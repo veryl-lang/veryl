@@ -15,7 +15,6 @@ pub const KEYWORDS: &[&str] = &[
     "else",
     "embed",
     "enum",
-    "export",
     "f32",
     "f64",
     "final",

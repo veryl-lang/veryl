@@ -81,7 +81,6 @@ DefaultTerm           : <INITIAL, Generic       >/(?-u:\b)default(?-u:\b)/      
 ElseTerm              : <INITIAL, Generic       >/(?-u:\b)else(?-u:\b)/                                                                : Token;
 EmbedTerm             : <INITIAL, Generic       >/(?-u:\b)embed(?-u:\b)/                                                               : Token;
 EnumTerm              : <INITIAL, Generic       >/(?-u:\b)enum(?-u:\b)/                                                                : Token;
-ExportTerm            : <INITIAL, Generic       >/(?-u:\b)export(?-u:\b)/                                                              : Token;
 F32Term               : <INITIAL, Generic       >/(?-u:\b)f32(?-u:\b)/                                                                 : Token;
 F64Term               : <INITIAL, Generic       >/(?-u:\b)f64(?-u:\b)/                                                                 : Token;
 FinalTerm             : <INITIAL, Generic       >/(?-u:\b)final(?-u:\b)/                                                               : Token;
@@ -207,7 +206,6 @@ DefaultToken       : DefaultTerm       : Token Comments;
 ElseToken          : ElseTerm          : Token Comments;
 EmbedToken         : EmbedTerm         : Token Comments;
 EnumToken          : EnumTerm          : Token Comments;
-ExportToken        : ExportTerm        : Token Comments;
 F32Token           : F32Term           : Token Comments;
 F64Token           : F64Term           : Token Comments;
 FinalToken         : FinalTerm         : Token Comments;
@@ -338,7 +336,6 @@ Defaul        : DefaultToken       : VerylToken; // avoid to conflict with Rust'
 Else          : ElseToken          : VerylToken;
 Embed         : EmbedToken         : VerylToken;
 Enum          : EnumToken          : VerylToken;
-Export        : ExportToken        : VerylToken;
 F32           : F32Token           : VerylToken;
 F64           : F64Token           : VerylToken;
 Final         : FinalToken         : VerylToken;
@@ -776,12 +773,10 @@ Direction: Input
 FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] StatementBlock;
 
 // ----------------------------------------------------------------------------
-// Import / Export
+// Import
 // ----------------------------------------------------------------------------
 
 ImportDeclaration: Import ScopedIdentifier [ ColonColon Star ] Semicolon;
-
-ExportDeclaration: Export ( Star | ScopedIdentifier [ ColonColon Star ] ) Semicolon;
 
 // ----------------------------------------------------------------------------
 // Unsafe
@@ -852,7 +847,6 @@ PackageItem: ConstDeclaration
            | StructUnionDeclaration
            | FunctionDeclaration
            | ImportDeclaration
-           | ExportDeclaration
            | AliasPackageDeclaration
            ;
 

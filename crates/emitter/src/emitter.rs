@@ -3650,23 +3650,6 @@ impl VerylWalker for Emitter {
         self.in_import = false;
     }
 
-    /// Semantic action for non-terminal 'ExportDeclaration'
-    fn export_declaration(&mut self, arg: &ExportDeclaration) {
-        self.export(&arg.export);
-        self.space(1);
-        match &*arg.export_declaration_group {
-            ExportDeclarationGroup::Star(x) => self.token(&x.star.star_token.replace("*::*")),
-            ExportDeclarationGroup::ScopedIdentifierExportDeclarationOpt(x) => {
-                self.scoped_identifier(&x.scoped_identifier);
-                if let Some(ref x) = x.export_declaration_opt {
-                    self.colon_colon(&x.colon_colon);
-                    self.star(&x.star);
-                }
-            }
-        }
-        self.semicolon(&arg.semicolon);
-    }
-
     /// Semantic action for non-terminal 'UnsafeBlock'
     fn unsafe_block(&mut self, arg: &UnsafeBlock) {
         for (i, x) in arg.unsafe_block_list.iter().enumerate() {

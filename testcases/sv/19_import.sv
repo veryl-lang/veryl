@@ -28,7 +28,5 @@ package veryl_testcase_Package19;
     import PackageA::*;
     import veryl_testcase_PackageA::A;
     import veryl_testcase_PackageA::*;
-    export A;
-    export *::*;
 endpackage
-//# sourceMappingURL=../map/testcases/sv/19_import_export.sv.map
+//# sourceMappingURL=../map/testcases/sv/19_import.sv.map

@@ -447,13 +447,6 @@ pub trait VerylWalker {
         after!(self, r#enum, arg);
     }
 
-    /// Semantic action for non-terminal 'Export'
-    fn export(&mut self, arg: &Export) {
-        before!(self, export, arg);
-        self.veryl_token(&arg.export_token);
-        after!(self, export, arg);
-    }
-
     /// Semantic action for non-terminal 'F32'
     fn f32(&mut self, arg: &F32) {
         before!(self, f32, arg);
@@ -2638,24 +2631,6 @@ pub trait VerylWalker {
         after!(self, import_declaration, arg);
     }
 
-    /// Semantic action for non-terminal 'ExportDeclaration'
-    fn export_declaration(&mut self, arg: &ExportDeclaration) {
-        before!(self, export_declaration, arg);
-        self.export(&arg.export);
-        match &*arg.export_declaration_group {
-            ExportDeclarationGroup::Star(x) => self.star(&x.star),
-            ExportDeclarationGroup::ScopedIdentifierExportDeclarationOpt(x) => {
-                self.scoped_identifier(&x.scoped_identifier);
-                if let Some(ref x) = x.export_declaration_opt {
-                    self.colon_colon(&x.colon_colon);
-                    self.star(&x.star);
-                }
-            }
-        }
-        self.semicolon(&arg.semicolon);
-        after!(self, export_declaration, arg);
-    }
-
     /// Semantic action for non-terminal 'UnsafeBlock'
     fn unsafe_block(&mut self, arg: &UnsafeBlock) {
         before!(self, unsafe_block, arg);
@@ -2966,7 +2941,6 @@ pub trait VerylWalker {
                 self.function_declaration(&x.function_declaration)
             }
             PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
-            PackageItem::ExportDeclaration(x) => self.export_declaration(&x.export_declaration),
             PackageItem::AliasPackageDeclaration(x) => {
                 self.alias_package_declaration(&x.alias_package_declaration)
             }
