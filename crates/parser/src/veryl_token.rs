@@ -1043,7 +1043,6 @@ token_with_comments!(Default);
 token_with_comments!(Else);
 token_with_comments!(Embed);
 token_with_comments!(Enum);
-token_with_comments!(Export);
 token_with_comments!(F32);
 token_with_comments!(F64);
 token_with_comments!(Final);

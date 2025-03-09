@@ -18,6 +18,4 @@ interface Interface19 {
 package Package19 {
     import PackageA::A;
     import PackageA::*;
-    export PackageA::A;
-    export *;
 }
