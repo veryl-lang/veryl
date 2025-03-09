@@ -120,13 +120,13 @@ impl SymbolTable {
         self.symbol_table.insert(id, symbol);
     }
 
-    fn trace_user_defined<'a>(
+    fn trace_type_kind<'a>(
         &self,
         mut context: ResolveContext<'a>,
         kind: &TypeKind,
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let TypeKind::UserDefined(x) = kind {
-            // Detect infinite loop in trace_user_defined
+            // Detect infinite loop in trace_type_kind
             if let Some(last_found) = context.last_found {
                 if *x.path.first().unwrap() == last_found.token.text {
                     return Ok(context);
@@ -137,12 +137,17 @@ impl SymbolTable {
             match symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
                 SymbolKind::TypeDef(x) => {
-                    return self.trace_user_defined(context, &x.r#type.kind);
+                    return self.trace_type_kind(context, &x.r#type.kind);
                 }
                 _ => (),
             }
             context.namespace = symbol.found.inner_namespace();
             context.last_found_type = Some(symbol.found.id);
+            context.inner = true;
+        } else {
+            // assign a new empty namespace becuase
+            // factor types and abstruct interface type have no members.
+            context.namespace = Namespace::new();
             context.inner = true;
         }
         Ok(context)
@@ -371,22 +376,22 @@ impl SymbolTable {
                     context.full_path.push(found.id);
                     match &found.kind {
                         SymbolKind::Variable(x) => {
-                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::StructMember(x) => {
-                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::UnionMember(x) => {
-                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::Parameter(x) => {
-                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::TypeDef(x) => {
-                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::Port(x) => {
-                            context = self.trace_user_defined(context, &x.r#type.kind)?;
+                            context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::ModportVariableMember(_) => {
                             let path = SymbolPath::new(&[found.token.text]);
@@ -394,7 +399,7 @@ impl SymbolTable {
                             context.namespace.pop();
                             let symbol = self.resolve(&path, &context.namespace)?;
                             if let SymbolKind::Variable(x) = &symbol.found.kind {
-                                context = self.trace_user_defined(context, &x.r#type.kind)?;
+                                context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
                         }
                         SymbolKind::Module(_)

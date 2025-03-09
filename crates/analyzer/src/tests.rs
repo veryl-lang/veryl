@@ -2520,6 +2520,53 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        var b: logic;
+
+        modport mp_a {
+            a: output,
+        }
+
+        modport mp_b {
+            b: output,
+        }
+    }
+
+    module ModuleA (
+        a_if: modport InterfaceA::mp_a,
+    ) {
+        assign a_if.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+
+    let code = r#"
+    module ModuleA (
+        a: interface      ,
+        b: interface::port,
+    ) {
+        assign a.a = 0;
+        assign b.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic = 0;
+        let _b: logic = _a._a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
 }
 
 #[test]
