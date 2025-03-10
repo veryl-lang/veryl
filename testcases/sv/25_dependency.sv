@@ -6,7 +6,7 @@ module veryl_testcase_Module25 (
 );
     veryl_sample3_data_if data_if ();
 
-    veryl_sample1_delay u0 (
+    veryl_sample_delay u0 (
         .i_clk   (i_clk       ),
         .i_rst_n (i_rst_n     ),
         .i_d     (in_if.data  ),
