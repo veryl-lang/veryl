@@ -12,9 +12,10 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    AliasPackageProperty, ConnectTarget, ConnectTargetIdentifier, DocComment, EnumMemberProperty,
-    EnumMemberValue, EnumProperty, FunctionProperty, GenericBoundKind, GenericParameterProperty,
-    InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
+    AliasInterfaceProperty, AliasModuleProperty, AliasPackageProperty, ConnectTarget,
+    ConnectTargetIdentifier, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty,
+    FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
+    InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
     ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
     ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoModuleProperty,
     ProtoPackageProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
@@ -1591,16 +1592,26 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
-    fn alias_package_declaration(
-        &mut self,
-        arg: &AliasPackageDeclaration,
-    ) -> Result<(), ParolError> {
+    /// Semantic action for non-terminal 'AliasDeclaration'
+    fn alias_declaration(&mut self, arg: &AliasDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-            let property = AliasPackageProperty { target };
-            let token = arg.identifier.identifier_token.token;
+            let kind = match &*arg.alias_declaration_group {
+                AliasDeclarationGroup::Module(_) => {
+                    let property = AliasModuleProperty { target };
+                    SymbolKind::AliasModule(property)
+                }
+                AliasDeclarationGroup::Interface(_) => {
+                    let property = AliasInterfaceProperty { target };
+                    SymbolKind::AliasInterface(property)
+                }
+                AliasDeclarationGroup::Package(_) => {
+                    let property = AliasPackageProperty { target };
+                    SymbolKind::AliasPackage(property)
+                }
+            };
             if let Some(id) =
-                self.insert_symbol(&token, SymbolKind::AliasPackage(property), self.is_public)
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, self.is_public)
             {
                 self.push_package_member(id);
             }
