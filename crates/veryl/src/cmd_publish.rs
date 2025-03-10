@@ -4,7 +4,7 @@ use log::{info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr, bail};
 use std::fs;
 use veryl_analyzer::Analyzer;
-use veryl_metadata::{Metadata, UrlPath};
+use veryl_metadata::{LockSource, Metadata};
 use veryl_parser::Parser;
 
 pub struct CmdPublish {
@@ -29,12 +29,14 @@ impl CmdPublish {
             }
         }
 
-        for url in metadata.dependencies.keys() {
-            if let UrlPath::Path(x) = url {
-                bail!(
-                    "path dependency \"{}\" is used, it can't be published",
-                    x.to_string_lossy()
-                );
+        for locks in metadata.lockfile.lock_table.values() {
+            for lock in locks {
+                if let LockSource::Path(x) = &lock.source {
+                    bail!(
+                        "path dependency \"{}\" is used, it can't be published",
+                        x.to_string_lossy()
+                    );
+                }
             }
         }
 
