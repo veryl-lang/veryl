@@ -58,6 +58,14 @@ pub enum MetadataError {
     #[error("{version} @ {url} is not found")]
     VersionNotFound { url: UrlPath, version: String },
 
+    #[diagnostic(code(MetadataError::ProjectNotFound), help(""))]
+    #[error("{project} @ {url} is not found")]
+    ProjectNotFound { url: UrlPath, project: String },
+
+    #[diagnostic(code(MetadataError::InvalidDependency), help(""))]
+    #[error("dependency to {name} is invalid because {cause}")]
+    InvalidDependency { name: String, cause: String },
+
     #[diagnostic(code(MetadataError::GitSpec), help(""))]
     #[error("no version/rev/tag/branch specification of {0}")]
     GitSpec(Url),
