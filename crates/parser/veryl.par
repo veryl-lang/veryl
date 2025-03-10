@@ -827,7 +827,7 @@ GenerateItem: LetDeclaration
             | EnumDeclaration
             | StructUnionDeclaration
             | ImportDeclaration
-            | AliasPackageDeclaration
+            | AliasDeclaration
             | InitialDeclaration
             | FinalDeclaration
             | UnsafeBlock
@@ -847,14 +847,14 @@ PackageItem: ConstDeclaration
            | StructUnionDeclaration
            | FunctionDeclaration
            | ImportDeclaration
-           | AliasPackageDeclaration
+           | AliasDeclaration
            ;
 
 // ----------------------------------------------------------------------------
 // Alias
 // ----------------------------------------------------------------------------
 
-AliasPackageDeclaration: Alias Package Identifier Equ ScopedIdentifier Semicolon;
+AliasDeclaration: Alias ( Module | Interface | Package ) Identifier Equ ScopedIdentifier Semicolon;
 
 // ----------------------------------------------------------------------------
 // Proto
@@ -912,7 +912,7 @@ DescriptionItem: [ Pub ] PublicDescriptionItem
 PublicDescriptionItem: ModuleDeclaration
                      | InterfaceDeclaration
                      | PackageDeclaration
-                     | AliasPackageDeclaration
+                     | AliasDeclaration
                      | ProtoModuleDeclaration
                      | ProtoPackageDeclaration
                      ;

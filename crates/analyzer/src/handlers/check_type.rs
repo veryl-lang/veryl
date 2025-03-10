@@ -4,8 +4,8 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericBoundKind, Symbol, SymbolKind, TypeKind};
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol::{GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -21,6 +21,8 @@ pub struct CheckType {
     in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
     in_modport: bool,
+    in_alias_module: bool,
+    in_alias_interface: bool,
     in_alias_package: bool,
 }
 
@@ -99,6 +101,37 @@ fn resolve_proto_generic_arg_type(
     symbol_table::resolve((&proto, namespace))
         .ok()
         .map(|s| s.found)
+}
+
+enum InstTypeSource {
+    Id(SymbolId),
+    Path(SymbolPathNamespace),
+}
+
+fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
+    let symbol = match arg {
+        InstTypeSource::Id(x) => symbol_table::get(*x)?,
+        InstTypeSource::Path(x) => symbol_table::resolve(x).ok()?.found,
+    };
+
+    match &symbol.kind {
+        SymbolKind::AliasModule(x) => {
+            let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
+            return resolve_inst_type(&InstTypeSource::Path(path));
+        }
+        SymbolKind::GenericInstance(x) => {
+            return resolve_inst_type(&InstTypeSource::Id(x.base));
+        }
+        SymbolKind::GenericParameter(x) => {
+            if let GenericBoundKind::Proto(proto) = &x.bound {
+                let path: SymbolPathNamespace = (proto, &symbol.namespace).into();
+                return resolve_inst_type(&InstTypeSource::Path(path));
+            }
+        }
+        _ => {}
+    }
+
+    Some(symbol)
 }
 
 impl VerylGrammarTrait for CheckType {
@@ -197,14 +230,25 @@ impl VerylGrammarTrait for CheckType {
                     }
                 }
 
-                // Check targe of package alias
-                if self.in_alias_package && !symbol.found.is_package(false) {
-                    self.errors.push(AnalyzerError::mismatch_type(
-                        &symbol.found.token.to_string(),
-                        "package",
-                        &symbol.found.kind.to_kind_name(),
-                        &arg.identifier().token.into(),
-                    ));
+                // Check targe of alias
+                if self.in_generic_argument.is_empty() {
+                    let expected = if self.in_alias_module && !symbol.found.is_module(false) {
+                        Some("module")
+                    } else if self.in_alias_interface && !symbol.found.is_interface(false) {
+                        Some("interface")
+                    } else if self.in_alias_package && !symbol.found.is_package(false) {
+                        Some("package")
+                    } else {
+                        None
+                    };
+                    if let Some(expected) = expected {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            &symbol.found.token.to_string(),
+                            expected,
+                            &symbol.found.kind.to_kind_name(),
+                            &arg.identifier().token.into(),
+                        ));
+                    }
                 }
             }
 
@@ -301,13 +345,18 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
-    fn alias_package_declaration(
-        &mut self,
-        _arg: &AliasPackageDeclaration,
-    ) -> Result<(), ParolError> {
+    fn alias_declaration(&mut self, arg: &AliasDeclaration) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => self.in_alias_package = true,
-            HandlerPoint::After => self.in_alias_package = false,
+            HandlerPoint::Before => match &*arg.alias_declaration_group {
+                AliasDeclarationGroup::Module(_) => self.in_alias_module = true,
+                AliasDeclarationGroup::Interface(_) => self.in_alias_interface = true,
+                AliasDeclarationGroup::Package(_) => self.in_alias_package = true,
+            },
+            HandlerPoint::After => {
+                self.in_alias_module = false;
+                self.in_alias_interface = false;
+                self.in_alias_package = false;
+            }
         }
         Ok(())
     }
@@ -334,7 +383,8 @@ impl VerylGrammarTrait for CheckType {
                 }
             }
 
-            if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+            let path: SymbolPathNamespace = arg.scoped_identifier.as_ref().into();
+            if let Some(symbol) = resolve_inst_type(&InstTypeSource::Path(path)) {
                 let mut stringifier = Stringifier::new();
                 stringifier.scoped_identifier(&arg.scoped_identifier);
                 let name = stringifier.as_str();
@@ -343,52 +393,20 @@ impl VerylGrammarTrait for CheckType {
                 let mut ports = vec![];
                 let mut check_port_connection = false;
 
-                let type_expected = match symbol.found.kind {
+                let type_expected = match symbol.kind {
                     SymbolKind::Module(ref x) if self.in_module => {
                         params.append(&mut x.parameters.clone());
                         ports.append(&mut x.ports.clone());
                         check_port_connection = true;
                         None
                     }
+                    SymbolKind::ProtoModule(ref x) if self.in_module => {
+                        params.append(&mut x.parameters.clone());
+                        ports.append(&mut x.ports.clone());
+                        check_port_connection = true;
+                        None
+                    }
                     SymbolKind::Interface(_) | SymbolKind::SystemVerilog => None,
-                    SymbolKind::GenericInstance(ref x) => {
-                        let base = symbol_table::get(x.base).unwrap();
-                        match base.kind {
-                            SymbolKind::Module(ref x) if self.in_module => {
-                                params.append(&mut x.parameters.clone());
-                                ports.append(&mut x.ports.clone());
-                                check_port_connection = true;
-                                None
-                            }
-                            SymbolKind::Interface(_) | SymbolKind::SystemVerilog => None,
-                            _ => {
-                                if self.in_module {
-                                    Some("module or interface")
-                                } else {
-                                    Some("interface")
-                                }
-                            }
-                        }
-                    }
-                    SymbolKind::GenericParameter(ref x) => {
-                        if let GenericBoundKind::Proto(ref x) = x.bound {
-                            if let Ok(symbol) = symbol_table::resolve((x, &symbol.found.namespace))
-                            {
-                                if let SymbolKind::ProtoModule(x) = symbol.found.kind {
-                                    params.append(&mut x.parameters.clone());
-                                    ports.append(&mut x.ports.clone());
-                                    check_port_connection = true;
-                                    None
-                                } else {
-                                    Some("module or interface")
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
                     _ => {
                         if self.in_module {
                             Some("module or interface")
@@ -402,7 +420,7 @@ impl VerylGrammarTrait for CheckType {
                     self.errors.push(AnalyzerError::mismatch_type(
                         name,
                         expected,
-                        &symbol.found.kind.to_kind_name(),
+                        &symbol.kind.to_kind_name(),
                         &arg.identifier.as_ref().into(),
                     ));
                 }

@@ -1639,24 +1639,65 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    package PkgA {}
-    package PkgB::<B0: const, B1: const> {}
+    module ModuleA {}
+    module ModuleB::<B0: const, B1: const> {}
 
-    alias package FooPkg = PkgA;
-    alias package BarPkg = PkgB::<1, 2>;
+    alias module Foo = ModuleA;
+    alias module Bar = ModuleB::<1, 2>;
     "#;
 
     let errors = analyze(code);
     assert!(errors.is_empty());
 
     let code = r#"
+    interface InterfaceA {}
+    alias module ModuleA = InterfaceA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ModuleA;
+    alias module ModuleB = ModuleA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceA {}
+    interface InterfaceB::<B0: const, B1: const> {}
+
+    alias interface Foo = InterfaceA;
+    alias interface Bar = InterfaceB::<1, 2>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PackageA {}
+    alias interface InterfaceA = PackageA;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    //let code = r#"
+    //proto interface InterfaceA {}
+    //alias interface InterfaceB = InterfaceA;
+    //"#;
+    //
+    //let errors = analyze(code);
+    //assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
     package PkgA {}
     package PkgB::<B0: const, B1: const> {}
 
-    module ModuleA {
-        alias package FooPkg = PkgA;
-        alias package BarPkg = PkgB::<1, 2>;
-    }
+    alias package FooPkg = PkgA;
+    alias package BarPkg = PkgB::<1, 2>;
     "#;
 
     let errors = analyze(code);
