@@ -2876,9 +2876,7 @@ pub trait VerylWalker {
                 self.struct_union_declaration(&x.struct_union_declaration)
             }
             GenerateItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
-            GenerateItem::AliasPackageDeclaration(x) => {
-                self.alias_package_declaration(&x.alias_package_declaration)
-            }
+            GenerateItem::AliasDeclaration(x) => self.alias_declaration(&x.alias_declaration),
             GenerateItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
             GenerateItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
             GenerateItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
@@ -2941,22 +2939,25 @@ pub trait VerylWalker {
                 self.function_declaration(&x.function_declaration)
             }
             PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
-            PackageItem::AliasPackageDeclaration(x) => {
-                self.alias_package_declaration(&x.alias_package_declaration)
-            }
+            PackageItem::AliasDeclaration(x) => self.alias_declaration(&x.alias_declaration),
         }
         after!(self, package_item, arg);
     }
 
-    /// Semantic action for non-terminal 'AliasPackageDeclaration'
-    fn alias_package_declaration(&mut self, arg: &AliasPackageDeclaration) {
-        before!(self, alias_package_declaration, arg);
+    /// Semantic action for non-terminal 'AliasDeclaration'
+    fn alias_declaration(&mut self, arg: &AliasDeclaration) {
+        before!(self, alias_declaration, arg);
         self.alias(&arg.alias);
-        self.package(&arg.package);
+        match &*arg.alias_declaration_group {
+            AliasDeclarationGroup::Module(x) => self.module(&x.module),
+            AliasDeclarationGroup::Interface(x) => self.interface(&x.interface),
+            AliasDeclarationGroup::Package(x) => self.package(&x.package),
+        }
         self.identifier(&arg.identifier);
         self.equ(&arg.equ);
         self.scoped_identifier(&arg.scoped_identifier);
-        after!(self, alias_package_declaration, arg);
+        self.semicolon(&arg.semicolon);
+        after!(self, alias_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'ProtoModuleDeclaration'
@@ -3144,8 +3145,8 @@ pub trait VerylWalker {
             PublicDescriptionItem::PackageDeclaration(x) => {
                 self.package_declaration(&x.package_declaration)
             }
-            PublicDescriptionItem::AliasPackageDeclaration(x) => {
-                self.alias_package_declaration(&x.alias_package_declaration);
+            PublicDescriptionItem::AliasDeclaration(x) => {
+                self.alias_declaration(&x.alias_declaration);
             }
             PublicDescriptionItem::ProtoModuleDeclaration(x) => {
                 self.proto_module_declaration(&x.proto_module_declaration)

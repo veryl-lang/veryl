@@ -1032,7 +1032,7 @@ impl Emitter {
         function_call: &FunctionCall,
     ) {
         let (defiend_ports, generic_map) = if let (Ok(symbol), _) =
-            self.resolve_symbol_with_generics(&identifier.scoped_identifier)
+            self.resolve_scoped_idnetifier(&identifier.scoped_identifier)
         {
             match symbol.found.kind {
                 SymbolKind::Function(ref x) => (x.ports.clone(), Vec::new()),
@@ -1110,15 +1110,14 @@ impl Emitter {
 
     fn resolve_symbol_with_generics(
         &self,
-        arg: &ScopedIdentifier,
+        path: &mut GenericSymbolPath,
+        namespace: &Namespace,
     ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
-        let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
-        let mut path: GenericSymbolPath = arg.into();
-        path.resolve_imported(&namespace);
+        path.resolve_imported(namespace);
 
         for i in 0..path.len() {
             let base = path.base_path(i);
-            if let Ok(symbol) = symbol_table::resolve((&base, &namespace)) {
+            if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
                 let params = symbol.found.generic_parameters();
                 let n_args = path.paths[i].arguments.len();
 
@@ -1129,9 +1128,14 @@ impl Emitter {
                 }
 
                 for arg in &mut path.paths[i].arguments {
-                    if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), &namespace)) {
-                        if let SymbolKind::AliasPackage(x) = symbol.found.kind {
-                            *arg = x.target.clone();
+                    if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace)) {
+                        if let Some(target) = symbol.found.alias_target() {
+                            if let (Ok(_), path) = self.resolve_symbol_with_generics(
+                                &mut target.clone(),
+                                &symbol.found.namespace,
+                            ) {
+                                *arg = path;
+                            }
                         }
                     }
                 }
@@ -1141,10 +1145,25 @@ impl Emitter {
         if let Some(maps) = self.generic_map.last() {
             path.apply_map(maps);
         }
-        (
-            symbol_table::resolve((&path.mangled_path(), &namespace)),
-            path,
-        )
+
+        let result = symbol_table::resolve((&path.mangled_path(), namespace));
+        if let Ok(symbol) = &result {
+            if let Some(target) = symbol.found.alias_target() {
+                return self
+                    .resolve_symbol_with_generics(&mut target.clone(), &symbol.found.namespace);
+            }
+        }
+
+        (result, path.clone())
+    }
+
+    fn resolve_scoped_idnetifier(
+        &self,
+        arg: &ScopedIdentifier,
+    ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+        let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
+        let mut path: GenericSymbolPath = arg.into();
+        self.resolve_symbol_with_generics(&mut path, &namespace)
     }
 
     fn push_resolved_identifier(&mut self, x: &str) {
@@ -1450,7 +1469,7 @@ impl VerylWalker for Emitter {
         if is_anonymous_token(&arg.identifier().token) {
             self.veryl_token(&arg.identifier().replace(""));
         } else {
-            match self.resolve_symbol_with_generics(arg) {
+            match self.resolve_scoped_idnetifier(arg) {
                 (Ok(symbol), _) => {
                     let context: SymbolContext = self.into();
                     let text = symbol_string(arg.identifier(), &symbol.found, &context);
@@ -3182,7 +3201,7 @@ impl VerylWalker for Emitter {
         );
         let (defined_ports, generic_map) = if allow_missing_port {
             (Vec::new(), Vec::new())
-        } else if let (Ok(symbol), _) = self.resolve_symbol_with_generics(&arg.scoped_identifier) {
+        } else if let (Ok(symbol), _) = self.resolve_scoped_idnetifier(&arg.scoped_identifier) {
             match symbol.found.kind {
                 SymbolKind::Module(ref x) => (x.ports.clone(), Vec::new()),
                 SymbolKind::GenericInstance(ref x) => {
@@ -4006,8 +4025,8 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'AliasPackageDeclaration'
-    fn alias_package_declaration(&mut self, _arg: &AliasPackageDeclaration) {
+    /// Semantic action for non-terminal 'AliasDeclaration'
+    fn alias_declaration(&mut self, _arg: &AliasDeclaration) {
         // nothing to emit
     }
 
@@ -4088,7 +4107,7 @@ impl VerylWalker for Emitter {
                 self.package_declaration(&x.package_declaration)
             }
             // alias and proto are not emitted at SystemVerilog
-            PublicDescriptionItem::AliasPackageDeclaration(_)
+            PublicDescriptionItem::AliasDeclaration(_)
             | PublicDescriptionItem::ProtoModuleDeclaration(_)
             | PublicDescriptionItem::ProtoPackageDeclaration(_) => (),
         };
@@ -4239,13 +4258,6 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             ret.push_str(&namespace_string(&symbol.namespace, context));
             ret.push_str(&token_text);
         }
-        SymbolKind::AliasPackage(x) => {
-            if let Ok(symbol) = symbol_table::resolve((&x.target.mangled_path(), &symbol.namespace))
-            {
-                let text = symbol_string(token, &symbol.found, context);
-                ret.push_str(&text);
-            }
-        }
         SymbolKind::Parameter(_)
         | SymbolKind::Function(_)
         | SymbolKind::Struct(_)
@@ -4327,7 +4339,12 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Genvar
         | SymbolKind::Namespace
         | SymbolKind::SystemFunction => ret.push_str(&token_text),
-        SymbolKind::ClockDomain | SymbolKind::EnumMemberMangled | SymbolKind::Test(_) => {
+        SymbolKind::AliasModule(_)
+        | SymbolKind::AliasInterface(_)
+        | SymbolKind::AliasPackage(_)
+        | SymbolKind::ClockDomain
+        | SymbolKind::EnumMemberMangled
+        | SymbolKind::Test(_) => {
             unreachable!()
         }
     }

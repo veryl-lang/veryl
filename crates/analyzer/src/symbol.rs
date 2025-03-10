@@ -393,6 +393,54 @@ impl Symbol {
         }
     }
 
+    pub fn alias_target(&self) -> Option<GenericSymbolPath> {
+        match &self.kind {
+            SymbolKind::AliasModule(x) => Some(x.target.clone()),
+            SymbolKind::AliasInterface(x) => Some(x.target.clone()),
+            SymbolKind::AliasPackage(x) => Some(x.target.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn is_module(&self, include_proto: bool) -> bool {
+        match &self.kind {
+            SymbolKind::Module(_) | SymbolKind::AliasModule(_) => return true,
+            SymbolKind::ProtoModule(_) => return include_proto,
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                return symbol.is_module(false);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_module(true);
+                    }
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    pub fn is_interface(&self, _include_proto: bool) -> bool {
+        match &self.kind {
+            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => return true,
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                return symbol.is_interface(false);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_interface(true);
+                    }
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     pub fn is_package(&self, include_proto: bool) -> bool {
         match &self.kind {
             SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => return true,
@@ -445,7 +493,9 @@ pub enum SymbolKind {
     Variable(VariableProperty),
     Module(ModuleProperty),
     ProtoModule(ProtoModuleProperty),
+    AliasModule(AliasModuleProperty),
     Interface(InterfaceProperty),
+    AliasInterface(AliasInterfaceProperty),
     Function(FunctionProperty),
     ProtoFunction(FunctionProperty),
     Parameter(ParameterProperty),
@@ -488,7 +538,9 @@ impl SymbolKind {
             SymbolKind::Variable(_) => "variable".to_string(),
             SymbolKind::Module(_) => "module".to_string(),
             SymbolKind::ProtoModule(_) => "proto module".to_string(),
+            SymbolKind::AliasModule(_) => "alias module".to_string(),
             SymbolKind::Interface(_) => "interface".to_string(),
+            SymbolKind::AliasInterface(_) => "alias interface".to_string(),
             SymbolKind::Function(_) => "function".to_string(),
             SymbolKind::ProtoFunction(_) => "proto function".to_string(),
             SymbolKind::Parameter(_) => "parameter".to_string(),
@@ -497,7 +549,7 @@ impl SymbolKind {
             SymbolKind::Block => "block".to_string(),
             SymbolKind::Package(_) => "package".to_string(),
             SymbolKind::ProtoPackage(_) => "proto package".to_string(),
-            SymbolKind::AliasPackage(_) => "package alias".to_string(),
+            SymbolKind::AliasPackage(_) => "alias package".to_string(),
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
             SymbolKind::Union(_) => "union".to_string(),
@@ -646,12 +698,18 @@ impl fmt::Display for SymbolKind {
                     x.ports.len()
                 )
             }
+            SymbolKind::AliasModule(x) => {
+                format!("alias module (target {})", x.target)
+            }
             SymbolKind::Interface(x) => {
                 format!(
                     "interface ({} generic, {} params)",
                     x.generic_parameters.len(),
                     x.parameters.len()
                 )
+            }
+            SymbolKind::AliasInterface(x) => {
+                format!("alias interface (target {})", x.target)
             }
             SymbolKind::Function(x) => {
                 format!(
@@ -692,7 +750,7 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::ProtoPackage(_) => "proto package".to_string(),
             SymbolKind::AliasPackage(x) => {
-                format!("package alias (target {})", x.target)
+                format!("alias package (target {})", x.target)
             }
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {
@@ -1360,12 +1418,22 @@ pub struct ProtoModuleProperty {
 }
 
 #[derive(Debug, Clone)]
+pub struct AliasModuleProperty {
+    pub target: GenericSymbolPath,
+}
+
+#[derive(Debug, Clone)]
 pub struct InterfaceProperty {
     pub range: TokenRange,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub definition: DefinitionId,
+}
+
+#[derive(Debug, Clone)]
+pub struct AliasInterfaceProperty {
+    pub target: GenericSymbolPath,
 }
 
 #[derive(Debug, Clone)]

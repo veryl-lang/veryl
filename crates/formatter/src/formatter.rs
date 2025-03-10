@@ -2411,11 +2411,15 @@ impl VerylWalker for Formatter {
         }
     }
 
-    /// Semantic action for non-terminal 'AliasPackageDeclaration'
-    fn alias_package_declaration(&mut self, arg: &AliasPackageDeclaration) {
+    /// Semantic action for non-terminal 'AliasDeclaration'
+    fn alias_declaration(&mut self, arg: &AliasDeclaration) {
         self.alias(&arg.alias);
         self.space(1);
-        self.package(&arg.package);
+        match &*arg.alias_declaration_group {
+            AliasDeclarationGroup::Module(x) => self.module(&x.module),
+            AliasDeclarationGroup::Interface(x) => self.interface(&x.interface),
+            AliasDeclarationGroup::Package(x) => self.package(&x.package),
+        }
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);

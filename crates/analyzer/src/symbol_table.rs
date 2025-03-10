@@ -217,7 +217,10 @@ impl SymbolTable {
     fn is_public(&self, context: &ResolveContext, found: &Symbol) -> bool {
         match found.kind {
             SymbolKind::Module(_)
+            | SymbolKind::ProtoModule(_)
+            | SymbolKind::AliasModule(_)
             | SymbolKind::Interface(_)
+            | SymbolKind::AliasInterface(_)
             | SymbolKind::Package(_)
             | SymbolKind::ProtoPackage(_)
             | SymbolKind::AliasPackage(_) => !context.other_prj || found.public,
@@ -408,6 +411,12 @@ impl SymbolTable {
                         | SymbolKind::ProtoPackage(_) => {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
+                        }
+                        SymbolKind::AliasModule(x) => {
+                            context = self.trace_type_path(context, &x.target)?;
+                        }
+                        SymbolKind::AliasInterface(x) => {
+                            context = self.trace_type_path(context, &x.target)?;
                         }
                         SymbolKind::AliasPackage(x) => {
                             context = self.trace_type_path(context, &x.target)?;
