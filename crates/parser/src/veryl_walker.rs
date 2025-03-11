@@ -713,6 +713,13 @@ pub trait VerylWalker {
         after!(self, r#break, arg);
     }
 
+    /// Semantic action for non-terminal 'Same'
+    fn same(&mut self, arg: &Same) {
+        before!(self, same, arg);
+        self.veryl_token(&arg.same_token);
+        after!(self, same, arg);
+    }
+
     /// Semantic action for non-terminal 'Signed'
     fn signed(&mut self, arg: &Signed) {
         before!(self, signed, arg);
@@ -2055,6 +2062,12 @@ pub trait VerylWalker {
         match arg {
             ModportDefault::Input(x) => self.input(&x.input),
             ModportDefault::Output(x) => self.output(&x.output),
+            ModportDefault::SameLParenIdentifierRParen(x) => {
+                self.same(&x.same);
+                self.l_paren(&x.l_paren);
+                self.identifier(&x.identifier);
+                self.r_paren(&x.r_paren);
+            }
             ModportDefault::ConverseLParenIdentifierRParen(x) => {
                 self.converse(&x.converse);
                 self.l_paren(&x.l_paren);

@@ -119,6 +119,7 @@ ResetSyncHighTerm     : <INITIAL, Generic       >/(?-u:\b)reset_sync_high(?-u:\b
 ResetSyncLowTerm      : <INITIAL, Generic       >/(?-u:\b)reset_sync_low(?-u:\b)/                                                      : Token;
 ReturnTerm            : <INITIAL, Generic       >/(?-u:\b)return(?-u:\b)/                                                              : Token;
 BreakTerm             : <INITIAL, Generic       >/(?-u:\b)break(?-u:\b)/                                                               : Token;
+SameTerm              : <INITIAL, Generic       >/(?-u:\b)same(?-u:\b)/                                                                : Token;
 SignedTerm            : <INITIAL, Generic       >/(?-u:\b)signed(?-u:\b)/                                                              : Token;
 StepTerm              : <INITIAL, Generic       >/(?-u:\b)step(?-u:\b)/                                                                : Token;
 StringTerm            : <INITIAL, Generic       >/(?-u:\b)string(?-u:\b)/                                                              : Token;
@@ -244,6 +245,7 @@ ResetSyncHighToken : ResetSyncHighTerm : Token Comments;
 ResetSyncLowToken  : ResetSyncLowTerm  : Token Comments;
 ReturnToken        : ReturnTerm        : Token Comments;
 BreakToken         : BreakTerm         : Token Comments;
+SameToken          : SameTerm          : Token Comments;
 SignedToken        : SignedTerm        : Token Comments;
 StepToken          : StepTerm          : Token Comments;
 StringToken        : StringTerm        : Token Comments;
@@ -373,6 +375,7 @@ ResetAsyncLow : ResetAsyncLowToken : VerylToken;
 ResetSyncHigh : ResetSyncHighToken : VerylToken;
 ResetSyncLow  : ResetSyncLowToken  : VerylToken;
 Return        : ReturnToken        : VerylToken;
+Same          : SameToken          : VerylToken;
 Signed        : SignedToken        : VerylToken;
 Step          : StepToken          : VerylToken;
 Strin         : StringToken        : VerylToken; // avoid to conflict with Rust's String struct
@@ -658,6 +661,7 @@ ModportItem: Identifier Colon Direction;
 
 ModportDefault: Input
               | Output
+              | Same LParen Identifier RParen
               | Converse LParen Identifier RParen;
 
 EnumDeclaration: Enum Identifier [ Colon ScalarType ] LBrace EnumList RBrace;

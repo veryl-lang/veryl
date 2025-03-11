@@ -405,6 +405,17 @@ impl CreateSymbolTable {
                     let direction = match default {
                         SymModportDefault::Input => Some(SymDirection::Input),
                         SymModportDefault::Output => Some(SymDirection::Output),
+                        SymModportDefault::Same(tgt) => {
+                            if let Some(tgt) = directions.get(&(tgt.text, x)) {
+                                Some(*tgt)
+                            } else {
+                                self.errors.push(AnalyzerError::undefined_identifier(
+                                    &tgt.text.to_string(),
+                                    &tgt.into(),
+                                ));
+                                None
+                            }
+                        }
                         SymModportDefault::Converse(tgt) => {
                             if let Some(tgt) = directions.get(&(tgt.text, x)) {
                                 Some(tgt.converse())
@@ -788,6 +799,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     match x.modport_default.as_ref() {
                         ModportDefault::Input(_) => Some(crate::symbol::ModportDefault::Input),
                         ModportDefault::Output(_) => Some(crate::symbol::ModportDefault::Output),
+                        ModportDefault::SameLParenIdentifierRParen(x) => {
+                            Some(crate::symbol::ModportDefault::Same(
+                                x.identifier.identifier_token.token,
+                            ))
+                        }
                         ModportDefault::ConverseLParenIdentifierRParen(x) => {
                             Some(crate::symbol::ModportDefault::Converse(
                                 x.identifier.identifier_token.token,

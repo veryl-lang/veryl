@@ -45,5 +45,19 @@ interface veryl_testcase_Interface75;
         input  b,
         input  d
     );
+
+    modport master2 (
+        input  a,
+        input  b,
+        output c,
+        output d
+    );
+
+    modport partial_same (
+        output a,
+        input  b,
+        output c,
+        output d
+    );
 endinterface
-//# sourceMappingURL=../map/testcases/sv/75_modport_converse.sv.map
+//# sourceMappingURL=../map/testcases/sv/75_modport_default.sv.map

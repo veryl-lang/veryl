@@ -1080,6 +1080,7 @@ token_with_comments!(ResetAsyncLow);
 token_with_comments!(ResetSyncHigh);
 token_with_comments!(ResetSyncLow);
 token_with_comments!(Return);
+token_with_comments!(Same);
 token_with_comments!(Signed);
 token_with_comments!(Step);
 token_with_comments!(String);
