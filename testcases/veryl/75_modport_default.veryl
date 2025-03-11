@@ -32,4 +32,13 @@ interface Interface75 {
         c: output,
         ..input
     }
+
+    modport master2 {
+        ..same(master)
+    }
+
+    modport partial_same {
+        a: output,
+        ..same(master)
+    }
 }
