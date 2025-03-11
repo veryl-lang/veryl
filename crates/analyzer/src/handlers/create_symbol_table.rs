@@ -405,27 +405,9 @@ impl CreateSymbolTable {
                     let direction = match default {
                         SymModportDefault::Input => Some(SymDirection::Input),
                         SymModportDefault::Output => Some(SymDirection::Output),
-                        SymModportDefault::Same(tgt) => {
-                            if let Some(tgt) = directions.get(&(tgt.text, x)) {
-                                Some(*tgt)
-                            } else {
-                                self.errors.push(AnalyzerError::undefined_identifier(
-                                    &tgt.text.to_string(),
-                                    &tgt.into(),
-                                ));
-                                None
-                            }
-                        }
+                        SymModportDefault::Same(tgt) => directions.get(&(tgt.text, x)).copied(),
                         SymModportDefault::Converse(tgt) => {
-                            if let Some(tgt) = directions.get(&(tgt.text, x)) {
-                                Some(tgt.converse())
-                            } else {
-                                self.errors.push(AnalyzerError::undefined_identifier(
-                                    &tgt.text.to_string(),
-                                    &tgt.into(),
-                                ));
-                                None
-                            }
+                            directions.get(&(tgt.text, x)).map(|x| x.converse())
                         }
                     };
 
