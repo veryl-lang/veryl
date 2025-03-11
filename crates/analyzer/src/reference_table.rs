@@ -230,8 +230,8 @@ impl ReferenceTable {
                         if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace))
                         {
                             // Replace arg with its target if arg is alias
-                            if let SymbolKind::AliasPackage(x) = symbol.found.kind {
-                                *arg = x.target.clone();
+                            if let Some(target) = symbol.found.alias_target() {
+                                *arg = target;
                             }
                         }
                     }

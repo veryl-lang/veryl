@@ -9,7 +9,8 @@ package Package55::<A: const, B: const> for ProtoPackage55 {
 }
 
 module Module55 {
-    alias package Package55I = Package55::<8, 16>;
+    alias package Package55J = Package55::<8, 16>;
+    alias module Module55J = Module55I::<Package55J>;
 
     inst u0: Module55A::<Module55B>;
     inst u1: Module55A::<Module55C>;
@@ -20,7 +21,7 @@ module Module55 {
     inst u6: Module55H::<10>;
     inst u7: Module55H::<10>;
     inst u8: Module55I::<Package55::<8, 16>>;
-    inst u9: Module55I::<Package55I>;
+    inst u9: Module55J;
 }
 
 pub proto module Proto55;
