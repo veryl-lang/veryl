@@ -7,6 +7,8 @@ use veryl_parser::veryl_token::Token;
 pub enum Attribute {
     Ifdef(StrId),
     Ifndef(StrId),
+    Elsif(StrId, Vec<StrId>),
+    Else(Vec<StrId>),
     Sv(StrId),
     Allow(AllowItem),
     EnumEncoding(EnumEncodingItem),
@@ -40,6 +42,8 @@ impl fmt::Display for Attribute {
         let text = match self {
             Attribute::Ifdef(x) => format!("ifdef({})", x),
             Attribute::Ifndef(x) => format!("ifndef({})", x),
+            Attribute::Elsif(x, _) => format!("elsif({})", x),
+            Attribute::Else(_) => format!("else"),
             Attribute::Sv(x) => format!("sv(\"{}\")", x),
             Attribute::Allow(x) => format!("allow({})", x),
             Attribute::EnumEncoding(x) => format!("enum_encoding({})", x),
@@ -130,6 +134,8 @@ fn get_args_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>
 struct Pattern {
     pub ifdef: StrId,
     pub ifndef: StrId,
+    pub elsif: StrId,
+    pub r#else: StrId,
     pub sv: StrId,
     pub allow: StrId,
     pub missing_port: StrId,
@@ -158,6 +164,8 @@ impl Pattern {
         Self {
             ifdef: resource_table::insert_str("ifdef"),
             ifndef: resource_table::insert_str("ifndef"),
+            elsif: resource_table::insert_str("elsif"),
+            r#else: resource_table::insert_str("else"),
             sv: resource_table::insert_str("sv"),
             allow: resource_table::insert_str("allow"),
             missing_port: resource_table::insert_str("missing_port"),
@@ -190,14 +198,16 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
 
     fn try_from(value: &veryl_parser::veryl_grammar_trait::Attribute) -> Result<Self, Self::Error> {
         PAT.with_borrow(|pat| match value.identifier.identifier_token.token.text {
-            x if x == pat.ifdef || x == pat.ifndef => {
+            x if x == pat.ifdef || x == pat.ifndef || x == pat.elsif || x == pat.r#else => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
-                    if x == pat.ifdef {
-                        Ok(Attribute::Ifdef(arg.text))
-                    } else {
-                        Ok(Attribute::Ifndef(arg.text))
+                    match x {
+                        x if x == pat.ifdef => Ok(Attribute::Ifdef(arg.text)),
+                        x if x == pat.ifndef => Ok(Attribute::Ifndef(arg.text)),
+                        x if x == pat.elsif => Ok(Attribute::Elsif(arg.text, Vec::new())),
+                        x if x == pat.r#else => Ok(Attribute::Else(Vec::new())),
+                        _ => unreachable!(),
                     }
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
