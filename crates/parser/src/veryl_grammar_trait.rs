@@ -459,6 +459,54 @@ impl HierarchicalIdentifier {
     }
 }
 
+impl AlwaysFfDeclaration {
+    pub fn has_if_reset(&self) -> bool {
+        let x = self.statement_block.statement_block_list.first();
+        if x.is_none() {
+            return false;
+        }
+
+        let x: Vec<_> = x.unwrap().statement_block_group.as_ref().into();
+        if let Some(StatementBlockItem::Statement(x)) = x.first() {
+            return matches!(*x.statement, Statement::IfResetStatement(_));
+        }
+
+        false
+    }
+
+    pub fn has_explicit_clock(&self) -> bool {
+        self.always_ff_declaration_opt.is_some()
+    }
+
+    pub fn get_explicit_clock(&self) -> Option<HierarchicalIdentifier> {
+        self.always_ff_declaration_opt.as_ref().map(|x| {
+            x.always_ff_event_list
+                .always_ff_clock
+                .hierarchical_identifier
+                .as_ref()
+                .clone()
+        })
+    }
+
+    pub fn has_explicit_reset(&self) -> bool {
+        if let Some(x) = &self.always_ff_declaration_opt {
+            return x.always_ff_event_list.always_ff_event_list_opt.is_some();
+        }
+
+        false
+    }
+
+    pub fn get_explicit_reset(&self) -> Option<HierarchicalIdentifier> {
+        if let Some(x) = &self.always_ff_declaration_opt {
+            if let Some(x) = &x.always_ff_event_list.always_ff_event_list_opt {
+                return Some(x.always_ff_reset.hierarchical_identifier.as_ref().clone());
+            }
+        }
+
+        None
+    }
+}
+
 pub trait FirstToken {
     fn token(&self) -> Token;
     fn id(&self) -> TokenId {

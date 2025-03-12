@@ -6,7 +6,7 @@ use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncoding
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::evaluator::{EvaluatedTypeResetKind, Evaluator};
 use veryl_analyzer::namespace::Namespace;
-use veryl_analyzer::symbol::TypeModifier as SymTypeModifier;
+use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
@@ -2177,6 +2177,9 @@ impl VerylWalker for Emitter {
                 self.space(1);
             }
             TypeModifier::Signed(_) => self.signed = true,
+            TypeModifier::Defaul(x) => {
+                self.token(&x.defaul.default_token.replace(""));
+            }
         }
     }
 
@@ -2887,12 +2890,12 @@ impl VerylWalker for Emitter {
             if let Ok(symbol) = symbol_table::resolve(&ident) {
                 match &symbol.found.kind {
                     SymbolKind::Variable(x) => {
-                        if x.r#type.modifier.contains(&SymTypeModifier::Tri) {
+                        if x.r#type.has_modifier(&SymTypeModifierKind::Tri) {
                             emit_assign = true;
                         }
                     }
                     SymbolKind::Port(x) => {
-                        if x.r#type.modifier.contains(&SymTypeModifier::Tri) {
+                        if x.r#type.has_modifier(&SymTypeModifierKind::Tri) {
                             emit_assign = true;
                         }
                     }

@@ -527,7 +527,7 @@ VariableType: Clock
 
 UserDefinedType: ScopedIdentifier;
 
-TypeModifier: Tri | Signed;
+TypeModifier: Tri | Signed | Defaul;
 
 FactorType: ( VariableType [ Width ] | FixedType );
 

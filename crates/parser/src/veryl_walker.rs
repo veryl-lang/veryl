@@ -1470,6 +1470,7 @@ pub trait VerylWalker {
         match arg {
             TypeModifier::Tri(x) => self.tri(&x.tri),
             TypeModifier::Signed(x) => self.signed(&x.signed),
+            TypeModifier::Defaul(x) => self.defaul(&x.defaul),
         }
         after!(self, type_modifier, arg);
     }
