@@ -119,6 +119,10 @@ fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
             return resolve_inst_type(&InstTypeSource::Path(path));
         }
+        SymbolKind::AliasInterface(x) => {
+            let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
+            return resolve_inst_type(&InstTypeSource::Path(path));
+        }
         SymbolKind::GenericInstance(x) => {
             return resolve_inst_type(&InstTypeSource::Id(x.base));
         }
