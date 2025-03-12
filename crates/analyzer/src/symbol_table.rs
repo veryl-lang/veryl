@@ -167,6 +167,9 @@ impl SymbolTable {
         };
 
         match type_symbol.kind {
+            SymbolKind::AliasModule(x) => self.trace_type_path(context, &x.target),
+            SymbolKind::AliasInterface(x) => self.trace_type_path(context, &x.target),
+            SymbolKind::AliasPackage(x) => self.trace_type_path(context, &x.target),
             SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &type_symbol),
             SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &type_symbol),
             _ => {
@@ -240,7 +243,10 @@ impl SymbolTable {
         });
         let via_interface_instance = match &last_found.kind {
             SymbolKind::Port(x) => matches!(x.direction, Direction::Modport | Direction::Interface),
-            SymbolKind::Instance(_) => matches!(last_found_type, Some(SymbolKind::Interface(_))),
+            SymbolKind::Instance(_) => matches!(
+                last_found_type,
+                Some(SymbolKind::Interface(_)) | Some(SymbolKind::AliasInterface(_))
+            ),
             SymbolKind::GenericParameter(x) => {
                 matches!(&x.bound, GenericBoundKind::Inst(_))
                     && matches!(last_found_type, Some(SymbolKind::Interface(_)))
@@ -248,7 +254,7 @@ impl SymbolTable {
             _ => false,
         };
         let via_interface = match &last_found.kind {
-            SymbolKind::Interface(_) => true,
+            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => true,
             SymbolKind::GenericInstance(_) => {
                 matches!(last_found_type, Some(SymbolKind::Interface(_)))
             }
