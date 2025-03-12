@@ -224,7 +224,7 @@ impl CreateSymbolTable {
         (None, None)
     }
 
-    fn push_default_clocl_reset(&mut self, identifier: &Token, id: SymbolId, kind: &SymbolKind) {
+    fn push_default_clock_reset(&mut self, identifier: &Token, id: SymbolId, kind: &SymbolKind) {
         let r#type = match kind {
             SymbolKind::Variable(x) => &x.r#type,
             SymbolKind::Port(x) => &x.r#type,
@@ -582,7 +582,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
-                self.push_default_clocl_reset(&arg.identifier.identifier_token.token, id, &kind);
+                self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
             }
         }
         Ok(())
@@ -643,7 +643,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
-                self.push_default_clocl_reset(&arg.identifier.identifier_token.token, id, &kind);
+                self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
             }
         }
         Ok(())
@@ -675,7 +675,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
-                self.push_default_clocl_reset(&arg.identifier.identifier_token.token, id, &kind);
+                self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
                 let text = arg.identifier.identifier_token.token.text;
                 self.variable_ids.insert(text, id);
             }
@@ -1234,7 +1234,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     symbol: id,
                 };
                 self.ports.last_mut().unwrap().push(port);
-                self.push_default_clocl_reset(&arg.identifier.identifier_token.token, id, &kind);
+                self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
             }
         }
         Ok(())
