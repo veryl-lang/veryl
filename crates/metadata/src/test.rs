@@ -14,6 +14,8 @@ pub struct Test {
     pub vivado: VivadoProperty,
     #[serde(default)]
     pub waveform_target: WaveFormTarget,
+    #[serde(default)]
+    pub waveform_format: WaveFormFormat,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,4 +66,22 @@ pub enum WaveFormTarget {
     Target,
     #[serde(rename = "directory")]
     Directory { path: PathBuf },
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WaveFormFormat {
+    #[default]
+    #[serde(rename = "vcd")]
+    Vcd,
+    #[serde(rename = "fst")]
+    Fst,
+}
+
+impl WaveFormFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            WaveFormFormat::Vcd => "vcd",
+            WaveFormFormat::Fst => "fst",
+        }
+    }
 }

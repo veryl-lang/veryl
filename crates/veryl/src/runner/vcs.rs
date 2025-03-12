@@ -1,6 +1,6 @@
 use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
 use futures::prelude::*;
-use log::{error, info};
+use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -8,7 +8,7 @@ use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, WaveFormFormat};
 use veryl_parser::resource_table::{PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -124,7 +124,7 @@ impl Runner for Vcs {
         test: StrId,
         _top: Option<StrId>,
         path: PathId,
-        wave: bool,
+        mut wave: bool,
     ) -> Result<bool> {
         self.success = true;
 
@@ -136,12 +136,16 @@ impl Runner for Vcs {
             "+define+__veryl_test_{}_{}__",
             metadata.project.name, test
         )];
-
         if wave {
-            defines.push(format!(
-                "+define+__veryl_wavedump_{}_{}__",
-                metadata.project.name, test
-            ));
+            if WaveFormFormat::Vcd == metadata.test.waveform_format {
+                defines.push(format!(
+                    "+define+__veryl_wavedump_{}_{}__",
+                    metadata.project.name, test
+                ));
+            } else {
+                warn!("Only VCD is supported as a waveform format for vcs!");
+                wave = false;
+            }
         }
 
         let rt = Runtime::new().unwrap();
