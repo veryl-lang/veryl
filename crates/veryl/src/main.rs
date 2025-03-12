@@ -52,11 +52,13 @@ fn main() -> Result<ExitCode> {
                 "{} {}{}",
                 style.apply_to(format!("[{:<5}]", record.level())),
                 " ".repeat(
-                    12 - format!("{message}")
-                        .split_ascii_whitespace()
-                        .next()
-                        .unwrap()
-                        .len()
+                    12_usize.saturating_sub(
+                        format!("{message}")
+                            .split_ascii_whitespace()
+                            .next()
+                            .unwrap()
+                            .len()
+                    )
                 ),
                 message
             ))
