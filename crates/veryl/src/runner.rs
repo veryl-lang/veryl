@@ -106,13 +106,22 @@ pub fn copy_wave(
     metadata: &Metadata,
     work_path: &Path,
 ) -> Result<()> {
+    // The file always has a `.vcd` extension, because `$dumpfile` doesn't have the metadata information
     let wave_src_path = work_path.join(format!("{}.vcd", test_name));
+
+    // but let's rename the target file to the correct extension, based on the selected format
+    let target_name = format!(
+        "{}.{}",
+        test_name,
+        metadata.test.waveform_format.extension()
+    );
+
     let wave_dst_path = match &metadata.test.waveform_target {
-        WaveFormTarget::Target => {
-            let target = PathBuf::from(test_path.to_string());
-            target.parent().unwrap().join(format!("{}.vcd", test_name))
-        }
-        WaveFormTarget::Directory { path } => path.join(format!("{}.vcd", test_name)),
+        WaveFormTarget::Target => PathBuf::from(test_path.to_string())
+            .parent()
+            .unwrap()
+            .join(target_name),
+        WaveFormTarget::Directory { path } => path.join(target_name),
     };
 
     let wave_dst_dir = wave_dst_path.parent().unwrap();
