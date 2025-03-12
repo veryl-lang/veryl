@@ -922,6 +922,7 @@ pub enum TypeKind {
     F32,
     F64,
     Type,
+    Bool,
     String,
     UserDefined(UserDefinedType),
     AbstractInterface(Option<StrId>),
@@ -1041,6 +1042,7 @@ impl fmt::Display for Type {
             TypeKind::F32 => text.push_str("f32"),
             TypeKind::F64 => text.push_str("f64"),
             TypeKind::Type => text.push_str("type"),
+            TypeKind::Bool => text.push_str("bool"),
             TypeKind::String => text.push_str("string"),
             TypeKind::UserDefined(x) => {
                 text.push_str(&format!("{}", x.path.first().unwrap()));
@@ -1250,6 +1252,7 @@ impl From<&syntax_tree::FactorType> for Type {
                     syntax_tree::FixedType::I64(_) => TypeKind::I64,
                     syntax_tree::FixedType::F32(_) => TypeKind::F32,
                     syntax_tree::FixedType::F64(_) => TypeKind::F64,
+                    syntax_tree::FixedType::Bool(_) => TypeKind::Bool,
                     syntax_tree::FixedType::Strin(_) => TypeKind::String,
                 };
                 Type {

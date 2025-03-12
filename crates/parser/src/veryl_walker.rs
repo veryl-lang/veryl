@@ -377,6 +377,13 @@ pub trait VerylWalker {
         after!(self, bit, arg);
     }
 
+    /// Semantic action for non-terminal 'Bool'
+    fn bool(&mut self, arg: &Bool) {
+        before!(self, bool, arg);
+        self.veryl_token(&arg.bool_token);
+        after!(self, bool, arg);
+    }
+
     /// Semantic action for non-terminal 'Case'
     fn case(&mut self, arg: &Case) {
         before!(self, case, arg);
@@ -459,6 +466,13 @@ pub trait VerylWalker {
         before!(self, f64, arg);
         self.veryl_token(&arg.f64_token);
         after!(self, f64, arg);
+    }
+
+    /// Semantic action for non-terminal 'False'
+    fn r#false(&mut self, arg: &False) {
+        before!(self, r#false, arg);
+        self.veryl_token(&arg.false_token);
+        after!(self, r#false, arg);
     }
 
     /// Semantic action for non-terminal 'Final'
@@ -776,6 +790,13 @@ pub trait VerylWalker {
         after!(self, tri, arg);
     }
 
+    /// Semantic action for non-terminal 'True'
+    fn r#true(&mut self, arg: &True) {
+        before!(self, r#true, arg);
+        self.veryl_token(&arg.true_token);
+        after!(self, r#true, arg);
+    }
+
     /// Semantic action for non-terminal 'Type'
     fn r#type(&mut self, arg: &Type) {
         before!(self, r#type, arg);
@@ -1066,6 +1087,7 @@ pub trait VerylWalker {
         before!(self, factor, arg);
         match arg {
             Factor::Number(x) => self.number(&x.number),
+            Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
@@ -1112,6 +1134,16 @@ pub trait VerylWalker {
             }
         }
         after!(self, factor, arg);
+    }
+
+    /// Semantic action for non-terminal 'BooleanLiteral'
+    fn boolean_literal(&mut self, arg: &BooleanLiteral) {
+        before!(self, boolean_literal, arg);
+        match arg {
+            BooleanLiteral::True(x) => self.r#true(&x.r#true),
+            BooleanLiteral::False(x) => self.r#false(&x.r#false),
+        }
+        after!(self, boolean_literal, arg);
     }
 
     /// Semantic action for non-terminal 'IdentifierFactor'
@@ -1434,6 +1466,7 @@ pub trait VerylWalker {
             FixedType::I64(x) => self.i64(&x.i64),
             FixedType::F32(x) => self.f32(&x.f32),
             FixedType::F64(x) => self.f64(&x.f64),
+            FixedType::Bool(x) => self.bool(&x.bool),
             FixedType::Strin(x) => self.strin(&x.strin),
         };
         after!(self, fixed_type, arg);
@@ -1530,6 +1563,7 @@ pub trait VerylWalker {
             CastingType::I64(x) => self.i64(&x.i64),
             CastingType::F32(x) => self.f32(&x.f32),
             CastingType::F64(x) => self.f64(&x.f64),
+            CastingType::Bool(x) => self.bool(&x.bool),
             CastingType::Clock(x) => self.clock(&x.clock),
             CastingType::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
             CastingType::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),

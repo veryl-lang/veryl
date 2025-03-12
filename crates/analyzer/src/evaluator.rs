@@ -1114,6 +1114,14 @@ impl Evaluator {
         }
     }
 
+    fn boolean_literal(&mut self, arg: &BooleanLiteral) -> Evaluated {
+        let value = match arg {
+            BooleanLiteral::True(_) => 1,
+            BooleanLiteral::False(_) => 0,
+        };
+        Evaluated::create_fixed(value, false, vec![1], vec![])
+    }
+
     pub fn expression(&mut self, arg: &Expression) -> Evaluated {
         let mut ret = self.expression01(&arg.expression01);
         for x in &arg.expression_list {
@@ -1231,6 +1239,9 @@ impl Evaluator {
         let mut ret = self.expression12(&arg.expression12);
         if let Some(x) = &arg.expression11_opt {
             let new_type = match x.casting_type.as_ref() {
+                CastingType::Bool(_) => {
+                    Some(Evaluated::create_variable(false, true, vec![1], vec![]))
+                }
                 CastingType::Clock(_) => Some(Evaluated::create_clock(
                     EvaluatedTypeClockKind::Implicit,
                     vec![1],
@@ -1340,6 +1351,7 @@ impl Evaluator {
     fn factor(&mut self, arg: &Factor) -> Evaluated {
         match arg {
             Factor::Number(x) => self.number(&x.number),
+            Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
             Factor::IdentifierFactor(x) => {
                 if let Some(args) = &x.identifier_factor.identifier_factor_opt {
                     let args = &args.function_call.function_call_opt;

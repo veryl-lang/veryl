@@ -333,6 +333,27 @@ impl From<&Number> for TokenRange {
     }
 }
 
+impl From<&False> for TokenRange {
+    fn from(value: &False) -> Self {
+        value.false_token.token.into()
+    }
+}
+
+impl From<&True> for TokenRange {
+    fn from(value: &True) -> Self {
+        value.true_token.token.into()
+    }
+}
+
+impl From<&BooleanLiteral> for TokenRange {
+    fn from(value: &BooleanLiteral) -> Self {
+        match value {
+            BooleanLiteral::True(x) => x.r#true.as_ref().into(),
+            BooleanLiteral::False(x) => x.r#false.as_ref().into(),
+        }
+    }
+}
+
 impl From<&TypeModifier> for TokenRange {
     fn from(value: &TypeModifier) -> Self {
         let beg = match value {
@@ -483,6 +504,7 @@ impl From<&Factor> for TokenRange {
     fn from(value: &Factor) -> Self {
         match value {
             Factor::Number(x) => x.number.as_ref().into(),
+            Factor::BooleanLiteral(x) => x.boolean_literal.as_ref().into(),
             Factor::IdentifierFactor(x) => {
                 x.identifier_factor.expression_identifier.as_ref().into()
             }
@@ -571,6 +593,7 @@ impl From<&FixedType> for TokenRange {
             FixedType::I64(x) => x.i64.i64_token.token,
             FixedType::F32(x) => x.f32.f32_token.token,
             FixedType::F64(x) => x.f64.f64_token.token,
+            FixedType::Bool(x) => x.bool.bool_token.token,
             FixedType::Strin(x) => x.strin.string_token.token,
         };
         let end = beg;
@@ -717,6 +740,11 @@ impl From<&CastingType> for TokenRange {
             }
             CastingType::F64(x) => {
                 let beg = x.f64.f64_token.token;
+                let end = beg;
+                TokenRange { beg, end }
+            }
+            CastingType::Bool(x) => {
+                let beg = x.bool.bool_token.token;
                 let end = beg;
                 TokenRange { beg, end }
             }
@@ -1034,6 +1062,7 @@ token_with_comments!(AlwaysFf);
 token_with_comments!(As);
 token_with_comments!(Assign);
 token_with_comments!(Bit);
+token_with_comments!(Bool);
 token_with_comments!(Break);
 token_with_comments!(Case);
 token_with_comments!(Clock);
@@ -1047,6 +1076,7 @@ token_with_comments!(Embed);
 token_with_comments!(Enum);
 token_with_comments!(F32);
 token_with_comments!(F64);
+token_with_comments!(False);
 token_with_comments!(Final);
 token_with_comments!(For);
 token_with_comments!(Function);
@@ -1089,6 +1119,7 @@ token_with_comments!(String);
 token_with_comments!(Struct);
 token_with_comments!(Switch);
 token_with_comments!(Tri);
+token_with_comments!(True);
 token_with_comments!(Type);
 token_with_comments!(U32);
 token_with_comments!(U64);

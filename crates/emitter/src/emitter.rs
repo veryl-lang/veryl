@@ -1318,6 +1318,11 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'Bool'
+    fn bool(&mut self, arg: &Bool) {
+        self.veryl_token(&arg.bool_token.replace("logic"));
+    }
+
     /// Semantic action for non-terminal 'Clock'
     fn clock(&mut self, arg: &Clock) {
         self.veryl_token(&arg.clock_token.replace("logic"));
@@ -1373,6 +1378,11 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.f64_token.replace("real"));
     }
 
+    /// Semantic action for non-terminal 'False'
+    fn r#false(&mut self, arg: &False) {
+        self.veryl_token(&arg.false_token.replace("1'b0"));
+    }
+
     /// Semantic action for non-terminal 'I32'
     fn i32(&mut self, arg: &I32) {
         self.veryl_token(&arg.i32_token.replace("int signed"));
@@ -1409,6 +1419,11 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Switch'
     fn switch(&mut self, arg: &Switch) {
         self.veryl_token(&arg.switch_token.replace("case"));
+    }
+
+    /// Semantic action for non-terminal 'True'
+    fn r#true(&mut self, arg: &True) {
+        self.veryl_token(&arg.true_token.replace("1'b1"));
     }
 
     /// Semantic action for non-terminal 'U32'
@@ -1712,6 +1727,7 @@ impl VerylWalker for Emitter {
                     self.f64(&x.f64);
                     self.str("'(");
                 }
+                CastingType::Bool(_) => self.str("(("),
                 CastingType::UserDefinedType(x) => {
                     self.user_defined_type(&x.user_defined_type);
                     self.str("'(");
@@ -1795,6 +1811,7 @@ impl VerylWalker for Emitter {
                 | CastingType::UserDefinedType(_)
                 | CastingType::Based(_)
                 | CastingType::BaseLess(_) => self.str(")"),
+                CastingType::Bool(_) => self.str(") != 1'b0)"),
                 _ => (),
             }
         }
@@ -1804,6 +1821,7 @@ impl VerylWalker for Emitter {
     fn factor(&mut self, arg: &Factor) {
         match arg {
             Factor::Number(x) => self.number(&x.number),
+            Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);

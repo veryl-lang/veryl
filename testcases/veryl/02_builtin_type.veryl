@@ -11,21 +11,25 @@ module Module02 {
     let _c : f32 = 1;
     let _cc: f64 = 1;
 
+    // boolean
+    let _d : bool = true;
+    let _dd: bool = false;
+
     // 4 state (01xz) type
-    let _d  : logic         = 1;
-    let _dd : logic<10>     = 1;
-    let _ddd: logic<10, 10> = 1;
+    let _e  : logic         = 1;
+    let _ee : logic<10>     = 1;
+    let _eee: logic<10, 10> = 1;
 
     // 2 state (01) type
-    let _e  : bit         = 1;
-    let _ee : bit<10>     = 1;
-    let _eee: bit<10, 10> = 1;
+    let _f  : bit         = 1;
+    let _ff : bit<10>     = 1;
+    let _fff: bit<10, 10> = 1;
 
     // array
-    let _f     : u32 [2] = '{1, 1};
-    let _ff    : u64 [2] = '{1, 1};
-    let _fff   : i32 [2] = '{1, 1};
-    let _ffff  : i64 [2] = '{1, 1};
-    let _fffff : f32 [2] = '{1, 1};
-    let _ffffff: f64 [2] = '{1, 1};
+    let _g     : u32 [2] = '{1, 1};
+    let _gg    : u64 [2] = '{1, 1};
+    let _ggg   : i32 [2] = '{1, 1};
+    let _gggg  : i64 [2] = '{1, 1};
+    let _ggggg : f32 [2] = '{1, 1};
+    let _gggggg: f64 [2] = '{1, 1};
 }

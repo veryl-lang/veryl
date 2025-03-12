@@ -1,10 +1,11 @@
 module Module64 {
     let a: u32 = 1;
 
-    let _x0: u32 = a as u32;
-    let _x1: u64 = a as u64;
-    let _x2: i32 = a as i32;
-    let _x3: i64 = a as i64;
-    let _x4: f32 = a as f32;
-    let _x5: f64 = a as f64;
+    let _x0: u32  = a as u32;
+    let _x1: u64  = a as u64;
+    let _x2: i32  = a as i32;
+    let _x3: i64  = a as i64;
+    let _x4: f32  = a as f32;
+    let _x5: f64  = a as f64;
+    let _x6: bool = a as bool;
 }

@@ -561,6 +561,7 @@ impl VerylWalker for Formatter {
     fn factor(&mut self, arg: &Factor) {
         match arg {
             Factor::Number(x) => self.number(&x.number),
+            Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
