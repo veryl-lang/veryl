@@ -6,7 +6,7 @@ module Module25 (
 ) {
     inst data_if: veryl_sample3::data_if;
 
-    inst u0: veryl_sample1::delay (
+    inst u0: veryl_sample::delay (
         i_clk                ,
         i_rst_n: i_rst       ,
         i_d    : in_if.data  ,

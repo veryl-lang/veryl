@@ -263,8 +263,12 @@ impl Analyzer {
                 symbol_table::insert(&token, symbol);
                 for lock_dep in &lock.dependencies {
                     let from = resource_table::insert_str(&lock_dep.name);
-                    let to = metadata.lockfile.lock_table.get(&lock_dep.url).unwrap();
-                    let to = to.iter().find(|x| x.version == lock_dep.version).unwrap();
+                    let to = metadata
+                        .lockfile
+                        .lock_table
+                        .get(&lock_dep.source.to_url())
+                        .unwrap();
+                    let to = to.iter().find(|x| x.source == lock_dep.source).unwrap();
 
                     let (token, symbol) = new_namespace(&to.name);
                     symbol_table::insert(&token, symbol);
