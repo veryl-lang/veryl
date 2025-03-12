@@ -13,10 +13,9 @@ pub struct CheckClockReset {
     in_always_ff: bool,
     in_if_reset: bool,
     if_reset_brace: usize,
-    if_reset_exist: bool,
     n_of_select: usize,
-    default_clock_exists: bool,
-    default_reset_exists: bool,
+    has_default_clock: bool,
+    has_default_reset: bool,
     evaluator: Evaluator,
 }
 
@@ -38,14 +37,14 @@ impl VerylGrammarTrait for CheckClockReset {
             HandlerPoint::Before => {
                 if let Ok(found) = symbol_table::resolve(arg.identifier.as_ref()) {
                     if let SymbolKind::Module(x) = found.found.kind {
-                        self.default_clock_exists = x.default_clock.is_some();
-                        self.default_reset_exists = x.default_reset.is_some();
+                        self.has_default_clock = x.default_clock.is_some();
+                        self.has_default_reset = x.default_reset.is_some();
                     }
                 }
             }
             HandlerPoint::After => {
-                self.default_clock_exists = false;
-                self.default_reset_exists = false;
+                self.has_default_clock = false;
+                self.has_default_reset = false;
             }
         }
         Ok(())
@@ -74,7 +73,6 @@ impl VerylGrammarTrait for CheckClockReset {
 
     fn if_reset(&mut self, _arg: &IfReset) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.if_reset_exist = true;
             self.in_if_reset = true;
         }
         Ok(())
@@ -84,32 +82,13 @@ impl VerylGrammarTrait for CheckClockReset {
         match self.point {
             HandlerPoint::Before => {
                 //  check if clock signal exists
-                let clock_signal_exists = arg.always_ff_declaration_opt.is_some();
-                if !(self.default_clock_exists || clock_signal_exists) {
+                if !(self.has_default_clock || arg.has_explicit_clock()) {
                     self.errors
                         .push(AnalyzerError::missing_clock_signal(&arg.into()))
                 }
 
                 // Check first if_reset when reset signel exists
-                let if_reset_required = if let Some(ref x) = arg.always_ff_declaration_opt {
-                    if x.always_ff_event_list.always_ff_event_list_opt.is_some() {
-                        if let Some(x) = arg.statement_block.statement_block_list.first() {
-                            let x: Vec<_> = x.statement_block_group.as_ref().into();
-                            if let Some(StatementBlockItem::Statement(x)) = x.first() {
-                                !matches!(*x.statement, Statement::IfResetStatement(_))
-                            } else {
-                                true
-                            }
-                        } else {
-                            true
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if if_reset_required {
+                if arg.has_explicit_reset() && !arg.has_if_reset() {
                     self.errors
                         .push(AnalyzerError::missing_if_reset(&arg.into()));
                 }
@@ -118,20 +97,14 @@ impl VerylGrammarTrait for CheckClockReset {
             }
             HandlerPoint::After => {
                 // Check reset signal when if_reset exists
-                if self.if_reset_exist {
-                    let reset_signal_exists = if let Some(ref x) = arg.always_ff_declaration_opt {
-                        x.always_ff_event_list.always_ff_event_list_opt.is_some()
-                    } else {
-                        false
-                    };
-                    if !(self.default_reset_exists || reset_signal_exists) {
-                        self.errors
-                            .push(AnalyzerError::missing_reset_signal(&arg.into()));
-                    }
+                let missing_reset =
+                    arg.has_if_reset() && !(self.has_default_reset || arg.has_explicit_reset());
+                if missing_reset {
+                    self.errors
+                        .push(AnalyzerError::missing_reset_signal(&arg.into()));
                 }
 
                 self.in_always_ff = false;
-                self.if_reset_exist = false;
             }
         }
         Ok(())

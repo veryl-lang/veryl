@@ -338,6 +338,7 @@ impl From<&TypeModifier> for TokenRange {
         let beg = match value {
             TypeModifier::Tri(x) => x.tri.tri_token.token,
             TypeModifier::Signed(x) => x.signed.signed_token.token,
+            TypeModifier::Defaul(x) => x.defaul.default_token.token,
         };
         let end = beg;
         TokenRange { beg, end }
@@ -666,6 +667,7 @@ impl From<&ScalarType> for TokenRange {
             range.beg = match &*x.type_modifier {
                 TypeModifier::Tri(x) => x.tri.tri_token.token,
                 TypeModifier::Signed(x) => x.r#signed.signed_token.token,
+                TypeModifier::Defaul(x) => x.defaul.default_token.token,
             };
         }
 

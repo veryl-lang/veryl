@@ -150,7 +150,7 @@ impl Symbol {
                         } else if x.loop_variable {
                             Evaluated::create_unknown_static()
                         } else {
-                            let signed = x.r#type.modifier.contains(&TypeModifier::Signed);
+                            let signed = x.r#type.is_signed();
                             let is_4state = x.r#type.kind.is_4state();
                             Evaluated::create_variable(signed, is_4state, width, array)
                         }
@@ -183,7 +183,7 @@ impl Symbol {
                             };
                             Evaluated::create_reset(kind, width, array)
                         } else {
-                            let signed = x.r#type.modifier.contains(&TypeModifier::Signed);
+                            let signed = x.r#type.is_signed();
                             let is_4state = x.r#type.kind.is_4state();
                             Evaluated::create_variable(signed, is_4state, width, array)
                         }
@@ -598,10 +598,26 @@ impl SymbolKind {
         }
     }
 
+    pub fn can_be_default_clock(&self) -> bool {
+        match self {
+            SymbolKind::Port(x) => x.r#type.can_be_default_clock(),
+            SymbolKind::Variable(x) => x.r#type.can_be_default_clock(),
+            _ => false,
+        }
+    }
+
     pub fn is_reset(&self) -> bool {
         match self {
             SymbolKind::Port(x) => x.r#type.kind.is_reset(),
             SymbolKind::Variable(x) => x.r#type.kind.is_reset(),
+            _ => false,
+        }
+    }
+
+    pub fn can_be_default_reset(&self) -> bool {
+        match self {
+            SymbolKind::Port(x) => x.r#type.can_be_default_reset(),
+            SymbolKind::Variable(x) => x.r#type.can_be_default_reset(),
             _ => false,
         }
     }
@@ -860,6 +876,26 @@ impl Type {
     pub fn is_compatible(&self, other: &Type) -> bool {
         self.to_string() == other.to_string()
     }
+
+    pub fn has_modifier(&self, kind: &TypeModifierKind) -> bool {
+        self.modifier.iter().any(|x| x.kind == *kind)
+    }
+
+    pub fn find_modifier(&self, kind: &TypeModifierKind) -> Option<TypeModifier> {
+        self.modifier.iter().find(|x| x.kind == *kind).cloned()
+    }
+
+    pub fn is_signed(&self) -> bool {
+        self.has_modifier(&TypeModifierKind::Signed)
+    }
+
+    pub fn can_be_default_clock(&self) -> bool {
+        self.kind.is_clock() && self.width.is_empty() && self.array.is_empty()
+    }
+
+    pub fn can_be_default_reset(&self) -> bool {
+        self.kind.is_reset() && self.width.is_empty() && self.array.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -936,19 +972,51 @@ impl UserDefinedType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeModifier {
+pub enum TypeModifierKind {
     Tri,
     Signed,
+    Default,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeModifier {
+    pub kind: TypeModifierKind,
+    pub token: VerylToken,
+}
+
+impl From<&syntax_tree::TypeModifier> for TypeModifier {
+    fn from(value: &syntax_tree::TypeModifier) -> Self {
+        let (kind, token) = match value {
+            syntax_tree::TypeModifier::Tri(x) => (TypeModifierKind::Tri, &x.tri.tri_token),
+            syntax_tree::TypeModifier::Signed(x) => {
+                (TypeModifierKind::Signed, &x.signed.signed_token)
+            }
+            syntax_tree::TypeModifier::Defaul(x) => {
+                (TypeModifierKind::Default, &x.defaul.default_token)
+            }
+        };
+        TypeModifier {
+            kind,
+            token: token.clone(),
+        }
+    }
+}
+
+impl fmt::Display for TypeModifier {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.kind {
+            TypeModifierKind::Tri => "tri".to_string().fmt(f),
+            TypeModifierKind::Signed => "signed".to_string().fmt(f),
+            TypeModifierKind::Default => "default".to_string().fmt(f),
+        }
+    }
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
         for x in &self.modifier {
-            match x {
-                TypeModifier::Tri => text.push_str("tri "),
-                TypeModifier::Signed => text.push_str("signed "),
-            }
+            text.push_str(&x.to_string());
         }
         match &self.kind {
             TypeKind::Clock => text.push_str("clock"),
@@ -1087,10 +1155,7 @@ impl TryFrom<&syntax_tree::Expression> for Type {
 
                 let mut modifier = Vec::new();
                 for x in &factor.factor_type_factor_list {
-                    match &*x.type_modifier {
-                        syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
-                        syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
-                    }
+                    modifier.push(TypeModifier::from(&*x.type_modifier));
                 }
                 let mut factor_type: Type = factor.factor_type.as_ref().into();
                 factor_type.modifier = modifier;
@@ -1198,10 +1263,7 @@ impl From<&syntax_tree::ScalarType> for Type {
     fn from(value: &syntax_tree::ScalarType) -> Self {
         let mut modifier = Vec::new();
         for x in &value.scalar_type_list {
-            match &*x.type_modifier {
-                syntax_tree::TypeModifier::Tri(_) => modifier.push(TypeModifier::Tri),
-                syntax_tree::TypeModifier::Signed(_) => modifier.push(TypeModifier::Signed),
-            }
+            modifier.push(TypeModifier::from(&*x.type_modifier));
         }
         match &*value.scalar_type_group {
             syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {

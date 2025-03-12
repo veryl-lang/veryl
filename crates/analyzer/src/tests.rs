@@ -171,6 +171,20 @@ fn clock_check() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidClock { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input `a default clock,
+        i_clk_b: input `b default clock,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleDefaultClock { .. }
+    ));
 }
 
 #[test]
@@ -364,6 +378,54 @@ fn reset_check() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidReset { .. }));
+}
+
+#[test]
+fn invalid_modifier() {
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input default logic,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input default clock<2>
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input default clock[2]
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input default reset<2>
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input default reset[2]
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
 }
 
 #[test]
@@ -3959,6 +4021,77 @@ fn clock_domain() {
         assign intf.v = '0;
         assign o_dat  = intf.v;
     }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleL (
+        i_clk_a: input `a clock,
+        i_rst_a: input `a reset,
+        i_clk_b: input `b clock,
+        i_rst_b: input `b reset,
+    ) {
+        var _a: `a logic;
+        always_ff (i_clk_a, i_rst_b) {
+            if_reset {
+                _a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleM (
+        i_clk_a: input `a clock,
+        i_clk_b: input `b clock,
+        i_rst_b: input `b reset,
+    ) {
+        var _a: `a logic;
+        always_ff (i_clk_a) {
+            if_reset {
+                _a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleO (
+        i_clk_a: input `a clock,
+        i_rst_b: input `b reset,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleO (
+        i_clk_a: input `a default clock,
+        i_rst_a: input `a         reset,
+        i_clk_b: input `b         clock,
+        i_rst_b: input `b default reset,
+    ) {}
     "#;
 
     let errors = analyze(code);

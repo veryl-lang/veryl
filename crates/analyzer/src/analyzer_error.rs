@@ -129,6 +129,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_modifier),
+        help("remove the modifier"),
+        url("")
+    )]
+    #[error("{kind} modifier can't be used because {reason}")]
+    InvalidModifier {
+        kind: String,
+        reason: String,
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_direction),
         help("remove {kind} direction"),
         url(
@@ -291,6 +306,18 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(multiple_default_clock), help(""), url(""))]
+    #[error(
+        "{identifier} can't be used as the default clock because the default clock has already been specified."
+    )]
+    MultipleDefaultClock {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(invalid_modport_variable_item),
@@ -346,6 +373,18 @@ pub enum AnalyzerError {
         "#{identifier} can't be used as a reset because it is not 'reset' type nor a single bit signal"
     )]
     InvalidReset {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(severity(Error), code(multiple_default_reset), help(""), url(""))]
+    #[error(
+        "{identifier} can't be used as the default reset because the default reset has already been specified."
+    )]
+    MultipleDefaultReset {
         identifier: String,
         #[source_code]
         input: MultiSources,
@@ -1263,6 +1302,15 @@ impl AnalyzerError {
         }
     }
 
+    pub fn invalid_modifier(kind: &str, reason: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidModifier {
+            kind: kind.to_string(),
+            reason: reason.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn invalid_direction(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidDirection {
             kind: kind.to_string(),
@@ -1342,8 +1390,24 @@ impl AnalyzerError {
         }
     }
 
+    pub fn multiple_default_clock(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MultipleDefaultClock {
+            identifier: identifier.into(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn invalid_reset(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidReset {
+            identifier: identifier.into(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn multiple_default_reset(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MultipleDefaultReset {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
