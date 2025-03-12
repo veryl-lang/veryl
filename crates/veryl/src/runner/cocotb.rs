@@ -1,4 +1,4 @@
-use crate::runner::Runner;
+use crate::runner::{Runner, copy_wave};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -8,7 +8,7 @@ use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, WaveFormFormat};
 use veryl_parser::resource_table::{self, PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -119,7 +119,7 @@ impl Runner for Cocotb {
         test: StrId,
         top: Option<StrId>,
         path: PathId,
-        _wave: bool,
+        wave: bool,
     ) -> Result<bool> {
         self.success = true;
 
@@ -163,6 +163,14 @@ impl Runner for Cocotb {
 
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
 
+        let (py_waves, args) = match wave.then_some(metadata.test.waveform_format) {
+            Some(WaveFormFormat::Vcd) => ("True", "['--trace']"),
+            Some(WaveFormFormat::Fst) => (
+                "True",
+                "['--trace-fst', '--trace-structs', '--trace-threads', '2']",
+            ),
+            None => ("False", ""),
+        };
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
             r#"
@@ -176,11 +184,14 @@ runner.build(
     verilog_sources=sources,
     hdl_toplevel="{module}",
     always=True,
+    waves={py_waves},
+    build_args={args},
 )
 
 runner.test(
     hdl_toplevel="{module}",
     test_module="{test},",
+    waves={py_waves},
 )
 "#
         );
@@ -208,6 +219,20 @@ runner.test(
 
             self.parse(compile).await
         })?;
+
+        if wave {
+            // `copy_wave` expects the waveform at a certain position and format
+            fs::copy(
+                temp_dir
+                    .path()
+                    .join("sim_build")
+                    .join("dump")
+                    .with_extension(metadata.test.waveform_format.extension()),
+                temp_dir.path().join(test.to_string()).with_extension("vcd"),
+            )
+            .into_diagnostic()?;
+            copy_wave(test, path, metadata, temp_dir.path())?;
+        }
 
         if self.success {
             info!("Succeeded test ({})", test);
