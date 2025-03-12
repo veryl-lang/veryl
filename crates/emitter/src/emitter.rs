@@ -784,6 +784,14 @@ impl Emitter {
             let reset_kind = match found.found.kind {
                 SymbolKind::Port(x) => x.r#type.kind,
                 SymbolKind::Variable(x) => x.r#type.kind,
+                SymbolKind::ModportVariableMember(x) => {
+                    let symbol = symbol_table::get(x.variable).unwrap();
+                    if let SymbolKind::Variable(x) = symbol.kind {
+                        x.r#type.kind
+                    } else {
+                        unreachable!();
+                    }
+                }
                 _ => unreachable!(),
             };
 
@@ -2810,6 +2818,14 @@ impl VerylWalker for Emitter {
             let clock = match found.found.kind {
                 SymbolKind::Port(x) => x.r#type.kind,
                 SymbolKind::Variable(x) => x.r#type.kind,
+                SymbolKind::ModportVariableMember(x) => {
+                    let symbol = symbol_table::get(x.variable).unwrap();
+                    if let SymbolKind::Variable(x) = symbol.kind {
+                        x.r#type.kind
+                    } else {
+                        unreachable!();
+                    }
+                }
                 _ => unreachable!(),
             };
             let clock_type = match clock {
@@ -2836,6 +2852,14 @@ impl VerylWalker for Emitter {
             let (reset_kind, prefix, suffix) = match found.found.kind {
                 SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
                 SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
+                SymbolKind::ModportVariableMember(x) => {
+                    let symbol = symbol_table::get(x.variable).unwrap();
+                    if let SymbolKind::Variable(x) = symbol.kind {
+                        (x.r#type.kind, x.prefix.clone(), x.suffix.clone())
+                    } else {
+                        unreachable!();
+                    }
+                }
                 _ => unreachable!(),
             };
             let reset_type = match reset_kind {

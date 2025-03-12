@@ -93,7 +93,7 @@ pub struct CreateSymbolTable {
     default_clock_candidates: Vec<SymbolId>,
     default_reset: Option<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
-    variable_ids: Vec<SymbolId>,
+    variable_ids: HashMap<StrId, SymbolId>,
     modport_member_ids: Vec<SymbolId>,
     modport_ids: Vec<SymbolId>,
     function_ids: HashMap<StrId, SymbolId>,
@@ -386,30 +386,35 @@ impl CreateSymbolTable {
                     .iter()
                     .map(|x| symbol_table::get(*x).unwrap().token.text)
                     .collect();
-                let default_members: Vec<_> = self
+                let mut default_members: Vec<_> = self
                     .variable_ids
                     .iter()
-                    .map(|x| symbol_table::get(*x).unwrap().token.text)
-                    .filter(|x| !explicit_members.contains(x))
+                    .filter(|(x, _)| !explicit_members.contains(x))
                     .collect();
 
+                // Sort by SymbolId to keep inserting order as the same as definition order
+                default_members.sort_by(|x, y| x.1.cmp(y.1));
+
                 let namespace = mp.inner_namespace();
-                for x in default_members {
+                for (text, id) in default_members {
                     let direction = match default {
                         SymModportDefault::Input => Some(SymDirection::Input),
                         SymModportDefault::Output => Some(SymDirection::Output),
-                        SymModportDefault::Same(tgt) => directions.get(&(tgt.text, x)).copied(),
+                        SymModportDefault::Same(tgt) => directions.get(&(tgt.text, *text)).copied(),
                         SymModportDefault::Converse(tgt) => {
-                            directions.get(&(tgt.text, x)).map(|x| x.converse())
+                            directions.get(&(tgt.text, *text)).map(|x| x.converse())
                         }
                     };
 
                     if let Some(direction) = direction {
                         let path = mp.token.source.get_path().unwrap();
-                        let token = Token::generate(x, path);
+                        let token = Token::generate(*text, path);
                         namespace_table::insert(token.id, path, &namespace);
 
-                        let property = ModportVariableMemberProperty { direction };
+                        let property = ModportVariableMemberProperty {
+                            direction,
+                            variable: *id,
+                        };
                         let kind = SymbolKind::ModportVariableMember(property);
                         let symbol =
                             Symbol::new(&token, kind, &namespace, false, DocComment::default());
@@ -671,7 +676,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
                 self.push_default_clocl_reset(&arg.identifier.identifier_token.token, id, &kind);
-                self.variable_ids.push(id);
+                let text = arg.identifier.identifier_token.token.text;
+                self.variable_ids.insert(text, id);
             }
         }
         Ok(())
@@ -743,7 +749,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         _ => {
                             let direction: crate::symbol::Direction =
                                 item.direction.as_ref().into();
-                            let property = ModportVariableMemberProperty { direction };
+                            let property = ModportVariableMemberProperty {
+                                direction,
+                                variable: SymbolId::default(),
+                            };
                             SymbolKind::ModportVariableMember(property)
                         }
                     };
@@ -1483,16 +1492,28 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.is_public,
                 );
 
-                //  link modport function
+                //  link modport members to actual definition
                 for id in &self.modport_member_ids {
                     let mut mp_member = symbol_table::get(*id).unwrap();
-                    if let SymbolKind::ModportFunctionMember(_) = mp_member.kind {
-                        if let Some(id) = self.function_ids.get(&mp_member.token.text) {
-                            let property = ModportFunctionMemberProperty { function: *id };
-                            let kind = SymbolKind::ModportFunctionMember(property);
-                            mp_member.kind = kind;
-                            symbol_table::update(mp_member);
+                    match mp_member.kind {
+                        SymbolKind::ModportFunctionMember(_) => {
+                            if let Some(id) = self.function_ids.get(&mp_member.token.text) {
+                                let property = ModportFunctionMemberProperty { function: *id };
+                                let kind = SymbolKind::ModportFunctionMember(property);
+                                mp_member.kind = kind;
+                                symbol_table::update(mp_member);
+                            }
                         }
+                        SymbolKind::ModportVariableMember(x) => {
+                            if let Some(id) = self.variable_ids.get(&mp_member.token.text) {
+                                let mut property = x;
+                                property.variable = *id;
+                                let kind = SymbolKind::ModportVariableMember(property);
+                                mp_member.kind = kind;
+                                symbol_table::update(mp_member);
+                            }
+                        }
+                        _ => (),
                     }
                 }
 

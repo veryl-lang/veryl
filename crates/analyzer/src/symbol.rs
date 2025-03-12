@@ -1669,6 +1669,7 @@ pub enum ModportDefault {
 #[derive(Debug, Clone)]
 pub struct ModportVariableMemberProperty {
     pub direction: Direction,
+    pub variable: SymbolId,
 }
 
 #[derive(Debug, Clone)]

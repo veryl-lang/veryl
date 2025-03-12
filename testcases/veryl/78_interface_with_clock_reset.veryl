@@ -1,0 +1,23 @@
+interface Interface78 {
+    var clk: clock;
+    var rst: reset;
+
+    modport slave {
+        clk: input,
+        rst: input,
+    }
+}
+
+module Module78 (
+    intf: modport Interface78::slave,
+) {
+    var x: logic;
+
+    always_ff (intf.clk, intf.rst) {
+        if_reset {
+            x = 0;
+        } else {
+            x += 1;
+        }
+    }
+}

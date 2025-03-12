@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::evaluator::{EvaluatedValue, Evaluator};
-use crate::symbol::{SymbolKind, TypeKind};
+use crate::symbol::{SymbolKind, Type, TypeKind};
 use crate::symbol_table;
 use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
@@ -111,30 +111,30 @@ impl VerylGrammarTrait for CheckClockReset {
     }
 
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) -> Result<(), ParolError> {
+        fn is_valid_clock(x: Type, n_of_selected: usize) -> bool {
+            let n_of_selectable = x.width.len() + x.array.len();
+            match x.kind {
+                TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge => {
+                    n_of_selectable == n_of_selected
+                }
+                _ => false,
+            }
+        }
+
         match self.point {
             HandlerPoint::Before => self.n_of_select = 0,
             HandlerPoint::After => {
                 if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
                     let symbol = found.found;
                     let valid_clock = match symbol.kind {
-                        SymbolKind::Port(x) => {
-                            let clock = x.r#type;
-                            let n_of_select = clock.width.len() + clock.array.len();
-                            match clock.kind {
-                                TypeKind::Clock
-                                | TypeKind::ClockPosedge
-                                | TypeKind::ClockNegedge => n_of_select == self.n_of_select,
-                                _ => false,
-                            }
-                        }
-                        SymbolKind::Variable(x) => {
-                            let clock = x.r#type;
-                            let n_of_select = clock.width.len() + clock.array.len();
-                            match clock.kind {
-                                TypeKind::Clock
-                                | TypeKind::ClockPosedge
-                                | TypeKind::ClockNegedge => n_of_select == self.n_of_select,
-                                _ => false,
+                        SymbolKind::Port(x) => is_valid_clock(x.r#type, self.n_of_select),
+                        SymbolKind::Variable(x) => is_valid_clock(x.r#type, self.n_of_select),
+                        SymbolKind::ModportVariableMember(x) => {
+                            let symbol = symbol_table::get(x.variable).unwrap();
+                            if let SymbolKind::Variable(x) = symbol.kind {
+                                is_valid_clock(x.r#type, self.n_of_select)
+                            } else {
+                                false
                             }
                         }
                         _ => false,
@@ -158,34 +158,32 @@ impl VerylGrammarTrait for CheckClockReset {
     }
 
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) -> Result<(), ParolError> {
+        fn is_valid_reset(x: Type, n_of_selected: usize) -> bool {
+            let n_of_selectable = x.width.len() + x.array.len();
+            match x.kind {
+                TypeKind::Reset
+                | TypeKind::ResetAsyncHigh
+                | TypeKind::ResetAsyncLow
+                | TypeKind::ResetSyncHigh
+                | TypeKind::ResetSyncLow => n_of_selectable == n_of_selected,
+                _ => false,
+            }
+        }
+
         match self.point {
             HandlerPoint::Before => self.n_of_select = 0,
             HandlerPoint::After => {
                 if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
                     let symbol = found.found;
                     let valid_reset = match symbol.kind {
-                        SymbolKind::Port(x) => {
-                            let reset = x.r#type;
-                            let n_of_select = reset.width.len() + reset.array.len();
-                            match reset.kind {
-                                TypeKind::Reset
-                                | TypeKind::ResetAsyncHigh
-                                | TypeKind::ResetAsyncLow
-                                | TypeKind::ResetSyncHigh
-                                | TypeKind::ResetSyncLow => n_of_select == self.n_of_select,
-                                _ => false,
-                            }
-                        }
-                        SymbolKind::Variable(x) => {
-                            let reset = x.r#type;
-                            let n_of_select = reset.width.len() + reset.array.len();
-                            match reset.kind {
-                                TypeKind::Reset
-                                | TypeKind::ResetAsyncHigh
-                                | TypeKind::ResetAsyncLow
-                                | TypeKind::ResetSyncHigh
-                                | TypeKind::ResetSyncLow => n_of_select == self.n_of_select,
-                                _ => false,
+                        SymbolKind::Port(x) => is_valid_reset(x.r#type, self.n_of_select),
+                        SymbolKind::Variable(x) => is_valid_reset(x.r#type, self.n_of_select),
+                        SymbolKind::ModportVariableMember(x) => {
+                            let symbol = symbol_table::get(x.variable).unwrap();
+                            if let SymbolKind::Variable(x) = symbol.kind {
+                                is_valid_reset(x.r#type, self.n_of_select)
+                            } else {
+                                false
                             }
                         }
                         _ => false,
