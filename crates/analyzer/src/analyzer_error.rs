@@ -1246,6 +1246,21 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(ambiguous_elsif),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#ambiguous_elsif")
+    )]
+    #[error("elsif/else attribute is ambiguous because {cause}")]
+    AmbiguousElsif {
+        cause: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 fn source(token: &TokenRange) -> MultiSources {
@@ -1967,6 +1982,14 @@ impl AnalyzerError {
     pub fn exceed_limit(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::ExceedLimit {
             kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn ambiguous_elsif(cause: &str, token: &TokenRange) -> Self {
+        AnalyzerError::AmbiguousElsif {
+            cause: cause.to_string(),
             input: source(token),
             error_location: token.into(),
         }

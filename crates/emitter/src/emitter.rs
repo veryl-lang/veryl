@@ -2994,34 +2994,53 @@ impl VerylWalker for Emitter {
         self.in_attribute = true;
         let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
-            "ifdef" | "ifndef" => {
-                if let Some(ref x) = arg.attribute_opt {
-                    let comma = if self.string.trim_end().ends_with(',') {
-                        self.unindent();
-                        self.truncate(self.string.len() - format!(",{}", NEWLINE).len());
-                        self.newline();
-                        true
-                    } else {
-                        false
-                    };
+            "ifdef" | "ifndef" | "elsif" => {
+                let comma = if self.string.trim_end().ends_with(',') {
+                    self.unindent();
+                    self.truncate(self.string.len() - format!(",{}", NEWLINE).len());
+                    self.newline();
+                    true
+                } else if self.string.trim_end().ends_with(",`endif") {
+                    self.unindent();
+                    self.truncate(self.string.len() - format!(",`endif{}", NEWLINE).len());
+                    self.str("`endif");
+                    self.newline();
+                    true
+                } else {
+                    false
+                };
 
-                    self.consume_adjust_line(&arg.identifier.identifier_token.token);
-                    self.str("`");
+                let is_els = identifier.as_str().starts_with("els");
+
+                if is_els && self.string.trim_end().ends_with("`endif") {
+                    self.unindent();
+                    self.truncate(self.string.len() - format!("`endif{}", NEWLINE).len());
+                }
+
+                self.consume_adjust_line(&arg.identifier.identifier_token.token);
+                self.str("`");
+                if identifier.as_str() == "els" {
+                    self.token(&arg.identifier.identifier_token.replace("else"));
+                } else {
                     self.identifier(&arg.identifier);
+                }
+
+                if let Some(ref x) = arg.attribute_opt {
                     self.space(1);
                     if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
                         self.identifier(&x.identifier);
                     }
-                    self.newline();
-                    self.attribute.push(AttributeType::Ifdef);
-
-                    if comma {
-                        self.str(",");
-                        self.newline();
-                    }
-
-                    self.clear_adjust_line();
                 }
+
+                self.newline();
+                self.attribute.push(AttributeType::Ifdef);
+
+                if comma {
+                    self.str(",");
+                    self.newline();
+                }
+
+                self.clear_adjust_line();
             }
             "sv" => {
                 if let Some(ref x) = arg.attribute_opt {

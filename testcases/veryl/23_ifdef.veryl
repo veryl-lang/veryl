@@ -42,6 +42,20 @@ module Module23 #(
 
     #[ifndef(DEFINE_D)]
     assign _d = 1;
+
+    #[ifdef(DEFINE_E)]
+    let _e: logic = 1;
+    #[elsif(DEFINE_F)]
+    let _e: logic = 2;
+    #[els]
+    let _e: logic = 3;
+
+    #[ifndef(DEFINE_G)]
+    let _f: logic = 1;
+    #[elsif(DEFINE_H)]
+    let _f: logic = 2;
+    #[els]
+    let _f: logic = 3;
 }
 
 #[ifdef(DEFINE_A)]
