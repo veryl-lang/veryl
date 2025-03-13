@@ -20,7 +20,7 @@ pub struct ResolveResult {
 
 #[derive(Clone, Debug)]
 pub struct ResolveError {
-    pub last_found: Option<Symbol>,
+    pub last_found: Option<Box<Symbol>>,
     pub cause: ResolveErrorCause,
 }
 
@@ -34,7 +34,7 @@ pub enum ResolveErrorCause {
 impl ResolveError {
     pub fn new(last_found: Option<&Symbol>, cause: ResolveErrorCause) -> Self {
         Self {
-            last_found: last_found.cloned(),
+            last_found: last_found.map(|s| Box::new(s.clone())),
             cause,
         }
     }

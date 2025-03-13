@@ -44,7 +44,7 @@ pub enum Context {
 
 #[derive(Debug, Clone)]
 pub enum DagError {
-    Cyclic(Symbol, Symbol),
+    Cyclic(Box<Symbol>, Box<Symbol>),
 }
 
 impl TypeDag {
@@ -80,13 +80,11 @@ impl TypeDag {
         }
     }
 
-    fn get_symbol(&self, node: u32) -> Symbol {
-        match self.symbols.get(&node) {
-            Some(x) => x.clone(),
-            None => {
-                panic!("Must insert node before accessing");
-            }
-        }
+    fn get_cloned_symbol(&self, node: u32) -> Symbol {
+        self.symbols
+            .get(&node)
+            .expect("Must insert node before accessing")
+            .clone()
     }
 
     fn insert_edge(&mut self, start: u32, end: u32, edge: Context) -> Result<(), DagError> {
@@ -98,9 +96,12 @@ impl TypeDag {
                 if matches!(edge, Context::Module | Context::Interface) && is_direct_recursion {
                     Ok(())
                 } else {
-                    let ssym = self.get_symbol(start);
-                    let esym = self.get_symbol(end);
-                    Err(DagError::Cyclic(ssym, esym))
+                    let ssym = self.get_cloned_symbol(start);
+                    let esym = self.get_cloned_symbol(end);
+                    Err(DagError::Cyclic(
+                        Box::new(ssym),
+                        Box::new(esym),
+                    ))
                 }
             }
         }
@@ -122,8 +123,7 @@ impl TypeDag {
         for node in nodes {
             let index = node.index() as u32;
             if self.paths.contains_key(&index) {
-                let sym = self.get_symbol(index);
-                ret.push(sym);
+                ret.push(self.get_cloned_symbol(index));
             }
         }
         ret
@@ -142,8 +142,7 @@ impl TypeDag {
             while let Some(x) = dfs.next(&graph) {
                 let index = x.index() as u32;
                 if self.paths.contains_key(&index) {
-                    let symbol = self.get_symbol(index);
-                    connected.push(symbol);
+                    connected.push(self.get_cloned_symbol(index));
                 }
             }
             if !connected.is_empty() {
@@ -227,7 +226,7 @@ pub fn insert_node(symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
 }
 
 pub fn get_symbol(node: u32) -> Symbol {
-    TYPE_DAG.with(|f| f.borrow().get_symbol(node))
+    TYPE_DAG.with(|f| f.borrow().get_cloned_symbol(node))
 }
 
 pub fn toposort() -> Vec<Symbol> {
