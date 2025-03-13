@@ -16,7 +16,6 @@ exclude               = ["build.rs"]
 [dependencies]
 anyhow        = {workspace = true}
 bimap         = "0.6.3"
-once_cell     = {workspace = true}
 parol_runtime = {version = "3.0", features = ["regex_automata"], default-features = false}
 paste         = "1.0"
 regex         = {workspace = true}

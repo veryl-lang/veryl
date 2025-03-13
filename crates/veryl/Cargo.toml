@@ -29,7 +29,6 @@ fern            = "0.7.0"
 futures         = {workspace = true}
 handlebars      = "6.3"
 log             = {workspace = true}
-once_cell       = {workspace = true}
 mdbook          = {workspace = true}
 miette          = {workspace = true}
 pulldown-cmark  = {workspace = true}

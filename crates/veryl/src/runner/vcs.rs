@@ -2,9 +2,9 @@ use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
 use futures::prelude::*;
 use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::process::Stdio;
+use std::sync::LazyLock;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
@@ -28,8 +28,8 @@ pub struct Vcs {
 }
 
 fn remap_msg(line: &str) -> String {
-    static RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r###""?(?<path>[^: "]+)"?, (?<line>[0-9]+)"###).unwrap());
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r###""?(?<path>[^: "]+)"?, (?<line>[0-9]+)"###).unwrap());
 
     remap_msg_by_regex(line, &RE)
 }

@@ -2,10 +2,10 @@ use crate::doc_comment_table;
 use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::text_table::{self, TextId};
 use crate::veryl_grammar_trait::*;
-use once_cell::sync::Lazy;
 use paste::paste;
 use regex::Regex;
 use std::fmt;
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenSource {
@@ -875,8 +875,8 @@ impl ExpressionIdentifier {
     }
 }
 
-static COMMENT_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap());
+static COMMENT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap());
 
 fn split_comment_token(token: Token) -> Vec<Token> {
     let mut line = token.line;
