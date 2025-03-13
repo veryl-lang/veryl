@@ -98,10 +98,7 @@ impl TypeDag {
                 } else {
                     let ssym = self.get_cloned_symbol(start);
                     let esym = self.get_cloned_symbol(end);
-                    Err(DagError::Cyclic(
-                        Box::new(ssym),
-                        Box::new(esym),
-                    ))
+                    Err(DagError::Cyclic(Box::new(ssym), Box::new(esym)))
                 }
             }
         }
