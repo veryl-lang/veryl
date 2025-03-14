@@ -30,7 +30,7 @@
 				},
 				{
 					"name": "keyword.other.veryl",
-					"match": "\\b(module|interface|function|modport|package|param|local|clock|clock_posedge|clock_negedge|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|always_ff|always_comb|assign|return|break|var|inst|import|as|initial|final|pub|let|embed|include|unsafe|type|const|alias|proto)\\b"
+					"match": "\\b(module|interface|function|modport|package|param|local|clock|clock_posedge|clock_negedge|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|always_ff|always_comb|assign|return|break|var|inst|import|as|initial|final|pub|let|embed|include|unsafe|type|const|alias|proto|true|false)\\b"
 				}
 			]
 		},
@@ -38,7 +38,7 @@
 			"patterns": [
 				{
 					"name": "storage.type.veryl",
-					"match": "\\b(enum|struct|logic|bit|u32|u64|i32|i64|f32|f64)\\b"
+					"match": "\\b(enum|struct|logic|bit|u32|u64|i32|i64|f32|f64|bool)\\b"
 				},
 				{
 					"name": "storage.modifier.veryl",
