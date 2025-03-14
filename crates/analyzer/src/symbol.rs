@@ -53,6 +53,7 @@ impl DocComment {
 #[derive(Clone, Debug, Default)]
 pub struct GenericMap {
     pub name: String,
+    pub id: Option<SymbolId>,
     pub map: HashMap<StrId, GenericSymbolPath>,
 }
 
@@ -285,7 +286,11 @@ impl Symbol {
                 HashMap::default()
             };
             let name = format!("{}{}", prefix, symbol.token.text);
-            ret.push(GenericMap { name, map });
+            ret.push(GenericMap {
+                name,
+                id: Some(symbol.id),
+                map,
+            });
         }
 
         // empty map for non-generic

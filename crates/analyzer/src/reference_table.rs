@@ -248,6 +248,7 @@ impl ReferenceTable {
                         let table = symbol.found.generic_table(&path.arguments);
                         let map = vec![GenericMap {
                             name: "".to_string(),
+                            id: None,
                             map: table,
                         }];
                         let mut references = symbol.found.generic_references();
