@@ -1,6 +1,6 @@
 use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
 use futures::prelude::*;
-use log::{error, info};
+use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -8,7 +8,7 @@ use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, WaveFormFormat};
 use veryl_parser::resource_table::{PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -107,7 +107,7 @@ impl Runner for Vivado {
         test: StrId,
         _top: Option<StrId>,
         path: PathId,
-        wave: bool,
+        mut wave: bool,
     ) -> Result<bool> {
         self.success = true;
 
@@ -121,11 +121,16 @@ impl Runner for Vivado {
         ];
 
         if wave {
-            defines.push("-d".to_string());
-            defines.push(format!(
-                "__veryl_wavedump_{}_{}__",
-                metadata.project.name, test
-            ));
+            if WaveFormFormat::Vcd == metadata.test.waveform_format {
+                defines.push("-d".to_string());
+                defines.push(format!(
+                    "__veryl_wavedump_{}_{}__",
+                    metadata.project.name, test
+                ));
+            } else {
+                warn!("Only VCD is supported as a waveform format for vivado!");
+                wave = false;
+            }
         }
 
         let rt = Runtime::new().unwrap();
@@ -154,12 +159,13 @@ impl Runner for Vivado {
 
         info!("Elaborating test ({})", test);
 
-        let opt = if wave { vec!["-debug", "all"] } else { vec![] };
-
         let mut top = vec![test.to_string()];
-        if wave {
+        let opt = if wave && WaveFormFormat::Vcd == metadata.test.waveform_format {
             top.push("__veryl_wavedump".to_string());
-        }
+            vec!["-debug", "all"]
+        } else {
+            vec![]
+        };
 
         rt.block_on(async {
             let elaborate = Command::new("xelab")

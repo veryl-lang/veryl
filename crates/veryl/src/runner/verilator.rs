@@ -8,7 +8,7 @@ use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, WaveFormFormat};
 use veryl_parser::resource_table::{PathId, StrId};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -147,17 +147,24 @@ impl Runner for Verilator {
             metadata.project.name, test
         )];
 
+        let mut opt = vec!["--assert", "--binary", "-Wno-MULTITOP"];
+
         if wave {
             defines.push(format!(
                 "+define+__veryl_wavedump_{}_{}__",
                 metadata.project.name, test
             ));
-        }
 
-        let mut opt = vec!["--assert", "--binary", "-Wno-MULTITOP"];
-
-        if wave {
-            opt.push("--trace");
+            match metadata.test.waveform_format {
+                WaveFormFormat::Vcd => opt.push("--trace"),
+                WaveFormFormat::Fst => opt.extend(&[
+                    "--trace-fst",
+                    "--trace-threads",
+                    "2",
+                    "--trace-structs",
+                    "--trace-params",
+                ]),
+            }
         }
 
         let rt = Runtime::new().unwrap();
