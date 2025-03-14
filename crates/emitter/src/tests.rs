@@ -632,3 +632,68 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn emit_nested_generic_instances() {
+    let code = r#"package Pkg::<A: const> {
+    function Func::<B: const> -> i32 {
+        return A + B;
+    }
+    struct Struct::<W: cosnt> {
+        foo: logic<W>,
+    }
+}
+module Module {
+    let _a: i32 = Pkg::<1>::Func::<1>();
+    let _b: i32 = Pkg::<1>::Func::<2>();
+    let _c: i32 = Pkg::<2>::Func::<1>();
+    var _d: Pkg::<1>::Struct::<2>;
+    var _e: Pkg::<2>::Struct::<1>;
+    var _f: Pkg::<2>::Struct::<2>;
+}
+"#;
+
+    let expect = r#"package prj___Pkg__1;
+    function automatic int signed __Func__1;
+        return 1 + 1;
+    endfunction
+    function automatic int signed __Func__2;
+        return 1 + 2;
+    endfunction
+    typedef struct packed {
+        logic [2-1:0] foo;
+    } __Struct__2;
+endpackage
+package prj___Pkg__2;
+    function automatic int signed __Func__1;
+        return 2 + 1;
+    endfunction
+    typedef struct packed {
+        logic [1-1:0] foo;
+    } __Struct__1;
+    typedef struct packed {
+        logic [2-1:0] foo;
+    } __Struct__2;
+endpackage
+module prj_Module;
+    int signed                _a; always_comb _a = prj___Pkg__1::__Func__1();
+    int signed                _b; always_comb _b = prj___Pkg__1::__Func__2();
+    int signed                _c; always_comb _c = prj___Pkg__2::__Func__1();
+    prj___Pkg__1::__Struct__2 _d;
+    prj___Pkg__2::__Struct__1 _e;
+    prj___Pkg__2::__Struct__2 _f;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}

@@ -1180,6 +1180,41 @@ impl Emitter {
         }
     }
 
+    fn get_generic_maps(&self, symbol: &Symbol) -> Vec<GenericMap> {
+        let parent_id = if let Some(maps) = self.generic_map.last() {
+            maps.last().and_then(|x| x.id)
+        } else {
+            None
+        };
+
+        // The given symbol is a top level symbol or
+        // the parent symbol is a non generic object.
+        if parent_id.is_none() {
+            return symbol.generic_maps();
+        }
+
+        let parent_id = parent_id.unwrap();
+        symbol
+            .generic_maps()
+            .into_iter()
+            .filter(|x| {
+                if let Some(id) = x.id {
+                    let symbol = symbol_table::get(id).unwrap();
+                    let parent = symbol.get_parent().unwrap();
+                    if matches!(parent.kind, SymbolKind::GenericInstance(_)) {
+                        parent_id == parent.id
+                    } else {
+                        // If the symbol is a generic instance and used in the definition scope
+                        // it belongs to the base object of the parent even if the parent is a generic object.
+                        true
+                    }
+                } else {
+                    true
+                }
+            })
+            .collect()
+    }
+
     fn push_generic_map(&mut self, map: GenericMap) {
         if let Some(maps) = self.generic_map.last_mut() {
             maps.push(map);
@@ -3125,7 +3160,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'StructUnionDeclaration'
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = symbol.found.generic_maps();
+        let maps = self.get_generic_maps(&symbol.found);
 
         for (i, map) in maps.iter().enumerate() {
             if i != 0 {
@@ -3645,7 +3680,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'FunctionDeclaration'
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = symbol.found.generic_maps();
+        let maps = self.get_generic_maps(&symbol.found);
 
         for (i, map) in maps.iter().enumerate() {
             if i != 0 {
@@ -3714,7 +3749,7 @@ impl VerylWalker for Emitter {
             self.default_reset = x.default_reset;
         }
 
-        let maps = symbol.found.generic_maps();
+        let maps = self.get_generic_maps(&symbol.found);
         for (i, map) in maps.iter().enumerate() {
             if i != 0 {
                 self.newline();
@@ -3792,7 +3827,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = symbol.found.generic_maps();
+        let maps = self.get_generic_maps(&symbol.found);
 
         for (i, map) in maps.iter().enumerate() {
             if i != 0 {
@@ -3993,7 +4028,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'PackageDeclaration'
     fn package_declaration(&mut self, arg: &PackageDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = symbol.found.generic_maps();
+        let maps = self.get_generic_maps(&symbol.found);
 
         for (i, map) in maps.iter().enumerate() {
             if i != 0 {
@@ -4329,7 +4364,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
             if !visible | top_level {
-                ret.push_str(&namespace_string(&base.namespace, context));
+                ret.push_str(&namespace_string(&symbol.namespace, context));
             }
             ret.push_str(&token_text);
         }

@@ -120,6 +120,18 @@ impl SymbolTable {
         self.symbol_table.insert(id, symbol);
     }
 
+    fn match_nested_generic_instance(&self, context: &ResolveContext, found: &Symbol) -> bool {
+        if let Some(last_found) = context.last_found {
+            if let (SymbolKind::GenericInstance(_), SymbolKind::GenericInstance(_)) =
+                (&last_found.kind, &found.kind)
+            {
+                let namespace = last_found.inner_namespace();
+                return namespace.matched(&found.namespace);
+            }
+        }
+        false
+    }
+
     fn trace_type_kind<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -307,6 +319,11 @@ impl SymbolTable {
             SymbolKind::Function(_) => via_interface_instance || via_pacakge,
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
             SymbolKind::Modport(_) => via_interface,
+            SymbolKind::GenericInstance(_) => {
+                // A generic instance in this context is for generic type or function
+                // defined in a packge
+                via_pacakge
+            }
             _ => matches!(last_found.kind, SymbolKind::Namespace),
         }
     }
@@ -352,7 +369,11 @@ impl SymbolTable {
                 for id in ids {
                     let symbol = self.symbol_table.get(id).unwrap();
                     let (included, imported) = if context.inner {
-                        (context.namespace.matched(&symbol.namespace), false)
+                        (
+                            self.match_nested_generic_instance(&context, symbol)
+                                || context.namespace.matched(&symbol.namespace),
+                            false,
+                        )
                     } else {
                         let imported = symbol
                             .imported
@@ -604,8 +625,7 @@ impl SymbolTable {
                 let symbol = symbol.found;
                 if import.wildcard {
                     if let Some(pkg) = self.get_package(&symbol, false) {
-                        let mut target = pkg.namespace.clone();
-                        target.push(pkg.token.text);
+                        let target = pkg.inner_namespace();
                         self.add_imported_package(&target, &import.namespace);
                     }
                 } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {

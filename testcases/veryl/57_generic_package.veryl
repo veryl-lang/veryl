@@ -14,12 +14,19 @@ package Package57C::<W: const> {
     }
 }
 
-package Package57D {
+package Package57D::<A: const> {
+    struct StructD::<B: const> {
+        d0: logic<A>,
+        d1: logic<B>,
+    }
+}
+
+package Package57E {
     const Y: u32 = 1;
 }
 
 module Module57 {
-    import Package57D::Y;
+    import Package57E::Y;
     const A: u32 = Package57A::<1>::X;
     const B: u64 = Package57A::<2>::X;
     const C: u32 = Package57B::<3>::X;
@@ -27,6 +34,9 @@ module Module57 {
     const D: u64 = Package57B::<>::X;
     const F: u64 = Package57B::<Y>::X;
 
-    var _e  : Package57C::<2>::StructC;
-    assign _e.c = 1;
+    var _c   : Package57C::<2>::StructC     ;
+    var _d   : Package57D::<1>::StructD::<2>;
+    assign _c.c  = 1;
+    assign _d.d0 = 0;
+    assign _d.d1 = 1;
 }
