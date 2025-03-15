@@ -4344,8 +4344,8 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible = namespace.included(&symbol.namespace)
-                || symbol.imported.iter().any(|x| *x == namespace);
+            let visible =
+                namespace.included(&symbol.namespace) || symbol.imported.contains(&namespace);
             if visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
@@ -4375,8 +4375,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         }
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
-            let visible = namespace.included(&base.namespace)
-                || base.imported.iter().any(|x| *x == namespace);
+            let visible = namespace.included(&base.namespace) || base.imported.contains(&namespace);
             let top_level = matches!(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)

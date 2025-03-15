@@ -4,12 +4,12 @@
 // lost after next build.
 // ---------------------------------------------------------
 
-use parol_runtime::once_cell::sync::Lazy;
 #[allow(unused_imports)]
 use parol_runtime::parser::{LLKParser, LookaheadDFA, ParseTreeType, ParseType, Production, Trans};
 use parol_runtime::{ParolError, ParseTree, TerminalIndex};
 use parol_runtime::{ScannerConfig, TokenStream, Tokenizer};
 use std::path::Path;
+use std::sync::LazyLock;
 
 use crate::veryl_grammar::VerylGrammar;
 use crate::veryl_grammar_trait::VerylGrammarAuto;
@@ -33161,7 +33161,7 @@ pub const PRODUCTIONS: &[Production; 1025] = &[
     },
 ];
 
-static SCANNERS: Lazy<Vec<ScannerConfig>> = Lazy::new(|| {
+static SCANNERS: LazyLock<Vec<ScannerConfig>> = LazyLock::new(|| {
     vec![
         ScannerConfig::new(
             "INITIAL",

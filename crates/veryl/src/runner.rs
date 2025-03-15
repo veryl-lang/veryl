@@ -1,10 +1,10 @@
 use anstyle::{AnsiColor, Style};
 use log::{Level, debug, log_enabled};
 use miette::{IntoDiagnostic, Result};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use veryl_metadata::{Metadata, WaveFormTarget};
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_sourcemap::SourceMap;
@@ -39,24 +39,24 @@ pub trait Runner {
     }
 
     fn info(&self, line: &str) {
-        static STYLE: Lazy<Style> =
-            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Green.into())));
+        static STYLE: LazyLock<Style> =
+            LazyLock::new(|| Style::new().fg_color(Some(AnsiColor::Green.into())));
         if !log_enabled!(Level::Debug) {
             println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
         }
     }
 
     fn warning(&mut self, line: &str) {
-        static STYLE: Lazy<Style> =
-            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Yellow.into())));
+        static STYLE: LazyLock<Style> =
+            LazyLock::new(|| Style::new().fg_color(Some(AnsiColor::Yellow.into())));
         if !log_enabled!(Level::Debug) {
             println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
         }
     }
 
     fn error(&mut self, line: &str) {
-        static STYLE: Lazy<Style> =
-            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Red.into())));
+        static STYLE: LazyLock<Style> =
+            LazyLock::new(|| Style::new().fg_color(Some(AnsiColor::Red.into())));
         if !log_enabled!(Level::Debug) {
             println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
         }
@@ -64,8 +64,8 @@ pub trait Runner {
     }
 
     fn fatal(&mut self, line: &str) {
-        static STYLE: Lazy<Style> =
-            Lazy::new(|| Style::new().fg_color(Some(AnsiColor::Red.into())).bold());
+        static STYLE: LazyLock<Style> =
+            LazyLock::new(|| Style::new().fg_color(Some(AnsiColor::Red.into())).bold());
         if !log_enabled!(Level::Debug) {
             println!("{}{}{}", STYLE.render(), line, STYLE.render_reset());
         }

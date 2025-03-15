@@ -10,7 +10,6 @@ use crate::publish::Publish;
 use crate::test::Test;
 use crate::{FilelistType, MetadataError, SourceMapTarget};
 use log::{debug, info};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
@@ -21,6 +20,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::LazyLock;
 use url::Url;
 use veryl_path::PathSet;
 
@@ -80,8 +80,8 @@ impl fmt::Display for UrlPath {
     }
 }
 
-static VALID_PROJECT_NAME: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
+static VALID_PROJECT_NAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
 
 impl Metadata {
     pub fn search_from_current() -> Result<PathBuf, MetadataError> {
