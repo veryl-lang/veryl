@@ -781,6 +781,26 @@ fn invalid_modport_item() {
         errors[0],
         AnalyzerError::InvalidModportFunctionItem { .. }
     ));
+
+    let code = r#"
+    package Pkg {
+        function f() -> logic {
+            return 0;
+        }
+    }
+    interface Interface {
+        import Pkg::f;
+        modport mp {
+            f: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidModportFunctionItem { .. }
+    ));
 }
 
 #[test]
