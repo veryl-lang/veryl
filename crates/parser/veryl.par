@@ -464,7 +464,7 @@ Factor: Number
 
 BooleanLiteral: True | False;
 
-IdentifierFactor: ExpressionIdentifier [ FunctionCall ];
+IdentifierFactor: ExpressionIdentifier [ FunctionCall | StructConstructor ];
 
 FactorTypeFactor: { TypeModifier } FactorType;
 
@@ -473,6 +473,12 @@ FunctionCall: LParen [ ArgumentList ] RParen;
 ArgumentList: ArgumentItem { Comma ArgumentItem } [ Comma ];
 
 ArgumentItem: Expression;
+
+StructConstructor: QuoteLBrace StructConstructorList [ DotDot Defaul LParen Expression RParen ] RBrace;
+
+StructConstructorList: StructConstructorItem { Comma StructConstructorItem } [ Comma ];
+
+StructConstructorItem: Identifier Colon Expression;
 
 ConcatenationList: ConcatenationItem { Comma ConcatenationItem } [ Comma ];
 

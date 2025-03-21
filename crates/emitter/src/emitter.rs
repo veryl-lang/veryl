@@ -1883,9 +1883,18 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'IdentifierFactor'
     fn identifier_factor(&mut self, arg: &IdentifierFactor) {
-        self.expression_identifier(&arg.expression_identifier);
         if let Some(ref x) = arg.identifier_factor_opt {
-            self.emit_function_call(&arg.expression_identifier, &x.function_call);
+            match x.identifier_factor_opt_group.as_ref() {
+                IdentifierFactorOptGroup::FunctionCall(x) => {
+                    self.expression_identifier(&arg.expression_identifier);
+                    self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                }
+                IdentifierFactorOptGroup::StructConstructor(x) => {
+                    self.struct_constructor(&x.struct_constructor);
+                }
+            }
+        } else {
+            self.expression_identifier(&arg.expression_identifier);
         }
     }
 
@@ -1900,6 +1909,63 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.argument_list_opt {
             self.comma(&x.comma);
         }
+    }
+
+    /// Semantic action for non-terminal 'StructConstructor'
+    fn struct_constructor(&mut self, arg: &StructConstructor) {
+        if arg.quote_l_brace.line() != arg.r_brace.line() {
+            self.multi_line_start();
+        }
+        self.quote_l_brace(&arg.quote_l_brace);
+        if self.multi_line() {
+            self.newline_push();
+        }
+        self.struct_constructor_list(&arg.struct_constructor_list);
+        if let Some(ref x) = arg.struct_constructor_opt {
+            self.str(",");
+            if self.multi_line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
+            self.defaul(&x.defaul);
+            self.str(":");
+            self.space(1);
+            self.expression(&x.expression);
+        }
+        if self.multi_line() {
+            self.newline_pop();
+        }
+        self.r_brace(&arg.r_brace);
+        if arg.quote_l_brace.line() != arg.r_brace.line() {
+            self.multi_line_finish();
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructConstructorList'
+    fn struct_constructor_list(&mut self, arg: &StructConstructorList) {
+        self.struct_constructor_item(&arg.struct_constructor_item);
+        for x in &arg.struct_constructor_list_list {
+            self.comma(&x.comma);
+            if x.comma.line() != x.struct_constructor_item.line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
+            self.struct_constructor_item(&x.struct_constructor_item);
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructConstructorItem'
+    fn struct_constructor_item(&mut self, arg: &StructConstructorItem) {
+        self.align_start(align_kind::IDENTIFIER);
+        self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.align_start(align_kind::EXPRESSION);
+        self.expression(&arg.expression);
+        self.align_finish(align_kind::EXPRESSION);
     }
 
     /// Semantic action for non-terminal 'ConcatenationList'

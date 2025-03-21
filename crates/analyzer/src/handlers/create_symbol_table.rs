@@ -6,7 +6,7 @@ use crate::definition_table::{self, Definition};
 use crate::evaluator::{EvaluatedValue, Evaluator};
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::reference_table;
+use crate::reference_table::{self, ReferenceCandidate};
 use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::ModportDefault as SymModportDefault;
@@ -102,6 +102,7 @@ pub struct CreateSymbolTable {
     file_scope_import_item: Vec<SymbolPathNamespace>,
     file_scope_import_wildcard: Vec<SymbolPathNamespace>,
     is_public: bool,
+    identifier_factor_names: Vec<ExpressionIdentifier>,
 }
 
 #[derive(Clone)]
@@ -527,6 +528,30 @@ impl VerylGrammarTrait for CreateSymbolTable {
             // This should be `After` not `Before`.
             // Because this should be executed after scoped_identifier to handle hierarchical access only
             reference_table::add(arg.into());
+        }
+        Ok(())
+    }
+
+    fn identifier_factor(&mut self, arg: &IdentifierFactor) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.identifier_factor_names
+                    .push(*arg.expression_identifier.clone());
+            }
+            HandlerPoint::After => {
+                self.identifier_factor_names.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn struct_constructor_item(&mut self, arg: &StructConstructorItem) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let cand = ReferenceCandidate::StructConstructorItem {
+                arg: arg.clone(),
+                r#type: self.identifier_factor_names.last().unwrap().clone(),
+            };
+            reference_table::add(cand);
         }
         Ok(())
     }

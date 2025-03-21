@@ -1354,32 +1354,39 @@ impl Evaluator {
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
             Factor::IdentifierFactor(x) => {
                 if let Some(args) = &x.identifier_factor.identifier_factor_opt {
-                    let args = &args.function_call.function_call_opt;
-                    let func = x
-                        .identifier_factor
-                        .expression_identifier
-                        .identifier()
-                        .to_string();
+                    match args.identifier_factor_opt_group.as_ref() {
+                        IdentifierFactorOptGroup::FunctionCall(args) => {
+                            let args = &args.function_call.function_call_opt;
+                            let func = x
+                                .identifier_factor
+                                .expression_identifier
+                                .identifier()
+                                .to_string();
 
-                    if func.starts_with("$") {
-                        self.system_function(&func, args)
-                    } else {
-                        let mut ret = Evaluated::create_unknown();
+                            if func.starts_with("$") {
+                                self.system_function(&func, args)
+                            } else {
+                                let mut ret = Evaluated::create_unknown();
 
-                        if let Ok(symbol) = symbol_table::resolve(
-                            x.identifier_factor.expression_identifier.as_ref(),
-                        ) {
-                            if !symbol.found.kind.is_function() {
-                                ret.errors.push(EvaluatedError::CallNonFunction {
-                                    kind: symbol.found.kind.to_kind_name(),
-                                    token: symbol.found.token,
-                                });
+                                if let Ok(symbol) = symbol_table::resolve(
+                                    x.identifier_factor.expression_identifier.as_ref(),
+                                ) {
+                                    if !symbol.found.kind.is_function() {
+                                        ret.errors.push(EvaluatedError::CallNonFunction {
+                                            kind: symbol.found.kind.to_kind_name(),
+                                            token: symbol.found.token,
+                                        });
+                                    }
+                                }
+
+                                // TODO return type of function
+
+                                ret
                             }
                         }
-
-                        // TODO return type of function
-
-                        ret
+                        IdentifierFactorOptGroup::StructConstructor(_) => {
+                            Evaluated::create_unknown()
+                        }
                     }
                 } else {
                     // Identifier
