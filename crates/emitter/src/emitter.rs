@@ -4247,6 +4247,7 @@ pub struct SymbolContext {
     pub project_name: Option<StrId>,
     pub build_opt: Build,
     pub in_import: bool,
+    pub in_direction_modport: bool,
     pub generic_map: Vec<GenericMap>,
 }
 
@@ -4261,6 +4262,7 @@ impl From<&mut Emitter> for SymbolContext {
             project_name: value.project_name,
             build_opt: value.build_opt.clone(),
             in_import: value.in_import,
+            in_direction_modport: value.in_direction_modport,
             generic_map,
         }
     }
@@ -4308,6 +4310,7 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
                         }
                     }
                     SymbolKind::Interface(_) => ".",
+                    SymbolKind::SystemVerilog if context.in_direction_modport => ".",
                     _ if in_sv_namespace => "::",
                     _ => "_",
                 };

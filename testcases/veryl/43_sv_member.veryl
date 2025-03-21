@@ -1,4 +1,6 @@
-module Module43 {
+module Module43 (
+    port: modport $sv::InterfaceA::mp,
+) {
     var a: $sv::StructA;
 
     let _b: logic = a.memberA;
