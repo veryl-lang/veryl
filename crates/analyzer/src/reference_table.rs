@@ -2,12 +2,13 @@ use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
-use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, HierarchicalIdentifier, InstPortItem, ModportItem, ScopedIdentifier,
+    StructConstructorItem,
 };
 use veryl_parser::veryl_token::{Token, TokenRange, TokenSource, is_anonymous_text};
 
@@ -32,6 +33,10 @@ pub enum ReferenceCandidate {
     InstPortItem {
         arg: InstPortItem,
         namespace: Namespace,
+    },
+    StructConstructorItem {
+        arg: StructConstructorItem,
+        r#type: ExpressionIdentifier,
     },
 }
 
@@ -100,6 +105,7 @@ impl ReferenceTable {
         err: ResolveError,
         token: &TokenRange,
         generics_token: Option<Token>,
+        struct_token: Option<Token>,
     ) {
         if let Some(last_found) = err.last_found {
             let name = last_found.token.to_string();
@@ -137,6 +143,12 @@ impl ReferenceTable {
                     ));
             } else if is_anonymous_text(not_found) {
                 // AnonymousIdentifierUsage is handled at create_type_dag
+            } else if let Some(struct_token) = struct_token {
+                self.errors.push(AnalyzerError::unknown_member(
+                    &struct_token.text.to_string(),
+                    &name,
+                    token,
+                ));
             } else {
                 self.errors
                     .push(AnalyzerError::undefined_identifier(&name, token));
@@ -268,7 +280,7 @@ impl ReferenceTable {
                         return;
                     }
 
-                    self.push_resolve_error(err, &path.range, generics_token);
+                    self.push_resolve_error(err, &path.range, generics_token, None);
                 }
             }
         }
@@ -299,7 +311,7 @@ impl ReferenceTable {
                             // and we don't have to consider it is anonymous
 
                             // TODO check SV-side member to suppress error
-                            self.push_resolve_error(err, &arg.into(), None);
+                            self.push_resolve_error(err, &arg.into(), None, None);
                         }
                     }
                 }
@@ -329,7 +341,7 @@ impl ReferenceTable {
                                 symbol_table::add_reference(symbol.found.id, &ident);
                             }
                             Err(err) => {
-                                self.push_resolve_error(err, &arg.into(), None);
+                                self.push_resolve_error(err, &arg.into(), None, None);
                             }
                         }
                     }
@@ -350,7 +362,12 @@ impl ReferenceTable {
                             }
                         }
                         Err(err) => {
-                            self.push_resolve_error(err, &arg.identifier.as_ref().into(), None);
+                            self.push_resolve_error(
+                                err,
+                                &arg.identifier.as_ref().into(),
+                                None,
+                                None,
+                            );
                         }
                     }
                 }
@@ -369,7 +386,37 @@ impl ReferenceTable {
                                 }
                             }
                             Err(err) => {
-                                self.push_resolve_error(err, &arg.identifier.as_ref().into(), None);
+                                self.push_resolve_error(
+                                    err,
+                                    &arg.identifier.as_ref().into(),
+                                    None,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                }
+                ReferenceCandidate::StructConstructorItem { arg, r#type } => {
+                    if let Ok(symbol) = symbol_table::resolve(r#type) {
+                        let namespace = symbol.found.inner_namespace();
+                        let symbol_path: SymbolPath = arg.identifier.as_ref().into();
+
+                        match symbol_table::resolve((&symbol_path, &namespace)) {
+                            Ok(symbol) => {
+                                for id in symbol.full_path {
+                                    symbol_table::add_reference(
+                                        id,
+                                        &arg.identifier.identifier_token.token,
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                self.push_resolve_error(
+                                    err,
+                                    &arg.identifier.as_ref().into(),
+                                    None,
+                                    Some(symbol.found.token),
+                                );
                             }
                         }
                     }

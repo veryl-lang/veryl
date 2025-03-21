@@ -2736,6 +2736,20 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic,
+        }
+        let _a: StructA = StructA'{
+            x: 0,
+        };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
 }
 
 #[test]

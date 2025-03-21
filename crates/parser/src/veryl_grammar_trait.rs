@@ -548,6 +548,12 @@ impl FirstToken for Expression {
     }
 }
 
+impl FirstToken for StructConstructorItem {
+    fn token(&self) -> Token {
+        self.identifier.as_ref().token()
+    }
+}
+
 impl FirstToken for ConcatenationItem {
     fn token(&self) -> Token {
         self.expression.as_ref().token()
