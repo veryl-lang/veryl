@@ -169,7 +169,7 @@ impl Runner for Cocotb {
                 "True",
                 "['--trace-fst', '--trace-structs', '--trace-threads', '2']",
             ),
-            None => ("False", ""),
+            None => ("False", "[]"),
         };
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
