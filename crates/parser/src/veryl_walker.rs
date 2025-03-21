@@ -1151,7 +1151,14 @@ pub trait VerylWalker {
         before!(self, identifier_factor, arg);
         self.expression_identifier(&arg.expression_identifier);
         if let Some(ref x) = arg.identifier_factor_opt {
-            self.function_call(&x.function_call);
+            match x.identifier_factor_opt_group.as_ref() {
+                IdentifierFactorOptGroup::FunctionCall(x) => {
+                    self.function_call(&x.function_call);
+                }
+                IdentifierFactorOptGroup::StructConstructor(x) => {
+                    self.struct_constructor(&x.struct_constructor);
+                }
+            }
         }
         after!(self, identifier_factor, arg);
     }
@@ -1196,6 +1203,45 @@ pub trait VerylWalker {
         before!(self, argument_item, arg);
         self.expression(&arg.expression);
         after!(self, argument_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'StructConstructor'
+    fn struct_constructor(&mut self, arg: &StructConstructor) {
+        before!(self, struct_constructor, arg);
+        self.quote_l_brace(&arg.quote_l_brace);
+        self.struct_constructor_list(&arg.struct_constructor_list);
+        if let Some(ref x) = arg.struct_constructor_opt {
+            self.dot_dot(&x.dot_dot);
+            self.defaul(&x.defaul);
+            self.l_paren(&x.l_paren);
+            self.expression(&x.expression);
+            self.r_paren(&x.r_paren);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, struct_constructor, arg);
+    }
+
+    /// Semantic action for non-terminal 'StructConstructorList'
+    fn struct_constructor_list(&mut self, arg: &StructConstructorList) {
+        before!(self, struct_constructor_list, arg);
+        self.struct_constructor_item(&arg.struct_constructor_item);
+        for x in &arg.struct_constructor_list_list {
+            self.comma(&x.comma);
+            self.struct_constructor_item(&x.struct_constructor_item);
+        }
+        if let Some(ref x) = arg.struct_constructor_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, struct_constructor_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'StructConstructorItem'
+    fn struct_constructor_item(&mut self, arg: &StructConstructorItem) {
+        before!(self, struct_constructor_item, arg);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.expression(&arg.expression);
+        after!(self, struct_constructor_item, arg);
     }
 
     /// Semantic action for non-terminal 'ConcatenationList'
