@@ -185,6 +185,9 @@ impl SymbolTable {
             SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &type_symbol),
             SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &type_symbol),
             _ => {
+                if matches!(type_symbol.kind, SymbolKind::SystemVerilog) {
+                    context.sv_member = true;
+                }
                 context.namespace = type_symbol.inner_namespace();
                 context.last_found_type = Some(type_symbol.id);
                 context.inner = true;
