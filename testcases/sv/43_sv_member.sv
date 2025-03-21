@@ -1,4 +1,6 @@
-module veryl_testcase_Module43;
+module veryl_testcase_Module43 (
+    InterfaceA.mp port
+);
     StructA a;
 
     logic _b; always_comb _b = a.memberA;
