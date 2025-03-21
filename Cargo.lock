@@ -5272,6 +5272,7 @@ dependencies = [
  "veryl-parser",
  "veryl-path",
  "veryl-std",
+ "walkdir",
 ]
 
 [[package]]
