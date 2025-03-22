@@ -256,8 +256,11 @@ impl SymbolTable {
             let symbol = self.symbol_table.get(&x).unwrap();
             symbol.kind.clone()
         });
-        let via_interface_instance = match &last_found.kind {
+        let via_modport = match &last_found.kind {
             SymbolKind::Port(x) => matches!(x.direction, Direction::Modport | Direction::Interface),
+            _ => false,
+        };
+        let via_interface_instance = match &last_found.kind {
             SymbolKind::Instance(_) => matches!(
                 last_found_type,
                 Some(SymbolKind::Interface(_)) | Some(SymbolKind::AliasInterface(_))
@@ -300,7 +303,7 @@ impl SymbolTable {
         match &found.kind {
             SymbolKind::Variable(_)
             | SymbolKind::ModportFunctionMember(_)
-            | SymbolKind::ModportVariableMember(_) => via_interface_instance,
+            | SymbolKind::ModportVariableMember(_) => via_modport || via_interface_instance,
             SymbolKind::StructMember(_) | SymbolKind::UnionMember(_) => matches!(
                 last_found.kind,
                 SymbolKind::Port(_)
@@ -319,9 +322,9 @@ impl SymbolTable {
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
             | SymbolKind::ProtoFunction(_) => via_pacakge,
-            SymbolKind::Function(_) => via_interface_instance || via_pacakge,
+            SymbolKind::Function(_) => via_modport || via_interface_instance || via_pacakge,
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
-            SymbolKind::Modport(_) => via_interface,
+            SymbolKind::Modport(_) => via_interface || via_interface_instance,
             SymbolKind::GenericInstance(_) => {
                 // A generic instance in this context is for generic type or function
                 // defined in a packge

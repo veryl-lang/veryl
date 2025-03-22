@@ -1,5 +1,6 @@
 use crate::analyzer::AnalyzerPass2Expression;
 use crate::analyzer_error::AnalyzerError;
+use crate::connect_operation_table::{self, ConnectOperand};
 use crate::definition_table::{self, Definition};
 use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, Evaluator};
 use crate::instance_history::{self, InstanceHistoryError, InstanceSignature};
@@ -307,8 +308,30 @@ impl VerylGrammarTrait for CheckExpression {
                         // TODO function check
                     }
                     IdentifierStatementGroup::Assignment(x) => {
+                        let token = arg.expression_identifier.identifier().token;
+                        let connect_operation = connect_operation_table::get(&token);
+
+                        let do_check = if connect_operation.is_none() {
+                            (true, true)
+                        } else if matches!(
+                            connect_operation.unwrap().rhs,
+                            ConnectOperand::Expression(_)
+                        ) {
+                            (true, false)
+                        } else {
+                            (false, false)
+                        };
+
+                        if !do_check.0 {
+                            return Ok(());
+                        }
+
                         let exp = self.evaluator.expression(&x.assignment.expression);
                         self.evaluated_error(&exp.errors);
+
+                        if !do_check.1 {
+                            return Ok(());
+                        }
 
                         if let Ok(dst) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
                             let dst_last_select = arg.expression_identifier.last_select();

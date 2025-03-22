@@ -10,6 +10,7 @@ pub const KEYWORDS: &[&str] = &[
     "clock",
     "clock_posedge",
     "clock_negedge",
+    "connect",
     "const",
     "converse",
     "default",

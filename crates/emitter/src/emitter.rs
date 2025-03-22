@@ -4,8 +4,10 @@ use veryl_aligner::{Aligner, Location, Measure, align_kind};
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem};
 use veryl_analyzer::attribute_table;
+use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::evaluator::{EvaluatedTypeResetKind, Evaluator};
 use veryl_analyzer::namespace::Namespace;
+use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
@@ -50,6 +52,7 @@ pub struct Emitter {
     dst_column: u32,
     aligner: Aligner,
     measure: Measure,
+    force_duplicated: bool,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: Vec<()>,
@@ -88,6 +91,7 @@ impl Default for Emitter {
             build_opt: Build::default(),
             format_opt: Format::default(),
             string: String::new(),
+            force_duplicated: false,
             indent: 0,
             src_line: 1,
             dst_line: 1,
@@ -400,7 +404,11 @@ impl Emitter {
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.process_token(x, false, None)
+        if self.force_duplicated {
+            self.duplicated_token(x)
+        } else {
+            self.process_token(x, false, None)
+        }
     }
 
     fn token_will_push(&mut self, x: &VerylToken) {
@@ -1032,6 +1040,138 @@ impl Emitter {
 
         self.src_line = src_line;
         self.generic_map.pop();
+    }
+
+    fn emit_connect_statement(&mut self, arg: &IdentifierStatement) -> bool {
+        let (identifier, operator, expression) =
+            if let IdentifierStatementGroup::Assignment(x) = &*arg.identifier_statement_group {
+                if let AssignmentGroup::DiamondOperator(y) = &*x.assignment.assignment_group {
+                    (
+                        &arg.expression_identifier,
+                        &y.diamond_operator,
+                        &x.assignment.expression,
+                    )
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            };
+
+        let token = identifier.identifier().token;
+        let operation = connect_operation_table::get(&token).unwrap();
+
+        let mut lhs_identifier = identifier.clone();
+        if operation.is_lhs_instance() {
+            // remove modport path
+            lhs_identifier.expression_identifier_list0.pop();
+        }
+
+        let assign_operator = if self.in_always_ff {
+            "<="
+        } else {
+            "="
+        };
+
+        if let Some((ports, _)) = operation.get_ports_with_expression() {
+            for (i, (port, _)) in ports.iter().enumerate() {
+                if i > 0 {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                self.expression_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(port);
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&operator.diamond_operator_token.replace(assign_operator));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(port);
+                self.expression(expression);
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
+        } else {
+            let mut rhs_identifier = expression.unwrap_identifier().unwrap().clone();
+            if operation.is_rhs_instance() {
+                // remove modport path
+                rhs_identifier.expression_identifier_list0.pop();
+            }
+
+            for (i, (lhs_symbol, lhs_direction, rhs_symbol, _)) in
+                operation.get_connection_pairs().iter().enumerate()
+            {
+                if i > 0 {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                let symbol = if matches!(lhs_direction, SymDirection::Output) {
+                    self.expression_identifier(&lhs_identifier);
+                    self.emit_member_name_for_connect_operand(lhs_symbol);
+                    &lhs_symbol
+                } else {
+                    self.expression_identifier(&rhs_identifier);
+                    self.emit_member_name_for_connect_operand(rhs_symbol);
+                    &rhs_symbol
+                };
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&operator.diamond_operator_token.replace(assign_operator));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(symbol);
+                if matches!(lhs_direction, SymDirection::Input) {
+                    self.expression_identifier(&lhs_identifier);
+                    self.emit_member_name_for_connect_operand(lhs_symbol);
+                } else {
+                    self.expression_identifier(&rhs_identifier);
+                    self.emit_member_name_for_connect_operand(rhs_symbol);
+                }
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
+        }
+
+        true
+    }
+
+    fn emit_member_name_for_connect_operand(&mut self, symbol: &Symbol) {
+        let last_token = self.last_token.as_ref().unwrap();
+        let member_token = last_token.replace(&format!(".{}", symbol.token));
+        self.duplicated_token(&member_token);
+    }
+
+    fn emit_cast_for_connect_operand(&mut self, symbol: &Symbol) -> bool {
+        let r#type = symbol.kind.get_type();
+        if r#type.is_none() || r#type.unwrap().width.is_empty() {
+            return false;
+        }
+
+        let user_defined = r#type.unwrap().get_user_defined();
+        if user_defined.is_none() {
+            return false;
+        }
+
+        self.scoped_identifier(&user_defined.unwrap().identifier);
+        self.str("'(");
+
+        true
     }
 
     fn emit_function_call(
@@ -2353,19 +2493,22 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'IdentifierStatement'
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
-        self.align_start(align_kind::IDENTIFIER);
-        self.expression_identifier(&arg.expression_identifier);
-        self.assignment_lefthand_side = Some(*arg.expression_identifier.clone());
-        self.align_finish(align_kind::IDENTIFIER);
-        match &*arg.identifier_statement_group {
-            IdentifierStatementGroup::FunctionCall(x) => {
-                self.emit_function_call(&arg.expression_identifier, &x.function_call);
+        let connect_statement_emitted = self.emit_connect_statement(arg);
+        if !connect_statement_emitted {
+            self.align_start(align_kind::IDENTIFIER);
+            self.expression_identifier(&arg.expression_identifier);
+            self.assignment_lefthand_side = Some(*arg.expression_identifier.clone());
+            self.align_finish(align_kind::IDENTIFIER);
+            match &*arg.identifier_statement_group {
+                IdentifierStatementGroup::FunctionCall(x) => {
+                    self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                }
+                IdentifierStatementGroup::Assignment(x) => {
+                    self.assignment(&x.assignment);
+                }
             }
-            IdentifierStatementGroup::Assignment(x) => {
-                self.assignment(&x.assignment);
-            }
+            self.semicolon(&arg.semicolon);
         }
-        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'Assignment'
@@ -2412,6 +2555,7 @@ impl VerylWalker for Emitter {
                     self.space(1);
                     self.str(token);
                 }
+                _ => unreachable!(),
             }
             self.space(1);
             if let AssignmentGroup::AssignmentOperator(_) = &*arg.assignment_group {
@@ -2428,6 +2572,7 @@ impl VerylWalker for Emitter {
                 AssignmentGroup::AssignmentOperator(x) => {
                     self.assignment_operator(&x.assignment_operator)
                 }
+                _ => unreachable!(),
             }
             self.align_finish(align_kind::ASSIGNMENT);
             self.space(1);
@@ -3023,6 +3168,178 @@ impl VerylWalker for Emitter {
         }
         if let Some(ref x) = arg.assign_concatenation_list_opt {
             self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ConnectDeclaration'
+    fn connect_declaration(&mut self, arg: &ConnectDeclaration) {
+        let token = arg
+            .hierarchical_identifier
+            .identifier
+            .identifier_token
+            .token;
+        let operation = connect_operation_table::get(&token).unwrap();
+
+        let mut lhs_identifier = arg.hierarchical_identifier.clone();
+        if operation.is_lhs_instance() {
+            // remove modport path
+            lhs_identifier.hierarchical_identifier_list0.pop();
+        }
+
+        if let Some((ports, _)) = operation.get_ports_with_expression() {
+            let output_ports: Vec<_> = ports
+                .iter()
+                .filter(|(_, direction)| matches!(direction, SymDirection::Output))
+                .collect();
+            let inout_ports: Vec<_> = ports
+                .iter()
+                .filter(|(_, direction)| matches!(direction, SymDirection::Inout))
+                .collect();
+
+            for (i, (port, _)) in output_ports.iter().enumerate() {
+                if i == 0 {
+                    self.token_will_push(&arg.connect.connect_token.replace("always_comb begin"));
+                    self.newline_push();
+                } else {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                self.hierarchical_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(port);
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&arg.diamond_operator.diamond_operator_token.replace("="));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(port);
+                self.expression(&arg.expression);
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+
+                if (i + 1) == output_ports.len() {
+                    self.newline_pop();
+                    self.str("end");
+                    self.newline();
+                }
+            }
+
+            for (i, (port, _)) in inout_ports.iter().enumerate() {
+                if i > 0 {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.token(&arg.connect.connect_token.replace("assign"));
+                self.space(1);
+
+                self.align_start(align_kind::IDENTIFIER);
+                self.hierarchical_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(port);
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&arg.diamond_operator.diamond_operator_token.replace("="));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(port);
+                self.expression(&arg.expression);
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
+        } else {
+            let connect_pairs = operation.get_connection_pairs();
+            let input_output_pairs: Vec<_> = connect_pairs
+                .iter()
+                .filter(|x| matches!(x.1, SymDirection::Input | SymDirection::Output))
+                .collect();
+            let inout_piars: Vec<_> = connect_pairs
+                .iter()
+                .filter(|x| matches!(x.1, SymDirection::Inout))
+                .collect();
+
+            let mut rhs_identifier = arg.expression.unwrap_identifier().unwrap().clone();
+            if operation.is_rhs_instance() {
+                // remove modport path
+                rhs_identifier.expression_identifier_list0.pop();
+            }
+
+            for (i, (lhs_symbol, lhs_direction, rhs_symbol, _)) in
+                input_output_pairs.iter().enumerate()
+            {
+                if i == 0 {
+                    self.token_will_push(&arg.connect.connect_token.replace("always_comb begin"));
+                    self.newline_push();
+                } else {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                let symbol = if matches!(lhs_direction, SymDirection::Output) {
+                    self.hierarchical_identifier(&lhs_identifier);
+                    self.emit_member_name_for_connect_operand(lhs_symbol);
+                    &lhs_symbol
+                } else {
+                    self.expression_identifier(&rhs_identifier);
+                    self.emit_member_name_for_connect_operand(rhs_symbol);
+                    &rhs_symbol
+                };
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&arg.diamond_operator.diamond_operator_token.replace("="));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(symbol);
+                if matches!(lhs_direction, SymDirection::Input) {
+                    self.hierarchical_identifier(&lhs_identifier);
+                    self.emit_member_name_for_connect_operand(lhs_symbol);
+                } else {
+                    self.expression_identifier(&rhs_identifier);
+                    self.emit_member_name_for_connect_operand(rhs_symbol);
+                }
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+
+                if (i + 1) == input_output_pairs.len() {
+                    self.newline_pop();
+                    self.str("end");
+                    self.newline();
+                }
+            }
+
+            for (i, (lhs_symbol, _, rhs_symbol, _)) in inout_piars.iter().enumerate() {
+                if i > 0 {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.token(&arg.connect.connect_token.replace("tran ("));
+                self.hierarchical_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(lhs_symbol);
+                self.str(",");
+                self.space(1);
+                self.expression_identifier(&rhs_identifier);
+                self.emit_member_name_for_connect_operand(rhs_symbol);
+                self.str(")");
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
         }
     }
 
