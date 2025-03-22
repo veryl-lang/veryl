@@ -901,6 +901,14 @@ impl Type {
     pub fn can_be_default_reset(&self) -> bool {
         self.kind.is_reset() && self.width.is_empty() && self.array.is_empty()
     }
+
+    pub fn get_user_defined(&self) -> Option<UserDefinedType> {
+        if let TypeKind::UserDefined(x) = &self.kind {
+            return Some(x.clone());
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -965,17 +973,45 @@ impl TypeKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct UserDefinedType {
     pub path: Vec<StrId>,
+    pub identifier: syntax_tree::ScopedIdentifier,
     pub symbol: Option<SymbolId>,
 }
 
 impl UserDefinedType {
-    fn new(path: Vec<StrId>) -> Self {
-        Self { path, symbol: None }
+    fn new(identifier: syntax_tree::ScopedIdentifier) -> Self {
+        let mut path = Vec::new();
+
+        match identifier.scoped_identifier_group.as_ref() {
+            syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                path.push(x.identifier.identifier_token.token.text);
+            }
+            syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
+                path.push(x.dollar_identifier.dollar_identifier_token.token.text);
+            }
+        }
+
+        for x in &identifier.scoped_identifier_list {
+            path.push(x.identifier.identifier_token.token.text);
+        }
+
+        Self {
+            path,
+            identifier,
+            symbol: None,
+        }
     }
 }
+
+impl PartialEq for UserDefinedType {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for UserDefinedType {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeModifierKind {
@@ -1182,19 +1218,8 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                         return Err(());
                     }
 
-                    let mut name = Vec::new();
-                    match x.scoped_identifier.scoped_identifier_group.as_ref() {
-                        syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
-                            name.push(x.identifier.identifier_token.token.text);
-                        }
-                        syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
-                            name.push(x.dollar_identifier.dollar_identifier_token.token.text);
-                        }
-                    }
-                    for x in &x.scoped_identifier.scoped_identifier_list {
-                        name.push(x.identifier.identifier_token.token.text);
-                    }
-                    let kind = TypeKind::UserDefined(UserDefinedType::new(name));
+                    let r#type = UserDefinedType::new(x.scoped_identifier.as_ref().clone());
+                    let kind = TypeKind::UserDefined(r#type);
                     let width: Vec<syntax_tree::Expression> =
                         if let Some(ref x) = x.expression_identifier_opt {
                             x.width.as_ref().into()
@@ -1275,20 +1300,9 @@ impl From<&syntax_tree::ScalarType> for Type {
         }
         match &*value.scalar_type_group {
             syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
-                let ident = x.user_defined_type.scoped_identifier.as_ref();
-                let mut name = Vec::new();
-                match ident.scoped_identifier_group.as_ref() {
-                    syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
-                        name.push(x.identifier.identifier_token.token.text);
-                    }
-                    syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
-                        name.push(x.dollar_identifier.dollar_identifier_token.token.text);
-                    }
-                }
-                for x in &ident.scoped_identifier_list {
-                    name.push(x.identifier.identifier_token.token.text);
-                }
-                let kind = TypeKind::UserDefined(UserDefinedType::new(name));
+                let r#type =
+                    UserDefinedType::new(x.user_defined_type.scoped_identifier.as_ref().clone());
+                let kind = TypeKind::UserDefined(r#type);
                 let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.scalar_type_opt {
                     x.width.as_ref().into()
                 } else {

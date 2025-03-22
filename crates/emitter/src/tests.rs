@@ -697,3 +697,178 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn emit_connect_operation() {
+    let code = r#"interface InterfaceA {
+    var a: logic;
+    var b: logic;
+    var c: logic;
+    var d: logic;
+    var e: tri logic;
+    var f: tri logic;
+    modport mp_0 {
+        a: input ,
+        b: output,
+        c: input ,
+        d: output,
+        e: inout ,
+        f: inout ,
+    }
+    modport mp_1 {
+        a: output,
+        b: input ,
+        c: output,
+        d: input ,
+        e: inout ,
+        f: inout ,
+    }
+}
+module ModuleA (
+    if_0: modport InterfaceA::mp_0,
+) {
+    inst if_1: InterfaceA;
+
+    connect if_1.mp_1 <> if_0;
+    connect if_1.mp_0 <> '0;
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceA;
+    logic     a;
+    logic     b;
+    logic     c;
+    logic     d;
+    tri logic e;
+    tri logic f;
+    modport mp_0 (
+        input  a,
+        output b,
+        input  c,
+        output d,
+        inout  e,
+        inout  f
+    );
+    modport mp_1 (
+        output a,
+        input  b,
+        output c,
+        input  d,
+        inout  e,
+        inout  f
+    );
+endinterface
+module prj_ModuleA (
+    prj_InterfaceA.mp_0 if_0
+);
+    prj_InterfaceA if_1 ();
+
+    always_comb begin
+        if_1.a = if_0.a;
+        if_0.b = if_1.b;
+        if_1.c = if_0.c;
+        if_0.d = if_1.d;
+    end
+    tran (if_1.e, if_0.e);
+    tran (if_1.f, if_0.f);
+    always_comb begin
+        if_1.b = '0;
+        if_1.d = '0;
+    end
+    assign if_1.e = '0;
+    assign if_1.f = '0;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+
+    let code = r#"interface InterfaceB {
+    var a: logic;
+    var b: logic;
+    var c: logic;
+    var d: logic;
+    modport mp_0 {
+        a: input ,
+        b: output,
+        c: input ,
+        d: output,
+    }
+    modport mp_1 {
+        a: output,
+        b: input ,
+        c: output,
+        d: input ,
+    }
+}
+module ModuleB (
+    if_0: modport InterfaceB::mp_0,
+) {
+    inst if_1: InterfaceB;
+
+    always_comb {
+        if_1.mp_1 <> if_0;
+    }
+    always_comb {
+        if_1.mp_0 <> '0;
+    }
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceB;
+    logic a;
+    logic b;
+    logic c;
+    logic d;
+    modport mp_0 (
+        input  a,
+        output b,
+        input  c,
+        output d
+    );
+    modport mp_1 (
+        output a,
+        input  b,
+        output c,
+        input  d
+    );
+endinterface
+module prj_ModuleB (
+    prj_InterfaceB.mp_0 if_0
+);
+    prj_InterfaceB if_1 ();
+
+    always_comb begin
+        if_1.a = if_0.a;
+        if_0.b = if_1.b;
+        if_1.c = if_0.c;
+        if_0.d = if_1.d;
+    end
+    always_comb begin
+        if_1.b = '0;
+        if_1.d = '0;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}

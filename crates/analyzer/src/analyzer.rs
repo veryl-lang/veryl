@@ -220,6 +220,7 @@ impl AnalyzerPass3 {
 
             for (ref_index, var_ref) in target_list {
                 let before_assign = assign_list.iter().any(|(assing_index, assign)| {
+                    println!("ref {} assign {}", var_ref.path, assign.path);
                     *assing_index > ref_index && assign.path.may_fully_included(&var_ref.path)
                 });
                 if before_assign {

@@ -46,6 +46,7 @@ impl CheckSeparator {
                 SymbolKind::Variable(_) // member variable of instance
                 | SymbolKind::StructMember(_)
                 | SymbolKind::UnionMember(_)
+                | SymbolKind::Modport(_)
                 | SymbolKind::ModportVariableMember(_)
                 | SymbolKind::ModportFunctionMember(_)
             )

@@ -467,6 +467,13 @@ impl_token_range!(
     semicolon,
     semicolon_token
 );
+impl_token_range!(
+    ConnectDeclaration,
+    connect,
+    connect_token,
+    semicolon,
+    semicolon_token
+);
 
 impl From<&IdentifierStatement> for TokenRange {
     fn from(value: &IdentifierStatement) -> Self {
@@ -1043,6 +1050,7 @@ token_with_comments!(Semicolon);
 token_with_comments!(Star);
 
 token_with_comments!(AssignmentOperator);
+token_with_comments!(DiamondOperator);
 token_with_comments!(Operator01);
 token_with_comments!(Operator02);
 token_with_comments!(Operator03);
@@ -1068,6 +1076,7 @@ token_with_comments!(Case);
 token_with_comments!(Clock);
 token_with_comments!(ClockPosedge);
 token_with_comments!(ClockNegedge);
+token_with_comments!(Connect);
 token_with_comments!(Const);
 token_with_comments!(Converse);
 token_with_comments!(Default);

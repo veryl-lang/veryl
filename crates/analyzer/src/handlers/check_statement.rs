@@ -39,16 +39,19 @@ impl VerylGrammarTrait for CheckStatement {
     fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if self.in_initial || self.in_final {
-                let token = match &*arg.assignment_group {
-                    AssignmentGroup::Equ(x) => &x.equ.equ_token.token,
-                    AssignmentGroup::AssignmentOperator(x) => {
-                        &x.assignment_operator.assignment_operator_token.token
-                    }
+                let (kind, token) = match &*arg.assignment_group {
+                    AssignmentGroup::Equ(x) => ("assignment", &x.equ.equ_token.token),
+                    AssignmentGroup::AssignmentOperator(x) => (
+                        "assignment",
+                        &x.assignment_operator.assignment_operator_token.token,
+                    ),
+                    AssignmentGroup::DiamondOperator(x) => (
+                        "connection",
+                        &x.diamond_operator.diamond_operator_token.token,
+                    ),
                 };
-                self.errors.push(AnalyzerError::invalid_statement(
-                    "assignment",
-                    &token.into(),
-                ));
+                self.errors
+                    .push(AnalyzerError::invalid_statement(kind, &token.into()));
             }
         }
         Ok(())
