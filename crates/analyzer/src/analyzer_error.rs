@@ -127,6 +127,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_connect_operand), help(""), url(""))]
+    #[error("{identifier} can't be used as a connect operand because {reason}")]
+    InvalidConnectOperand {
+        identifier: String,
+        reason: String,
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(invalid_modifier),
@@ -1297,6 +1307,15 @@ impl AnalyzerError {
         AnalyzerError::InvalidAssignmentToConst {
             identifier: identifier.into(),
             kind: kind.into(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_connect_operand(identifier: &str, reason: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidConnectOperand {
+            identifier: identifier.into(),
+            reason: reason.into(),
             input: source(token),
             error_location: token.into(),
         }

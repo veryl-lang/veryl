@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod analyzer_error;
 pub mod attribute;
 pub mod attribute_table;
+pub mod connect_operation_table;
 pub mod definition_table;
 pub mod evaluator;
 pub mod handlers;

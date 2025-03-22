@@ -1122,6 +1122,9 @@ impl VerylWalker for Formatter {
             AssignmentGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
+            AssignmentGroup::DiamondOperator(x) => {
+                self.diamond_operator(&x.diamond_operator);
+            }
         }
         self.align_finish(align_kind::ASSIGNMENT);
         self.space(1);
@@ -1540,6 +1543,20 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.assign_concatenation_list_opt {
             self.comma(&x.comma);
         }
+    }
+
+    /// Semantic action for non-terminal 'ConnectDeclaration'
+    fn connect_declaration(&mut self, arg: &ConnectDeclaration) {
+        self.connect(&arg.connect);
+        self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        self.space(1);
+        self.diamond_operator(&arg.diamond_operator);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'ModportDeclaration'

@@ -3,6 +3,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, CondTypeItem};
 use crate::attribute_table;
+use crate::connect_operation_table;
 use crate::evaluator::Evaluator;
 use crate::symbol::{Direction, GenericBoundKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
@@ -145,80 +146,15 @@ fn has_cond_type(token: &Token) -> bool {
 }
 
 fn map_assignable_factor(arg: &Expression) -> Option<VarRefPath> {
-    if !arg.expression_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*arg.expression01;
-    if !exp.expression01_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression02;
-    if !exp.expression02_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression03;
-    if !exp.expression03_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression04;
-    if !exp.expression04_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression05;
-    if !exp.expression05_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression06;
-    if !exp.expression06_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression07;
-    if !exp.expression07_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression08;
-    if !exp.expression08_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression09;
-    if !exp.expression09_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression10;
-    if !exp.expression10_list.is_empty() {
-        return None;
-    }
-
-    let exp = &*exp.expression11;
-    if exp.expression11_opt.is_some() {
-        return None;
-    }
-
-    let exp = &*exp.expression12;
-    if !exp.expression12_list.is_empty() {
-        return None;
-    }
-
-    if let Factor::IdentifierFactor(factor) = &*exp.factor {
-        if factor.identifier_factor.identifier_factor_opt.is_none() {
+    if let Some(Factor::IdentifierFactor(x)) = arg.unwrap_factor() {
+        if x.identifier_factor.identifier_factor_opt.is_none() {
             if let Ok(symbol) =
-                symbol_table::resolve(factor.identifier_factor.expression_identifier.as_ref())
+                symbol_table::resolve(x.identifier_factor.expression_identifier.as_ref())
             {
                 if is_assignable_symbol(&symbol.found) {
-                    let path = VarRefPath::try_from(
-                        factor.identifier_factor.expression_identifier.as_ref(),
-                    )
-                    .unwrap();
+                    let path =
+                        VarRefPath::try_from(x.identifier_factor.expression_identifier.as_ref())
+                            .unwrap();
                     return Some(path);
                 }
             }
@@ -365,52 +301,83 @@ impl VerylGrammarTrait for CheckVarRef {
 
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => {
-                if matches!(
-                    &*arg.identifier_statement_group,
-                    IdentifierStatementGroup::FunctionCall(_)
-                ) {
+            HandlerPoint::Before => match &*arg.identifier_statement_group {
+                IdentifierStatementGroup::Assignment(x) => {
+                    if let AssignmentGroup::DiamondOperator(_) = *x.assignment.assignment_group {
+                        let token = arg.expression_identifier.identifier().token;
+                        if let Some(operation) = connect_operation_table::get(&token) {
+                            for (path, r#type) in operation.get_expression_paths() {
+                                self.add_expression(&path, r#type);
+                            }
+                        }
+                    }
+                }
+                IdentifierStatementGroup::FunctionCall(_) => {
                     self.push_function_call(arg.expression_identifier.as_ref());
                 }
-            }
+            },
             HandlerPoint::After => {
                 match &*arg.identifier_statement_group {
                     IdentifierStatementGroup::Assignment(x) => {
-                        let token = match x.assignment.assignment_group.as_ref() {
-                            AssignmentGroup::Equ(x) => x.equ.equ_token.token,
-                            AssignmentGroup::AssignmentOperator(x) => {
-                                x.assignment_operator.assignment_operator_token.token
+                        let assignment = x.assignment.assignment_group.as_ref();
+                        if let AssignmentGroup::DiamondOperator(x) = assignment {
+                            let token = arg.expression_identifier.identifier().token;
+                            if let Some(operation) = connect_operation_table::get(&token) {
+                                for path in operation.get_assign_paths() {
+                                    self.assign_position.push(AssignPositionType::Statement {
+                                        token,
+                                        define_context: x
+                                            .diamond_operator
+                                            .diamond_operator_token
+                                            .token
+                                            .into(),
+                                        resettable: true,
+                                    });
+                                    self.add_assign(&path);
+                                }
                             }
-                        };
-                        if let Ok(path) = VarRefPath::try_from(arg.expression_identifier.as_ref()) {
-                            let full_path = path.full_path();
-                            let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
+                        } else {
+                            let token = match assignment {
+                                AssignmentGroup::Equ(x) => x.equ.equ_token.token,
+                                AssignmentGroup::AssignmentOperator(x) => {
+                                    x.assignment_operator.assignment_operator_token.token
+                                }
+                                _ => unreachable!(),
+                            };
+                            if let Ok(path) =
+                                VarRefPath::try_from(arg.expression_identifier.as_ref())
+                            {
+                                let full_path = path.full_path();
+                                let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
 
-                            if can_assign(full_path) {
-                                self.assign_position.push(AssignPositionType::Statement {
-                                    token,
-                                    define_context: token.into(),
-                                    resettable: true,
-                                });
-                                self.add_assign(&path);
-                            } else {
-                                let token = arg.expression_identifier.identifier().token;
-                                self.errors.push(AnalyzerError::invalid_assignment(
-                                    &token.to_string(),
-                                    &symbol.kind.to_kind_name(),
-                                    &arg.expression_identifier.as_ref().into(),
-                                ));
-                            }
-
-                            // Check to confirm not assigning to constant
-                            if let SymbolKind::Variable(v) = symbol.kind.clone() {
-                                if v.r#type.is_const {
+                                if can_assign(full_path) {
+                                    self.assign_position.push(AssignPositionType::Statement {
+                                        token,
+                                        define_context: token.into(),
+                                        resettable: true,
+                                    });
+                                    self.add_assign(&path);
+                                } else {
                                     let token = arg.expression_identifier.identifier().token;
-                                    self.errors.push(AnalyzerError::invalid_assignment_to_const(
+                                    self.errors.push(AnalyzerError::invalid_assignment(
                                         &token.to_string(),
                                         &symbol.kind.to_kind_name(),
                                         &arg.expression_identifier.as_ref().into(),
                                     ));
+                                }
+
+                                // Check to confirm not assigning to constant
+                                if let SymbolKind::Variable(v) = symbol.kind.clone() {
+                                    if v.r#type.is_const {
+                                        let token = arg.expression_identifier.identifier().token;
+                                        self.errors.push(
+                                            AnalyzerError::invalid_assignment_to_const(
+                                                &token.to_string(),
+                                                &symbol.kind.to_kind_name(),
+                                                &arg.expression_identifier.as_ref().into(),
+                                            ),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -637,6 +604,30 @@ impl VerylGrammarTrait for CheckVarRef {
                         ));
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn connect_declaration(&mut self, arg: &ConnectDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let token = arg
+                .hierarchical_identifier
+                .identifier
+                .identifier_token
+                .token;
+            let operation = connect_operation_table::get(&token);
+            if operation.is_none() {
+                return Ok(());
+            }
+
+            for path in operation.unwrap().get_assign_paths() {
+                self.assign_position.push(AssignPositionType::Declaration {
+                    token: arg.connect.connect_token.token,
+                    define_context: arg.connect.connect_token.token.into(),
+                    r#type: AssignDeclarationType::Assign,
+                });
+                self.add_assign(&path);
             }
         }
         Ok(())

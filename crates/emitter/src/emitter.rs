@@ -4,8 +4,10 @@ use veryl_aligner::{Aligner, Location, Measure, align_kind};
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem};
 use veryl_analyzer::attribute_table;
+use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::evaluator::{EvaluatedTypeResetKind, Evaluator};
 use veryl_analyzer::namespace::Namespace;
+use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
@@ -50,6 +52,7 @@ pub struct Emitter {
     dst_column: u32,
     aligner: Aligner,
     measure: Measure,
+    force_duplicated: bool,
     in_start_token: bool,
     consumed_next_newline: bool,
     single_line: Vec<()>,
@@ -88,6 +91,7 @@ impl Default for Emitter {
             build_opt: Build::default(),
             format_opt: Format::default(),
             string: String::new(),
+            force_duplicated: false,
             indent: 0,
             src_line: 1,
             dst_line: 1,
@@ -131,6 +135,54 @@ fn is_ifdef_attribute(arg: &Attribute) -> bool {
         arg.identifier.identifier_token.token.to_string().as_str(),
         "ifdef" | "ifndef"
     )
+}
+
+fn resolve_generic_path(
+    path: &GenericSymbolPath,
+    namespace: &Namespace,
+    generic_maps: Option<&Vec<GenericMap>>,
+) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+    let mut path = path.clone();
+    path.resolve_imported(namespace);
+
+    for i in 0..path.len() {
+        let base = path.base_path(i);
+        if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
+            let params = symbol.found.generic_parameters();
+            let n_args = path.paths[i].arguments.len();
+
+            for param in params.iter().skip(n_args) {
+                path.paths[i]
+                    .arguments
+                    .push(param.1.default_value.as_ref().unwrap().clone());
+            }
+
+            for arg in &mut path.paths[i].arguments {
+                if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace)) {
+                    if let Some(target) = symbol.found.alias_target() {
+                        if let (Ok(_), path) =
+                            resolve_generic_path(&target, &symbol.found.namespace, generic_maps)
+                        {
+                            *arg = path;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(maps) = generic_maps {
+        path.apply_map(maps);
+    }
+
+    let result = symbol_table::resolve((&path.mangled_path(), namespace));
+    if let Ok(symbol) = &result {
+        if let Some(target) = symbol.found.alias_target() {
+            return resolve_generic_path(&target, &symbol.found.namespace, generic_maps);
+        }
+    }
+
+    (result, path)
 }
 
 impl Emitter {
@@ -400,7 +452,11 @@ impl Emitter {
     }
 
     fn token(&mut self, x: &VerylToken) {
-        self.process_token(x, false, None)
+        if self.force_duplicated {
+            self.duplicated_token(x)
+        } else {
+            self.process_token(x, false, None)
+        }
     }
 
     fn token_will_push(&mut self, x: &VerylToken) {
@@ -1046,6 +1102,202 @@ impl Emitter {
         self.generic_map.pop();
     }
 
+    fn emit_connect_statement(&mut self, arg: &IdentifierStatement) -> bool {
+        let (identifier, operator, expression) = {
+            let IdentifierStatementGroup::Assignment(x) = &*arg.identifier_statement_group else {
+                return false;
+            };
+            let AssignmentGroup::DiamondOperator(y) = &*x.assignment.assignment_group else {
+                return false;
+            };
+            (
+                &arg.expression_identifier,
+                &y.diamond_operator,
+                &x.assignment.expression,
+            )
+        };
+
+        let token = identifier.identifier();
+        let operation = connect_operation_table::get(&token.token).unwrap();
+
+        let mut lhs_identifier = identifier.clone();
+        if operation.is_lhs_instance() {
+            // remove modport path
+            lhs_identifier.expression_identifier_list0.pop();
+        }
+        let lhs_generic_map = {
+            let symbol = symbol_table::resolve(lhs_identifier.as_ref()).unwrap();
+            self.get_interface_generic_map(&symbol.found)
+        };
+
+        let assign_operator = if self.in_always_ff { "<=" } else { "=" };
+
+        if let Some((ports, _)) = operation.get_ports_with_expression() {
+            for (i, (port, _)) in ports.iter().enumerate() {
+                if i > 0 {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                self.expression_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(port);
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&operator.diamond_operator_token.replace(assign_operator));
+                self.space(1);
+
+                let cast_emitted =
+                    self.emit_cast_for_connect_operand(token, port, &lhs_generic_map, None, None);
+                self.expression(expression);
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
+        } else {
+            let mut rhs_identifier = expression.unwrap_identifier().unwrap().clone();
+            if operation.is_rhs_instance() {
+                // remove modport path
+                rhs_identifier.expression_identifier_list0.pop();
+            }
+            let rhs_generic_map = {
+                let symbol = symbol_table::resolve(&rhs_identifier).unwrap();
+                self.get_interface_generic_map(&symbol.found)
+            };
+
+            for (i, (lhs_symbol, lhs_direction, rhs_symbol, _)) in
+                operation.get_connection_pairs().iter().enumerate()
+            {
+                if i > 0 {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                let (target, target_map, driver, driver_map) =
+                    if matches!(lhs_direction, SymDirection::Output) {
+                        self.expression_identifier(&lhs_identifier);
+                        self.emit_member_name_for_connect_operand(lhs_symbol);
+                        (&lhs_symbol, &lhs_generic_map, &rhs_symbol, &rhs_generic_map)
+                    } else {
+                        self.expression_identifier(&rhs_identifier);
+                        self.emit_member_name_for_connect_operand(rhs_symbol);
+                        (&rhs_symbol, &rhs_generic_map, &lhs_symbol, &lhs_generic_map)
+                    };
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&operator.diamond_operator_token.replace(assign_operator));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(
+                    token,
+                    target,
+                    target_map,
+                    Some(driver),
+                    Some(driver_map),
+                );
+                if matches!(lhs_direction, SymDirection::Input) {
+                    self.expression_identifier(&lhs_identifier);
+                    self.emit_member_name_for_connect_operand(lhs_symbol);
+                } else {
+                    self.expression_identifier(&rhs_identifier);
+                    self.emit_member_name_for_connect_operand(rhs_symbol);
+                }
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
+        }
+
+        true
+    }
+
+    fn get_interface_generic_map(&self, symbol: &Symbol) -> Vec<GenericMap> {
+        match &symbol.kind {
+            SymbolKind::Port(x) => {
+                if let Some(x) = x.r#type.get_user_defined() {
+                    if let (Ok(symbol), _) = self.resolve_generic_path(&x.path, &symbol.namespace) {
+                        // symbol for interface is parent symbol because
+                        // resolved symbol is for modport
+                        let parent = symbol.found.get_parent().unwrap();
+                        return parent.generic_maps();
+                    }
+                }
+            }
+            SymbolKind::Instance(x) => {
+                if let (Ok(symbol), _) = self.resolve_generic_path(&x.type_name, &symbol.namespace)
+                {
+                    return symbol.found.generic_maps();
+                }
+            }
+            _ => {}
+        }
+
+        vec![]
+    }
+
+    fn emit_member_name_for_connect_operand(&mut self, symbol: &Symbol) {
+        let last_token = self.last_token.as_ref().unwrap();
+        let member_token = last_token.replace(&format!(".{}", symbol.token));
+        self.duplicated_token(&member_token);
+    }
+
+    fn emit_cast_for_connect_operand(
+        &mut self,
+        token: &VerylToken,
+        target: &Symbol,
+        target_map: &Vec<GenericMap>,
+        driver: Option<&Symbol>,
+        driver_map: Option<&Vec<GenericMap>>,
+    ) -> bool {
+        fn get_type_symbol(symbol: &Symbol, map: &Vec<GenericMap>) -> Option<Symbol> {
+            let r#type = symbol.kind.get_type();
+            if r#type.is_none() || !r#type.unwrap().width.is_empty() {
+                return None;
+            }
+
+            let user_defined = r#type.unwrap().get_user_defined()?;
+            let (type_symbol, _) =
+                resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
+            type_symbol.ok().map(|x| x.found)
+        }
+
+        let Some(target_type) = get_type_symbol(target, target_map) else {
+            return false;
+        };
+
+        if let (Some(driver), Some(driver_map)) = (driver, driver_map) {
+            if let Some(driver_type) = get_type_symbol(driver, driver_map) {
+                if target_type.id == driver_type.id {
+                    return false;
+                }
+            }
+        }
+
+        let context = SymbolContext {
+            project_name: self.project_name,
+            build_opt: self.build_opt.clone(),
+            in_import: false,
+            in_direction_modport: false,
+            generic_map: target_map.clone(),
+        };
+        let text = symbol_string(token, &target_type, &context);
+        self.str(&text);
+        self.str("'(");
+
+        true
+    }
+
     fn emit_function_call(
         &mut self,
         identifier: &ExpressionIdentifier,
@@ -1128,62 +1380,22 @@ impl Emitter {
         }
     }
 
-    fn resolve_symbol_with_generics(
-        &self,
-        path: &mut GenericSymbolPath,
-        namespace: &Namespace,
-    ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
-        path.resolve_imported(namespace);
-
-        for i in 0..path.len() {
-            let base = path.base_path(i);
-            if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
-                let params = symbol.found.generic_parameters();
-                let n_args = path.paths[i].arguments.len();
-
-                for param in params.iter().skip(n_args) {
-                    path.paths[i]
-                        .arguments
-                        .push(param.1.default_value.as_ref().unwrap().clone());
-                }
-
-                for arg in &mut path.paths[i].arguments {
-                    if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace)) {
-                        if let Some(target) = symbol.found.alias_target() {
-                            if let (Ok(_), path) = self.resolve_symbol_with_generics(
-                                &mut target.clone(),
-                                &symbol.found.namespace,
-                            ) {
-                                *arg = path;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(maps) = self.generic_map.last() {
-            path.apply_map(maps);
-        }
-
-        let result = symbol_table::resolve((&path.mangled_path(), namespace));
-        if let Ok(symbol) = &result {
-            if let Some(target) = symbol.found.alias_target() {
-                return self
-                    .resolve_symbol_with_generics(&mut target.clone(), &symbol.found.namespace);
-            }
-        }
-
-        (result, path.clone())
-    }
-
     fn resolve_scoped_idnetifier(
         &self,
         arg: &ScopedIdentifier,
     ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
         let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
-        let mut path: GenericSymbolPath = arg.into();
-        self.resolve_symbol_with_generics(&mut path, &namespace)
+        let path: GenericSymbolPath = arg.into();
+        self.resolve_generic_path(&path, &namespace)
+    }
+
+    fn resolve_generic_path(
+        &self,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+        let genric_map = self.generic_map.last();
+        resolve_generic_path(path, namespace, genric_map)
     }
 
     fn push_resolved_identifier(&mut self, x: &str) {
@@ -2431,19 +2643,22 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'IdentifierStatement'
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
-        self.align_start(align_kind::IDENTIFIER);
-        self.expression_identifier(&arg.expression_identifier);
-        self.assignment_lefthand_side = Some(*arg.expression_identifier.clone());
-        self.align_finish(align_kind::IDENTIFIER);
-        match &*arg.identifier_statement_group {
-            IdentifierStatementGroup::FunctionCall(x) => {
-                self.emit_function_call(&arg.expression_identifier, &x.function_call);
+        let connect_statement_emitted = self.emit_connect_statement(arg);
+        if !connect_statement_emitted {
+            self.align_start(align_kind::IDENTIFIER);
+            self.expression_identifier(&arg.expression_identifier);
+            self.assignment_lefthand_side = Some(*arg.expression_identifier.clone());
+            self.align_finish(align_kind::IDENTIFIER);
+            match &*arg.identifier_statement_group {
+                IdentifierStatementGroup::FunctionCall(x) => {
+                    self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                }
+                IdentifierStatementGroup::Assignment(x) => {
+                    self.assignment(&x.assignment);
+                }
             }
-            IdentifierStatementGroup::Assignment(x) => {
-                self.assignment(&x.assignment);
-            }
+            self.semicolon(&arg.semicolon);
         }
-        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'Assignment'
@@ -2490,6 +2705,7 @@ impl VerylWalker for Emitter {
                     self.space(1);
                     self.str(token);
                 }
+                _ => unreachable!(),
             }
             self.space(1);
             if let AssignmentGroup::AssignmentOperator(_) = &*arg.assignment_group {
@@ -2506,6 +2722,7 @@ impl VerylWalker for Emitter {
                 AssignmentGroup::AssignmentOperator(x) => {
                     self.assignment_operator(&x.assignment_operator)
                 }
+                _ => unreachable!(),
             }
             self.align_finish(align_kind::ASSIGNMENT);
             self.space(1);
@@ -3107,6 +3324,189 @@ impl VerylWalker for Emitter {
         }
         if let Some(ref x) = arg.assign_concatenation_list_opt {
             self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'ConnectDeclaration'
+    fn connect_declaration(&mut self, arg: &ConnectDeclaration) {
+        let token = &arg.hierarchical_identifier.identifier.identifier_token;
+        let operation = connect_operation_table::get(&token.token).unwrap();
+
+        let mut lhs_identifier = arg.hierarchical_identifier.clone();
+        if operation.is_lhs_instance() {
+            // remove modport path
+            lhs_identifier.hierarchical_identifier_list0.pop();
+        }
+        let lhs_generic_map = {
+            let symbol = symbol_table::resolve(lhs_identifier.as_ref()).unwrap();
+            self.get_interface_generic_map(&symbol.found)
+        };
+
+        if let Some((ports, _)) = operation.get_ports_with_expression() {
+            let output_ports: Vec<_> = ports
+                .iter()
+                .filter(|(_, direction)| matches!(direction, SymDirection::Output))
+                .collect();
+            let inout_ports: Vec<_> = ports
+                .iter()
+                .filter(|(_, direction)| matches!(direction, SymDirection::Inout))
+                .collect();
+
+            for (i, (port, _)) in output_ports.iter().enumerate() {
+                if i == 0 {
+                    self.token_will_push(&arg.connect.connect_token.replace("always_comb begin"));
+                    self.newline_push();
+                } else {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                self.hierarchical_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(port);
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&arg.diamond_operator.diamond_operator_token.replace("="));
+                self.space(1);
+
+                let cast_emitted =
+                    self.emit_cast_for_connect_operand(token, port, &lhs_generic_map, None, None);
+                self.expression(&arg.expression);
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+
+                if (i + 1) == output_ports.len() {
+                    self.newline_pop();
+                    self.str("end");
+                }
+            }
+
+            for (i, (port, _)) in inout_ports.iter().enumerate() {
+                if i > 0 || !output_ports.is_empty() {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.token(&arg.connect.connect_token.replace("assign"));
+                self.space(1);
+
+                self.align_start(align_kind::IDENTIFIER);
+                self.hierarchical_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(port);
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&arg.diamond_operator.diamond_operator_token.replace("="));
+                self.space(1);
+
+                let cast_emitted =
+                    self.emit_cast_for_connect_operand(token, port, &lhs_generic_map, None, None);
+                self.expression(&arg.expression);
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
+        } else {
+            let connect_pairs = operation.get_connection_pairs();
+            let input_output_pairs: Vec<_> = connect_pairs
+                .iter()
+                .filter(|x| matches!(x.1, SymDirection::Input | SymDirection::Output))
+                .collect();
+            let inout_piars: Vec<_> = connect_pairs
+                .iter()
+                .filter(|x| matches!(x.1, SymDirection::Inout))
+                .collect();
+
+            let mut rhs_identifier = arg.expression.unwrap_identifier().unwrap().clone();
+            if operation.is_rhs_instance() {
+                // remove modport path
+                rhs_identifier.expression_identifier_list0.pop();
+            }
+            let rhs_generic_map = {
+                let symbol = symbol_table::resolve(&rhs_identifier).unwrap();
+                self.get_interface_generic_map(&symbol.found)
+            };
+
+            for (i, (lhs_symbol, lhs_direction, rhs_symbol, _)) in
+                input_output_pairs.iter().enumerate()
+            {
+                if i == 0 {
+                    self.token_will_push(&arg.connect.connect_token.replace("always_comb begin"));
+                    self.newline_push();
+                } else {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.align_start(align_kind::IDENTIFIER);
+                let (target, target_map, driver, driver_map) =
+                    if matches!(lhs_direction, SymDirection::Output) {
+                        self.hierarchical_identifier(&lhs_identifier);
+                        self.emit_member_name_for_connect_operand(lhs_symbol);
+                        (&lhs_symbol, &lhs_generic_map, &rhs_symbol, &rhs_generic_map)
+                    } else {
+                        self.expression_identifier(&rhs_identifier);
+                        self.emit_member_name_for_connect_operand(rhs_symbol);
+                        (&rhs_symbol, &rhs_generic_map, &lhs_symbol, &lhs_generic_map)
+                    };
+                self.align_finish(align_kind::IDENTIFIER);
+
+                self.space(1);
+                self.token(&arg.diamond_operator.diamond_operator_token.replace("="));
+                self.space(1);
+
+                let cast_emitted = self.emit_cast_for_connect_operand(
+                    token,
+                    target,
+                    target_map,
+                    Some(driver),
+                    Some(driver_map),
+                );
+                if matches!(lhs_direction, SymDirection::Input) {
+                    self.hierarchical_identifier(&lhs_identifier);
+                    self.emit_member_name_for_connect_operand(lhs_symbol);
+                } else {
+                    self.expression_identifier(&rhs_identifier);
+                    self.emit_member_name_for_connect_operand(rhs_symbol);
+                }
+
+                if cast_emitted {
+                    self.str(")");
+                }
+                self.semicolon(&arg.semicolon);
+
+                if (i + 1) == input_output_pairs.len() {
+                    self.newline_pop();
+                    self.str("end");
+                }
+            }
+
+            for (i, (lhs_symbol, _, rhs_symbol, _)) in inout_piars.iter().enumerate() {
+                if i > 0 || !input_output_pairs.is_empty() {
+                    self.newline();
+                    self.force_duplicated = true;
+                }
+
+                self.token(&arg.connect.connect_token.replace("tran ("));
+                self.hierarchical_identifier(&lhs_identifier);
+                self.emit_member_name_for_connect_operand(lhs_symbol);
+                self.str(",");
+                self.space(1);
+                self.expression_identifier(&rhs_identifier);
+                self.emit_member_name_for_connect_operand(rhs_symbol);
+                self.str(")");
+                self.semicolon(&arg.semicolon);
+            }
+
+            self.force_duplicated = false;
         }
     }
 

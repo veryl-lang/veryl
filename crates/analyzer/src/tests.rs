@@ -3186,6 +3186,55 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+
+        modport master {
+            a: output,
+        }
+        modport slave {
+            ..converse(master)
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        inst b_if: InterfaceA;
+        always_comb {
+            a_if.master <> b_if.slave;
+            b_if.master <> 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+
+        modport master {
+            a: output,
+        }
+        modport slave {
+            ..converse(master)
+        }
+    }
+    module ModuleA (
+        a_if: modport InterfaceA::master,
+    ){
+        inst b_if: InterfaceA;
+        always_comb {
+            a_if        <> b_if.slave;
+            b_if.master <> 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
 
 #[test]
@@ -3319,6 +3368,30 @@ fn uncovered_branch() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+
+    // TODO
+    // Adapt 'traverse_assignable_symbol' to interface/struct/union members
+    //let code = r#"
+    //interface InterfaceA {
+    //    var a: logic;
+    //
+    //    modport master {
+    //        a: output,
+    //    }
+    //}
+    //module ModuleA {
+    //    inst a_if: InterfaceA;
+    //    let x: logic = 1;
+    //    always_comb {
+    //        if x {
+    //            a_if.master <> 0;
+    //        }
+    //    }
+    //}
+    //"#;
+    //
+    //let errors = analyze(code);
+    //assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
 }
 
 #[test]
@@ -4559,4 +4632,238 @@ fn define_context() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn check_connect_operation() {
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        inst b_if: InterfaceA;
+        connect a_if <> b_if.slave;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        inst b_if: InterfaceA;
+        connect a_if.master <> b_if;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA (
+        i_a: input logic,
+    ) {
+        inst b_if: InterfaceA;
+        connect i_a <> b_if.slave;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA[2];
+        inst b_if: InterfaceA;
+        connect a_if.master <> b_if.slave;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        inst b_if: InterfaceA[2];
+        connect a_if[0].master <> b_if.slave;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA[2, 2];
+        inst b_if: InterfaceA;
+        connect a_if[0].master <> b_if.slave;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+        modport slave {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        inst b_if: InterfaceA[2, 2];
+        connect a_if[0].master <> b_if[0].slave;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: tri logic;
+        modport mp {
+            a: inout,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        always_comb {
+            a_if.mp <> 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        enum EnumA: logic {
+            A
+        }
+
+        var a: EnumA;
+
+        modport mp {
+            a: output,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        connect a_if.mp <> 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        enum EnumA: logic {
+            A
+        }
+
+        var a: EnumA;
+
+        modport mp {
+            a: output,
+        }
+    }
+    interface InterfaceB {
+        var a: logic;
+
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA {
+        inst a_if: InterfaceA;
+        inst b_if: InterfaceB;
+        connect a_if.mp <> b_if.mp;
+        connect b_if.mp <> 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConnectOperand { .. }
+    ));
 }
