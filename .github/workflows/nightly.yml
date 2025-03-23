@@ -46,31 +46,16 @@ jobs:
     - name: Build for Windows
       if: matrix.os == 'windows-latest'
       run: make release_win
-
-    - name: Release for linux
-      if: matrix.os == 'ubuntu-latest'
-      uses: actions/upload-artifact@v4
+    - name: Move archives
+      run: |
+        mkdir -p upload
+        mv *.zip upload
+    - name: Upload
+      uses: ryand56/r2-upload-action@latest
       with:
-        name: x86_64-linux
-        path: '*-x86_64-linux.zip'
-
-    - name: Release for macOS (x86_64)
-      if: matrix.os == 'macOS-latest'
-      uses: actions/upload-artifact@v4
-      with:
-        name: x86_64-mac
-        path: '*-x86_64-mac.zip'
-
-    - name: Release for macOS (aarch64)
-      if: matrix.os == 'macOS-latest'
-      uses: actions/upload-artifact@v4
-      with:
-        name: aarch64-mac
-        path: '*-aarch64-mac.zip'
-
-    - name: Release for Windows
-      if: matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@v4
-      with:
-        name: x86_64-windows
-        path: '*-x86_64-windows.zip'
+        r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+        r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+        r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        r2-bucket: ${{ secrets.R2_BUCKET }}
+        source-dir: upload
+        destination-dir: ./toolchain/nightly/
