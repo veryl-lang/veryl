@@ -1,12 +1,12 @@
-VERSION = $(patsubst "%",%, $(word 3, $(shell grep version ./crates/veryl/Cargo.toml)))
-BUILD_TIME = $(shell date +"%Y/%m/%d %H:%M:%S")
+PKG_VERSION = $(patsubst "%",%, $(word 3, $(shell grep version ./crates/veryl/Cargo.toml)))
+BUILD_DATE = $(shell date +"%Y-%m-%d")
 GIT_REVISION = $(shell git log -1 --format="%h")
-RUST_VERSION = $(word 2, $(shell rustc -V))
-LONG_VERSION = "$(VERSION) ( rev: $(GIT_REVISION), rustc: $(RUST_VERSION), build at: $(BUILD_TIME) )"
+CHANNEL ?= 
+VERSION = $(PKG_VERSION)$(CHANNEL) ($(GIT_REVISION) $(BUILD_DATE))
 ZIP_NAME = veryl
 BIN_NAMES = veryl veryl-ls
 
-export LONG_VERSION
+export VERSION
 
 .PHONY: all test clean lint release_lnx release_win release_mac
 
