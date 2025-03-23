@@ -36,6 +36,7 @@ pulldown-cmark  = {workspace = true}
 regex           = {workspace = true}
 serde           = {workspace = true}
 serde_json      = {workspace = true}
+shadow-rs       = {version = "1.1", default-features = false}
 similar         = {workspace = true}
 tempfile        = {workspace = true}
 thiserror       = {workspace = true}
@@ -48,3 +49,6 @@ veryl-metadata  = {version = "0.14.2-rc.1", path = "../metadata"}
 veryl-parser    = {version = "0.14.2-rc.1", path = "../parser"}
 veryl-path      = {version = "0.14.2-rc.1", path = "../path"}
 veryl-sourcemap = {version = "0.14.2-rc.1", path = "../sourcemap"}
+
+[build-dependencies]
+shadow-rs = "1.1"

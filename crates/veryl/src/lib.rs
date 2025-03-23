@@ -1,4 +1,6 @@
+use crate::build::CLAP_LONG_VERSION;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use shadow_rs::shadow;
 use std::path::PathBuf;
 
 pub mod cmd_build;
@@ -21,9 +23,12 @@ pub mod runner;
 // Opt
 // ---------------------------------------------------------------------------------------------------------------------
 
+shadow!(build);
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
+#[clap(long_version = CLAP_LONG_VERSION)]
 pub struct Opt {
     /// No output printed to stdout
     #[arg(long, global = true)]
