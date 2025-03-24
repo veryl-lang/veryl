@@ -102,9 +102,13 @@ impl VerylGrammarTrait for CheckFunction {
 
                 let mut args = 0;
                 if let Some(ref x) = arg.identifier_factor_opt {
-                    if let Some(ref x) = x.function_call.function_call_opt {
-                        args += 1;
-                        args += x.argument_list.argument_list_list.len();
+                    if let IdentifierFactorOptGroup::FunctionCall(x) =
+                        x.identifier_factor_opt_group.as_ref()
+                    {
+                        if let Some(ref x) = x.function_call.function_call_opt {
+                            args += 1;
+                            args += x.argument_list.argument_list_list.len();
+                        }
                     }
                 }
 

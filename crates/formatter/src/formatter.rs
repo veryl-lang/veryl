@@ -644,6 +644,66 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'StructConstructor'
+    fn struct_constructor(&mut self, arg: &StructConstructor) {
+        if arg.quote_l_brace.line() != arg.r_brace.line() {
+            self.multi_line_start();
+        }
+        self.quote_l_brace(&arg.quote_l_brace);
+        if self.multi_line() {
+            self.newline_push();
+        }
+        self.struct_constructor_list(&arg.struct_constructor_list);
+        if let Some(ref x) = arg.struct_constructor_opt {
+            if self.multi_line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
+            self.dot_dot(&x.dot_dot);
+            self.defaul(&x.defaul);
+            self.l_paren(&x.l_paren);
+            self.expression(&x.expression);
+            self.r_paren(&x.r_paren);
+        }
+        if self.multi_line() {
+            self.newline_pop();
+        }
+        self.r_brace(&arg.r_brace);
+        if arg.quote_l_brace.line() != arg.r_brace.line() {
+            self.multi_line_finish();
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructConstructorList'
+    fn struct_constructor_list(&mut self, arg: &StructConstructorList) {
+        self.struct_constructor_item(&arg.struct_constructor_item);
+        for x in &arg.struct_constructor_list_list {
+            self.comma(&x.comma);
+            if x.comma.line() != x.struct_constructor_item.line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
+            self.struct_constructor_item(&x.struct_constructor_item);
+        }
+        if let Some(ref x) = arg.struct_constructor_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
+    /// Semantic action for non-terminal 'StructConstructorItem'
+    fn struct_constructor_item(&mut self, arg: &StructConstructorItem) {
+        self.align_start(align_kind::IDENTIFIER);
+        self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.align_start(align_kind::EXPRESSION);
+        self.expression(&arg.expression);
+        self.align_finish(align_kind::EXPRESSION);
+    }
+
     /// Semantic action for non-terminal 'ConcatenationList'
     fn concatenation_list(&mut self, arg: &ConcatenationList) {
         if self.multi_line() {
