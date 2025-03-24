@@ -31,12 +31,10 @@ name = "main"
 version = "0.1.0"
 
 [dependencies]
-"file://{}/sub1" = "0.1.0"
-"file://{}/sub2" = "0.1.0"
-"file://{}/sub3" = [
-    {version = "0.2.0", name = "sub3_2"},
-    {version = "1.0.0", name = "sub3_3"},
-]
+sub1   = {git = "file://{}/sub1", version = "0.1.0"}
+sub2   = {git = "file://{}/sub2", version = "0.1.0"}
+sub3_2 = {git = "file://{}/sub3", project = "sub3", version = "0.2.0"}
+sub3_3 = {git = "file://{}/sub3", project = "sub3", version = "1.0.0"}
 "#;
 
 const SUB1_TOML: &'static str = r#"
@@ -49,7 +47,7 @@ bump_commit = true
 publish_commit = true
 
 [dependencies]
-"file://{}/sub3" = "0.1.0"
+sub2 = {git = "file://{}/sub2", version = "1.0.0"}
 "#;
 
 const SUB2_TOML: &'static str = r#"
@@ -64,7 +62,7 @@ publish_commit = true
 
 const SUB3_TOML: &'static str = r#"
 [project]
-name = "sub2"
+name = "sub3"
 version = "0.1.0"
 
 [publish]
@@ -72,7 +70,7 @@ bump_commit = true
 publish_commit = true
 
 [dependencies]
-"file://{}/sub1" = "0.1.0"
+sub1 = {git = "file://{}/sub1", version = "0.1.0"}
 "#;
 
 fn create_metadata_simple() -> (Metadata, TempDir) {
@@ -260,11 +258,26 @@ fn lockfile() {
     assert!(sub2_0.is_some());
     assert!(sub3_2.is_some());
     assert!(sub3_3.is_some());
-    assert_eq!(sub1.unwrap().version, Version::parse("0.1.1").unwrap());
-    assert_eq!(sub2.unwrap().version, Version::parse("0.1.1").unwrap());
-    assert_eq!(sub2_0.unwrap().version, Version::parse("0.1.1").unwrap());
-    assert_eq!(sub3_2.unwrap().version, Version::parse("0.2.0").unwrap());
-    assert_eq!(sub3_3.unwrap().version, Version::parse("1.0.0").unwrap());
+    assert_eq!(
+        sub1.unwrap().source.get_version(),
+        Some(&Version::parse("0.1.1").unwrap())
+    );
+    assert_eq!(
+        sub2.unwrap().source.get_version(),
+        Some(&Version::parse("0.1.1").unwrap())
+    );
+    assert_eq!(
+        sub2_0.unwrap().source.get_version(),
+        Some(&Version::parse("1.0.0").unwrap())
+    );
+    assert_eq!(
+        sub3_2.unwrap().source.get_version(),
+        Some(&Version::parse("0.2.0").unwrap())
+    );
+    assert_eq!(
+        sub3_3.unwrap().source.get_version(),
+        Some(&Version::parse("1.0.0").unwrap())
+    );
 
     let _ = lockfile.clear_cache();
 }

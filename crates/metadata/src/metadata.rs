@@ -48,7 +48,7 @@ pub struct Metadata {
     #[serde(default)]
     pub test: Test,
     #[serde(default)]
-    pub dependencies: HashMap<UrlPath, Dependency>,
+    pub dependencies: HashMap<String, Dependency>,
     #[serde(skip)]
     pub metadata_path: PathBuf,
     #[serde(skip)]
@@ -349,14 +349,15 @@ impl FromStr for Metadata {
 #[serde(deny_unknown_fields)]
 pub enum Dependency {
     Version(VersionReq),
-    Single(DependencyEntry),
-    Multi(Vec<DependencyEntry>),
+    Entry(DependencyEntry),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DependencyEntry {
-    pub version: VersionReq,
-    pub name: Option<String>,
+    pub version: Option<VersionReq>,
+    pub git: Option<UrlPath>,
+    pub github: Option<String>,
+    pub project: Option<String>,
     pub path: Option<PathBuf>,
 }
