@@ -112,6 +112,17 @@ impl Metadata {
             metadata.pubfile = Pubfile::load(&metadata.pubfile_path)?;
         }
 
+        let build_info = metadata.project_build_info_path();
+        if !build_info.exists() {
+            let ret = fs::create_dir(&build_info);
+            if let Err(x) = ret {
+                // Ignore AlreadyExists error because it is possible at parallel build
+                if x.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(MetadataError::FileIO(x));
+                }
+            }
+        }
+
         debug!(
             "Loaded metadata ({})",
             metadata.metadata_path.to_string_lossy()
@@ -318,6 +329,10 @@ version = "0.1.0""###
 
     pub fn project_dependencies_path(&self) -> PathBuf {
         self.project_path().join("dependencies")
+    }
+
+    pub fn project_build_info_path(&self) -> PathBuf {
+        self.project_path().join(".build")
     }
 
     pub fn filelist_path(&self) -> PathBuf {
