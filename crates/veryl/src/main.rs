@@ -81,6 +81,9 @@ fn main() -> Result<ExitCode> {
         }
     };
 
+    let build_info = metadata.project_build_info_path();
+    let build_lock = veryl_path::lock_dir(&build_info)?;
+
     let now = Instant::now();
 
     let ret = match opt.command {
@@ -97,6 +100,8 @@ fn main() -> Result<ExitCode> {
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata)?,
         Commands::Test(x) => cmd_test::CmdTest::new(x).exec(&mut metadata)?,
     };
+
+    veryl_path::unlock_dir(build_lock)?;
 
     let elapsed_time = now.elapsed();
     debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());

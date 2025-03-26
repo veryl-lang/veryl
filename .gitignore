@@ -19,3 +19,4 @@ veryl_testcase.*
 /crates/metadata/std/
 /crates/std/veryl/*.f
 /crates/std/veryl/target/
+.build/
