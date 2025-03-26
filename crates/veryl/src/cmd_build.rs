@@ -112,6 +112,7 @@ impl CmdBuild {
                 file.flush().into_diagnostic()?;
 
                 debug!("Output file ({})", dst.to_string_lossy());
+                metadata.build_info.generated_files.insert(dst);
 
                 if metadata.build.sourcemap_target != SourceMapTarget::None {
                     let source_map = emitter.source_map();
@@ -133,6 +134,7 @@ impl CmdBuild {
                     file.flush().into_diagnostic()?;
 
                     debug!("Output map ({})", map.to_string_lossy());
+                    metadata.build_info.generated_files.insert(map);
                 }
             }
         }
@@ -160,7 +162,7 @@ impl CmdBuild {
 
     fn gen_filelist(
         &self,
-        metadata: &Metadata,
+        metadata: &mut Metadata,
         paths: &[PathSet],
         temp_dir: Option<TempDir>,
         include_tests: bool,
@@ -183,7 +185,6 @@ impl CmdBuild {
                 text.push_str(&fs::read_to_string(&dst).into_diagnostic()?);
             }
 
-            debug!("Output file ({})", target_path.to_string_lossy());
             let mut file = OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -192,6 +193,12 @@ impl CmdBuild {
                 .into_diagnostic()?;
             file.write_all(text.as_bytes()).into_diagnostic()?;
             file.flush().into_diagnostic()?;
+
+            debug!("Output file ({})", target_path.to_string_lossy());
+            metadata
+                .build_info
+                .generated_files
+                .insert(target_path.clone());
 
             self.gen_filelist_line(metadata, &target_path)?
         } else {
@@ -203,15 +210,17 @@ impl CmdBuild {
             text
         };
 
-        info!("Output filelist ({})", filelist_path.to_string_lossy());
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(filelist_path)
+            .open(&filelist_path)
             .into_diagnostic()?;
         file.write_all(text.as_bytes()).into_diagnostic()?;
         file.flush().into_diagnostic()?;
+
+        info!("Output filelist ({})", filelist_path.to_string_lossy());
+        metadata.build_info.generated_files.insert(filelist_path);
 
         Ok(())
     }

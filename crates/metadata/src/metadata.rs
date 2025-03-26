@@ -1,4 +1,5 @@
 use crate::build::{Build, Target};
+use crate::build_info::BuildInfo;
 use crate::doc::Doc;
 use crate::format::Format;
 use crate::git::Git;
@@ -59,6 +60,8 @@ pub struct Metadata {
     pub lockfile_path: PathBuf,
     #[serde(skip)]
     pub lockfile: Lockfile,
+    #[serde(skip)]
+    pub build_info: BuildInfo,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -112,15 +115,20 @@ impl Metadata {
             metadata.pubfile = Pubfile::load(&metadata.pubfile_path)?;
         }
 
-        let build_info = metadata.project_build_info_path();
-        if !build_info.exists() {
-            let ret = fs::create_dir(&build_info);
+        let dot_build = metadata.project_dot_build_path();
+        if !dot_build.exists() {
+            let ret = fs::create_dir(&dot_build);
             if let Err(x) = ret {
                 // Ignore AlreadyExists error because it is possible at parallel build
                 if x.kind() != std::io::ErrorKind::AlreadyExists {
                     return Err(MetadataError::FileIO(x));
                 }
             }
+        }
+
+        let build_info = metadata.project_build_info_path();
+        if build_info.exists() {
+            metadata.build_info = BuildInfo::load(&build_info)?;
         }
 
         debug!(
@@ -246,6 +254,11 @@ impl Metadata {
         Ok(())
     }
 
+    pub fn save_build_info(&mut self) -> Result<(), MetadataError> {
+        let build_info = self.project_build_info_path();
+        self.build_info.save(&build_info)
+    }
+
     pub fn paths<T: AsRef<Path>>(
         &mut self,
         files: &[T],
@@ -331,8 +344,12 @@ version = "0.1.0""###
         self.project_path().join("dependencies")
     }
 
-    pub fn project_build_info_path(&self) -> PathBuf {
+    pub fn project_dot_build_path(&self) -> PathBuf {
         self.project_path().join(".build")
+    }
+
+    pub fn project_build_info_path(&self) -> PathBuf {
+        self.project_dot_build_path().join("info.toml")
     }
 
     pub fn filelist_path(&self) -> PathBuf {

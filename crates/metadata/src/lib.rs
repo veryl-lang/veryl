@@ -1,4 +1,5 @@
 mod build;
+mod build_info;
 mod doc;
 mod format;
 mod git;

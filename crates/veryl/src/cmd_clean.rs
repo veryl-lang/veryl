@@ -14,15 +14,10 @@ impl CmdClean {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let paths = metadata.paths::<&str>(&[], true)?;
-        for path in &paths {
-            if path.dst.exists() {
-                info!("Removing file ({})", path.dst.to_string_lossy());
-                fs::remove_file(&path.dst).into_diagnostic()?;
-            }
-            if path.map.exists() {
-                info!("Removing file ({})", path.map.to_string_lossy());
-                fs::remove_file(&path.map).into_diagnostic()?;
+        for path in metadata.build_info.generated_files.iter() {
+            if path.exists() {
+                info!("Removing file ({})", path.to_string_lossy());
+                fs::remove_file(path).into_diagnostic()?;
             }
         }
 
@@ -35,17 +30,14 @@ impl CmdClean {
             fs::remove_dir_all(&project_dependencies_path).into_diagnostic()?;
         }
 
-        let filelist_path = metadata.filelist_path();
-        if filelist_path.exists() {
-            info!("Removing file ({})", filelist_path.to_string_lossy());
-            fs::remove_file(&filelist_path).into_diagnostic()?;
-        }
-
         let doc_path = metadata.doc_path();
         if doc_path.exists() {
             info!("Removing dir  ({})", doc_path.to_string_lossy());
             fs::remove_dir_all(&doc_path).into_diagnostic()?;
         }
+
+        metadata.build_info.generated_files.clear();
+        metadata.save_build_info()?;
 
         Ok(true)
     }

@@ -69,20 +69,21 @@ fn main() -> Result<ExitCode> {
         .apply()
         .into_diagnostic()?;
 
-    let mut metadata = match opt.command {
+    let (mut metadata, dot_build_lock) = match opt.command {
         Commands::New(_) | Commands::Init(_) => {
             // dummy metadata
             let metadata = Metadata::create_default_toml("dummy").unwrap();
-            Metadata::from_str(&metadata)?
+            (Metadata::from_str(&metadata)?, None)
         }
         _ => {
             let metadata_path = Metadata::search_from_current()?;
-            Metadata::load(metadata_path)?
+            let metadata = Metadata::load(metadata_path)?;
+
+            let dot_build = metadata.project_dot_build_path();
+            let dot_build_lock = veryl_path::lock_dir(&dot_build)?;
+            (metadata, Some(dot_build_lock))
         }
     };
-
-    let build_info = metadata.project_build_info_path();
-    let build_lock = veryl_path::lock_dir(&build_info)?;
 
     let now = Instant::now();
 
@@ -91,7 +92,11 @@ fn main() -> Result<ExitCode> {
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec()?,
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata, opt.quiet)?,
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata)?,
-        Commands::Build(x) => cmd_build::CmdBuild::new(x).exec(&mut metadata, false, opt.quiet)?,
+        Commands::Build(x) => {
+            let ret = cmd_build::CmdBuild::new(x).exec(&mut metadata, false, opt.quiet);
+            metadata.save_build_info()?;
+            ret?
+        }
         Commands::Clean(x) => cmd_clean::CmdClean::new(x).exec(&mut metadata)?,
         Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&mut metadata)?,
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&mut metadata)?,
@@ -101,7 +106,9 @@ fn main() -> Result<ExitCode> {
         Commands::Test(x) => cmd_test::CmdTest::new(x).exec(&mut metadata)?,
     };
 
-    veryl_path::unlock_dir(build_lock)?;
+    if let Some(dot_build_lock) = dot_build_lock {
+        veryl_path::unlock_dir(dot_build_lock)?;
+    }
 
     let elapsed_time = now.elapsed();
     debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
