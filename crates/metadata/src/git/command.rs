@@ -29,21 +29,28 @@ const GIT_COMMAND: &str = "git.exe";
 const GIT_COMMAND: &str = "git";
 
 impl Git {
-    #[cfg(test)]
+    pub fn exists() -> bool {
+        which::which(GIT_COMMAND).is_ok()
+    }
+
     pub fn init(path: &Path) -> Result<Self, MetadataError> {
-        let output = Command::new(GIT_COMMAND)
-            .arg("init")
-            .current_dir(path)
-            .output()?;
-        if !output.status.success() {
-            let context = String::from_utf8_lossy(&output.stderr).to_string();
-            let msg = format!("failed to init: {}", path.to_string_lossy());
-            return Err(GitCommandError { msg, context }.into());
+        let ret = Git {
+            path: path.to_path_buf(),
+        };
+
+        if !ret.is_git()? {
+            let output = Command::new(GIT_COMMAND)
+                .arg("init")
+                .current_dir(path)
+                .output()?;
+            if !output.status.success() {
+                let context = String::from_utf8_lossy(&output.stderr).to_string();
+                let msg = format!("failed to init: {}", path.to_string_lossy());
+                return Err(GitCommandError { msg, context }.into());
+            }
         }
 
-        Ok(Git {
-            path: path.to_path_buf(),
-        })
+        Ok(ret)
     }
 
     pub fn open(path: &Path) -> Result<Self, MetadataError> {
@@ -155,6 +162,15 @@ impl Git {
         let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         Ok(revision)
+    }
+
+    pub fn is_git(&self) -> Result<bool, MetadataError> {
+        let output = Command::new(GIT_COMMAND)
+            .arg("status")
+            .arg("-s")
+            .current_dir(&self.path)
+            .output()?;
+        Ok(output.status.success())
     }
 
     pub fn is_clean(&self) -> Result<bool, MetadataError> {

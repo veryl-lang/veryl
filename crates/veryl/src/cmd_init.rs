@@ -3,7 +3,7 @@ use log::info;
 use miette::{IntoDiagnostic, Result, bail};
 use std::fs::File;
 use std::io::Write;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Git, Metadata};
 
 pub struct CmdInit {
     opt: OptInit,
@@ -35,6 +35,19 @@ impl CmdInit {
             let mut file = File::create(toml_path).into_diagnostic()?;
             write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
+
+            let gitignore = Metadata::create_default_gitignore();
+            let gitignore_path = self.opt.path.join(".gitignore");
+
+            if Git::exists() {
+                if !gitignore_path.exists() {
+                    let mut file = File::create(&gitignore_path).into_diagnostic()?;
+                    write!(file, "{gitignore}").into_diagnostic()?;
+                    file.flush().into_diagnostic()?;
+                }
+
+                Git::init(&self.opt.path)?;
+            }
 
             info!("Created \"{}\" project", name);
         } else {
