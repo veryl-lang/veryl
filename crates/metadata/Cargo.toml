@@ -29,6 +29,7 @@ veryl-parser   = {version = "0.14.2-rc.1", path = "../parser"}
 veryl-path     = {version = "0.14.2-rc.1", path = "../path"}
 veryl-std      = {version = "0.14.2-rc.1", path = "../std"}
 walkdir        = {workspace = true}
+which          = "7.0"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 miette         = {workspace = true, features = ["fancy-no-syscall"]}

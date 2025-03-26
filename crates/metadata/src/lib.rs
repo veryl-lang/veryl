@@ -17,6 +17,7 @@ mod tests;
 pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, SourceMapTarget, Target};
 pub use doc::Doc;
 pub use format::Format;
+pub use git::Git;
 pub use lint::{Case, Lint};
 pub use lockfile::{LockSource, Lockfile};
 pub use metadata::{BumpKind, Metadata, UrlPath};

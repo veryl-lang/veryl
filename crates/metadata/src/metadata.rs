@@ -336,6 +336,11 @@ version = "0.1.0""###
         ))
     }
 
+    pub fn create_default_gitignore() -> &'static str {
+        r#".build/
+"#
+    }
+
     pub fn project_path(&self) -> PathBuf {
         self.metadata_path.parent().unwrap().to_path_buf()
     }
