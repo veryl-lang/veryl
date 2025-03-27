@@ -514,7 +514,13 @@ impl Emitter {
                     self.range_item(&x.case_condition.range_item);
                     for x in &x.case_condition.case_condition_list {
                         self.comma(&x.comma);
-                        self.space(1);
+                        if x.comma.line() != x.range_item.line() {
+                            self.newline();
+                            self.align_finish(align_kind::EXPRESSION);
+                            self.align_start(align_kind::EXPRESSION);
+                        } else {
+                            self.space(1);
+                        }
                         self.range_item(&x.range_item);
                     }
                 }
@@ -562,7 +568,13 @@ impl Emitter {
                     self.inside_element_operation(lhs, &x.case_condition.range_item);
                     for x in &x.case_condition.case_condition_list {
                         self.comma(&x.comma);
-                        self.space(1);
+                        if x.comma.line() != x.range_item.line() {
+                            self.newline();
+                            self.align_finish(align_kind::EXPRESSION);
+                            self.align_start(align_kind::EXPRESSION);
+                        } else {
+                            self.space(1);
+                        }
                         self.inside_element_operation(lhs, &x.range_item);
                     }
                 }
@@ -2678,7 +2690,13 @@ impl VerylWalker for Emitter {
                 self.expression(&x.switch_condition.expression);
                 for x in &x.switch_condition.switch_condition_list {
                     self.comma(&x.comma);
-                    self.space(1);
+                    if x.comma.line() != x.expression.line() {
+                        self.newline();
+                        self.align_finish(align_kind::EXPRESSION);
+                        self.align_start(align_kind::EXPRESSION);
+                    } else {
+                        self.space(1);
+                    }
                     self.expression(&x.expression);
                 }
             }
