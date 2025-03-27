@@ -610,3 +610,9 @@ impl FirstToken for IfExpression {
         self.r#if.if_token.token
     }
 }
+
+impl FirstToken for RangeItem {
+    fn token(&self) -> Token {
+        self.range.expression.token()
+    }
+}

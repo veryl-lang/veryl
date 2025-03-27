@@ -15,10 +15,12 @@ module veryl_testcase_Module16;
                    a = 1;
                    a = 1;
                end //
-            3, 4   : a = 1;
-            [5:7  ]: a = 1;
-            y - 1  : a = 1;
-            default: a = 1;
+            3, 4           : a = 1;
+            [5:7          ]: a = 1;
+            y - 1          : a = 1;
+            10, 11, 12, 13,
+            14, 15, 16, 17 : a = 1;
+            default        : a = 1;
         endcase
     end
 
@@ -31,8 +33,11 @@ module veryl_testcase_Module16;
                         b = 1;
                         b = 1;
                     end //
-            z == 3, z == 4: b = 1;
-            default       : b = 1;
+            z == 3, z == 4                                 : b = 1;
+            z == 3'd05, z == 3'd06, z == 3'd07, z == 4'd08,
+            z == 4'd09, z == 4'd10, z == 4'd11, z == 4'd12,
+            z == 4'd13, z == 4'd14, z == 4'd15, z == 5'd16 : b = 1;
+            default                                        : b = 1;
         endcase
     end
 endmodule
