@@ -13,6 +13,7 @@ pub mod namespace;
 pub mod namespace_table;
 pub mod range_table;
 pub mod reference_table;
+pub mod sv_system_function;
 pub mod symbol;
 pub mod symbol_path;
 pub mod symbol_table;

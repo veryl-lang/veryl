@@ -4905,7 +4905,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::ModportFunctionMember(_)
         | SymbolKind::Genvar
         | SymbolKind::Namespace
-        | SymbolKind::SystemFunction => ret.push_str(&token_text),
+        | SymbolKind::SystemFunction(_) => ret.push_str(&token_text),
         SymbolKind::AliasModule(_)
         | SymbolKind::AliasInterface(_)
         | SymbolKind::AliasPackage(_)

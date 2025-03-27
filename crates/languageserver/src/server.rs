@@ -404,7 +404,7 @@ impl Server {
                     VerylSymbolKind::ModportFunctionMember(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
                     VerylSymbolKind::Namespace => SymbolKind::NAMESPACE,
-                    VerylSymbolKind::SystemFunction => SymbolKind::FUNCTION,
+                    VerylSymbolKind::SystemFunction(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::GenericParameter(_) => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::GenericInstance(_) => SymbolKind::MODULE,
                     VerylSymbolKind::ClockDomain => SymbolKind::TYPE_PARAMETER,
@@ -1043,7 +1043,7 @@ fn completion_symbol(
                     let text = format!("{}{}", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::VARIABLE))
                 }
-                VerylSymbolKind::Function(_) | VerylSymbolKind::SystemFunction => {
+                VerylSymbolKind::Function(_) | VerylSymbolKind::SystemFunction(_) => {
                     let text = format!("{}{}", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::FUNCTION))
                 }

@@ -2876,6 +2876,22 @@ fn unused_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnusedVariable { .. }));
+
+    let code = r#"
+    module ModuleC {
+        var memory: logic<32>[32];
+        var _d    : logic<32>    ;
+
+        initial {
+            $readmemh("calc.bin", memory);
+        }
+
+        assign _d = memory[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

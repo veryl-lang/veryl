@@ -66,6 +66,7 @@ impl CheckVarRef {
         if let Ok(func) = symbol_table::resolve(identifier) {
             let ports = match func.found.kind {
                 SymbolKind::Function(x) => x.ports,
+                SymbolKind::SystemFunction(x) => x.ports,
                 SymbolKind::ModportFunctionMember(x) => symbol_table::get(x.function)
                     .map(|x| {
                         if let SymbolKind::Function(x) = x.kind {

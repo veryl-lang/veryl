@@ -253,7 +253,7 @@ impl VerylGrammarTrait for CheckExpression {
                     // Only generic const or globally visible identifier can be used as port default value
                     if self.in_input_port_default_value {
                         let port_default_available = match &rr.found.kind {
-                            SymbolKind::SystemFunction => true,
+                            SymbolKind::SystemFunction(_) => true,
                             SymbolKind::GenericParameter(x) => {
                                 matches!(x.bound, GenericBoundKind::Const)
                             }
