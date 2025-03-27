@@ -718,6 +718,24 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(mixed_function_argument),
+        help("fix function arguments"),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mixed_function_argument"
+        )
+    )]
+    #[error(
+        "positional arguments and named arguments are mixed. Both of them can't be used at the same time"
+    )]
+    MixedFunctionArgument {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(sv_keyword_usage),
         help("Change the identifier to a non-SystemVerilog keyword"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_keyword_usage")
@@ -1639,6 +1657,13 @@ impl AnalyzerError {
         AnalyzerError::MissingPort {
             name: name.to_string(),
             port: port.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn mixed_function_argument(token: &TokenRange) -> Self {
+        AnalyzerError::MixedFunctionArgument {
             input: source(token),
             error_location: token.into(),
         }

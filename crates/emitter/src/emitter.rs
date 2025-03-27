@@ -66,6 +66,7 @@ pub struct Emitter {
     in_scalar_type: bool,
     in_expression: Vec<()>,
     in_attribute: bool,
+    in_named_argument: Vec<bool>,
     signed: bool,
     default_clock: Option<SymbolId>,
     default_reset: Option<SymbolId>,
@@ -111,6 +112,7 @@ impl Default for Emitter {
             in_scalar_type: false,
             in_expression: Vec::new(),
             in_attribute: false,
+            in_named_argument: Vec::new(),
             signed: false,
             default_clock: None,
             default_reset: None,
@@ -499,6 +501,12 @@ impl Emitter {
     fn align_dummy_location(&mut self, kind: usize, loc: Option<Location>) {
         if self.mode == Mode::Align {
             self.aligner.aligns[kind].dummy_location(loc.unwrap());
+        }
+    }
+
+    fn align_reset(&mut self) {
+        if self.mode == Mode::Align {
+            self.aligner.finish_group();
         }
     }
 
@@ -1323,7 +1331,21 @@ impl Emitter {
             unreachable!()
         };
 
-        self.l_paren(&function_call.l_paren);
+        let in_named_argument = if let Some(ref x) = function_call.function_call_opt {
+            let list: Vec<_> = x.argument_list.as_ref().into();
+            list.iter().any(|x| x.argument_item_opt.is_some())
+        } else {
+            false
+        };
+
+        self.in_named_argument.push(in_named_argument);
+        if in_named_argument {
+            self.token_will_push(&function_call.l_paren.l_paren_token);
+            self.newline_push();
+            self.align_reset();
+        } else {
+            self.l_paren(&function_call.l_paren);
+        }
         let n_args = if let Some(ref x) = function_call.function_call_opt {
             self.argument_list(&x.argument_list);
             1 + x.argument_list.argument_list_list.len()
@@ -1344,7 +1366,11 @@ impl Emitter {
         }
 
         self.generic_map.pop();
+        if in_named_argument {
+            self.newline_pop();
+        }
         self.r_paren(&function_call.r_paren);
+        self.in_named_argument.pop();
     }
 
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
@@ -2127,11 +2153,32 @@ impl VerylWalker for Emitter {
         self.argument_item(&arg.argument_item);
         for x in &arg.argument_list_list {
             self.comma(&x.comma);
-            self.space(1);
+            if *self.in_named_argument.last().unwrap() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
             self.argument_item(&x.argument_item);
         }
-        if let Some(ref x) = arg.argument_list_opt {
-            self.comma(&x.comma);
+    }
+
+    /// Semantic action for non-terminal 'ArgumentItem'
+    fn argument_item(&mut self, arg: &ArgumentItem) {
+        if let Some(ref x) = arg.argument_item_opt {
+            self.str(".");
+            self.align_start(align_kind::IDENTIFIER);
+            // Directly emittion because named argument can't be resolved and emitted by symbol_string
+            let token = VerylToken::new(arg.argument_expression.expression.token());
+            self.token(&token);
+            self.align_finish(align_kind::IDENTIFIER);
+            self.space(1);
+            self.str("(");
+            self.align_start(align_kind::EXPRESSION);
+            self.expression(&x.expression);
+            self.align_finish(align_kind::EXPRESSION);
+            self.str(")");
+        } else {
+            self.argument_expression(&arg.argument_expression);
         }
     }
 

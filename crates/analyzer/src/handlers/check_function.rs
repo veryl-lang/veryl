@@ -106,8 +106,19 @@ impl VerylGrammarTrait for CheckFunction {
                         x.identifier_factor_opt_group.as_ref()
                     {
                         if let Some(ref x) = x.function_call.function_call_opt {
-                            args += 1;
-                            args += x.argument_list.argument_list_list.len();
+                            let list: Vec<_> = x.argument_list.as_ref().into();
+
+                            let positional_only =
+                                list.iter().all(|x| x.argument_item_opt.is_none());
+                            let named_only = list.iter().all(|x| x.argument_item_opt.is_some());
+
+                            if !positional_only && !named_only {
+                                self.errors.push(AnalyzerError::mixed_function_argument(
+                                    &arg.expression_identifier.as_ref().into(),
+                                ));
+                            }
+
+                            args += list.len();
                         }
                     }
                 }

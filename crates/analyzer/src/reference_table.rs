@@ -38,6 +38,10 @@ pub enum ReferenceCandidate {
         arg: StructConstructorItem,
         r#type: ExpressionIdentifier,
     },
+    NamedArgument {
+        arg: ScopedIdentifier,
+        function: ExpressionIdentifier,
+    },
 }
 
 impl From<&HierarchicalIdentifier> for ReferenceCandidate {
@@ -414,6 +418,28 @@ impl ReferenceTable {
                                 self.push_resolve_error(
                                     err,
                                     &arg.identifier.as_ref().into(),
+                                    None,
+                                    Some(symbol.found.token),
+                                );
+                            }
+                        }
+                    }
+                }
+                ReferenceCandidate::NamedArgument { arg, function } => {
+                    if let Ok(symbol) = symbol_table::resolve(function) {
+                        let namespace = symbol.found.inner_namespace();
+                        let symbol_path: SymbolPath = arg.into();
+
+                        match symbol_table::resolve((&symbol_path, &namespace)) {
+                            Ok(symbol) => {
+                                for id in symbol.full_path {
+                                    symbol_table::add_reference(id, &arg.identifier().token);
+                                }
+                            }
+                            Err(err) => {
+                                self.push_resolve_error(
+                                    err,
+                                    &arg.into(),
                                     None,
                                     Some(symbol.found.token),
                                 );

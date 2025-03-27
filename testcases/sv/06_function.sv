@@ -25,6 +25,7 @@ module veryl_testcase_Module06;
     logic [ParamX-1:0] c;
     logic [ParamX-1:0] d;
     logic [ParamX-1:0] e;
+    logic [ParamX-1:0] f;
 
     // function call
     always_comb c = FuncA(a, b);
@@ -36,5 +37,18 @@ module veryl_testcase_Module06;
 
     // system function call
     always_comb e = $clog2(a);
+
+    // function call with named args
+    function automatic logic FuncB(
+        input var logic aaa,
+        input var logic bb 
+    ) ;
+        return aaa + bb;
+    endfunction
+
+    always_comb f = FuncB(
+        .aaa (a + 11),
+        .bb  (b + 2 )
+    );
 endmodule
 //# sourceMappingURL=../map/testcases/sv/06_function.sv.map
