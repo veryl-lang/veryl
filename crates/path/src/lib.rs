@@ -94,3 +94,12 @@ pub fn lock_dir<T: AsRef<Path>>(_path: T) -> Result<(), PathError> {
 pub fn unlock_dir(_lock: ()) -> Result<(), PathError> {
     Ok(())
 }
+
+pub fn ignore_already_exists(x: Result<(), std::io::Error>) -> Result<(), std::io::Error> {
+    if let Err(x) = x {
+        if x.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(x);
+        }
+    }
+    Ok(())
+}

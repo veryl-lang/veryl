@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
-use veryl_path::PathSet;
+use veryl_path::{PathSet, ignore_already_exists};
 
 #[derive(Clone, Copy, Debug)]
 pub enum BumpKind {
@@ -117,13 +117,7 @@ impl Metadata {
 
         let dot_build = metadata.project_dot_build_path();
         if !dot_build.exists() {
-            let ret = fs::create_dir(&dot_build);
-            if let Err(x) = ret {
-                // Ignore AlreadyExists error because it is possible at parallel build
-                if x.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(MetadataError::FileIO(x));
-                }
-            }
+            ignore_already_exists(fs::create_dir(&dot_build))?;
         }
 
         let build_info = metadata.project_build_info_path();
@@ -308,7 +302,7 @@ impl Metadata {
 
         let base_dst = self.project_dependencies_path();
         if !base_dst.exists() {
-            fs::create_dir(&base_dst)?;
+            ignore_already_exists(fs::create_dir(&base_dst))?;
         }
 
         if !self.build.exclude_std {

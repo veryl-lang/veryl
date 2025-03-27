@@ -1,7 +1,7 @@
 use rust_embed::Embed;
 use std::fs;
 use std::path::{Path, PathBuf};
-use veryl_path::{PathError, PathSet};
+use veryl_path::{PathError, PathSet, ignore_already_exists};
 
 include!(concat!(env!("OUT_DIR"), "/std_hash.rs"));
 
@@ -18,7 +18,7 @@ pub fn expand() -> Result<(), PathError> {
     let std_dir = std_dir();
 
     if !std_dir.exists() {
-        fs::create_dir_all(&std_dir)?;
+        ignore_already_exists(fs::create_dir_all(&std_dir))?;
 
         let lock = veryl_path::lock_dir(&std_dir)?;
 
