@@ -280,7 +280,7 @@ group_to_item!(Description);
 group_to_item!(StatementBlock);
 
 impl Expression {
-    fn unwrap_factor(&self) -> Option<&Factor> {
+    pub fn unwrap_factor(&self) -> Option<&Factor> {
         if !self.expression_list.is_empty() {
             return None;
         }
@@ -346,6 +346,16 @@ impl Expression {
         }
 
         Some(exp.factor.as_ref())
+    }
+
+    pub fn unwrap_identifier(&self) -> Option<&ExpressionIdentifier> {
+        if let Some(Factor::IdentifierFactor(x)) = self.unwrap_factor() {
+            if x.identifier_factor.identifier_factor_opt.is_none() {
+                return Some(x.identifier_factor.expression_identifier.as_ref());
+            }
+        }
+
+        None
     }
 
     pub fn is_assignable(&self) -> bool {

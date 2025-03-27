@@ -101,7 +101,6 @@ mod formatter {
         let _ = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
         let mut formatter = Formatter::new(&metadata);
         formatter.format(&ret.veryl);
-
         assert_eq!(original, formatter.as_str());
     }
 

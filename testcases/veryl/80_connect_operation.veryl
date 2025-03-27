@@ -1,0 +1,91 @@
+package Package80 {
+    enum Command {
+        WRITE,
+        READ,
+    }
+
+    enum Status {
+        OK,
+        ERROR,
+    }
+}
+
+interface Interface80A {
+    import Package80::Command;
+
+    var command_ready: logic  ;
+    var command_valid: logic  ;
+    var command      : Command;
+
+    modport mp {
+        command_ready: output,
+        command_valid: input ,
+        command      : input ,
+    }
+}
+
+interface Interface80B {
+    import Package80::Status;
+
+    var status_ready: logic ;
+    var status_valid: logic ;
+    var status      : Status;
+
+    modport mp {
+        status_ready: input ,
+        status_valid: output,
+        status      : output,
+    }
+}
+
+interface Interface80C {
+    import Package80::Command;
+
+    var command_ready: logic  ;
+    var command_valid: logic  ;
+    var command      : Command;
+    var status_ready : logic  ;
+    var status_valid : logic  ;
+    var status       : logic  ;
+
+    modport master_mp {
+        command_ready: input ,
+        command_valid: output,
+        command      : output,
+        status_ready : output,
+        status_valid : input ,
+        status       : input ,
+    }
+
+    modport slave_mp {
+        ..converse(master_mp)
+    }
+}
+
+module Module80A (
+    command_if: modport Interface80A::mp,
+    status_if : modport Interface80B::mp,
+) {
+    inst bus_if: Interface80C;
+
+    always_comb {
+        command_if <> bus_if.master_mp;
+        status_if  <> bus_if.master_mp;
+    }
+
+    always_comb {
+        bus_if.slave_mp <> 0;
+    }
+}
+
+module Module80B (
+    command_if: modport Interface80A::mp,
+    status_if : modport Interface80B::mp,
+) {
+    inst bus_if: Interface80C;
+
+    connect command_if <> bus_if.master_mp;
+    connect status_if  <> bus_if.master_mp;
+
+    connect bus_if.slave_mp <> 0;
+}

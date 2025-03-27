@@ -83,6 +83,13 @@ pub trait VerylWalker {
         after!(self, assignment_operator, arg);
     }
 
+    /// Semantic action for non-terminal 'DiamondOperator'
+    fn diamond_operator(&mut self, arg: &DiamondOperator) {
+        before!(self, diamond_operator, arg);
+        self.veryl_token(&arg.diamond_operator_token);
+        after!(self, diamond_operator, arg);
+    }
+
     /// Semantic action for non-terminal 'Operator01'
     fn operator01(&mut self, arg: &Operator01) {
         before!(self, operator01, arg);
@@ -410,6 +417,13 @@ pub trait VerylWalker {
         before!(self, clock_negedge, arg);
         self.veryl_token(&arg.clock_negedge_token);
         after!(self, clock_negedge, arg);
+    }
+
+    /// Semantic action for non-terminal 'Connect'
+    fn connect(&mut self, arg: &Connect) {
+        before!(self, connect, arg);
+        self.veryl_token(&arg.connect_token);
+        after!(self, connect, arg);
     }
 
     /// Semantic action for non-terminal 'Const'
@@ -1732,6 +1746,9 @@ pub trait VerylWalker {
             AssignmentGroup::AssignmentOperator(x) => {
                 self.assignment_operator(&x.assignment_operator)
             }
+            AssignmentGroup::DiamondOperator(x) => {
+                self.diamond_operator(&x.diamond_operator);
+            }
         }
         self.expression(&arg.expression);
         after!(self, assignment, arg);
@@ -2078,6 +2095,17 @@ pub trait VerylWalker {
         before!(self, assign_concatenation_item, arg);
         self.hierarchical_identifier(&arg.hierarchical_identifier);
         after!(self, assign_concatenation_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'ConnectDeclaration'
+    fn connect_declaration(&mut self, arg: &ConnectDeclaration) {
+        before!(self, connect_declaration, arg);
+        self.connect(&arg.connect);
+        self.hierarchical_identifier(&arg.hierarchical_identifier);
+        self.diamond_operator(&arg.diamond_operator);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+        after!(self, connect_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'ModportDeclaration'
@@ -2950,6 +2978,7 @@ pub trait VerylWalker {
                 self.always_comb_declaration(&x.always_comb_declaration)
             }
             GenerateItem::AssignDeclaration(x) => self.assign_declaration(&x.assign_declaration),
+            GenerateItem::ConnectDeclaration(x) => self.connect_declaration(&x.connect_declaration),
             GenerateItem::FunctionDeclaration(x) => {
                 self.function_declaration(&x.function_declaration)
             }

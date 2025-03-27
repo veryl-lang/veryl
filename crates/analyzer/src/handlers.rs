@@ -1,6 +1,7 @@
 pub mod check_attribute;
 pub mod check_clock_domain;
 pub mod check_clock_reset;
+pub mod check_connect_operation;
 pub mod check_embed_include;
 pub mod check_enum;
 pub mod check_expression;
@@ -21,6 +22,7 @@ pub mod create_type_dag;
 use check_attribute::*;
 use check_clock_domain::*;
 use check_clock_reset::*;
+use check_connect_operation::*;
 use check_embed_include::*;
 use check_enum::*;
 use check_expression::*;
@@ -102,6 +104,7 @@ pub struct Pass2Handlers {
     check_modport: CheckModport,
     check_function: CheckFunction,
     check_msb_lsb: CheckMsbLsb,
+    check_connect_operation: CheckConnectOperation,
     check_var_ref: CheckVarRef,
     check_clock_reset: CheckClockReset,
     check_expression: CheckExpression,
@@ -118,6 +121,7 @@ impl Pass2Handlers {
             check_modport: CheckModport::new(),
             check_function: CheckFunction::new(),
             check_msb_lsb: CheckMsbLsb::new(),
+            check_connect_operation: CheckConnectOperation::new(),
             check_var_ref: CheckVarRef::new(),
             check_clock_reset: CheckClockReset::new(),
             create_type_dag: CreateTypeDag::new(),
@@ -135,6 +139,7 @@ impl Pass2Handlers {
             &mut self.check_modport as &mut dyn Handler,
             &mut self.check_function as &mut dyn Handler,
             &mut self.check_msb_lsb as &mut dyn Handler,
+            &mut self.check_connect_operation as &mut dyn Handler,
             &mut self.check_var_ref as &mut dyn Handler,
             &mut self.check_clock_reset as &mut dyn Handler,
             &mut self.create_type_dag as &mut dyn Handler,
@@ -152,6 +157,7 @@ impl Pass2Handlers {
         ret.append(&mut self.check_modport.errors);
         ret.append(&mut self.check_function.errors);
         ret.append(&mut self.check_msb_lsb.errors);
+        ret.append(&mut self.check_connect_operation.errors);
         ret.append(&mut self.check_var_ref.errors);
         ret.append(&mut self.check_clock_reset.errors);
         ret.append(&mut self.create_type_dag.errors);

@@ -901,6 +901,14 @@ impl Type {
     pub fn can_be_default_reset(&self) -> bool {
         self.kind.is_reset() && self.width.is_empty() && self.array.is_empty()
     }
+
+    pub fn get_user_defined(&self) -> Option<UserDefinedType> {
+        if let TypeKind::UserDefined(x) = &self.kind {
+            return Some(x.clone());
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -967,12 +975,12 @@ impl TypeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserDefinedType {
-    pub path: Vec<StrId>,
+    pub path: GenericSymbolPath,
     pub symbol: Option<SymbolId>,
 }
 
 impl UserDefinedType {
-    fn new(path: Vec<StrId>) -> Self {
+    fn new(path: GenericSymbolPath) -> Self {
         Self { path, symbol: None }
     }
 }
@@ -1045,10 +1053,7 @@ impl fmt::Display for Type {
             TypeKind::Bool => text.push_str("bool"),
             TypeKind::String => text.push_str("string"),
             TypeKind::UserDefined(x) => {
-                text.push_str(&format!("{}", x.path.first().unwrap()));
-                for path in &x.path[1..] {
-                    text.push_str(&format!("::{path}"));
-                }
+                text.push_str(&x.path.to_string());
             }
             TypeKind::AbstractInterface(x) => {
                 if let Some(x) = x {
@@ -1182,19 +1187,9 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                         return Err(());
                     }
 
-                    let mut name = Vec::new();
-                    match x.scoped_identifier.scoped_identifier_group.as_ref() {
-                        syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
-                            name.push(x.identifier.identifier_token.token.text);
-                        }
-                        syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
-                            name.push(x.dollar_identifier.dollar_identifier_token.token.text);
-                        }
-                    }
-                    for x in &x.scoped_identifier.scoped_identifier_list {
-                        name.push(x.identifier.identifier_token.token.text);
-                    }
-                    let kind = TypeKind::UserDefined(UserDefinedType::new(name));
+                    let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                    let r#type = UserDefinedType::new(path);
+                    let kind = TypeKind::UserDefined(r#type);
                     let width: Vec<syntax_tree::Expression> =
                         if let Some(ref x) = x.expression_identifier_opt {
                             x.width.as_ref().into()
@@ -1275,20 +1270,9 @@ impl From<&syntax_tree::ScalarType> for Type {
         }
         match &*value.scalar_type_group {
             syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
-                let ident = x.user_defined_type.scoped_identifier.as_ref();
-                let mut name = Vec::new();
-                match ident.scoped_identifier_group.as_ref() {
-                    syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
-                        name.push(x.identifier.identifier_token.token.text);
-                    }
-                    syntax_tree::ScopedIdentifierGroup::DollarIdentifier(x) => {
-                        name.push(x.dollar_identifier.dollar_identifier_token.token.text);
-                    }
-                }
-                for x in &ident.scoped_identifier_list {
-                    name.push(x.identifier.identifier_token.token.text);
-                }
-                let kind = TypeKind::UserDefined(UserDefinedType::new(name));
+                let path: GenericSymbolPath = x.user_defined_type.scoped_identifier.as_ref().into();
+                let r#type = UserDefinedType::new(path);
+                let kind = TypeKind::UserDefined(r#type);
                 let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.scalar_type_opt {
                     x.width.as_ref().into()
                 } else {
