@@ -615,21 +615,28 @@ impl SymbolTable {
         self.import_list.push(import);
     }
 
-    pub fn apply_import(&mut self) {
-        let import_list: Vec<_> = self.import_list.drain(0..).collect();
-        for import in import_list {
+    pub fn get_imported_symbols(&self) -> Vec<(Import, Symbol)> {
+        let mut ret = Vec::new();
+        for import in &self.import_list {
             if let Ok(symbol) = self.resolve(&import.path.0, &import.path.1) {
-                let symbol = symbol.found;
-                if import.wildcard {
-                    if let Some(pkg) = self.get_package(&symbol, false) {
-                        let target = pkg.inner_namespace();
-                        self.add_imported_package(&target, &import.namespace);
-                    }
-                } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                    self.add_imported_item(symbol.token.id, &import.namespace);
-                }
+                ret.push((import.clone(), symbol.found));
             }
         }
+        ret
+    }
+
+    pub fn apply_import(&mut self, symbols: &[(Import, Symbol)]) {
+        for (import, symbol) in symbols {
+            if import.wildcard {
+                if let Some(pkg) = self.get_package(symbol, false) {
+                    let target = pkg.inner_namespace();
+                    self.add_imported_package(&target, &import.namespace);
+                }
+            } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
+                self.add_imported_item(symbol.token.id, &import.namespace);
+            }
+        }
+        self.import_list.clear();
     }
 
     fn get_package(&self, symbol: &Symbol, include_proto: bool) -> Option<Symbol> {
@@ -1145,13 +1152,14 @@ pub fn add_import(import: Import) {
 
 pub fn apply_import() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import())
+    let symbols = SYMBOL_TABLE.with(|f| f.borrow().get_imported_symbols());
+    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import(&symbols));
 }
 
 pub fn resolve_user_defined() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     let resolved = SYMBOL_TABLE.with(|f| f.borrow().get_user_defined());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved))
+    SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
