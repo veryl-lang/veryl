@@ -478,7 +478,9 @@ FunctionCall: LParen [ ArgumentList ] RParen;
 
 ArgumentList: ArgumentItem { Comma ArgumentItem } [ Comma ];
 
-ArgumentItem: Expression;
+ArgumentItem: ArgumentExpression [ Colon Expression ];
+
+ArgumentExpression: Expression;
 
 StructConstructor: QuoteLBrace StructConstructorList [ DotDot Defaul LParen Expression RParen ] RBrace;
 

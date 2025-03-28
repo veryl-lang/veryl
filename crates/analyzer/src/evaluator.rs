@@ -1422,7 +1422,7 @@ impl Evaluator {
         match name {
             "$clog2" => {
                 if let Some(arg) = args.first() {
-                    let arg = self.expression(&arg.expression);
+                    let arg = self.expression(&arg.argument_expression.expression);
                     if let EvaluatedValue::Fixed(x) = arg.value {
                         let ret = isize::BITS - x.leading_zeros();
                         Evaluated::create_fixed(ret as isize, false, vec![32], vec![])

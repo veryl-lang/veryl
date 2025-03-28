@@ -238,7 +238,9 @@ impl VerylGrammarTrait for CheckVarRef {
                         .unwrap_or(Direction::Input);
                     if !matches!(direction, Direction::Output | Direction::Inout) {
                         self.in_expression.push(true);
-                    } else if let Some(path) = map_assignable_factor(&arg.expression) {
+                    } else if let Some(path) =
+                        map_assignable_factor(&arg.argument_expression.expression)
+                    {
                         self.assign_position.push(AssignPositionType::Statement {
                             token: function_call.token,
                             define_context: function_call.token.into(),

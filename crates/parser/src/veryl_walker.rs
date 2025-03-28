@@ -1215,8 +1215,19 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ArgumentItem'
     fn argument_item(&mut self, arg: &ArgumentItem) {
         before!(self, argument_item, arg);
-        self.expression(&arg.expression);
+        self.argument_expression(&arg.argument_expression);
+        if let Some(ref x) = arg.argument_item_opt {
+            self.colon(&x.colon);
+            self.expression(&x.expression);
+        }
         after!(self, argument_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'ArgumentExpression'
+    fn argument_expression(&mut self, arg: &ArgumentExpression) {
+        before!(self, argument_expression, arg);
+        self.expression(&arg.expression);
+        after!(self, argument_expression, arg);
     }
 
     /// Semantic action for non-terminal 'StructConstructor'

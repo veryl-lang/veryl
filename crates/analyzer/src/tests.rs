@@ -2750,6 +2750,23 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA (
+            a: input logic
+        ) -> logic {
+            return a;
+        }
+
+        let _a: logic = FuncA(
+            aa: 0,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
 }
 
 #[test]
@@ -4881,5 +4898,30 @@ fn check_connect_operation() {
     assert!(matches!(
         errors[0],
         AnalyzerError::InvalidConnectOperand { .. }
+    ));
+}
+
+#[test]
+fn mixed_function_argument() {
+    let code = r#"
+    module ModuleA {
+        function FuncA (
+            a: input logic,
+            b: input logic,
+        ) -> logic {
+            return a + b;
+        }
+
+        let _a: logic = FuncA(
+            0,
+            a: 0,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedFunctionArgument { .. }
     ));
 }

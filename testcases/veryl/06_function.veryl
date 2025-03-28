@@ -24,6 +24,7 @@ module Module06 {
     var c: logic<ParamX>;
     var d: logic<ParamX>;
     var e: logic<ParamX>;
+    var f: logic<ParamX>;
 
     // function call
     assign c = FuncA(a, b);
@@ -35,4 +36,17 @@ module Module06 {
 
     // system function call
     assign e = $clog2(a);
+
+    // function call with named args
+    function FuncB (
+        aaa: input logic,
+        bb : input logic,
+    ) -> logic {
+        return aaa + bb;
+    }
+
+    assign f = FuncB(
+        aaa: a + 11,
+        bb : b + 2 ,
+    );
 }

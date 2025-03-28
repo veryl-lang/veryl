@@ -103,6 +103,8 @@ pub struct CreateSymbolTable {
     file_scope_import_wildcard: Vec<SymbolPathNamespace>,
     is_public: bool,
     identifier_factor_names: Vec<ExpressionIdentifier>,
+    in_named_argument: Vec<bool>,
+    in_argument_expression: Vec<()>,
 }
 
 #[derive(Clone)]
@@ -484,7 +486,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add(arg.into());
+                if *self.in_named_argument.last().unwrap_or(&false)
+                    && !self.in_argument_expression.is_empty()
+                {
+                    let func_pos = self.identifier_factor_names.len() - 2;
+                    let function = self.identifier_factor_names.get(func_pos).unwrap().clone();
+                    let cand = ReferenceCandidate::NamedArgument {
+                        arg: arg.clone(),
+                        function,
+                    };
+                    reference_table::add(cand);
+                } else {
+                    reference_table::add(arg.into());
+                }
 
                 // Add symbols under $sv namespace
                 if let ScopedIdentifierGroup::DollarIdentifier(x) =
@@ -540,6 +554,30 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
             HandlerPoint::After => {
                 self.identifier_factor_names.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn argument_item(&mut self, arg: &ArgumentItem) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_named_argument.push(arg.argument_item_opt.is_some());
+            }
+            HandlerPoint::After => {
+                self.in_named_argument.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn argument_expression(&mut self, _arg: &ArgumentExpression) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_argument_expression.push(());
+            }
+            HandlerPoint::After => {
+                self.in_argument_expression.pop();
             }
         }
         Ok(())
