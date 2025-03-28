@@ -213,7 +213,7 @@ impl Symbol {
                 | SymbolKind::Modport(_)
                 | SymbolKind::ModportFunctionMember(_)
                 | SymbolKind::Namespace
-                | SymbolKind::SystemFunction
+                | SymbolKind::SystemFunction(_)
                 | SymbolKind::GenericInstance(_)
                 | SymbolKind::ClockDomain
                 | SymbolKind::Test(_) => {
@@ -525,7 +525,7 @@ pub enum SymbolKind {
     ModportFunctionMember(ModportFunctionMemberProperty),
     SystemVerilog,
     Namespace,
-    SystemFunction,
+    SystemFunction(SystemFuncitonProperty),
     GenericParameter(GenericParameterProperty),
     GenericInstance(GenericInstanceProperty),
     ClockDomain,
@@ -575,7 +575,7 @@ impl SymbolKind {
             SymbolKind::ModportFunctionMember(_) => "modport function member".to_string(),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
-            SymbolKind::SystemFunction => "system function".to_string(),
+            SymbolKind::SystemFunction(_) => "system function".to_string(),
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
@@ -633,7 +633,7 @@ impl SymbolKind {
             | SymbolKind::ProtoFunction(_)
             | SymbolKind::SystemVerilog
             | SymbolKind::ModportFunctionMember(..)
-            | SymbolKind::SystemFunction => true,
+            | SymbolKind::SystemFunction(_) => true,
             SymbolKind::GenericInstance(x) => {
                 let base = symbol_table::get(x.base).unwrap();
                 matches!(
@@ -641,7 +641,7 @@ impl SymbolKind {
                     SymbolKind::Function(_)
                         | SymbolKind::SystemVerilog
                         | SymbolKind::ModportFunctionMember(..)
-                        | SymbolKind::SystemFunction
+                        | SymbolKind::SystemFunction(_)
                 )
             }
             _ => false,
@@ -812,7 +812,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::ModportFunctionMember(_) => "modport function member".to_string(),
             SymbolKind::SystemVerilog => "systemverilog item".to_string(),
             SymbolKind::Namespace => "namespace".to_string(),
-            SymbolKind::SystemFunction => "system function".to_string(),
+            SymbolKind::SystemFunction(_) => "system function".to_string(),
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
@@ -934,6 +934,7 @@ pub enum TypeKind {
     String,
     UserDefined(UserDefinedType),
     AbstractInterface(Option<StrId>),
+    Any,
 }
 
 impl TypeKind {
@@ -1062,6 +1063,7 @@ impl fmt::Display for Type {
                     text.push_str("interface");
                 }
             }
+            TypeKind::Any => text.push_str("any"),
         }
         if !self.width.is_empty() {
             text.push('<');
@@ -1497,6 +1499,11 @@ pub struct FunctionProperty {
     pub generic_references: Vec<GenericSymbolPath>,
     pub ports: Vec<Port>,
     pub ret: Option<Type>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SystemFuncitonProperty {
+    pub ports: Vec<Port>,
 }
 
 #[derive(Debug, Clone)]
