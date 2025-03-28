@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
-use veryl_path::PathSet;
+use veryl_path::{PathSet, ignore_already_exists};
 use walkdir::WalkDir;
 
 const LOCKFILE_VERSION: usize = 1;
@@ -510,7 +510,7 @@ impl Lockfile {
         let resolve_dir = veryl_path::cache_path().join("resolve");
 
         if !resolve_dir.exists() {
-            fs::create_dir_all(&resolve_dir)?;
+            ignore_already_exists(fs::create_dir_all(&resolve_dir))?;
         }
 
         let path = Self::resolve_path(url)?;
@@ -587,7 +587,7 @@ impl Lockfile {
                     let dependencies_dir = veryl_path::cache_path().join("dependencies");
 
                     if !dependencies_dir.exists() {
-                        fs::create_dir_all(&dependencies_dir)?;
+                        ignore_already_exists(fs::create_dir_all(&dependencies_dir))?;
                     }
 
                     let path = Self::dependency_path(&x.url, &x.path, &x.revision)?;
