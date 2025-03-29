@@ -8,7 +8,7 @@ pub package selector_pkg {
     function calc_binary_select_width (
         entries: input u32,
     ) -> u32 {
-        return if entries >= 2 { $clog2(entries) } else { 1 };
+        return if entries >= 2 ? $clog2(entries) : 1;
     }
 
     function calc_select_width (

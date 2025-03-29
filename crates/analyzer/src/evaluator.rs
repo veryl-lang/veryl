@@ -1123,13 +1123,19 @@ impl Evaluator {
     }
 
     pub fn expression(&mut self, arg: &Expression) -> Evaluated {
-        let mut ret = self.expression01(&arg.expression01);
-        for x in &arg.expression_list {
-            let operator = x.operator01.operator01_token.to_string();
-            let operand = self.expression01(&x.expression01);
-            ret = self.binary_operator(&operator, ret, operand);
+        self.if_expression(&arg.if_expression)
+    }
+
+    fn if_expression(&mut self, arg: &IfExpression) -> Evaluated {
+        for x in &arg.if_expression_list {
+            let cond = self.expression(&x.expression);
+
+            if let EvaluatedValue::Fixed(1) = cond.value {
+                return self.expression(&x.expression0);
+            }
         }
-        ret
+
+        self.expression01(&arg.expression01)
     }
 
     fn expression01(&mut self, arg: &Expression01) -> Evaluated {
@@ -1215,10 +1221,7 @@ impl Evaluator {
     fn expression09(&mut self, arg: &Expression09) -> Evaluated {
         let mut ret = self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
-            let operator = match &*x.expression09_list_group {
-                Expression09ListGroup::Operator10(x) => x.operator10.operator10_token.to_string(),
-                Expression09ListGroup::Star(x) => x.star.star_token.to_string(),
-            };
+            let operator = x.operator10.operator10_token.to_string();
             let operand = self.expression10(&x.expression10);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -1228,7 +1231,10 @@ impl Evaluator {
     fn expression10(&mut self, arg: &Expression10) -> Evaluated {
         let mut ret = self.expression11(&arg.expression11);
         for x in &arg.expression10_list {
-            let operator = x.operator11.operator11_token.to_string();
+            let operator = match &*x.expression10_list_group {
+                Expression10ListGroup::Operator11(x) => x.operator11.operator11_token.to_string(),
+                Expression10ListGroup::Star(x) => x.star.star_token.to_string(),
+            };
             let operand = self.expression11(&x.expression11);
             ret = self.binary_operator(&operator, ret, operand);
         }
@@ -1237,7 +1243,17 @@ impl Evaluator {
 
     fn expression11(&mut self, arg: &Expression11) -> Evaluated {
         let mut ret = self.expression12(&arg.expression12);
-        if let Some(x) = &arg.expression11_opt {
+        for x in &arg.expression11_list {
+            let operator = x.operator12.operator12_token.to_string();
+            let operand = self.expression12(&x.expression12);
+            ret = self.binary_operator(&operator, ret, operand);
+        }
+        ret
+    }
+
+    fn expression12(&mut self, arg: &Expression12) -> Evaluated {
+        let mut ret = self.expression13(&arg.expression13);
+        if let Some(x) = &arg.expression12_opt {
             let new_type = match x.casting_type.as_ref() {
                 CastingType::Bool(_) => {
                     Some(Evaluated::create_variable(false, true, vec![1], vec![]))
@@ -1294,17 +1310,17 @@ impl Evaluator {
         }
     }
 
-    pub fn expression12(&mut self, arg: &Expression12) -> Evaluated {
+    pub fn expression13(&mut self, arg: &Expression13) -> Evaluated {
         let mut ret = self.factor(&arg.factor);
-        for x in arg.expression12_list.iter().rev() {
-            let operator = match &*x.expression12_list_group {
-                Expression12ListGroup::UnaryOperator(x) => {
+        for x in arg.expression13_list.iter().rev() {
+            let operator = match &*x.expression13_list_group {
+                Expression13ListGroup::UnaryOperator(x) => {
                     x.unary_operator.unary_operator_token.to_string()
                 }
-                Expression12ListGroup::Operator03(x) => x.operator03.operator03_token.to_string(),
-                Expression12ListGroup::Operator04(x) => x.operator04.operator04_token.to_string(),
-                Expression12ListGroup::Operator05(x) => x.operator05.operator05_token.to_string(),
-                Expression12ListGroup::Operator09(x) => x.operator09.operator09_token.to_string(),
+                Expression13ListGroup::Operator04(x) => x.operator04.operator04_token.to_string(),
+                Expression13ListGroup::Operator05(x) => x.operator05.operator05_token.to_string(),
+                Expression13ListGroup::Operator06(x) => x.operator06.operator06_token.to_string(),
+                Expression13ListGroup::Operator10(x) => x.operator10.operator10_token.to_string(),
             };
             ret = self.unary_operator(&operator, ret);
         }
@@ -1400,7 +1416,6 @@ impl Evaluator {
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
                 self.array_literal_list(&x.array_literal_list)
             }
-            Factor::IfExpression(x) => self.if_expression(&x.if_expression),
             Factor::CaseExpression(x) => self.case_expression(&x.case_expression),
             Factor::SwitchExpression(x) => self.switch_expression(&x.switch_expression),
             Factor::StringLiteral(_) => Evaluated::create_unknown(),
@@ -1561,16 +1576,6 @@ impl Evaluator {
             }
         } else {
             Evaluated::create_unknown()
-        }
-    }
-
-    fn if_expression(&mut self, arg: &IfExpression) -> Evaluated {
-        let cond = self.expression(&arg.expression);
-
-        if let EvaluatedValue::Fixed(1) = cond.value {
-            self.expression(&arg.expression0)
-        } else {
-            self.expression(&arg.expression1)
         }
     }
 

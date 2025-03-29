@@ -5,7 +5,7 @@ module veryl_testcase_Module20;
     logic x; always_comb x = 1;
     logic y; always_comb y = 1;
 
-    always_comb a = ((x) ? ( 1 ) : ( ((y) ? ( 1 ) : ( 2 )) ));
+    always_comb a = ((x) ? ( 1 ) : (y) ? ( 2 ) : ( 3 ));
 
     always_comb b = (((a) ==? (1)) ? (
         0

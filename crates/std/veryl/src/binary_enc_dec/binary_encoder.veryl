@@ -14,7 +14,7 @@ pub module binary_encoder #(
     /// Binary encoded output.
     o_bin: output logic<BIN_WIDTH>,
 ) {
-    let unary_masked: logic<UNARY_WIDTH> = if i_en { i_unary } else { {'0, 1'b1} };
+    let unary_masked: logic<UNARY_WIDTH> = if i_en ? i_unary : {'0, 1'b1};
 
     inst u_binary_encoder: _binary_encoder #(
         UNARY_WIDTH: UNARY_WIDTH,
@@ -77,7 +77,7 @@ module _binary_encoder #(
         assign o_valid = r_valid_bot | r_valid_top;
         assign o_bin   = {
             r_valid_top,
-            if r_valid_top { r_bin_top } else { r_bin_bot }
+            if r_valid_top ? r_bin_top : r_bin_bot
         };
     }
 

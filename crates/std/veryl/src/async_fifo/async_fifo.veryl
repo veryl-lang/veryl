@@ -73,7 +73,7 @@ pub module async_fifo::<S: synchronizer> #(
     }
 
     always_comb {
-        push = if !full { is_push } else { '0 };
+        push = if !full ? is_push : '0;
     }
 
     always_comb {
@@ -156,7 +156,7 @@ pub module async_fifo::<S: synchronizer> #(
     }
 
     always_comb {
-        pop = if !empty { id_pop } else { '0 };
+        pop = if !empty ? id_pop : '0;
     }
 
     always_ff (id_clk, drst) {

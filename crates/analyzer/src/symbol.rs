@@ -1097,7 +1097,8 @@ impl TryFrom<&syntax_tree::Expression> for Type {
     type Error = ();
 
     fn try_from(value: &syntax_tree::Expression) -> Result<Self, Self::Error> {
-        let value = if value.expression_list.is_empty() {
+        let value = value.if_expression.as_ref();
+        let value = if value.if_expression_list.is_empty() {
             value.expression01.as_ref()
         } else {
             return Err(());
@@ -1152,12 +1153,17 @@ impl TryFrom<&syntax_tree::Expression> for Type {
         } else {
             return Err(());
         };
-        let value = if value.expression11_opt.is_none() {
+        let value = if value.expression11_list.is_empty() {
             value.expression12.as_ref()
         } else {
             return Err(());
         };
-        let value = if value.expression12_list.is_empty() {
+        let value = if value.expression12_opt.is_none() {
+            value.expression13.as_ref()
+        } else {
+            return Err(());
+        };
+        let value = if value.expression13_list.is_empty() {
             value.factor.as_ref()
         } else {
             return Err(());

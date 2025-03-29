@@ -204,13 +204,17 @@ impl From<&Identifier> for Expression {
         let factor = Box::new(Factor::IdentifierFactor(FactorIdentifierFactor {
             identifier_factor,
         }));
-        let expression12 = Box::new(Expression12 {
-            expression12_list: vec![],
+        let expression13 = Box::new(Expression13 {
+            expression13_list: vec![],
             factor,
+        });
+        let expression12 = Box::new(Expression12 {
+            expression13,
+            expression12_opt: None,
         });
         let expression11 = Box::new(Expression11 {
             expression12,
-            expression11_opt: None,
+            expression11_list: vec![],
         });
         let expression10 = Box::new(Expression10 {
             expression11,
@@ -252,10 +256,11 @@ impl From<&Identifier> for Expression {
             expression02,
             expression01_list: vec![],
         });
-        Expression {
+        let if_expression = Box::new(IfExpression {
+            if_expression_list: vec![],
             expression01,
-            expression_list: vec![],
-        }
+        });
+        Expression { if_expression }
     }
 }
 
@@ -281,11 +286,12 @@ group_to_item!(StatementBlock);
 
 impl Expression {
     pub fn unwrap_factor(&self) -> Option<&Factor> {
-        if !self.expression_list.is_empty() {
+        let exp = &*self.if_expression;
+        if !exp.if_expression_list.is_empty() {
             return None;
         }
 
-        let exp = &*self.expression01;
+        let exp = &*exp.expression01;
         if !exp.expression01_list.is_empty() {
             return None;
         }
@@ -336,12 +342,17 @@ impl Expression {
         }
 
         let exp = &*exp.expression11;
-        if exp.expression11_opt.is_some() {
+        if !exp.expression11_list.is_empty() {
             return None;
         }
 
         let exp = &*exp.expression12;
-        if !exp.expression12_list.is_empty() {
+        if exp.expression12_opt.is_some() {
+            return None;
+        }
+
+        let exp = &*exp.expression13;
+        if !exp.expression13_list.is_empty() {
             return None;
         }
 
@@ -617,7 +628,8 @@ impl FirstToken for Identifier {
 
 impl FirstToken for IfExpression {
     fn token(&self) -> Token {
-        self.r#if.if_token.token
+        let range: TokenRange = self.into();
+        range.beg
     }
 }
 

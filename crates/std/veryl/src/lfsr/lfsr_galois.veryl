@@ -90,9 +90,9 @@ pub module lfsr_galois #(
     for i in 0..(SIZE - 1) :g_taps {
         const K: u32 = SIZE - 2 - i;
         if TAPVEC[K] :g_tap {
-            assign val_next[K] = if i_set { i_setval[K] } else { o_val[K + 1] ^ o_val[0] };
+            assign val_next[K] = if i_set ? i_setval[K] : o_val[K + 1] ^ o_val[0];
         } else :g_notap {
-            assign val_next[K] = if i_set { i_setval[K] } else { o_val[K + 1] };
+            assign val_next[K] = if i_set ? i_setval[K] : o_val[K + 1];
         }
     }
 
@@ -168,7 +168,7 @@ module lfsr_galois_bench #(parameter SIZE=64) (input i_clk, output logic done, o
 
     i_set = 1'b0;
     limit = '1;
-    limit[0] = 1'b0; 
+    limit[0] = 1'b0;
     limit[SIZE] = 1'b0;
 
     for (int i = 0; i < limit; i += 1) begin
@@ -180,7 +180,7 @@ module lfsr_galois_bench #(parameter SIZE=64) (input i_clk, output logic done, o
 
     done = 1'b1;
 
-    if (working) 
+    if (working)
         $info("Succesfully Ending LFSR of Size %0d", SIZE);
     else
         $error("Failure Detecing in LFSR of size %0d", SIZE);
