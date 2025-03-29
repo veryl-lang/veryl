@@ -1087,6 +1087,20 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Warning),
+        code(unenclosed_inner_if_expression),
+        help("enclose the inner if expression in parenthesis"),
+        url("")
+    )]
+    #[error("inner if expression should be enclosed in parenthesis, but is not")]
+    UnenclosedInnerIfExpression {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Warning),
         code(unused_variable),
         help("add prefix `_` to unused variable name"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unused_variable")
@@ -1864,6 +1878,13 @@ impl AnalyzerError {
         AnalyzerError::UnknownParam {
             name: name.to_string(),
             param: param.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unenclosed_inner_if_expression(token: &TokenRange) -> Self {
+        AnalyzerError::UnenclosedInnerIfExpression {
             input: source(token),
             error_location: token.into(),
         }

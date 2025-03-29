@@ -238,10 +238,10 @@ impl VerylGrammarTrait for CheckClockReset {
         Ok(())
     }
 
-    fn expression11(&mut self, arg: &Expression11) -> Result<(), ParolError> {
+    fn expression12(&mut self, arg: &Expression12) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Some(x) = &arg.expression11_opt {
-                let src = self.evaluator.expression12(&arg.expression12);
+            if let Some(x) = &arg.expression12_opt {
+                let src = self.evaluator.expression13(&arg.expression13);
                 match x.casting_type.as_ref() {
                     CastingType::Clock(_)
                     | CastingType::ClockPosedge(_)

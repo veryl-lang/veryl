@@ -2873,6 +2873,51 @@ fn uknown_param() {
 }
 
 #[test]
+fn unenclosed_inner_if_expression() {
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = if if 1 ? 2 : 3 ? 4 : 5;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnenclosedInnerIfExpression { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = if (if 1 ? 2 : 3) ? 4 : 5;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = if 1 ? if 2 ? 3 : 4 : 5;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnenclosedInnerIfExpression { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = if 1 ? (if 2 ? 3 : 4) : 5;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn unused_variable() {
     let code = r#"
     module ModuleA {
@@ -4523,7 +4568,7 @@ fn evaluator() {
         const F: u32 = &4'hf + |4'h1 + ~&4'h1 + ~|4'h0 + ^4'h8 + ~^4'h6;
         const G: u32 = A + B + C + D + E + F;
         const H: u32 = {1'b1, 2'h1, 2'd2 repeat 3};
-        const I: u32 = if B == 6 { 10 } else { 20 };
+        const I: u32 = if B == 6 ? 10 : 20;
         const J: u32 = $clog2(12);
         const K: u32 = B[2:1];
     }

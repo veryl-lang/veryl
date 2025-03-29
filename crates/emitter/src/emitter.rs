@@ -1763,12 +1763,12 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'Operator07'
-    fn operator07(&mut self, arg: &Operator07) {
-        match arg.operator07_token.to_string().as_str() {
+    /// Semantic action for non-terminal 'Operator08'
+    fn operator08(&mut self, arg: &Operator08) {
+        match arg.operator08_token.to_string().as_str() {
             "<:" => self.str("<"),
             ">:" => self.str(">"),
-            _ => self.veryl_token(&arg.operator07_token),
+            _ => self.veryl_token(&arg.operator08_token),
         }
     }
 
@@ -1822,22 +1822,66 @@ impl VerylWalker for Emitter {
     }
 
     /// Semantic action for non-terminal 'Expression'
-    // Add `#[inline(never)]` to `expression*` as a workaround for long time compilation
-    // https://github.com/rust-lang/rust/issues/106211
-    #[inline(never)]
     fn expression(&mut self, arg: &Expression) {
         self.in_expression.push(());
-        self.expression01(&arg.expression01);
-        for x in &arg.expression_list {
-            self.space(1);
-            self.operator01(&x.operator01);
-            self.space(1);
-            self.expression01(&x.expression01);
-        }
+        self.if_expression(&arg.if_expression);
         self.in_expression.pop();
     }
 
+    /// Semantic action for non-terminal 'IfExpression'
+    fn if_expression(&mut self, arg: &IfExpression) {
+        if arg.if_expression_list.is_empty() {
+            self.expression01(&arg.expression01);
+        } else {
+            self.measure_start();
+
+            let compact = attribute_table::is_format(&arg.token(), FormatItem::Compact);
+            let single_line = if self.mode == Mode::Emit {
+                let width = self.measure_get(&arg.token()).unwrap();
+                (width < self.format_opt.max_width as u32) || compact
+            } else {
+                // calc line width as single_line in Align mode
+                true
+            };
+            if single_line {
+                self.single_line_start();
+            }
+
+            for (i, x) in arg.if_expression_list.iter().enumerate() {
+                if i == 0 {
+                    self.token(&x.r#if.if_token.replace("(("));
+                } else {
+                    self.token(&x.r#if.if_token.replace("("));
+                }
+                self.expression(&x.expression);
+
+                self.token_will_push(&x.question.question_token.replace(") ? ("));
+                self.newline_push();
+                self.expression(&x.expression0);
+                self.newline_pop();
+
+                if (i + 1) < arg.if_expression_list.len() {
+                    self.token(&x.colon.colon_token.replace(") : "));
+                } else {
+                    self.token_will_push(&x.colon.colon_token.replace(") : ("));
+                }
+            }
+
+            self.newline_push();
+            self.expression01(&arg.expression01);
+            self.newline_pop();
+            self.str("))");
+
+            self.measure_finish(&arg.token());
+            if single_line {
+                self.single_line_finish();
+            }
+        }
+    }
+
     /// Semantic action for non-terminal 'Expression01'
+    // Add `#[inline(never)]` to `expression*` as a workaround for long time compilation
+    // https://github.com/rust-lang/rust/issues/106211
     #[inline(never)]
     fn expression01(&mut self, arg: &Expression01) {
         self.expression02(&arg.expression02);
@@ -1939,10 +1983,7 @@ impl VerylWalker for Emitter {
         self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
             self.space(1);
-            match &*x.expression09_list_group {
-                Expression09ListGroup::Operator10(x) => self.operator10(&x.operator10),
-                Expression09ListGroup::Star(x) => self.star(&x.star),
-            }
+            self.operator10(&x.operator10);
             self.space(1);
             self.expression10(&x.expression10);
         }
@@ -1954,7 +1995,10 @@ impl VerylWalker for Emitter {
         self.expression11(&arg.expression11);
         for x in &arg.expression10_list {
             self.space(1);
-            self.operator11(&x.operator11);
+            match &*x.expression10_list_group {
+                Expression10ListGroup::Operator11(x) => self.operator11(&x.operator11),
+                Expression10ListGroup::Star(x) => self.star(&x.star),
+            }
             self.space(1);
             self.expression11(&x.expression11);
         }
@@ -1963,7 +2007,19 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Expression11'
     #[inline(never)]
     fn expression11(&mut self, arg: &Expression11) {
-        if let Some(x) = &arg.expression11_opt {
+        self.expression12(&arg.expression12);
+        for x in &arg.expression11_list {
+            self.space(1);
+            self.operator12(&x.operator12);
+            self.space(1);
+            self.expression12(&x.expression12);
+        }
+    }
+
+    /// Semantic action for non-terminal 'Expression12'
+    #[inline(never)]
+    fn expression12(&mut self, arg: &Expression12) {
+        if let Some(x) = &arg.expression12_opt {
             match x.casting_type.as_ref() {
                 CastingType::U32(_) => self.str("unsigned'(int'("),
                 CastingType::U64(_) => self.str("unsigned'(longint'("),
@@ -2000,7 +2056,7 @@ impl VerylWalker for Emitter {
                 | CastingType::ResetSyncHigh(_)
                 | CastingType::ResetSyncLow(_) => {
                     let mut eval = Evaluator::new();
-                    let src = eval.expression12(&arg.expression12);
+                    let src = eval.expression13(&arg.expression13);
                     let dst = x.casting_type.as_ref();
                     let reset_type = self.build_opt.reset_type;
 
@@ -2049,8 +2105,8 @@ impl VerylWalker for Emitter {
                 }
             }
         }
-        self.expression12(&arg.expression12);
-        if let Some(x) = &arg.expression11_opt {
+        self.expression13(&arg.expression13);
+        if let Some(x) = &arg.expression12_opt {
             match x.casting_type.as_ref() {
                 CastingType::U32(_)
                 | CastingType::U64(_)
@@ -2099,9 +2155,6 @@ impl VerylWalker for Emitter {
                 if x.quote_l_brace.line() != x.r_brace.line() {
                     self.multi_line_finish();
                 }
-            }
-            Factor::IfExpression(x) => {
-                self.if_expression(&x.if_expression);
             }
             Factor::CaseExpression(x) => {
                 self.case_expression(&x.case_expression);
@@ -2312,56 +2365,6 @@ impl VerylWalker for Emitter {
                 self.space(1);
                 self.expression(&x.expression);
             }
-        }
-    }
-
-    /// Semantic action for non-terminal 'IfExpression'
-    fn if_expression(&mut self, arg: &IfExpression) {
-        self.measure_start();
-
-        let compact = attribute_table::is_format(&arg.token(), FormatItem::Compact);
-        let single_line = if self.mode == Mode::Emit {
-            let width = self.measure_get(&arg.token()).unwrap();
-            (width < self.format_opt.max_width as u32) || compact
-        } else {
-            // calc line width as single_line in Align mode
-            true
-        };
-        if single_line {
-            self.single_line_start();
-        }
-
-        self.token(&arg.r#if.if_token.replace("(("));
-        self.expression(&arg.expression);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(") ? ("));
-        self.newline_push();
-        self.expression(&arg.expression0);
-        self.newline_pop();
-        self.token(&arg.r_brace.r_brace_token.replace(")"));
-        self.space(1);
-        for x in &arg.if_expression_list {
-            self.token(&x.r#else.else_token.replace(":"));
-            self.space(1);
-            self.token(&x.r#if.if_token.replace("("));
-            self.expression(&x.expression);
-            self.token_will_push(&x.l_brace.l_brace_token.replace(") ? ("));
-            self.newline_push();
-            self.expression(&x.expression0);
-            self.newline_pop();
-            self.token(&x.r_brace.r_brace_token.replace(")"));
-            self.space(1);
-        }
-        self.token(&arg.r#else.else_token.replace(":"));
-        self.space(1);
-        self.token_will_push(&arg.l_brace0.l_brace_token.replace("("));
-        self.newline_push();
-        self.expression(&arg.expression1);
-        self.newline_pop();
-        self.token(&arg.r_brace0.r_brace_token.replace("))"));
-
-        self.measure_finish(&arg.token());
-        if single_line {
-            self.single_line_finish();
         }
     }
 
