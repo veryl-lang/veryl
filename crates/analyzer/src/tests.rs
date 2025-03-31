@@ -2954,6 +2954,23 @@ fn unused_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleD (
+        i_clk:    input `a clock,
+        i_clk_en: input `a logic,
+    ) {
+        let clk: `a default clock = i_clk & i_clk_en;
+        var _a : `a logic;
+
+        always_ff {
+            _a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
