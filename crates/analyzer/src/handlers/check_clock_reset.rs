@@ -1,6 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::evaluator::{EvaluatedValue, Evaluator};
-use crate::symbol::{SymbolKind, Type, TypeKind};
+use crate::symbol::{SymbolId, SymbolKind, Type, TypeKind};
 use crate::symbol_table;
 use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
@@ -14,8 +14,8 @@ pub struct CheckClockReset {
     in_if_reset: bool,
     if_reset_brace: usize,
     n_of_select: usize,
-    has_default_clock: bool,
-    has_default_reset: bool,
+    default_clock: Option<SymbolId>,
+    default_reset: Option<SymbolId>,
     evaluator: Evaluator,
 }
 
@@ -37,14 +37,14 @@ impl VerylGrammarTrait for CheckClockReset {
             HandlerPoint::Before => {
                 if let Ok(found) = symbol_table::resolve(arg.identifier.as_ref()) {
                     if let SymbolKind::Module(x) = found.found.kind {
-                        self.has_default_clock = x.default_clock.is_some();
-                        self.has_default_reset = x.default_reset.is_some();
+                        self.default_clock = x.default_clock;
+                        self.default_reset = x.default_reset;
                     }
                 }
             }
             HandlerPoint::After => {
-                self.has_default_clock = false;
-                self.has_default_reset = false;
+                self.default_clock = None;
+                self.default_reset = None;
             }
         }
         Ok(())
@@ -81,10 +81,15 @@ impl VerylGrammarTrait for CheckClockReset {
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                //  check if clock signal exists
-                if !(self.has_default_clock || arg.has_explicit_clock()) {
-                    self.errors
-                        .push(AnalyzerError::missing_clock_signal(&arg.into()))
+                //  check clock signal
+                if !arg.has_explicit_clock() {
+                    if let Some(id) = self.default_clock {
+                        let token = arg.always_ff.always_ff_token.token;
+                        symbol_table::add_reference(id, &token);
+                    } else {
+                        self.errors
+                            .push(AnalyzerError::missing_clock_signal(&arg.into()))
+                    }
                 }
 
                 // Check first if_reset when reset signel exists
@@ -96,12 +101,21 @@ impl VerylGrammarTrait for CheckClockReset {
                 self.in_always_ff = true;
             }
             HandlerPoint::After => {
-                // Check reset signal when if_reset exists
-                let missing_reset =
-                    arg.has_if_reset() && !(self.has_default_reset || arg.has_explicit_reset());
-                if missing_reset {
-                    self.errors
-                        .push(AnalyzerError::missing_reset_signal(&arg.into()));
+                // Check reset signal
+                if arg.has_if_reset() {
+                    match self.default_reset {
+                        _ if arg.has_explicit_reset() => {
+                            // nothing to do if reset is specified explicitly
+                        }
+                        Some(id) => {
+                            let token = arg.always_ff.always_ff_token.token;
+                            symbol_table::add_reference(id, &token);
+                        }
+                        _ => {
+                            self.errors
+                                .push(AnalyzerError::missing_reset_signal(&arg.into()));
+                        }
+                    }
                 }
 
                 self.in_always_ff = false;
