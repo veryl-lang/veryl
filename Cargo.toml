@@ -7,6 +7,7 @@ members = [
     "crates/languageserver",
     "crates/mdbook",
     "crates/metadata",
+    "crates/migrator",
     "crates/parser",
     "crates/path",
     "crates/simulator",

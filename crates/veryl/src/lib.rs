@@ -9,6 +9,7 @@ pub mod cmd_dump;
 pub mod cmd_fmt;
 pub mod cmd_init;
 pub mod cmd_metadata;
+pub mod cmd_migrate;
 pub mod cmd_new;
 pub mod cmd_publish;
 pub mod cmd_test;
@@ -63,6 +64,7 @@ pub enum Commands {
     Clean(OptClean),
     Update(OptUpdate),
     Publish(OptPublish),
+    Migrate(OptMigrate),
     Doc(OptDoc),
     Metadata(OptMetadata),
     Dump(OptDump),
@@ -125,6 +127,17 @@ pub struct OptPublish {
     /// Bump version
     #[arg(long)]
     pub bump: Option<BumpKind>,
+}
+
+/// Migrate breaking changes from the previous version
+#[derive(Args)]
+pub struct OptMigrate {
+    /// Target files
+    pub files: Vec<PathBuf>,
+
+    /// Run fmt in check mode
+    #[arg(long)]
+    pub check: bool,
 }
 
 /// Build the document corresponding to the current project

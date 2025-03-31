@@ -1,0 +1,38 @@
+[package]
+name                  = "veryl-migrator"
+version               = "0.14.2-rc.1"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition.workspace     = true
+exclude               = ["build.rs"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow         = {workspace = true}
+bimap          = "0.6.3"
+once_cell      = {workspace = true}
+parol_runtime  = {version = "3.0", features = ["regex_automata"], default-features = false}
+paste          = "1.0"
+regex          = {workspace = true}
+thiserror      = {workspace = true}
+veryl-metadata = {version = "0.14.2-rc.1", path = "../metadata"}
+veryl-parser   = {version = "0.14.2-rc.1", path = "../parser"}
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+miette        = {workspace = true, features = ["fancy-no-syscall"]}
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+miette        = {workspace = true, features = ["fancy"]}
+
+[build-dependencies]
+parol         = {version = "3.0", optional = true}
+
+[features]
+default = ["build"]
+build   = ["dep:parol"]

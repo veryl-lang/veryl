@@ -90,6 +90,13 @@ pub trait VerylWalker {
         after!(self, diamond_operator, arg);
     }
 
+    /// Semantic action for non-terminal 'Operator01'
+    fn operator01(&mut self, arg: &Operator01) {
+        before!(self, operator01, arg);
+        self.veryl_token(&arg.operator01_token);
+        after!(self, operator01, arg);
+    }
+
     /// Semantic action for non-terminal 'Operator02'
     fn operator02(&mut self, arg: &Operator02) {
         before!(self, operator02, arg);
@@ -158,13 +165,6 @@ pub trait VerylWalker {
         before!(self, operator11, arg);
         self.veryl_token(&arg.operator11_token);
         after!(self, operator11, arg);
-    }
-
-    /// Semantic action for non-terminal 'Operator12'
-    fn operator12(&mut self, arg: &Operator12) {
-        before!(self, operator12, arg);
-        self.veryl_token(&arg.operator12_token);
-        after!(self, operator12, arg);
     }
 
     /// Semantic action for non-terminal 'UnaryOperator'
@@ -242,13 +242,6 @@ pub trait VerylWalker {
         before!(self, hash, arg);
         self.veryl_token(&arg.hash_token);
         after!(self, hash, arg);
-    }
-
-    /// Semantic action for non-terminal 'Question'
-    fn question(&mut self, arg: &Question) {
-        before!(self, question, arg);
-        self.veryl_token(&arg.question_token);
-        after!(self, question, arg);
     }
 
     /// Semantic action for non-terminal 'QuoteLBrace'
@@ -955,22 +948,12 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Expression'
     fn expression(&mut self, arg: &Expression) {
         before!(self, expression, arg);
-        self.if_expression(&arg.if_expression);
-        after!(self, expression, arg);
-    }
-
-    /// Semantic action for non-terminal 'IfExpression'
-    fn if_expression(&mut self, arg: &IfExpression) {
-        before!(self, if_expression, arg);
-        for x in &arg.if_expression_list {
-            self.r#if(&x.r#if);
-            self.expression(&x.expression);
-            self.question(&x.question);
-            self.expression(&x.expression0);
-            self.colon(&x.colon);
-        }
         self.expression01(&arg.expression01);
-        after!(self, if_expression, arg);
+        for x in &arg.expression_list {
+            self.operator01(&x.operator01);
+            self.expression01(&x.expression01);
+        }
+        after!(self, expression, arg);
     }
 
     /// Semantic action for non-terminal 'Expression01'
@@ -1066,7 +1049,10 @@ pub trait VerylWalker {
         before!(self, expression09, arg);
         self.expression10(&arg.expression10);
         for x in &arg.expression09_list {
-            self.operator10(&x.operator10);
+            match &*x.expression09_list_group {
+                Expression09ListGroup::Operator10(x) => self.operator10(&x.operator10),
+                Expression09ListGroup::Star(x) => self.star(&x.star),
+            }
             self.expression10(&x.expression10);
         }
         after!(self, expression09, arg);
@@ -1077,10 +1063,7 @@ pub trait VerylWalker {
         before!(self, expression10, arg);
         self.expression11(&arg.expression11);
         for x in &arg.expression10_list {
-            match &*x.expression10_list_group {
-                Expression10ListGroup::Operator11(x) => self.operator11(&x.operator11),
-                Expression10ListGroup::Star(x) => self.star(&x.star),
-            }
+            self.operator11(&x.operator11);
             self.expression11(&x.expression11);
         }
         after!(self, expression10, arg);
@@ -1090,9 +1073,9 @@ pub trait VerylWalker {
     fn expression11(&mut self, arg: &Expression11) {
         before!(self, expression11, arg);
         self.expression12(&arg.expression12);
-        for x in &arg.expression11_list {
-            self.operator12(&x.operator12);
-            self.expression12(&x.expression12);
+        if let Some(x) = &arg.expression11_opt {
+            self.r#as(&x.r#as);
+            self.casting_type(&x.casting_type);
         }
         after!(self, expression11, arg);
     }
@@ -1100,28 +1083,17 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Expression12'
     fn expression12(&mut self, arg: &Expression12) {
         before!(self, expression12, arg);
-        self.expression13(&arg.expression13);
-        if let Some(x) = &arg.expression12_opt {
-            self.r#as(&x.r#as);
-            self.casting_type(&x.casting_type);
-        }
-        after!(self, expression12, arg);
-    }
-
-    /// Semantic action for non-terminal 'Expression13'
-    fn expression13(&mut self, arg: &Expression13) {
-        before!(self, expression13, arg);
-        for x in &arg.expression13_list {
-            match &*x.expression13_list_group {
-                Expression13ListGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
-                Expression13ListGroup::Operator04(x) => self.operator04(&x.operator04),
-                Expression13ListGroup::Operator05(x) => self.operator05(&x.operator05),
-                Expression13ListGroup::Operator06(x) => self.operator06(&x.operator06),
-                Expression13ListGroup::Operator10(x) => self.operator10(&x.operator10),
+        for x in &arg.expression12_list {
+            match &*x.expression12_list_group {
+                Expression12ListGroup::UnaryOperator(x) => self.unary_operator(&x.unary_operator),
+                Expression12ListGroup::Operator03(x) => self.operator03(&x.operator03),
+                Expression12ListGroup::Operator04(x) => self.operator04(&x.operator04),
+                Expression12ListGroup::Operator05(x) => self.operator05(&x.operator05),
+                Expression12ListGroup::Operator09(x) => self.operator09(&x.operator09),
             }
         }
         self.factor(&arg.factor);
-        after!(self, expression13, arg);
+        after!(self, expression12, arg);
     }
 
     /// Semantic action for non-terminal 'Factor'
@@ -1145,6 +1117,9 @@ pub trait VerylWalker {
                 self.quote_l_brace(&x.quote_l_brace);
                 self.array_literal_list(&x.array_literal_list);
                 self.r_brace(&x.r_brace);
+            }
+            Factor::IfExpression(x) => {
+                self.if_expression(&x.if_expression);
             }
             Factor::CaseExpression(x) => {
                 self.case_expression(&x.case_expression);
@@ -1351,6 +1326,29 @@ pub trait VerylWalker {
             }
         }
         after!(self, array_literal_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'IfExpression'
+    fn if_expression(&mut self, arg: &IfExpression) {
+        before!(self, if_expression, arg);
+        self.r#if(&arg.r#if);
+        self.expression(&arg.expression);
+        self.l_brace(&arg.l_brace);
+        self.expression(&arg.expression0);
+        self.r_brace(&arg.r_brace);
+        for x in &arg.if_expression_list {
+            self.r#else(&x.r#else);
+            self.r#if(&x.r#if);
+            self.expression(&x.expression);
+            self.l_brace(&x.l_brace);
+            self.expression(&x.expression0);
+            self.r_brace(&x.r_brace);
+        }
+        self.r#else(&arg.r#else);
+        self.l_brace(&arg.l_brace0);
+        self.expression(&arg.expression1);
+        self.r_brace(&arg.r_brace0);
+        after!(self, if_expression, arg);
     }
 
     /// Semantic action for non-terminal 'CaseExpression'
