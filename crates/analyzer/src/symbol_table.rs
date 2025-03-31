@@ -575,6 +575,12 @@ impl SymbolTable {
         for (_, symbol) in self.symbol_table.iter_mut() {
             symbol.references.retain(|x| x.source != file_path);
         }
+
+        for (affiliation, list) in self.var_ref_list.iter_mut() {
+            if affiliation.token().source == file_path {
+                list.clear();
+            }
+        }
     }
 
     pub fn add_reference(&mut self, target: SymbolId, token: &Token) {
