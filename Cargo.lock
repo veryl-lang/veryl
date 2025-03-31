@@ -5183,6 +5183,7 @@ dependencies = [
  "veryl-emitter",
  "veryl-formatter",
  "veryl-metadata",
+ "veryl-migrator",
  "veryl-parser",
  "veryl-path",
  "veryl-sourcemap",
@@ -5280,6 +5281,23 @@ dependencies = [
  "veryl-std",
  "walkdir",
  "which",
+]
+
+[[package]]
+name = "veryl-migrator"
+version = "0.14.2-rc.1"
+dependencies = [
+ "anyhow",
+ "bimap",
+ "miette",
+ "once_cell",
+ "parol",
+ "parol_runtime",
+ "paste",
+ "regex",
+ "thiserror 2.0.12",
+ "veryl-metadata",
+ "veryl-parser",
 ]
 
 [[package]]
