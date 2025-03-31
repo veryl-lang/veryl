@@ -204,6 +204,10 @@ impl Handler for CheckExpression {
     }
 }
 
+fn is_if_expression(expression: &Expression) -> bool {
+    !expression.if_expression.if_expression_list.is_empty()
+}
+
 fn is_defined_in_package(full_path: &[SymbolId]) -> bool {
     for path in full_path {
         let symbol = symbol_table::get(*path).unwrap();
@@ -239,6 +243,26 @@ impl VerylGrammarTrait for CheckExpression {
         if let HandlerPoint::Before = self.point {
             if self.disable_block_end.remove(&arg.r_brace_token.token.id) {
                 self.disable = false;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn if_expression(&mut self, arg: &IfExpression) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            for x in &arg.if_expression_list {
+                if is_if_expression(&x.expression) {
+                    let range: TokenRange = x.expression.as_ref().into();
+                    self.errors
+                        .push(AnalyzerError::unenclosed_inner_if_expression(&range));
+                }
+
+                if is_if_expression(&x.expression0) {
+                    let range: TokenRange = x.expression0.as_ref().into();
+                    self.errors
+                        .push(AnalyzerError::unenclosed_inner_if_expression(&range));
+                }
             }
         }
 

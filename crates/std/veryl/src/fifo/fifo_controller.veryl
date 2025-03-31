@@ -1,17 +1,17 @@
 module fifo_controller #(
-    param TYPE             : type = logic                                             ,
-    param DEPTH            : u32  = 8                                                 ,
-    param THRESHOLD        : u32  = DEPTH                                             ,
-    param FLAG_FF_OUT      : bit  = 1                                                 ,
-    param DATA_FF_OUT      : bit  = 1                                                 ,
-    param PUSH_ON_CLEAR    : bit  = 0                                                 ,
-    param RAM_WORDS        : u32  = if DATA_FF_OUT { DEPTH - 1 } else { DEPTH }       ,
-    param RAM_POINTER_WIDTH: u32  = if RAM_WORDS >= 2 { $clog2(RAM_WORDS) } else { 1 },
-    param MATCH_COUNT_WIDTH: u32  = 0                                                 ,
-    param POINTER_WIDTH    : u32  = if DEPTH >= 2 { $clog2(DEPTH) } else { 1 }        ,
-    const RAM_POINTER      : type = logic<RAM_POINTER_WIDTH>                          ,
-    const POINTER          : type = logic<POINTER_WIDTH>                              ,
-    const COUNTER          : type = logic<$clog2(DEPTH + 1)>                          ,
+    param TYPE             : type = logic                                    ,
+    param DEPTH            : u32  = 8                                        ,
+    param THRESHOLD        : u32  = DEPTH                                    ,
+    param FLAG_FF_OUT      : bit  = 1                                        ,
+    param DATA_FF_OUT      : bit  = 1                                        ,
+    param PUSH_ON_CLEAR    : bit  = 0                                        ,
+    param RAM_WORDS        : u32  = if DATA_FF_OUT ? DEPTH - 1 : DEPTH       ,
+    param RAM_POINTER_WIDTH: u32  = if RAM_WORDS >= 2 ? $clog2(RAM_WORDS) : 1,
+    param MATCH_COUNT_WIDTH: u32  = 0                                        ,
+    param POINTER_WIDTH    : u32  = if DEPTH >= 2 ? $clog2(DEPTH) : 1        ,
+    const RAM_POINTER      : type = logic<RAM_POINTER_WIDTH>                 ,
+    const POINTER          : type = logic<POINTER_WIDTH>                     ,
+    const COUNTER          : type = logic<$clog2(DEPTH + 1)>                 ,
 ) (
     i_clk          : input  clock      ,
     i_rst          : input  reset      ,
@@ -186,7 +186,7 @@ module fifo_controller #(
             } else if (clear[0]) {
                 ram_write_pointer = 0 as RAM_POINTER;
             } else if (clear[1]) {
-                ram_write_pointer = if DATA_FF_OUT { 0 as RAM_POINTER } else { 1 as RAM_POINTER };
+                ram_write_pointer = if DATA_FF_OUT ? 0 as RAM_POINTER : 1 as RAM_POINTER;
             } else if (ram_empty_next) {
                 ram_write_pointer = ram_read_pointer;
             } else if (write_to_ram) {
