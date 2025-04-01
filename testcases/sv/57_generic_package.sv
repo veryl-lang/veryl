@@ -36,6 +36,16 @@ package veryl_testcase_Package57E;
     localparam int unsigned Y = 1;
 endpackage
 
+
+module veryl_testcase_Module57F;
+endmodule
+
+
+package veryl_testcase___Package57F__Module57F;
+
+
+endpackage
+
 module veryl_testcase_Module57;
     import veryl_testcase_Package57E::Y;
     localparam int unsigned     A = veryl_testcase___Package57A__1::X;
@@ -50,5 +60,7 @@ module veryl_testcase_Module57;
     always_comb _c.c  = 1;
     always_comb _d.d0 = 0;
     always_comb _d.d1 = 1;
+
+    veryl_testcase_Module57F u ();
 endmodule
 //# sourceMappingURL=../map/testcases/sv/57_generic_package.sv.map

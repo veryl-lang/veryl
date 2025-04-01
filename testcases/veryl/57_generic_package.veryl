@@ -25,6 +25,16 @@ package Package57E {
     const Y: u32 = 1;
 }
 
+proto module ProtoModule57F;
+module Module57F for ProtoModule57F {}
+
+proto package ProtoPackage57F {
+    alias module InstModule: ProtoModule57F;
+}
+package Package57F::<M: ProtoModule57F> for ProtoPackage57F {
+    alias module InstModule = M;
+}
+
 module Module57 {
     import Package57E::Y;
     const A: u32 = Package57A::<1>::X;
@@ -39,4 +49,6 @@ module Module57 {
     assign _c.c  = 1;
     assign _d.d0 = 0;
     assign _d.d1 = 1;
+
+    inst u: Package57F::<Module57F>::InstModule;
 }

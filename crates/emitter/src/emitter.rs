@@ -181,6 +181,14 @@ fn resolve_generic_path(
     let result = symbol_table::resolve((&path.mangled_path(), namespace));
     if let Ok(symbol) = &result {
         if let Some(target) = symbol.found.alias_target() {
+            if let Some(parent) = symbol.found.get_parent() {
+                if matches!(parent.kind, SymbolKind::GenericInstance(_)) {
+                    // Alias target may be a generic parameter if it is defined in a generic package.
+                    // Need to apply parent's generic map to resolve a generic parameter.
+                    let map = parent.generic_maps();
+                    return resolve_generic_path(&target, &symbol.found.namespace, Some(&map));
+                }
+            }
             return resolve_generic_path(&target, &symbol.found.namespace, generic_maps);
         }
     }
@@ -4645,6 +4653,11 @@ impl VerylWalker for Emitter {
         // nothing to emit
     }
 
+    /// Semantic action for non-terminal 'ProtoAliasDeclaration'
+    fn proto_alias_declaration(&mut self, _arg: &ProtoAliasDeclaration) {
+        // nothing to emit
+    }
+
     /// Semantic action for non-terminal 'EmbedDeclaration'
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         if arg.identifier.identifier_token.to_string() == "inline" {
@@ -4958,8 +4971,11 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         | SymbolKind::Namespace
         | SymbolKind::SystemFunction(_) => ret.push_str(&token_text),
         SymbolKind::AliasModule(_)
+        | SymbolKind::ProtoAliasModule(_)
         | SymbolKind::AliasInterface(_)
+        | SymbolKind::ProtoAliasInterface(_)
         | SymbolKind::AliasPackage(_)
+        | SymbolKind::ProtoAliasPackage(_)
         | SymbolKind::ClockDomain
         | SymbolKind::EnumMemberMangled
         | SymbolKind::Test(_) => {

@@ -428,6 +428,21 @@ impl Symbol {
         false
     }
 
+    pub fn is_proto_module(&self) -> bool {
+        match &self.kind {
+            SymbolKind::ProtoModule(_) => return true,
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_proto_module();
+                    }
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     pub fn is_interface(&self, _include_proto: bool) -> bool {
         match &self.kind {
             SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => return true,
@@ -447,6 +462,17 @@ impl Symbol {
         false
     }
 
+    pub fn is_proto_interface(&self) -> bool {
+        if let SymbolKind::GenericParameter(x) = &self.kind {
+            if let GenericBoundKind::Proto(proto) = &x.bound {
+                if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                    return symbol.found.is_proto_interface();
+                }
+            }
+        }
+        false
+    }
+
     pub fn is_package(&self, include_proto: bool) -> bool {
         match &self.kind {
             SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => return true,
@@ -459,6 +485,21 @@ impl Symbol {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
                     if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
                         return symbol.found.is_package(true);
+                    }
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    pub fn is_proto_package(&self) -> bool {
+        match &self.kind {
+            SymbolKind::ProtoPackage(_) => return true,
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_proto_package();
                     }
                 }
             }
@@ -500,8 +541,10 @@ pub enum SymbolKind {
     Module(ModuleProperty),
     ProtoModule(ProtoModuleProperty),
     AliasModule(AliasModuleProperty),
+    ProtoAliasModule(AliasModuleProperty),
     Interface(InterfaceProperty),
     AliasInterface(AliasInterfaceProperty),
+    ProtoAliasInterface(AliasInterfaceProperty),
     Function(FunctionProperty),
     ProtoFunction(FunctionProperty),
     Parameter(ParameterProperty),
@@ -511,6 +554,7 @@ pub enum SymbolKind {
     Package(PackageProperty),
     ProtoPackage(ProtoPackageProperty),
     AliasPackage(AliasPackageProperty),
+    ProtoAliasPackage(AliasPackageProperty),
     Struct(StructProperty),
     StructMember(StructMemberProperty),
     Union(UnionProperty),
@@ -545,8 +589,10 @@ impl SymbolKind {
             SymbolKind::Module(_) => "module".to_string(),
             SymbolKind::ProtoModule(_) => "proto module".to_string(),
             SymbolKind::AliasModule(_) => "alias module".to_string(),
+            SymbolKind::ProtoAliasModule(_) => "proto alias module".to_string(),
             SymbolKind::Interface(_) => "interface".to_string(),
             SymbolKind::AliasInterface(_) => "alias interface".to_string(),
+            SymbolKind::ProtoAliasInterface(_) => "proto alias interface".to_string(),
             SymbolKind::Function(_) => "function".to_string(),
             SymbolKind::ProtoFunction(_) => "proto function".to_string(),
             SymbolKind::Parameter(_) => "parameter".to_string(),
@@ -556,6 +602,7 @@ impl SymbolKind {
             SymbolKind::Package(_) => "package".to_string(),
             SymbolKind::ProtoPackage(_) => "proto package".to_string(),
             SymbolKind::AliasPackage(_) => "alias package".to_string(),
+            SymbolKind::ProtoAliasPackage(_) => "proto alias package".to_string(),
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(_) => "struct member".to_string(),
             SymbolKind::Union(_) => "union".to_string(),
@@ -723,6 +770,9 @@ impl fmt::Display for SymbolKind {
             SymbolKind::AliasModule(x) => {
                 format!("alias module (target {})", x.target)
             }
+            SymbolKind::ProtoAliasModule(x) => {
+                format!("proto alias module (target {})", x.target)
+            }
             SymbolKind::Interface(x) => {
                 format!(
                     "interface ({} generic, {} params)",
@@ -732,6 +782,9 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::AliasInterface(x) => {
                 format!("alias interface (target {})", x.target)
+            }
+            SymbolKind::ProtoAliasInterface(x) => {
+                format!("proto alias interface (target {})", x.target)
             }
             SymbolKind::Function(x) => {
                 format!(
@@ -773,6 +826,9 @@ impl fmt::Display for SymbolKind {
             SymbolKind::ProtoPackage(_) => "proto package".to_string(),
             SymbolKind::AliasPackage(x) => {
                 format!("alias package (target {})", x.target)
+            }
+            SymbolKind::ProtoAliasPackage(x) => {
+                format!("proto alias package (target {})", x.target)
             }
             SymbolKind::Struct(_) => "struct".to_string(),
             SymbolKind::StructMember(x) => {

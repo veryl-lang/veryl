@@ -1412,6 +1412,114 @@ fn incompat_proto() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    proto package ProtoPkg {
+        alias module M: ProtoModuleA;
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    module ModuleA {}
+    proto package ProtoPkg {
+        alias module M: ProtoModuleA;
+    }
+    package Pkg for ProtoPkg {
+        alias module M = ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    proto module ProtoModuleB;
+    module ModuleB for ProtoModuleB {}
+    proto package ProtoPkg {
+        alias module M: ProtoModuleA;
+    }
+    package Pkg for ProtoPkg {
+        alias module M = ModuleB;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    proto package ProtoPkg {
+        alias module M: ProtoModuleA;
+    }
+    package Pkg for ProtoPkg {
+        const M: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    proto package ProtoPkg {
+        alias package P: ProtoPkgA;
+    }
+    package Pkg for ProtoPkg {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    package PkgA {}
+    proto package ProtoPkg {
+        alias package P: ProtoPkgA;
+    }
+    package Pkg for ProtoPkg {
+        alias package P = PkgA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    proto package ProtoPkgB {}
+    package PkgB for ProtoPkgB {}
+    proto package ProtoPkg {
+        alias package P: ProtoPkgA;
+    }
+    package Pkg for ProtoPkg {
+        alias package P = PkgB;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    proto package ProtoPkg {
+        alias package P: ProtoPkgA;
+    }
+    package Pkg for ProtoPkg {
+        const P: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
 }
 
 #[test]
@@ -1836,6 +1944,39 @@ fn mismatch_type() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
     assert!(matches!(errors[1], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {}
+    proto package Pkg {
+        alias interface Interface: ProtoPkg;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ProtoModule;
+    proto package Pkg {
+        alias package Package: ProtoModule;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {}
+    package Pkg {
+        alias module M = ModuleA;
+    }
+    module ModuleB {
+        inst u: Pkg::M;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

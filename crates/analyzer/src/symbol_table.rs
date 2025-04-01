@@ -312,6 +312,12 @@ impl SymbolTable {
             | SymbolKind::Enum(_)
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
+            | SymbolKind::AliasModule(_)
+            | SymbolKind::ProtoAliasModule(_)
+            | SymbolKind::AliasInterface(_)
+            | SymbolKind::ProtoAliasInterface(_)
+            | SymbolKind::AliasPackage(_)
+            | SymbolKind::ProtoAliasPackage(_)
             | SymbolKind::ProtoFunction(_) => via_pacakge,
             SymbolKind::Function(_) => via_modport || via_interface_instance || via_pacakge,
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
@@ -436,13 +442,13 @@ impl SymbolTable {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
                         }
-                        SymbolKind::AliasModule(x) => {
+                        SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
                             context = self.trace_type_path(context, &x.target)?;
                         }
-                        SymbolKind::AliasInterface(x) => {
+                        SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
                             context = self.trace_type_path(context, &x.target)?;
                         }
-                        SymbolKind::AliasPackage(x) => {
+                        SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
                             context = self.trace_type_path(context, &x.target)?;
                         }
                         SymbolKind::Enum(_) | SymbolKind::Namespace => {
