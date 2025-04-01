@@ -15,6 +15,7 @@ mod test;
 #[cfg(test)]
 mod tests;
 pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, SourceMapTarget, Target};
+pub use build_info::BuildInfo;
 pub use doc::Doc;
 pub use format::Format;
 pub use git::Git;
