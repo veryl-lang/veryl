@@ -24,18 +24,19 @@
         <link rel="stylesheet" href="fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="theme/custom.css">
 
 
-        <!-- Provide site root to javascript -->
+        <!-- Provide site root and default themes to javascript -->
         <script>
-            var path_to_root = "";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
@@ -45,8 +46,8 @@
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
 
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
@@ -60,7 +61,8 @@
 
         <!-- Set the theme before any content is loaded, prevents flash -->
         <script>
-            var theme;
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             const html = document.documentElement;
@@ -73,8 +75,8 @@
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var sidebar = null;
-            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
@@ -110,6 +112,7 @@
                             <i class="fa fa-paint-brush"></i>
                         </button>
                         <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
@@ -426,7 +429,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 </tr>
 <tr>
     <th class="table_list_item">INITIAL_OUT_DATA</th>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> Reset value of output data
 </td>
 </tr>
@@ -504,7 +507,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
     <th class="table_list_item">is_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> push data
 </td>
 </tr>
@@ -544,7 +547,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
     <th class="table_list_item">od_data</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> pop data
 </td>
 </tr>
@@ -664,7 +667,7 @@ Generic parameter <code>S</code> is a module name of synchrinoizer.</p>
     <th class="table_list_item">is_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> src data
 </td>
 </tr>
@@ -704,7 +707,7 @@ Generic parameter <code>S</code> is a module name of synchrinoizer.</p>
     <th class="table_list_item">od_data</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> dst data
 </td>
 </tr>
@@ -868,7 +871,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_set_value</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
     <td class="table_list_item"> Value used by i_set
 </td>
 </tr>
@@ -889,14 +892,14 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_count</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
     <td class="table_list_item"> Count value
 </td>
 </tr>
 <tr>
     <th class="table_list_item">o_count_next</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
     <td class="table_list_item"> Count value for the next clock cycle
 </td>
 </tr>
@@ -986,14 +989,14 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_d</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> Input
 </td>
 </tr>
 <tr>
     <th class="table_list_item">o_d</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"> Output
 </td>
 </tr>
@@ -1026,7 +1029,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 <tr>
     <th class="table_list_item">KIND</th>
-    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"><span class="hljs-type">selector_kind </span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -1049,13 +1052,13 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">o_data</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE<ENTRIES></span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE <ENTRIES></span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -1240,7 +1243,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_word_count</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNTER</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNTER </span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -1252,7 +1255,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -1264,7 +1267,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_data</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -1342,7 +1345,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_set_value</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
     <td class="table_list_item"> Value used by i_set
 </td>
 </tr>
@@ -1363,14 +1366,14 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_count</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
     <td class="table_list_item"> Count value
 </td>
 </tr>
 <tr>
     <th class="table_list_item">o_count_next</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
     <td class="table_list_item"> Count value for the next clock cycle
 </td>
 </tr>
@@ -1473,7 +1476,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 <tr>
     <th class="table_list_item">TAPVEC</th>
-    <td class="table_list_item"><span class="hljs-type">TAPVEC_T</span></td>
+    <td class="table_list_item"><span class="hljs-type">TAPVEC_T </span></td>
     <td class="table_list_item"> Bit-vector representing the taps of the LFSR.
  Default values provided for `SIZE` in range [2, 64]
 </td>
@@ -1543,7 +1546,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 <tr>
     <th class="table_list_item">KIND</th>
-    <td class="table_list_item"><span class="hljs-type">selector_kind</span></td>
+    <td class="table_list_item"><span class="hljs-type">selector_kind </span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -1561,13 +1564,13 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE<ENTRIES></span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE <ENTRIES></span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">o_data</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -1647,7 +1650,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 <tr>
     <th class="table_list_item">INITIAL_VALUE</th>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -1695,7 +1698,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_da</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -1713,7 +1716,7 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_qb</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE</span></td>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
