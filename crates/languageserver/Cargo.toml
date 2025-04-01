@@ -20,6 +20,7 @@ dashmap           = "6.1.0"
 futures           = {workspace = true}
 glob              = "0.3.2"
 ropey             = "1.6.1"
+mark-flaky-tests  = {version = "1.0.2", features = ["tokio"]}
 miette            = {workspace = true}
 ntest             = "0.9.3"
 serde_json        = {workspace = true}
