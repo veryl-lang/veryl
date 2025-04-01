@@ -29,8 +29,14 @@ const GIT_COMMAND: &str = "git.exe";
 const GIT_COMMAND: &str = "git";
 
 impl Git {
+    #[cfg(not(target_family = "wasm"))]
     pub fn exists() -> bool {
         which::which(GIT_COMMAND).is_ok()
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn exists() -> bool {
+        false
     }
 
     pub fn init(path: &Path) -> Result<Self, MetadataError> {
