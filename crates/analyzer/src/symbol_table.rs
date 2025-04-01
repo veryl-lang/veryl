@@ -445,9 +445,14 @@ impl SymbolTable {
                         SymbolKind::AliasPackage(x) => {
                             context = self.trace_type_path(context, &x.target)?;
                         }
-                        SymbolKind::Enum(_) | SymbolKind::SystemVerilog | SymbolKind::Namespace => {
+                        SymbolKind::Enum(_) | SymbolKind::Namespace => {
                             context.namespace = found.inner_namespace();
                             context.inner = true;
+                        }
+                        SymbolKind::SystemVerilog => {
+                            context.namespace = found.inner_namespace();
+                            context.inner = true;
+                            context.sv_member = true;
                         }
                         SymbolKind::Instance(x) => {
                             let mut type_name = x.type_name.clone();
