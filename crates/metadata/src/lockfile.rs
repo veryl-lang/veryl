@@ -411,7 +411,7 @@ impl Lockfile {
                     let uuid = Self::gen_uuid(url, &path, &release.revision)?;
 
                     // Path override is disabled if it is not root
-                    let r#override = if root { None } else { x.path.clone() };
+                    let r#override = if root { x.path.clone() } else { None };
 
                     LockSource::Repository(Box::new(LockSourceRepository {
                         uuid,
