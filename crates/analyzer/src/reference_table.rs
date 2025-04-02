@@ -8,13 +8,17 @@ use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
-    ExpressionIdentifier, HierarchicalIdentifier, InstPortItem, ModportItem, ScopedIdentifier,
-    StructConstructorItem,
+    ExpressionIdentifier, HierarchicalIdentifier, Identifier, InstPortItem, ModportItem,
+    ScopedIdentifier, StructConstructorItem,
 };
 use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_text};
 
 #[derive(Clone, Debug)]
 pub enum ReferenceCandidate {
+    Identifier {
+        arg: Identifier,
+        namespace: Namespace,
+    },
     HierarchicalIdentifier {
         arg: HierarchicalIdentifier,
         namespace: Namespace,
@@ -43,6 +47,15 @@ pub enum ReferenceCandidate {
         arg: ScopedIdentifier,
         function: ExpressionIdentifier,
     },
+}
+
+impl From<&Identifier> for ReferenceCandidate {
+    fn from(value: &Identifier) -> Self {
+        Self::Identifier {
+            arg: value.clone(),
+            namespace: namespace_table::get_default(),
+        }
+    }
 }
 
 impl From<&HierarchicalIdentifier> for ReferenceCandidate {
@@ -296,6 +309,20 @@ impl ReferenceTable {
 
         for x in &candidates {
             match x {
+                ReferenceCandidate::Identifier { arg, namespace } => {
+                    namespace_table::set_default(&namespace.paths);
+
+                    match symbol_table::resolve(arg) {
+                        Ok(symbol) => {
+                            for id in symbol.full_path {
+                                symbol_table::add_reference(id, &arg.identifier_token.token);
+                            }
+                        }
+                        Err(err) => {
+                            self.push_resolve_error(err, &arg.into(), None, None);
+                        }
+                    }
+                }
                 ReferenceCandidate::HierarchicalIdentifier { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);
 

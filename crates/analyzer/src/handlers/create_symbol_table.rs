@@ -836,11 +836,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         ModportDefault::Input(_) => Some(crate::symbol::ModportDefault::Input),
                         ModportDefault::Output(_) => Some(crate::symbol::ModportDefault::Output),
                         ModportDefault::SameLParenIdentifierRParen(x) => {
+                            reference_table::add(x.identifier.as_ref().into());
                             Some(crate::symbol::ModportDefault::Same(
                                 x.identifier.identifier_token.token,
                             ))
                         }
                         ModportDefault::ConverseLParenIdentifierRParen(x) => {
+                            reference_table::add(x.identifier.as_ref().into());
                             Some(crate::symbol::ModportDefault::Converse(
                                 x.identifier.identifier_token.token,
                             ))
