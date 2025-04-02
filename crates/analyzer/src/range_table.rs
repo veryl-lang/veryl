@@ -1,7 +1,8 @@
 use crate::HashMap;
 use std::fmt;
 use veryl_parser::resource_table::PathId;
-use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
+use veryl_parser::token_range::TokenRange;
+use veryl_parser::veryl_token::{Token, TokenSource};
 
 #[derive(Clone, Debug)]
 pub struct RangeTable<T> {

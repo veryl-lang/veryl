@@ -2,7 +2,8 @@ use crate::attribute::{AlignItem, Attribute, FormatItem};
 use crate::range_table::RangeTable;
 use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::token_range::TokenRange;
+use veryl_parser::veryl_token::Token;
 
 thread_local!(static ATTRIBUTE_TABLE: RefCell<RangeTable<Attribute>> = RefCell::new(RangeTable::default()));
 

@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::resource_table::TokenId;
+use veryl_parser::token_range::{TokenExt, TokenRange};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::TokenRange;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

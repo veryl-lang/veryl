@@ -11,8 +11,9 @@ use std::cell::RefCell;
 use std::fmt;
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{PathId, StrId};
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenRange, VerylToken};
+use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

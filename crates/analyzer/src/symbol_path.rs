@@ -6,8 +6,9 @@ use crate::{SVec, svec};
 use std::cmp::Ordering;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
+use veryl_parser::veryl_token::{Token, TokenSource};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolPath(pub SVec<StrId>);

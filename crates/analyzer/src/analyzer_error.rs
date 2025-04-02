@@ -2,7 +2,7 @@ use crate::evaluator::EvaluatedError;
 use crate::multi_sources::{MultiSources, Source};
 use miette::{self, Diagnostic, SourceSpan};
 use thiserror::Error;
-use veryl_parser::veryl_token::TokenRange;
+use veryl_parser::token_range::TokenRange;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum AnalyzerError {

@@ -23,8 +23,9 @@ use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Build, Lint, Metadata};
 use veryl_parser::resource_table;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenRange, TokenSource};
+use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1 {

@@ -1,12 +1,12 @@
 pub mod doc_comment_table;
 pub mod finder;
 pub mod generated;
-pub mod last_token;
 pub mod parser;
 pub mod parser_error;
 pub mod resource_table;
 pub mod stringifier;
 pub mod text_table;
+pub mod token_range;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;
 pub mod veryl_parser;
