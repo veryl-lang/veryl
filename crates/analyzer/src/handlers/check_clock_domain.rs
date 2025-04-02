@@ -6,8 +6,9 @@ use crate::r#unsafe::Unsafe;
 use crate::unsafe_table;
 use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 #[derive(Default)]

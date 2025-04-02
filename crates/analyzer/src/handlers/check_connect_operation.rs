@@ -3,8 +3,9 @@ use crate::connect_operation_table::{self, ConnectOperand, ConnectOperation};
 use crate::symbol::{Direction, Symbol};
 use crate::symbol_table;
 use veryl_parser::ParolError;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 #[derive(Default)]

@@ -3,6 +3,7 @@ use veryl_analyzer::attribute::{AlignItem, FormatItem};
 use veryl_analyzer::attribute_table;
 use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
+use veryl_parser::token_range::TokenExt;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -389,7 +390,7 @@ impl VerylWalker for Formatter {
     fn identifier(&mut self, arg: &Identifier) {
         let align = !self.align_any()
             && !self.in_attribute
-            && attribute_table::is_align(&arg.token(), AlignItem::Identifier);
+            && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
         if align {
             self.align_start(align_kind::IDENTIFIER);
         }
@@ -401,7 +402,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, arg: &Number) {
-        let align = !self.align_any() && attribute_table::is_align(&arg.token(), AlignItem::Number);
+        let align = !self.align_any() && attribute_table::is_align(&arg.first(), AlignItem::Number);
         if align {
             self.align_start(align_kind::NUMBER);
         }
@@ -428,9 +429,9 @@ impl VerylWalker for Formatter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.token(), FormatItem::Compact);
+            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
             let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.token()).unwrap();
+                let width = self.measure_get(&arg.first()).unwrap();
                 (width < self.format_opt.max_width as u32) || compact
             } else {
                 // calc line width as single_line in Align mode
@@ -463,7 +464,7 @@ impl VerylWalker for Formatter {
             self.expression01(&arg.expression01);
             self.newline_tail_pop();
 
-            self.measure_finish(&arg.token());
+            self.measure_finish(&arg.first());
             if single_line {
                 self.single_line_finish();
             }
@@ -1814,7 +1815,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        let compact = attribute_table::is_format(&arg.identifier.token(), FormatItem::Compact);
+        let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
         let single_line = arg.inst_declaration_opt2.is_none() || compact;
 
         self.inst(&arg.inst);

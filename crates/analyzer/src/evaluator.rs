@@ -1,7 +1,8 @@
 use crate::symbol::{SymbolId, Type, TypeKind};
 use crate::symbol_table::{self, ResolveError, ResolveResult};
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenRange};
+use veryl_parser::veryl_token::Token;
 
 #[derive(Clone, Debug)]
 pub struct Evaluated {

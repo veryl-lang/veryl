@@ -6,11 +6,12 @@ use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPat
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, HierarchicalIdentifier, InstPortItem, ModportItem, ScopedIdentifier,
     StructConstructorItem,
 };
-use veryl_parser::veryl_token::{Token, TokenRange, TokenSource, is_anonymous_text};
+use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_text};
 
 #[derive(Clone, Debug)]
 pub enum ReferenceCandidate {

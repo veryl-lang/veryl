@@ -18,6 +18,7 @@ use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::token_range::TokenExt;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource, VerylToken, is_anonymous_token};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -1690,7 +1691,7 @@ impl VerylWalker for Emitter {
     fn identifier(&mut self, arg: &Identifier) {
         let align = !self.align_any()
             && !self.in_attribute
-            && attribute_table::is_align(&arg.token(), AlignItem::Identifier);
+            && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
         if align {
             self.align_start(align_kind::IDENTIFIER);
         }
@@ -1706,7 +1707,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, arg: &Number) {
-        let align = !self.align_any() && attribute_table::is_align(&arg.token(), AlignItem::Number);
+        let align = !self.align_any() && attribute_table::is_align(&arg.first(), AlignItem::Number);
         if align {
             self.align_start(align_kind::NUMBER);
         }
@@ -1835,9 +1836,9 @@ impl VerylWalker for Emitter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.token(), FormatItem::Compact);
+            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
             let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.token()).unwrap();
+                let width = self.measure_get(&arg.first()).unwrap();
                 (width < self.format_opt.max_width as u32) || compact
             } else {
                 // calc line width as single_line in Align mode
@@ -1872,7 +1873,7 @@ impl VerylWalker for Emitter {
             self.newline_pop();
             self.str("))");
 
-            self.measure_finish(&arg.token());
+            self.measure_finish(&arg.first());
             if single_line {
                 self.single_line_finish();
             }
@@ -2221,7 +2222,7 @@ impl VerylWalker for Emitter {
             self.str(".");
             self.align_start(align_kind::IDENTIFIER);
             // Directly emittion because named argument can't be resolved and emitted by symbol_string
-            let token = VerylToken::new(arg.argument_expression.expression.token());
+            let token = VerylToken::new(arg.argument_expression.expression.first());
             self.token(&token);
             self.align_finish(align_kind::IDENTIFIER);
             self.space(1);
@@ -3833,7 +3834,7 @@ impl VerylWalker for Emitter {
             unreachable!()
         };
 
-        let compact = attribute_table::is_format(&arg.identifier.token(), FormatItem::Compact);
+        let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
         let single_line =
             arg.inst_declaration_opt2.is_none() && defined_ports.is_empty() || compact;
         self.token(&arg.inst.inst_token.replace(""));
