@@ -113,6 +113,15 @@ module veryl_testcase_Module12_2 (
         end
     end
 
+    // if_reset by reset value initialized by function
+    localparam logic X = $sin(1);
+    logic f;
+    always_ff @ (posedge i_clk, negedge i_rst_n) begin
+        if (!i_rst_n) begin
+            f <= X;
+        end
+    end
+
     // always_comb declaration
     always_comb begin
         a   = 10;
