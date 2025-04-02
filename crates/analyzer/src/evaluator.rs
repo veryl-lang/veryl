@@ -1,4 +1,4 @@
-use crate::symbol::{SymbolId, Type, TypeKind};
+use crate::symbol::{SymbolId, SymbolKind, Type, TypeKind};
 use crate::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -1338,7 +1338,14 @@ impl Evaluator {
 
     fn identifier_helper(&mut self, symbol: Result<ResolveResult, ResolveError>) -> Evaluated {
         if let Ok(symbol) = symbol {
-            symbol.found.evaluate()
+            let mut ret = symbol.found.evaluate();
+            if let SymbolKind::Parameter(_) = symbol.found.kind {
+                // Parameter is static
+                if ret.value == EvaluatedValue::Unknown {
+                    ret.value = EvaluatedValue::UnknownStatic;
+                }
+            }
+            ret
         } else {
             Evaluated::create_unknown()
         }
