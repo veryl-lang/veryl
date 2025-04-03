@@ -4394,6 +4394,30 @@ fn clock_domain() {
 }
 
 #[test]
+fn bit_width() {
+    let code = r#"
+    module t1 (
+    i: input logic<314>,
+    o: output logic,
+    ) {
+        assign o = 1;
+    }
+
+    module t2 (
+        i4: input logic<4>,
+        o4: output logic<-1>,
+    ) {
+        //    inst my_t1: t1 (i: i4, o: o4[0]); // correct type o4[0] is 1 bit wide
+        inst my_t1: t1 (i: i4, o: o4); // incorrect type o4 is 4 bit wide (should be rejected)
+    }
+    "#;
+
+    let errors = analyze(code);
+    println!("errors {:?}", errors);
+    // assert!(matches!(errors[0], AnalyzerError::UnknownUnsafe { .. }));
+}
+
+#[test]
 fn r#unsafe() {
     let code = r#"
     module ModuleA {
