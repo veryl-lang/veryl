@@ -26,11 +26,16 @@ impl Handler for CheckPort {
 
 impl VerylGrammarTrait for CheckPort {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
+        println!("PER: x {:?}", arg);
         if let HandlerPoint::Before = self.point {
             if let PortDeclarationItemGroup::PortTypeConcrete(x) =
                 arg.port_declaration_item_group.as_ref()
             {
                 let x = x.port_type_concrete.as_ref();
+
+                // println!("PER: x {:?}", x.port_type_concrete_opt);
+                // println!("PER: x {:?}", x.port_type_concrete_opt0);
+
                 let direction = x.direction.as_ref();
                 if let Direction::Inout(_) = direction {
                     let r#type = &x.array_type;
