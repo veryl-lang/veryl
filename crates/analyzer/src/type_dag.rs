@@ -93,9 +93,12 @@ impl TypeDag {
         match self.dag.add_edge(start.into(), end.into(), edge) {
             Ok(_) => Ok(()),
             Err(_) => {
-                // Direct recursion of module/interface is allowed
-                let is_direct_recursion = start == end;
-                if matches!(edge, Context::Module | Context::Interface) && is_direct_recursion {
+                // Direct recursion of module/interface/function is allowed
+                let is_allowed_direct_recursion = matches!(
+                    edge,
+                    Context::Module | Context::Interface | Context::Function
+                ) && start == end;
+                if is_allowed_direct_recursion {
                     Ok(())
                 } else {
                     let ssym = self.get_symbol(start);
