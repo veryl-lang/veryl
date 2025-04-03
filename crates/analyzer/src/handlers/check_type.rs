@@ -21,6 +21,7 @@ pub struct CheckType {
     in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
     in_modport: bool,
+    in_modport_default_member: bool,
     in_alias_module: bool,
     in_alias_interface: bool,
     in_alias_package: bool,
@@ -192,6 +193,25 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
+    fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if let Ok(symbol) = symbol_table::resolve(arg) {
+                // Check modport default member type
+                if self.in_modport_default_member
+                    && !matches!(symbol.found.kind, SymbolKind::Modport(_))
+                {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        &symbol.found.token.to_string(),
+                        "modport",
+                        &symbol.found.kind.to_kind_name(),
+                        &arg.identifier_token.token.into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {
@@ -346,6 +366,14 @@ impl VerylGrammarTrait for CheckType {
             HandlerPoint::Before => self.in_module = true,
             HandlerPoint::After => self.in_module = false,
         };
+        Ok(())
+    }
+
+    fn modport_default(&mut self, _arg: &ModportDefault) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_modport_default_member = true,
+            HandlerPoint::After => self.in_modport_default_member = false,
+        }
         Ok(())
     }
 

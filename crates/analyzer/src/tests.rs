@@ -1800,6 +1800,25 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp_0 {
+            a: input,
+        }
+        modport mp_1 {
+            ..converse(a)
+        }
+        modport mp_2 {
+            ..same(a)
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+    assert!(matches!(errors[1], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]
@@ -2509,6 +2528,31 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp_0 {
+            a: input,
+        }
+        modport mp_1 {
+            ..converse(mp)
+        }
+        modport mp_2 {
+            ..same(mp)
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
+    assert!(matches!(
+        errors[1],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
 }
 
 #[test]
