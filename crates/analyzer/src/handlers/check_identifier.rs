@@ -456,49 +456,49 @@ mod tests {
 
     #[test]
     fn lower_camel_case() {
-        assert_eq!(is_lower_camel_case("abc"), true);
-        assert_eq!(is_lower_camel_case("aBc"), true);
-        assert_eq!(is_lower_camel_case("AbC"), false);
-        assert_eq!(is_lower_camel_case("ABc"), false);
-        assert_eq!(is_lower_camel_case("ABC"), false);
-        assert_eq!(is_lower_camel_case("a_b_c"), false);
-        assert_eq!(is_lower_camel_case("a_B_c"), false);
-        assert_eq!(is_lower_camel_case("A_B_C"), false);
+        assert!(is_lower_camel_case("abc"));
+        assert!(is_lower_camel_case("aBc"));
+        assert!(!is_lower_camel_case("AbC"));
+        assert!(!is_lower_camel_case("ABc"));
+        assert!(!is_lower_camel_case("ABC"));
+        assert!(!is_lower_camel_case("a_b_c"));
+        assert!(!is_lower_camel_case("a_B_c"));
+        assert!(!is_lower_camel_case("A_B_C"));
     }
 
     #[test]
     fn upper_camel_case() {
-        assert_eq!(is_upper_camel_case("abc"), false);
-        assert_eq!(is_upper_camel_case("aBc"), false);
-        assert_eq!(is_upper_camel_case("AbC"), true);
-        assert_eq!(is_upper_camel_case("ABc"), true);
-        assert_eq!(is_upper_camel_case("ABC"), true);
-        assert_eq!(is_upper_camel_case("a_b_c"), false);
-        assert_eq!(is_upper_camel_case("a_B_c"), false);
-        assert_eq!(is_upper_camel_case("A_B_C"), false);
+        assert!(!is_upper_camel_case("abc"));
+        assert!(!is_upper_camel_case("aBc"));
+        assert!(is_upper_camel_case("AbC"));
+        assert!(is_upper_camel_case("ABc"));
+        assert!(is_upper_camel_case("ABC"));
+        assert!(!is_upper_camel_case("a_b_c"));
+        assert!(!is_upper_camel_case("a_B_c"));
+        assert!(!is_upper_camel_case("A_B_C"));
     }
 
     #[test]
     fn snake_case() {
-        assert_eq!(is_snake_case("abc"), true);
-        assert_eq!(is_snake_case("aBc"), false);
-        assert_eq!(is_snake_case("AbC"), false);
-        assert_eq!(is_snake_case("ABc"), false);
-        assert_eq!(is_snake_case("ABC"), false);
-        assert_eq!(is_snake_case("a_b_c"), true);
-        assert_eq!(is_snake_case("a_B_c"), false);
-        assert_eq!(is_snake_case("A_B_C"), false);
+        assert!(is_snake_case("abc"));
+        assert!(!is_snake_case("aBc"));
+        assert!(!is_snake_case("AbC"));
+        assert!(!is_snake_case("ABc"));
+        assert!(!is_snake_case("ABC"));
+        assert!(is_snake_case("a_b_c"));
+        assert!(!is_snake_case("a_B_c"));
+        assert!(!is_snake_case("A_B_C"));
     }
 
     #[test]
     fn screaming_snake_case() {
-        assert_eq!(is_screaming_snake_case("abc"), false);
-        assert_eq!(is_screaming_snake_case("aBc"), false);
-        assert_eq!(is_screaming_snake_case("AbC"), false);
-        assert_eq!(is_screaming_snake_case("ABc"), false);
-        assert_eq!(is_screaming_snake_case("ABC"), true);
-        assert_eq!(is_screaming_snake_case("a_b_c"), false);
-        assert_eq!(is_screaming_snake_case("a_B_c"), false);
-        assert_eq!(is_screaming_snake_case("A_B_C"), true);
+        assert!(!is_screaming_snake_case("abc"));
+        assert!(!is_screaming_snake_case("aBc"));
+        assert!(!is_screaming_snake_case("AbC"));
+        assert!(!is_screaming_snake_case("ABc"));
+        assert!(is_screaming_snake_case("ABC"));
+        assert!(!is_screaming_snake_case("a_b_c"));
+        assert!(!is_screaming_snake_case("a_B_c"));
+        assert!(is_screaming_snake_case("A_B_C"));
     }
 }
