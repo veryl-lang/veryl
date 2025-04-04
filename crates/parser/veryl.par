@@ -905,6 +905,7 @@ ProtoPacakgeItem: ProtoConstDeclaration
                 | EnumDeclaration
                 | StructUnionDeclaration
                 | ProtoFunctionDeclaration
+                | ProtoAliasDeclaration
                 | ImportDeclaration
                 ;
 
@@ -913,6 +914,8 @@ ProtoConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Semicolon;
 ProtoTypeDefDeclaration: Type Identifier Semicolon;
 
 ProtoFunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] Semicolon;
+
+ProtoAliasDeclaration: Alias ( Module | Interface | Package ) Identifier Colon ScopedIdentifier Semicolon;
 
 // ----------------------------------------------------------------------------
 // Embed

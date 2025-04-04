@@ -3145,6 +3145,9 @@ pub trait VerylWalker {
             ProtoPacakgeItem::ProtoFunctionDeclaration(x) => {
                 self.proto_function_declaration(&x.proto_function_declaration);
             }
+            ProtoPacakgeItem::ProtoAliasDeclaration(x) => {
+                self.proto_alias_declaration(&x.proto_alias_declaration);
+            }
             ProtoPacakgeItem::ImportDeclaration(x) => {
                 self.import_declaration(&x.import_declaration);
             }
@@ -3196,6 +3199,22 @@ pub trait VerylWalker {
         }
         self.semicolon(&arg.semicolon);
         after!(self, proto_function_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoAliasDeclaration'
+    fn proto_alias_declaration(&mut self, arg: &ProtoAliasDeclaration) {
+        before!(self, proto_alias_declaration, arg);
+        self.alias(&arg.alias);
+        match &*arg.proto_alias_declaration_group {
+            ProtoAliasDeclarationGroup::Module(x) => self.module(&x.module),
+            ProtoAliasDeclarationGroup::Interface(x) => self.interface(&x.interface),
+            ProtoAliasDeclarationGroup::Package(x) => self.package(&x.package),
+        }
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.semicolon(&arg.semicolon);
+        after!(self, proto_alias_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'EmbedDeclaration'

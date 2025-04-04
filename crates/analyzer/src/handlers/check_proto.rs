@@ -1,10 +1,12 @@
 use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
+use crate::namespace::Namespace;
 use crate::symbol::{
     EnumProperty, FunctionProperty, ModuleProperty, PackageProperty, Parameter, ParameterProperty,
     Port, ProtoConstProperty, ProtoModuleProperty, ProtoPackageProperty, StructProperty, SymbolId,
     SymbolKind, Type, TypeKind, UnionProperty,
 };
+use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
@@ -19,6 +21,7 @@ pub enum ProtoIncompatible {
     MissingTypedef(StrId),
     MissignMember(StrId),
     MissingFunction(StrId),
+    MissingAlias(StrId),
     MissingType,
     UnnecessaryParam(StrId),
     UnnecessaryPort(StrId),
@@ -31,6 +34,7 @@ pub enum ProtoIncompatible {
     IncompatibleTypedef(StrId),
     IncompatibleMember(StrId),
     IncompatibleFunction(StrId),
+    IncompatibleAlias(StrId),
     IncompatibleType,
 }
 
@@ -57,6 +61,9 @@ impl ProtoIncompatible {
             }
             ProtoIncompatible::MissingFunction(x) => {
                 format!("function {x} is missing")
+            }
+            ProtoIncompatible::MissingAlias(x) => {
+                format!("alias {x} is missing")
             }
             ProtoIncompatible::MissingType => "type specification is missing".to_string(),
             ProtoIncompatible::UnnecessaryParam(x) => {
@@ -89,6 +96,9 @@ impl ProtoIncompatible {
             }
             ProtoIncompatible::IncompatibleFunction(x) => {
                 format!("function {x} is incompatible")
+            }
+            ProtoIncompatible::IncompatibleAlias(x) => {
+                format!("alias {x} is incompatible")
             }
             ProtoIncompatible::IncompatibleType => "type specification is incompatible".to_string(),
         }
@@ -128,7 +138,9 @@ fn check_package_compat(
     for proto in proto_members {
         let text = proto.token.text;
         if let Some(actual) = actual_members.iter().find(|x| x.token.text == text) {
-            match (&actual.kind, &proto.kind) {
+            let actual_symbol = actual;
+            let proto_symbol = proto;
+            match (&actual_symbol.kind, &proto_symbol.kind) {
                 (SymbolKind::Parameter(actual), SymbolKind::ProtoConst(proto)) => {
                     if !check_const_compat(actual, proto).is_empty() {
                         ret.push(ProtoIncompatible::IncompatibleParam(text));
@@ -175,6 +187,51 @@ fn check_package_compat(
                 (_, SymbolKind::ProtoFunction(_)) => {
                     ret.push(ProtoIncompatible::IncompatibleFunction(text));
                 }
+                (SymbolKind::AliasModule(actual), SymbolKind::ProtoAliasModule(proto)) => {
+                    if !check_alias_compat(
+                        &actual.target,
+                        &actual_symbol.namespace,
+                        &proto.target,
+                        &proto_symbol.namespace,
+                    )
+                    .is_empty()
+                    {
+                        ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                    }
+                }
+                (_, SymbolKind::ProtoAliasModule(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                }
+                (SymbolKind::AliasInterface(actual), SymbolKind::ProtoAliasInterface(proto)) => {
+                    if !check_alias_compat(
+                        &actual.target,
+                        &actual_symbol.namespace,
+                        &proto.target,
+                        &proto_symbol.namespace,
+                    )
+                    .is_empty()
+                    {
+                        ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                    }
+                }
+                (_, SymbolKind::ProtoAliasInterface(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                }
+                (SymbolKind::AliasPackage(actual), SymbolKind::ProtoAliasPackage(proto)) => {
+                    if !check_alias_compat(
+                        &actual.target,
+                        &actual_symbol.namespace,
+                        &proto.target,
+                        &proto_symbol.namespace,
+                    )
+                    .is_empty()
+                    {
+                        ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                    }
+                }
+                (_, SymbolKind::ProtoAliasPackage(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                }
                 _ => {}
             }
         } else {
@@ -185,6 +242,11 @@ fn check_package_compat(
                 SymbolKind::Struct(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
                 SymbolKind::Union(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
                 SymbolKind::ProtoFunction(_) => ret.push(ProtoIncompatible::MissingFunction(text)),
+                SymbolKind::ProtoAliasModule(_)
+                | SymbolKind::ProtoAliasInterface(_)
+                | SymbolKind::ProtoAliasPackage(_) => {
+                    ret.push(ProtoIncompatible::MissingAlias(text))
+                }
                 _ => {}
             }
         }
@@ -327,6 +389,45 @@ fn check_function_compat(
     ));
     ret.append(&mut check_ports_compat(&actual.ports, &proto.ports));
     ret.append(&mut check_type_compat(&actual.ret, &proto.ret));
+    ret
+}
+
+fn check_alias_compat(
+    actual_path: &GenericSymbolPath,
+    actual_namespace: &Namespace,
+    proto_path: &GenericSymbolPath,
+    proto_namespace: &Namespace,
+) -> Vec<ProtoIncompatible> {
+    let mut ret = Vec::new();
+
+    let actual_proto = {
+        let Ok(symbol) = symbol_table::resolve((&actual_path.generic_path(), actual_namespace))
+        else {
+            return ret;
+        };
+        if let Some(ref proto) = symbol.found.proto() {
+            symbol_table::resolve((proto, &symbol.found.namespace))
+                .ok()
+                .map(|x| x.found)
+        } else {
+            None
+        }
+    };
+    let Ok(required_proto) = symbol_table::resolve((&proto_path.generic_path(), proto_namespace))
+    else {
+        return ret;
+    };
+
+    let proto_match = if let Some(actual_proto) = actual_proto {
+        actual_proto.id == required_proto.found.id
+    } else {
+        false
+    };
+
+    if !proto_match {
+        ret.push(ProtoIncompatible::IncompatibleType);
+    }
+
     ret
 }
 

@@ -951,3 +951,45 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn inst_module_givne_via_package() {
+    let code = r#"proto module ProtoModuleA;
+module ModuleA for ProtoModuleA {
+}
+proto package ProtoPkgA {
+    alias module InstModule: ProtoModuleA;
+}
+package PkgA::<M: ProtoModuleA> {
+    alias module InstModule = M;
+}
+module ModuleB {
+    inst u: PkgA::<ModuleA>::InstModule;
+}
+"#;
+    let expect = r#"
+module prj_ModuleA;
+endmodule
+
+
+package prj___PkgA__ModuleA;
+
+
+endpackage
+module prj_ModuleB;
+    prj_ModuleA u ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}

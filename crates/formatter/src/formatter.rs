@@ -2659,6 +2659,23 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'ProtoAliasDeclaration'
+    fn proto_alias_declaration(&mut self, arg: &ProtoAliasDeclaration) {
+        self.alias(&arg.alias);
+        self.space(1);
+        match &*arg.proto_alias_declaration_group {
+            ProtoAliasDeclarationGroup::Module(x) => self.module(&x.module),
+            ProtoAliasDeclarationGroup::Interface(x) => self.interface(&x.interface),
+            ProtoAliasDeclarationGroup::Package(x) => self.package(&x.package),
+        }
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'EmbedDeclaration'
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         self.embed(&arg.embed);

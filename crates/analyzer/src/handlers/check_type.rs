@@ -25,6 +25,9 @@ pub struct CheckType {
     in_alias_module: bool,
     in_alias_interface: bool,
     in_alias_package: bool,
+    in_proto_alias_module: bool,
+    in_proto_alias_interface: bool,
+    in_proto_alias_package: bool,
 }
 
 impl CheckType {
@@ -258,10 +261,16 @@ impl VerylGrammarTrait for CheckType {
                 if self.in_generic_argument.is_empty() {
                     let expected = if self.in_alias_module && !symbol.found.is_module(false) {
                         Some("module")
+                    } else if self.in_proto_alias_module && !symbol.found.is_proto_module() {
+                        Some("proto module")
                     } else if self.in_alias_interface && !symbol.found.is_interface(false) {
                         Some("interface")
+                    } else if self.in_proto_alias_interface && !symbol.found.is_proto_interface() {
+                        Some("proto interface")
                     } else if self.in_alias_package && !symbol.found.is_package(false) {
                         Some("package")
+                    } else if self.in_proto_alias_package && !symbol.found.is_proto_package() {
+                        Some("proto package")
                     } else {
                         None
                     };
@@ -495,6 +504,22 @@ impl VerylGrammarTrait for CheckType {
                         }
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_alias_declaration(&mut self, arg: &ProtoAliasDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => match &*arg.proto_alias_declaration_group {
+                ProtoAliasDeclarationGroup::Module(_) => self.in_proto_alias_module = true,
+                ProtoAliasDeclarationGroup::Interface(_) => self.in_proto_alias_interface = true,
+                ProtoAliasDeclarationGroup::Package(_) => self.in_proto_alias_package = true,
+            },
+            HandlerPoint::After => {
+                self.in_proto_alias_module = false;
+                self.in_proto_alias_interface = false;
+                self.in_proto_alias_package = false;
             }
         }
         Ok(())

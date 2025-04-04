@@ -1840,6 +1840,32 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn proto_alias_declaration(&mut self, arg: &ProtoAliasDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            let kind = match &*arg.proto_alias_declaration_group {
+                ProtoAliasDeclarationGroup::Module(_) => {
+                    let property = AliasModuleProperty { target };
+                    SymbolKind::ProtoAliasModule(property)
+                }
+                ProtoAliasDeclarationGroup::Interface(_) => {
+                    let property = AliasInterfaceProperty { target };
+                    SymbolKind::ProtoAliasInterface(property)
+                }
+                ProtoAliasDeclarationGroup::Package(_) => {
+                    let property = AliasPackageProperty { target };
+                    SymbolKind::ProtoAliasPackage(property)
+                }
+            };
+            if let Some(id) =
+                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+            {
+                self.push_package_member(id);
+            }
+        }
+        Ok(())
+    }
+
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let way = arg.identifier.identifier_token.to_string();

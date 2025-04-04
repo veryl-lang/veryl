@@ -1298,11 +1298,13 @@ impl_token_range_enum!(
     enum_declaration,
     struct_union_declaration,
     proto_function_declaration,
+    proto_alias_declaration,
     import_declaration
 );
 impl_token_range!(ProtoConstDeclaration, r#const, semicolon);
 impl_token_range!(ProtoTypeDefDeclaration, r#type, semicolon);
 impl_token_range!(ProtoFunctionDeclaration, function, semicolon);
+impl_token_range!(ProtoAliasDeclaration, alias, semicolon);
 
 // ----------------------------------------------------------------------------
 // Embed
