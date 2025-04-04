@@ -26,7 +26,7 @@ impl Handler for CheckPort {
 
 impl VerylGrammarTrait for CheckPort {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
-        println!("PER: x {:?}", arg);
+        println!("PER: x {:?}", arg.identifier.identifier_token.token.to_string());
         if let HandlerPoint::Before = self.point {
             if let PortDeclarationItemGroup::PortTypeConcrete(x) =
                 arg.port_declaration_item_group.as_ref()
