@@ -56,17 +56,17 @@ module veryl_testcase_Module23 #(
     logic _e; always_comb _e = 1;
     `elsif DEFINE_F
     logic _e; always_comb _e = 2;
-    `endif
-
+    `else
     logic _e; always_comb _e = 3;
+    `endif
 
     `ifndef DEFINE_G
     logic _f; always_comb _f = 1;
     `elsif DEFINE_H
     logic _f; always_comb _f = 2;
-    `endif
-
+    `else
     logic _f; always_comb _f = 3;
+    `endif
 endmodule
 
 `ifdef DEFINE_A
