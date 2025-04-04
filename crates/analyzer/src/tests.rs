@@ -510,6 +510,23 @@ fn cyclic_type_dependency() {
         errors[0],
         AnalyzerError::CyclicTypeDependency { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        function sum(
+            operand: input u32
+        ) -> u32 {
+            if operand >: 0 {
+                return operand + sum(operand - 1);
+            } else {
+                return 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

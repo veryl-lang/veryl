@@ -37,7 +37,7 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(cyclice_type_dependency),
+        code(cyclic_type_dependency),
         help(""),
         url(
             "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#cyclic_type_dependency"
