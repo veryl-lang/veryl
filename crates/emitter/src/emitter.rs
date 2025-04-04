@@ -2994,7 +2994,7 @@ impl VerylWalker for Emitter {
         self.in_attribute = true;
         let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
-            "ifdef" | "ifndef" | "elsif" => {
+            "ifdef" | "ifndef" | "elsif" | "els" => {
                 let comma = if self.string.trim_end().ends_with(',') {
                     self.unindent();
                     self.truncate(self.string.len() - format!(",{}", NEWLINE).len());
