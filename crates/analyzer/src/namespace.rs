@@ -38,6 +38,23 @@ impl From<&[Attribute]> for DefineContext {
                 Attribute::Ifndef(x) => {
                     ret.neg.insert(*x);
                 }
+                Attribute::Elsif(x, y, z) => {
+                    ret.pos.insert(*x);
+                    for y in y {
+                        ret.pos.insert(*y);
+                    }
+                    for z in z {
+                        ret.neg.insert(*z);
+                    }
+                }
+                Attribute::Els(x, y) => {
+                    for x in x {
+                        ret.pos.insert(*x);
+                    }
+                    for y in y {
+                        ret.neg.insert(*y);
+                    }
+                }
                 _ => (),
             }
         }

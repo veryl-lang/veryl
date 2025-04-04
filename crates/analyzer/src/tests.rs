@@ -1089,6 +1089,19 @@ fn mismatch_attribute_args() {
         errors[0],
         AnalyzerError::MismatchAttributeArgs { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        #[els(dummy_name)]
+        var a: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
 }
 
 #[test]
@@ -5188,4 +5201,83 @@ fn mixed_function_argument() {
         errors[0],
         AnalyzerError::MixedFunctionArgument { .. }
     ));
+}
+
+#[test]
+fn ambiguous_elsif() {
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        let _a: logic = 0;
+        #[elsif(B)]
+        let _a: logic = 0;
+        #[els]
+        let _a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        #[ifdef(B)]
+        #[ifdef(C)]
+        let _a: logic = 0;
+        #[elsif(D)]
+        let _a: logic = 0;
+        #[els]
+        let _a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::AmbiguousElsif { .. }));
+
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        let _a: logic = 0;
+        #[elsif(B)]
+        #[ifdef(A)]
+        let _a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::AmbiguousElsif { .. }));
+
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        let _a: logic = 0;
+        #[elsif(B)]
+        #[elsif(C)]
+        let _a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::AmbiguousElsif { .. }));
+
+    let code = r#"
+    module ModuleA {
+        #[elsif(A)]
+        let _a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::AmbiguousElsif { .. }));
+
+    let code = r#"
+    module ModuleA {
+        #[els]
+        let _a: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::AmbiguousElsif { .. }));
 }

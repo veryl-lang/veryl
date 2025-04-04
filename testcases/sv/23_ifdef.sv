@@ -22,9 +22,10 @@ module veryl_testcase_Module23 #(
     `ifndef DEFINE_A
     ,
     input var logic port_a
-    ,`endif
+    `endif
 
     `ifdef DEFINE_A
+    ,
     input var logic port_c
     `endif
 );
@@ -50,6 +51,22 @@ module veryl_testcase_Module23 #(
     `ifndef DEFINE_D
     always_comb _d = 1;
     `endif
+
+    `ifdef DEFINE_E
+    logic _e; always_comb _e = 1;
+    `elsif DEFINE_F
+    logic _e; always_comb _e = 2;
+    `endif
+
+    logic _e; always_comb _e = 3;
+
+    `ifndef DEFINE_G
+    logic _f; always_comb _f = 1;
+    `elsif DEFINE_H
+    logic _f; always_comb _f = 2;
+    `endif
+
+    logic _f; always_comb _f = 3;
 endmodule
 
 `ifdef DEFINE_A

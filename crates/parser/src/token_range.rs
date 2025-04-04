@@ -80,8 +80,13 @@ impl From<&Token> for TokenRange {
 }
 
 pub trait TokenExt {
-    fn first(&self) -> Token;
-    fn last(&self) -> Token;
+    fn range(&self) -> TokenRange;
+    fn first(&self) -> Token {
+        self.range().beg
+    }
+    fn last(&self) -> Token {
+        self.range().end
+    }
     fn id(&self) -> TokenId {
         self.first().id
     }
@@ -93,14 +98,8 @@ pub trait TokenExt {
 macro_rules! impl_token_ext {
     ($typename:ty) => {
         impl TokenExt for $typename {
-            fn first(&self) -> Token {
-                let ret: TokenRange = self.into();
-                ret.beg
-            }
-
-            fn last(&self) -> Token {
-                let ret: TokenRange = self.into();
-                ret.end
+            fn range(&self) -> TokenRange {
+                self.into()
             }
         }
     };
