@@ -39,6 +39,10 @@ pub struct Opt {
     #[arg(long, global = true)]
     pub verbose: bool,
 
+    /// Use trace output
+    #[arg(long, global = true)]
+    pub trace: bool,
+
     /// Generate tab-completion
     #[arg(long, global = true, hide = true)]
     pub completion: Option<CompletionShell>,

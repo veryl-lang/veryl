@@ -6,20 +6,46 @@ package Package56B {
     const X: u32 = 2;
 }
 
-module Module56 {
+proto package ProtoPackage56 {
+    type A;
+}
+
+package Package56C for ProtoPackage56 {
+    type A = StructA;
+
+    struct StructA {
+        a: logic,
+        b: logic,
+    }
+}
+
+module Module56 (
+    x0: modport Interface56D::<Package56C::StructA>::X,
+    x1: modport Interface56E::<Package56C>::X         ,
+) {
     import Package56A::X;
+
     inst u0: Interface56A::<Package56A::X>;
     inst u1: Interface56A::<Package56B::X>;
     inst u2: Interface56B::<Package56A::X>;
     inst u3: Interface56B::<Package56A::X>;
+
     inst u4: Interface56B::<>;
     inst u5: Interface56B::<X>;
     inst u6: Module56A::<1>;
+
     inst u7: Module56C::<Interface56C::<2>>;
+
+    inst u8: Interface56D::<Package56C::StructA>;
+    inst u9: Interface56E::<Package56C>;
 
     let _a: logic = u0._a;
     let _b: logic = u2._b;
     let _c: logic = u5._b;
+    let _d: logic = x0._b.a;
+    let _e: logic = x1._b.a;
+    let _f: logic = u8._b.a;
+    let _g: logic = u9._b.a;
 }
 
 module Module56A::<T: const> {
@@ -44,6 +70,7 @@ proto interface ProtoInterface56C {
 }
 
 interface Interface56C::<W: const> for ProtoInterface56C {
+
     const C_WIDTH: u32 = W;
 
     var _c: logic<C_WIDTH>;
@@ -51,4 +78,20 @@ interface Interface56C::<W: const> for ProtoInterface56C {
 
 module Module56C::<IF: ProtoInterface56C> {
     inst u: IF;
+}
+
+pub interface Interface56D::<T: type> {
+    var _b: T;
+
+    modport X {
+        _b: input,
+    }
+}
+
+pub interface Interface56E::<T: ProtoPackage56> {
+    var _b: T::A;
+
+    modport X {
+        _b: input,
+    }
 }
