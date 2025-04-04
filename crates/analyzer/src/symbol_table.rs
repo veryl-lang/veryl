@@ -17,6 +17,7 @@ pub struct ResolveResult {
     pub found: Symbol,
     pub full_path: Vec<SymbolId>,
     pub imported: bool,
+    pub generic_table: HashMap<StrId, GenericSymbolPath>,
 }
 
 #[derive(Clone, Debug)]
@@ -136,17 +137,38 @@ impl SymbolTable {
                 }
             }
 
-            let symbol = self.resolve(&x.path.generic_path(), &context.namespace)?;
+            let symbol = self.resolve(
+                &x.path.generic_path(),
+                &x.path.generic_arguments(),
+                &context.namespace,
+            )?;
             match symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
                 SymbolKind::TypeDef(x) => {
                     return self.trace_type_kind(context, &x.r#type.kind);
+                }
+                SymbolKind::GenericParameter(ref x) => {
+                    if x.bound == GenericBoundKind::Type {
+                        if let Some(path) = context.generic_table.get(&symbol.found.token.text) {
+                            let symbol = self.resolve(
+                                &path.generic_path(),
+                                &path.generic_arguments(),
+                                &context.namespace,
+                            )?;
+                            context.namespace = symbol.found.inner_namespace();
+                            context.last_found_type = Some(symbol.found.id);
+                            context.inner = true;
+                            context.generic_table = symbol.generic_table;
+                            return Ok(context);
+                        }
+                    }
                 }
                 _ => (),
             }
             context.namespace = symbol.found.inner_namespace();
             context.last_found_type = Some(symbol.found.id);
             context.inner = true;
+            context.generic_table = symbol.generic_table;
         } else {
             // assign a new empty namespace becuase
             // factor types and abstruct interface type have no members.
@@ -161,13 +183,17 @@ impl SymbolTable {
         mut context: ResolveContext<'a>,
         path: &GenericSymbolPath,
     ) -> Result<ResolveContext<'a>, ResolveError> {
-        let type_symbol = if let Ok(symbol) = self.resolve(&path.mangled_path(), &context.namespace)
-        {
-            symbol.found
-        } else {
-            let symbol = self.resolve(&path.generic_path(), &context.namespace)?;
-            symbol.found
-        };
+        let type_symbol =
+            if let Ok(symbol) = self.resolve(&path.mangled_path(), &[], &context.namespace) {
+                symbol.found
+            } else {
+                let symbol = self.resolve(
+                    &path.generic_path(),
+                    &path.generic_arguments(),
+                    &context.namespace,
+                )?;
+                symbol.found
+            };
 
         match type_symbol.kind {
             SymbolKind::AliasModule(x) => self.trace_type_path(context, &x.target),
@@ -211,8 +237,10 @@ impl SymbolTable {
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let SymbolKind::GenericParameter(x) = &found.kind {
             let symbol = match &x.bound {
-                GenericBoundKind::Inst(proto) => &self.resolve(proto, &found.namespace)?.found,
-                GenericBoundKind::Proto(proto) => &self.resolve(proto, &found.namespace)?.found,
+                GenericBoundKind::Inst(proto) => &self.resolve(proto, &[], &found.namespace)?.found,
+                GenericBoundKind::Proto(proto) => {
+                    &self.resolve(proto, &[], &found.namespace)?.found
+                }
                 _ => found,
             };
 
@@ -334,6 +362,7 @@ impl SymbolTable {
     pub fn resolve(
         &self,
         path: &SymbolPath,
+        generic_arguments: &[Vec<GenericSymbolPath>],
         namespace: &Namespace,
     ) -> Result<ResolveResult, ResolveError> {
         let mut context = ResolveContext::new(namespace);
@@ -348,9 +377,11 @@ impl SymbolTable {
             }
         }
 
-        for name in path.as_slice() {
+        for (i, name) in path.as_slice().iter().enumerate() {
             let mut max_depth = 0;
             context.found = None;
+
+            let generic_argument = generic_arguments.get(i);
 
             if context.sv_member {
                 let token = Token::new(&name.to_string(), 0, 0, 0, 0, TokenSource::External);
@@ -365,6 +396,7 @@ impl SymbolTable {
                     found: symbol,
                     full_path: context.full_path,
                     imported: context.imported,
+                    generic_table: context.generic_table,
                 });
             }
 
@@ -405,6 +437,9 @@ impl SymbolTable {
                         ));
                     }
 
+                    if let Some(x) = generic_argument {
+                        context.generic_table.extend(found.generic_table(&x));
+                    }
                     context.last_found = context.found;
                     context.full_path.push(found.id);
                     match &found.kind {
@@ -430,7 +465,7 @@ impl SymbolTable {
                             let path = SymbolPath::new(&[found.token.text]);
                             context.namespace = found.namespace.clone();
                             context.namespace.pop();
-                            let symbol = self.resolve(&path, &context.namespace)?;
+                            let symbol = self.resolve(&path, &[], &context.namespace)?;
                             if let SymbolKind::Variable(x) = &symbol.found.kind {
                                 context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
@@ -514,6 +549,7 @@ impl SymbolTable {
                 found,
                 full_path: context.full_path,
                 imported: context.imported,
+                generic_table: context.generic_table,
             })
         } else {
             let cause = ResolveErrorCause::NotFound(context.namespace.pop().unwrap());
@@ -635,7 +671,7 @@ impl SymbolTable {
     pub fn get_imported_symbols(&self) -> Vec<(Import, Symbol)> {
         let mut ret = Vec::new();
         for import in &self.import_list {
-            if let Ok(symbol) = self.resolve(&import.path.0, &import.path.1) {
+            if let Ok(symbol) = self.resolve(&import.path.0, &[], &import.path.1) {
                 ret.push((import.clone(), symbol.found));
             }
         }
@@ -661,7 +697,8 @@ impl SymbolTable {
             SymbolKind::Package(_) => return Some(symbol.clone()),
             SymbolKind::ProtoPackage(_) if include_proto => return Some(symbol.clone()),
             SymbolKind::AliasPackage(x) => {
-                if let Ok(symbol) = self.resolve(&x.target.generic_path(), &symbol.namespace) {
+                // TODO x.target.generic_arguments() instead of &[] is failed
+                if let Ok(symbol) = self.resolve(&x.target.generic_path(), &[], &symbol.namespace) {
                     return self.get_package(&symbol.found, include_proto);
                 }
             }
@@ -671,7 +708,7 @@ impl SymbolTable {
             }
             SymbolKind::GenericParameter(x) => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = self.resolve(proto, &symbol.namespace) {
+                    if let Ok(symbol) = self.resolve(proto, &[], &symbol.namespace) {
                         return self.get_package(&symbol.found, true);
                     }
                 }
@@ -687,8 +724,11 @@ impl SymbolTable {
         for symbol in self.symbol_table.values() {
             if let Some(x) = symbol.kind.get_type() {
                 if let TypeKind::UserDefined(x) = &x.kind {
-                    if let Ok(type_symbol) = self.resolve(&x.path.generic_path(), &symbol.namespace)
-                    {
+                    if let Ok(type_symbol) = self.resolve(
+                        &x.path.generic_path(),
+                        &x.path.generic_arguments(),
+                        &symbol.namespace,
+                    ) {
                         resolved.push((symbol.id, type_symbol.found.id));
                     }
                 }
@@ -823,6 +863,7 @@ struct ResolveContext<'a> {
     full_path: Vec<SymbolId>,
     namespace: Namespace,
     generic_namespace_map: HashMap<StrId, StrId>,
+    generic_table: HashMap<StrId, GenericSymbolPath>,
     inner: bool,
     other_prj: bool,
     sv_member: bool,
@@ -838,6 +879,7 @@ impl ResolveContext<'_> {
             full_path: vec![],
             namespace: namespace.clone(),
             generic_namespace_map: HashMap::default(),
+            generic_table: HashMap::default(),
             inner: false,
             other_prj: false,
             sv_member: false,
@@ -1127,7 +1169,7 @@ pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, R
     if let Some(x) = SYMBOL_CACHE.with(|f| f.borrow().get(&path).cloned()) {
         Ok(x)
     } else {
-        let ret = SYMBOL_TABLE.with(|f| f.borrow().resolve(&path.0, &path.1));
+        let ret = SYMBOL_TABLE.with(|f| f.borrow().resolve(&path.0, &[], &path.1));
         if let Ok(x) = &ret {
             SYMBOL_CACHE.with(|f| f.borrow_mut().insert(path, x.clone()));
         }
