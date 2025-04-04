@@ -200,4 +200,9 @@ module veryl_testcase_Module49;
         a = $writeo();
     end
 endmodule
+
+package veryl_testcase_Package49;
+    localparam int unsigned a = 1;
+    localparam int unsigned b = $clog2(a);
+endpackage
 //# sourceMappingURL=../map/testcases/sv/49_system_function.sv.map

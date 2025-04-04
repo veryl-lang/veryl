@@ -850,4 +850,18 @@ impl VerylGrammarTrait for CheckVarRef {
         }
         Ok(())
     }
+
+    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Package {
+                    token: arg.package.package_token.token,
+                });
+            }
+            HandlerPoint::After => {
+                self.affiliation.pop();
+            }
+        }
+        Ok(())
+    }
 }
