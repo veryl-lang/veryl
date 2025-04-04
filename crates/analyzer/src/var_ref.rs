@@ -58,6 +58,7 @@ pub enum VarRefType {
 pub enum VarRefAffiliation {
     Module { token: Token },
     Interface { token: Token },
+    Package { token: Token },
     AlwaysComb { token: Token },
     AlwaysFF { token: Token },
     Function { token: Token },
@@ -68,6 +69,7 @@ impl VarRefAffiliation {
         match self {
             VarRefAffiliation::Module { token } => token,
             VarRefAffiliation::Interface { token } => token,
+            VarRefAffiliation::Package { token } => token,
             VarRefAffiliation::AlwaysComb { token } => token,
             VarRefAffiliation::AlwaysFF { token } => token,
             VarRefAffiliation::Function { token } => token,

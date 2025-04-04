@@ -200,3 +200,8 @@ module Module49 {
         a = $writeo();
     }
 }
+
+package Package49 {
+    const a: u32 = 1;
+    const b: u32 = $clog2(a);
+}
