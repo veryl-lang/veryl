@@ -61,7 +61,9 @@ mod analyzer {
         dbg!(&errors);
         assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass3(&prj, &file, &ret.veryl);
+        let info = Analyzer::analyze_post_pass2();
+
+        let errors = analyzer.analyze_pass3(&prj, &file, &ret.veryl, &info);
         dbg!(&errors);
         assert!(errors.is_empty());
     }
@@ -313,8 +315,10 @@ mod filelist {
             let _ = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
         }
 
+        let info = Analyzer::analyze_post_pass2();
+
         for (path, _, parser, analyzer) in &contexts {
-            let _ = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
+            let _ = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
         }
 
         let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);

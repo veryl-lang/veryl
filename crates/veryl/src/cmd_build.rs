@@ -71,8 +71,10 @@ impl CmdBuild {
 
         debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
 
+        let info = Analyzer::analyze_post_pass2();
+
         for (path, _, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 

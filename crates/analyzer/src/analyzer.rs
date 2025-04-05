@@ -88,26 +88,18 @@ impl VerylWalker for AnalyzerPass2Expression {
 
 pub struct AnalyzerPass3 {
     path: PathId,
-    symbols: Vec<Symbol>,
-    var_refs: HashMap<VarRefAffiliation, Vec<VarRef>>,
 }
 
 impl AnalyzerPass3 {
     pub fn new(path: &Path) -> Self {
-        let symbols = symbol_table::get_all();
-        let var_refs = symbol_table::get_var_ref_list();
         let path = resource_table::get_path_id(path.to_path_buf()).unwrap();
-        AnalyzerPass3 {
-            path,
-            symbols,
-            var_refs,
-        }
+        AnalyzerPass3 { path }
     }
 
-    pub fn check_variables(&self) -> Vec<AnalyzerError> {
+    pub fn check_variables(&self, symbols: &[Symbol]) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        for symbol in &self.symbols {
+        for symbol in symbols {
             if symbol.token.source == self.path {
                 if let SymbolKind::Variable(_) = symbol.kind {
                     if symbol.references.is_empty() && !symbol.allow_unused {
@@ -126,13 +118,13 @@ impl AnalyzerPass3 {
         ret
     }
 
-    pub fn check_assignment(&self) -> Vec<AnalyzerError> {
+    pub fn check_assignment(&self, symbols: &[Symbol]) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         let assign_list = symbol_table::get_assign_list();
         let mut assignable_list = Vec::new();
 
-        for symbol in &self.symbols {
+        for symbol in symbols {
             if symbol.token.source == self.path {
                 assignable_list.append(&mut traverse_assignable_symbol(
                     symbol.id,
@@ -189,10 +181,13 @@ impl AnalyzerPass3 {
         ret
     }
 
-    pub fn check_unassigned(&self) -> Vec<AnalyzerError> {
+    pub fn check_unassigned(
+        &self,
+        var_refs: &HashMap<VarRefAffiliation, Vec<VarRef>>,
+    ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        let var_refs = self.var_refs.iter().filter(|(key, _)| {
+        let var_refs = var_refs.iter().filter(|(key, _)| {
             matches!(
                 key,
                 VarRefAffiliation::AlwaysComb { token } if token.source == self.path
@@ -241,6 +236,11 @@ impl AnalyzerPass3 {
 pub struct Analyzer {
     build_opt: Build,
     lint_opt: Lint,
+}
+
+pub struct AnalyzerPass3Info {
+    symbols: Vec<Symbol>,
+    var_refs: HashMap<VarRefAffiliation, Vec<VarRef>>,
 }
 
 fn new_namespace(name: &str) -> (Token, Symbol) {
@@ -330,19 +330,26 @@ impl Analyzer {
         ret
     }
 
+    pub fn analyze_post_pass2() -> AnalyzerPass3Info {
+        let symbols = symbol_table::get_all();
+        let var_refs = symbol_table::get_var_ref_list();
+        AnalyzerPass3Info { symbols, var_refs }
+    }
+
     pub fn analyze_pass3<T: AsRef<Path>>(
         &self,
         project_name: &str,
         path: T,
         _input: &Veryl,
+        info: &AnalyzerPass3Info,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
         let pass3 = AnalyzerPass3::new(path.as_ref());
-        ret.append(&mut pass3.check_variables());
-        ret.append(&mut pass3.check_assignment());
-        ret.append(&mut pass3.check_unassigned());
+        ret.append(&mut pass3.check_variables(&info.symbols));
+        ret.append(&mut pass3.check_assignment(&info.symbols));
+        ret.append(&mut pass3.check_unassigned(&info.var_refs));
 
         ret
     }

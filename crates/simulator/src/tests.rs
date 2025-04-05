@@ -19,7 +19,8 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors.append(&mut analyzer.analyze_pass1(&"prj", &"", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
     errors.append(&mut analyzer.analyze_pass2(&"prj", &"", &parser.veryl));
-    errors.append(&mut analyzer.analyze_pass3(&"prj", &"", &parser.veryl));
+    let info = Analyzer::analyze_post_pass2();
+    errors.append(&mut analyzer.analyze_pass3(&"prj", &"", &parser.veryl, &info));
     dbg!(&errors);
     errors
 }
