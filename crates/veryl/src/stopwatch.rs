@@ -4,11 +4,17 @@ pub struct StopWatch {
     now: Instant,
 }
 
-impl StopWatch {
-    pub fn new() -> Self {
+impl Default for StopWatch {
+    fn default() -> Self {
         Self {
             now: Instant::now(),
         }
+    }
+}
+
+impl StopWatch {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn lap(&mut self) -> u128 {
