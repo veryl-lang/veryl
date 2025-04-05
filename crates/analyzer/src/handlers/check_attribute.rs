@@ -129,19 +129,19 @@ impl CheckAttribute {
                         self.errors.push(AnalyzerError::ambiguous_elsif(msg, range));
                     }
                 }
-                Attr::Els(_, _) => {
+                Attr::Else(_, _) => {
                     if matches!(
                         self.ifdef_state,
                         IfdefState::SingleIfdef | IfdefState::Elsif
                     ) {
-                        *attr = Attr::Els(self.ifdef_pos.clone(), self.ifdef_neg.clone());
+                        *attr = Attr::Else(self.ifdef_pos.clone(), self.ifdef_neg.clone());
                         self.ifdef_state = IfdefState::None;
                     } else {
                         // Error
                         let msg = if self.ifdef_state == IfdefState::MultiIfdef {
-                            "els can't be used with multiple ifdef/ifndef"
+                            "else can't be used with multiple ifdef/ifndef"
                         } else {
-                            "els should be placed just after ifdef/ifndef"
+                            "else should be placed just after ifdef/ifndef"
                         };
                         self.errors.push(AnalyzerError::ambiguous_elsif(msg, range));
                     }

@@ -9,11 +9,12 @@
     %auto_ws_off
 }
 %scanner Generic {}
+%scanner Attr {}
 
 %%
 
-/*    0 */ CommentsTerm: <INITIAL, Generic>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;
-/*    1 */ StringLiteralTerm: <INITIAL, Generic>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
+/*    0 */ CommentsTerm: <INITIAL, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;
+/*    1 */ StringLiteralTerm: <INITIAL, Generic, Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
 /*    2 */ ExponentTerm: <INITIAL, Generic>/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
 /*    3 */ FixedPointTerm: <INITIAL, Generic>/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;
 /*    4 */ BasedTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;
@@ -40,22 +41,22 @@
 /*   25 */ ColonColonLAngleTerm: <INITIAL, Generic>'::<' : Token;
 /*   26 */ ColonColonTerm: <INITIAL, Generic>'::' : Token;
 /*   27 */ ColonTerm: <INITIAL, Generic>':' : Token;
-/*   28 */ CommaTerm: <INITIAL, Generic>',' : Token;
+/*   28 */ CommaTerm: <INITIAL, Generic, Attr>',' : Token;
 /*   29 */ DotDotEquTerm: <INITIAL, Generic>'..=' : Token;
 /*   30 */ DotDotTerm: <INITIAL, Generic>'..' : Token;
 /*   31 */ DotTerm: <INITIAL, Generic>'.' : Token;
 /*   32 */ EquTerm: <INITIAL, Generic>'=' : Token;
-/*   33 */ HashTerm: <INITIAL, Generic>'#' : Token;
+/*   33 */ HashTerm: <INITIAL, Generic, Attr>'#' : Token;
 /*   34 */ LAngleTerm: <INITIAL, Generic>'<' : Token;
 /*   35 */ QuestionTerm: '?' : Token;
 /*   36 */ QuoteLBraceTerm: <INITIAL, Generic>"'\{" : Token;
-/*   37 */ LBraceTerm: <INITIAL, Embed, Generic>'{' : Token;
-/*   38 */ LBracketTerm: <INITIAL, Generic>'[' : Token;
-/*   39 */ LParenTerm: <INITIAL, Generic>'(' : Token;
+/*   37 */ LBraceTerm: <INITIAL, Embed, Generic, Attr>'{' : Token;
+/*   38 */ LBracketTerm: <INITIAL, Generic, Attr>'[' : Token;
+/*   39 */ LParenTerm: <INITIAL, Generic, Attr>'(' : Token;
 /*   40 */ RAngleTerm: <INITIAL, Generic>'>' : Token;
-/*   41 */ RBraceTerm: <INITIAL, Embed, Generic>'}' : Token;
-/*   42 */ RBracketTerm: <INITIAL, Generic>']' : Token;
-/*   43 */ RParenTerm: <INITIAL, Generic>')' : Token;
+/*   41 */ RBraceTerm: <INITIAL, Embed, Generic, Attr>'}' : Token;
+/*   42 */ RBracketTerm: <INITIAL, Generic, Attr>']' : Token;
+/*   43 */ RParenTerm: <INITIAL, Generic, Attr>')' : Token;
 /*   44 */ SemicolonTerm: <INITIAL, Generic>';' : Token;
 /*   45 */ StarTerm: <INITIAL, Generic>'*' : Token;
 /*   46 */ AliasTerm: <INITIAL, Generic>/(?-u:\b)alias(?-u:\b)/ : Token;
@@ -130,7 +131,7 @@
 /*  115 */ UnsafeTerm: <INITIAL, Generic>/(?-u:\b)unsafe(?-u:\b)/ : Token;
 /*  116 */ VarTerm: <INITIAL, Generic>/(?-u:\b)var(?-u:\b)/ : Token;
 /*  117 */ DollarIdentifierTerm: <INITIAL, Generic>/\$[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;
-/*  118 */ IdentifierTerm: <INITIAL, Generic>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;
+/*  118 */ IdentifierTerm: <INITIAL, Generic, Attr>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;
 /*  119 */ AnyTerm: <Embed>/[^{}]+/ : Token;
 /*  120 */ Comments: CommentsOpt /* Option */;
 /*  121 */ CommentsOpt /* Option<T>::Some */: CommentsTerm;
@@ -681,7 +682,7 @@
 /*  666 */ SwitchCondition: Expression SwitchConditionList /* Vec */;
 /*  667 */ SwitchConditionList /* Vec<T>::Push */: Comma Expression SwitchConditionList;
 /*  668 */ SwitchConditionList /* Vec<T>::New */: ;
-/*  669 */ Attribute: Hash LBracket Identifier AttributeOpt /* Option */ RBracket;
+/*  669 */ Attribute: Hash %push(Attr) LBracket Identifier AttributeOpt /* Option */ RBracket %pop();
 /*  670 */ AttributeOpt /* Option<T>::Some */: LParen AttributeList RParen;
 /*  671 */ AttributeOpt /* Option<T>::None */: ;
 /*  672 */ AttributeList: AttributeItem AttributeListList /* Vec */ AttributeListOpt /* Option */;
