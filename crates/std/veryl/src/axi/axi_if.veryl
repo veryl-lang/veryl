@@ -1,0 +1,218 @@
+
+/// AXI3 / AXI4 bus interface
+pub interface axi_if #(
+    ///AXI bus version (3 or 4)
+    param AXIVersion: u32 = 4,
+
+    ///Payload lenght in BYTES
+    param DataLenBytes: u32 = 4,
+
+    ///Length of the xID fields, WID only used in AXI3
+    param IDLength: u32 = 1,
+
+    ///Length of AWUSER field, used with AXI4 only
+    param AWUserDataLength: u32 = 1,
+
+    ///Length of WUSER field, used with AXI4 only
+    param WUserDataLength: u32 = 1,
+
+    ///Length of BUSER field, used with AXI4 only
+    param BUserDataLength: u32 = 1,
+
+    ///Length of ARUSER field, used with AXI4 only
+    param ARUserDataLength: u32 = 1,
+
+    ///Length of RUSER field, used with AXI4 only
+    param RUserDataLength: u32 = 1,
+) {
+
+    ///Bus clock and reset
+    var ACLK   : clock_posedge ;
+    var ARESETN: reset_sync_low;
+
+    ///Write address channel
+    var AWVALID : logic                  ;
+    var AWREADY : logic                  ;
+    var AWADDR  : logic<32>              ;
+    var AWSIZE  : logic<3>               ;
+    var AWBURST : logic<2>               ;
+    var AWCACHE : logic<4>               ;
+    var AWPROT  : logic<3>               ;
+    var AWID    : logic<IDLength>        ;
+    var AWLEN   : logic<8>               ; //AXI3: 4 bits, AXI4: 8 bits
+    var AWLOCK  : logic<2>               ; //AXI3: 2 bits, AXI4: 1 bit
+    var AWQOS   : logic<4>               ; //Only AXI4
+    var AWREGION: logic<4>               ; //Only AXI4
+    var AWUSER  : logic<AWUserDataLength>; //Only AXI4
+
+    ///Write data channel
+    var WVALID: logic                  ;
+    var WREADY: logic                  ;
+    var WLAST : logic                  ;
+    var WDATA : logic<DataLenBytes * 8>;
+    var WSTRB : logic<DataLenBytes>    ;
+    var WID   : logic<IDLength>        ; //Only AXI3
+    var WUSER : logic<WUserDataLength> ; //Only AXI4
+
+    ///Write response channel
+    var BVALID: logic                 ;
+    var BREADY: logic                 ;
+    var BRESP : logic<2>              ;
+    var BID   : logic<IDLength>       ;
+    var BUSER : logic<BUserDataLength>; //Only AXI4
+
+    ///Read address channel
+    var ARVALID : logic                  ;
+    var ARREADY : logic                  ;
+    var ARADDR  : logic<32>              ;
+    var ARSIZE  : logic<3>               ;
+    var ARBURST : logic<2>               ;
+    var ARCACHE : logic<4>               ;
+    var ARPROT  : logic<3>               ;
+    var ARID    : logic<IDLength>        ;
+    var ARLEN   : logic<8>               ; //AXI3: 4 bits, AXI4: 8 bits
+    var ARLOCK  : logic<2>               ; //AXI3: 2 bits, AXI4: 1 bit
+    var ARQOS   : logic<4>               ; //Only AXI4
+    var ARREGION: logic<4>               ; //Only AXI4
+    var ARUSER  : logic<ARUserDataLength>; //Only AXI4
+
+    ///Read data channel
+    var RVALID: logic                  ;
+    var RREADY: logic                  ;
+    var RLAST : logic                  ;
+    var RDATA : logic<DataLenBytes * 8>;
+    var RRESP : logic<2>               ;
+    var RID   : logic<IDLength>        ;
+    var RUSER : logic<RUserDataLength> ; //Only AXI4
+
+    function awaddr_ack () -> logic {
+        return AWVALID && AWREADY;
+    }
+
+    function wdata_ack () -> logic {
+        return WVALID && WREADY;
+    }
+
+    function bresp_ack () -> logic {
+        return BVALID && BREADY;
+    }
+
+    function araddr_ack () -> logic {
+        return ARVALID && ARREADY;
+    }
+
+    function rresp_ack () -> logic {
+        return RVALID && RREADY;
+    }
+
+    modport master {
+        ACLK   : input,
+        ARESETN: input,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rresp_ack : import,
+
+        AWVALID : output,
+        AWREADY : input ,
+        AWADDR  : output,
+        AWSIZE  : output,
+        AWBURST : output,
+        AWCACHE : output,
+        AWPROT  : output,
+        AWID    : output,
+        AWLEN   : output,
+        AWLOCK  : output,
+        AWQOS   : output,
+        AWREGION: output,
+        AWUSER  : output,
+
+        WVALID: output,
+        WREADY: input ,
+        WLAST : output,
+        WDATA : output,
+        WSTRB : output,
+        WID   : output,
+        WUSER : output,
+
+        BVALID: input ,
+        BREADY: output,
+        BRESP : input ,
+        BID   : input ,
+        BUSER : input ,
+
+        ARVALID : output,
+        ARREADY : input ,
+        ARADDR  : output,
+        ARSIZE  : output,
+        ARBURST : output,
+        ARCACHE : output,
+        ARPROT  : output,
+        ARID    : output,
+        ARLEN   : output,
+        ARLOCK  : output,
+        ARQOS   : output,
+        ARREGION: output,
+        ARUSER  : output,
+
+        RVALID: input ,
+        RREADY: output,
+        RLAST : input ,
+        RDATA : input ,
+        RRESP : input ,
+        RID   : input ,
+        RUSER : input ,
+
+    }
+
+    modport slave {
+        ACLK   : input,
+        ARESETN: input,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rresp_ack : import,
+
+        ..converse(master)
+    }
+
+    modport master_interconnect {
+        ACLK   : output,
+        ARESETN: output,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rresp_ack : import,
+
+        ..same(master)
+    }
+
+    modport slave_interconnect {
+        ACLK   : output,
+        ARESETN: output,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rresp_ack : import,
+
+        ..same(slave)
+    }
+    modport monitor {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rresp_ack : import,
+
+        ..input
+    }
+}
