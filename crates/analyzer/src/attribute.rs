@@ -8,7 +8,7 @@ pub enum Attribute {
     Ifdef(StrId),
     Ifndef(StrId),
     Elsif(StrId, Vec<StrId>, Vec<StrId>),
-    Els(Vec<StrId>, Vec<StrId>),
+    Else(Vec<StrId>, Vec<StrId>),
     Sv(StrId),
     Allow(AllowItem),
     EnumEncoding(EnumEncodingItem),
@@ -42,7 +42,7 @@ impl Attribute {
             Attribute::Ifdef(_)
                 | Attribute::Ifndef(_)
                 | Attribute::Elsif(_, _, _)
-                | Attribute::Els(_, _)
+                | Attribute::Else(_, _)
         )
     }
 }
@@ -53,7 +53,7 @@ impl fmt::Display for Attribute {
             Attribute::Ifdef(x) => format!("ifdef({})", x),
             Attribute::Ifndef(x) => format!("ifndef({})", x),
             Attribute::Elsif(x, _, _) => format!("elsif({})", x),
-            Attribute::Els(_, _) => String::from("els"),
+            Attribute::Else(_, _) => String::from("else"),
             Attribute::Sv(x) => format!("sv(\"{}\")", x),
             Attribute::Allow(x) => format!("allow({})", x),
             Attribute::EnumEncoding(x) => format!("enum_encoding({})", x),
@@ -145,7 +145,7 @@ struct Pattern {
     pub ifdef: StrId,
     pub ifndef: StrId,
     pub elsif: StrId,
-    pub els: StrId,
+    pub r#else: StrId,
     pub sv: StrId,
     pub allow: StrId,
     pub missing_port: StrId,
@@ -175,7 +175,7 @@ impl Pattern {
             ifdef: resource_table::insert_str("ifdef"),
             ifndef: resource_table::insert_str("ifndef"),
             elsif: resource_table::insert_str("elsif"),
-            els: resource_table::insert_str("els"),
+            r#else: resource_table::insert_str("else"),
             sv: resource_table::insert_str("sv"),
             allow: resource_table::insert_str("allow"),
             missing_port: resource_table::insert_str("missing_port"),
@@ -208,7 +208,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
 
     fn try_from(value: &veryl_parser::veryl_grammar_trait::Attribute) -> Result<Self, Self::Error> {
         PAT.with_borrow(|pat| match value.identifier.identifier_token.token.text {
-            x if x == pat.ifdef || x == pat.ifndef || x == pat.elsif || x == pat.els => {
+            x if x == pat.ifdef || x == pat.ifndef || x == pat.elsif || x == pat.r#else => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
@@ -218,11 +218,11 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         x if x == pat.elsif => {
                             Ok(Attribute::Elsif(arg.text, Vec::new(), Vec::new()))
                         }
-                        x if x == pat.els => Err(AttributeError::MismatchArgs("no argument")),
+                        x if x == pat.r#else => Err(AttributeError::MismatchArgs("no argument")),
                         _ => unreachable!(),
                     }
-                } else if x == pat.els {
-                    Ok(Attribute::Els(Vec::new(), Vec::new()))
+                } else if x == pat.r#else {
+                    Ok(Attribute::Else(Vec::new(), Vec::new()))
                 } else {
                     Err(AttributeError::MismatchArgs("single identifier"))
                 }

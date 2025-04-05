@@ -554,6 +554,30 @@ const SCANNER_2: (&[&str; 5], &[TerminalIndex; 101]) = (
     ],
 );
 
+/* SCANNER_3: "Attr" */
+const SCANNER_3: (&[&str; 5], &[TerminalIndex; 11]) = (
+    &[
+        /*   0 */ UNMATCHABLE_TOKEN,
+        /*   1 */ NEW_LINE_TOKEN,
+        /*   2 */ WHITESPACE_TOKEN,
+        /*   3 */ UNMATCHABLE_TOKEN,
+        /*   4 */ UNMATCHABLE_TOKEN,
+    ],
+    &[
+        5,   /* CommentsTerm */
+        6,   /* StringLiteralTerm */
+        33,  /* CommaTerm */
+        38,  /* HashTerm */
+        42,  /* LBraceTerm */
+        43,  /* LBracketTerm */
+        44,  /* LParenTerm */
+        46,  /* RBraceTerm */
+        47,  /* RBracketTerm */
+        48,  /* RParenTerm */
+        123, /* IdentifierTerm */
+    ],
+);
+
 const MAX_K: usize = 3;
 
 pub const NON_TERMINALS: &[&str; 730] = &[
@@ -34572,14 +34596,16 @@ pub const PRODUCTIONS: &[Production; 1056] = &[
         lhs: 656,
         production: &[],
     },
-    // 669 - Attribute: Hash LBracket Identifier AttributeOpt /* Option */ RBracket;
+    // 669 - Attribute: Hash Push(3) LBracket Identifier AttributeOpt /* Option */ RBracket Pop;
     Production {
         lhs: 55,
         production: &[
+            ParseType::Pop,
             ParseType::N(556),
             ParseType::N(60),
             ParseType::N(295),
             ParseType::N(389),
+            ParseType::Push(3),
             ParseType::N(282),
         ],
     },
@@ -36799,6 +36825,11 @@ static SCANNERS: Lazy<Vec<ScannerConfig>> = Lazy::new(|| {
         ScannerConfig::new(
             "Generic",
             Tokenizer::build(TERMINALS, SCANNER_2.0, SCANNER_2.1).unwrap(),
+            &[],
+        ),
+        ScannerConfig::new(
+            "Attr",
+            Tokenizer::build(TERMINALS, SCANNER_3.0, SCANNER_3.1).unwrap(),
             &[],
         ),
     ]
