@@ -1448,6 +1448,7 @@ impl Evaluator {
                     let arg = self.expression(&arg.argument_expression.expression);
                     if let EvaluatedValue::Fixed(x) = arg.value {
                         let ret = isize::BITS - x.leading_zeros();
+                        let ret = if x.count_ones() == 1 { ret - 1 } else { ret };
                         Evaluated::create_fixed(ret as isize, false, vec![32], vec![])
                     } else {
                         Evaluated::create_unknown()

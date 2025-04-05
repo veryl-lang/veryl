@@ -1229,7 +1229,7 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(severity(Error), code(infinite_recursion), help(""), url(""))]
-    #[error("infinite instance recustion is detected")]
+    #[error("infinite instance recursion is detected")]
     InfiniteRecursion {
         #[source_code]
         input: MultiSources,
