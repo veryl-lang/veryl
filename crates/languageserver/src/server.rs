@@ -701,7 +701,8 @@ impl Server {
                         let mut errors = analyzer.analyze_pass1(prj, &path, &x.veryl);
                         errors.append(&mut Analyzer::analyze_post_pass1());
                         errors.append(&mut analyzer.analyze_pass2(prj, &path, &x.veryl));
-                        errors.append(&mut analyzer.analyze_pass3(prj, &path, &x.veryl));
+                        let info = Analyzer::analyze_post_pass2();
+                        errors.append(&mut analyzer.analyze_pass3(prj, &path, &x.veryl, &info));
                         let ret: Vec<_> = errors
                             .drain(0..)
                             .filter(|x| {

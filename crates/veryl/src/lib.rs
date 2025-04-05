@@ -17,6 +17,8 @@ pub mod cmd_update;
 pub mod diff;
 pub mod doc;
 pub mod runner;
+pub mod stopwatch;
+pub use stopwatch::StopWatch;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Opt

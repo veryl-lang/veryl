@@ -7,7 +7,6 @@ use log::{Level, LevelFilter};
 use miette::{IntoDiagnostic, Result};
 use std::process::ExitCode;
 use std::str::FromStr;
-use std::time::Instant;
 use veryl_metadata::Metadata;
 
 use veryl::*;
@@ -85,7 +84,7 @@ fn main() -> Result<ExitCode> {
         }
     };
 
-    let now = Instant::now();
+    let mut stopwatch = StopWatch::new();
 
     let ret = match opt.command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec()?,
@@ -111,8 +110,7 @@ fn main() -> Result<ExitCode> {
         veryl_path::unlock_dir(dot_build_lock)?;
     }
 
-    let elapsed_time = now.elapsed();
-    debug!("Elapsed time ({} milliseconds)", elapsed_time.as_millis());
+    debug!("Elapsed time ({} milliseconds)", stopwatch.lap());
 
     if ret {
         Ok(ExitCode::SUCCESS)

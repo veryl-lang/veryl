@@ -1,4 +1,5 @@
 use crate::OptBuild;
+use crate::StopWatch;
 use crate::cmd_check::CheckError;
 use crate::diff::print_diff;
 use log::{debug, info};
@@ -32,6 +33,8 @@ impl CmdBuild {
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();
 
+        let mut stopwatch = StopWatch::new();
+
         for path in &paths {
             info!("Processing file ({})", path.src.to_string_lossy());
 
@@ -47,18 +50,35 @@ impl CmdBuild {
             contexts.push((path, input, parser, analyzer));
         }
 
+        debug!(
+            "Executed parse/analyze_pass1 ({} milliseconds, {} files)",
+            stopwatch.lap(),
+            paths.len(),
+        );
+
         let mut errors = Analyzer::analyze_post_pass1();
         check_error = check_error.append(&mut errors).check_err()?;
+
+        debug!(
+            "Executed analyze_post_pass1 ({} milliseconds)",
+            stopwatch.lap()
+        );
 
         for (path, _, parser, analyzer) in &contexts {
             let mut errors = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
+        debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
+
+        let info = Analyzer::analyze_post_pass2();
+
         for (path, _, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
             check_error = check_error.append(&mut errors).check_err()?;
         }
+
+        debug!("Executed analyze_pass3 ({} milliseconds)", stopwatch.lap());
 
         let temp_dir = if let Target::Bundle { .. } = &metadata.build.target {
             Some(TempDir::new().into_diagnostic()?)

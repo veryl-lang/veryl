@@ -43,8 +43,10 @@ impl CmdDoc {
             analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
         }
 
+        let info = Analyzer::analyze_post_pass2();
+
         for (path, _, parser, analyzer) in &contexts {
-            analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl);
+            analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
         }
 
         let mut modules = BTreeMap::new();
