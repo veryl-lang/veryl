@@ -14187,7 +14187,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 0:
     ///
-    /// `CommentsTerm: <INITIAL, Generic>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;`
+    /// `CommentsTerm: <INITIAL, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn comments_term(&mut self, comments_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14206,7 +14206,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 1:
     ///
-    /// `StringLiteralTerm: <INITIAL, Generic>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;`
+    /// `StringLiteralTerm: <INITIAL, Generic, Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn string_literal_term(&mut self, string_literal_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14758,7 +14758,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 28:
     ///
-    /// `CommaTerm: <INITIAL, Generic>',' : Token;`
+    /// `CommaTerm: <INITIAL, Generic, Attr>',' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn comma_term(&mut self, comma_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14854,7 +14854,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 33:
     ///
-    /// `HashTerm: <INITIAL, Generic>'#' : Token;`
+    /// `HashTerm: <INITIAL, Generic, Attr>'#' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn hash_term(&mut self, hash_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14931,7 +14931,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 37:
     ///
-    /// `LBraceTerm: <INITIAL, Embed, Generic>'{' : Token;`
+    /// `LBraceTerm: <INITIAL, Embed, Generic, Attr>'{' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn l_brace_term(&mut self, l_brace_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14950,7 +14950,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 38:
     ///
-    /// `LBracketTerm: <INITIAL, Generic>'[' : Token;`
+    /// `LBracketTerm: <INITIAL, Generic, Attr>'[' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn l_bracket_term(&mut self, l_bracket_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14969,7 +14969,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 39:
     ///
-    /// `LParenTerm: <INITIAL, Generic>'(' : Token;`
+    /// `LParenTerm: <INITIAL, Generic, Attr>'(' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn l_paren_term(&mut self, l_paren_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15007,7 +15007,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 41:
     ///
-    /// `RBraceTerm: <INITIAL, Embed, Generic>'}' : Token;`
+    /// `RBraceTerm: <INITIAL, Embed, Generic, Attr>'}' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn r_brace_term(&mut self, r_brace_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15026,7 +15026,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 42:
     ///
-    /// `RBracketTerm: <INITIAL, Generic>']' : Token;`
+    /// `RBracketTerm: <INITIAL, Generic, Attr>']' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn r_bracket_term(&mut self, r_bracket_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15045,7 +15045,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 43:
     ///
-    /// `RParenTerm: <INITIAL, Generic>')' : Token;`
+    /// `RParenTerm: <INITIAL, Generic, Attr>')' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn r_paren_term(&mut self, r_paren_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16503,7 +16503,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 118:
     ///
-    /// `IdentifierTerm: <INITIAL, Generic>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
+    /// `IdentifierTerm: <INITIAL, Generic, Attr>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn identifier_term(&mut self, identifier_term: &ParseTreeType<'t>) -> Result<()> {
@@ -28962,7 +28962,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 669:
     ///
-    /// `Attribute: Hash LBracket Identifier AttributeOpt /* Option */ RBracket;`
+    /// `Attribute: Hash %push(Attr) LBracket Identifier AttributeOpt /* Option */ RBracket %pop();`
     ///
     #[parol_runtime::function_name::named]
     fn attribute(

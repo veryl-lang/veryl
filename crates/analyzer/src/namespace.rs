@@ -47,7 +47,7 @@ impl From<&[Attribute]> for DefineContext {
                         ret.neg.insert(*z);
                     }
                 }
-                Attribute::Els(x, y) => {
+                Attribute::Else(x, y) => {
                     for x in x {
                         ret.pos.insert(*x);
                     }

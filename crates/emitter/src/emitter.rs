@@ -2994,7 +2994,7 @@ impl VerylWalker for Emitter {
         self.in_attribute = true;
         let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
-            "ifdef" | "ifndef" | "elsif" | "els" => {
+            "ifdef" | "ifndef" | "elsif" | "else" => {
                 let comma = if self.string.trim_end().ends_with(',') {
                     self.unindent();
                     self.truncate(self.string.len() - format!(",{}", NEWLINE).len());
@@ -3010,20 +3010,16 @@ impl VerylWalker for Emitter {
                     false
                 };
 
-                let is_els = identifier.as_str().starts_with("els");
-
-                if is_els && self.string.trim_end().ends_with("`endif") {
+                let remove_endif = matches!(identifier.as_str(), "elsif" | "else")
+                    && self.string.trim_end().ends_with("`endif");
+                if remove_endif {
                     self.unindent();
                     self.truncate(self.string.len() - format!("`endif{}", NEWLINE).len());
                 }
 
                 self.consume_adjust_line(&arg.identifier.identifier_token.token);
                 self.str("`");
-                if identifier.as_str() == "els" {
-                    self.token(&arg.identifier.identifier_token.replace("else"));
-                } else {
-                    self.identifier(&arg.identifier);
-                }
+                self.identifier(&arg.identifier);
 
                 if let Some(ref x) = arg.attribute_opt {
                     self.space(1);

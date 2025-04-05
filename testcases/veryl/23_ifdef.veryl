@@ -47,14 +47,14 @@ module Module23 #(
     let _e: logic = 1;
     #[elsif(DEFINE_F)]
     let _e: logic = 2;
-    #[els]
+    #[else]
     let _e: logic = 3;
 
     #[ifndef(DEFINE_G)]
     let _f: logic = 1;
     #[elsif(DEFINE_H)]
     let _f: logic = 2;
-    #[els]
+    #[else]
     let _f: logic = 3;
 }
 

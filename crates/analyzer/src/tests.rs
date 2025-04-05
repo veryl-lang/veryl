@@ -1092,7 +1092,7 @@ fn mismatch_attribute_args() {
 
     let code = r#"
     module ModuleA {
-        #[els(dummy_name)]
+        #[else(dummy_name)]
         var a: logic;
     }
     "#;
@@ -5211,7 +5211,7 @@ fn ambiguous_elsif() {
         let _a: logic = 0;
         #[elsif(B)]
         let _a: logic = 0;
-        #[els]
+        #[else]
         let _a: logic = 0;
     }
     "#;
@@ -5227,7 +5227,7 @@ fn ambiguous_elsif() {
         let _a: logic = 0;
         #[elsif(D)]
         let _a: logic = 0;
-        #[els]
+        #[else]
         let _a: logic = 0;
     }
     "#;
@@ -5273,7 +5273,7 @@ fn ambiguous_elsif() {
 
     let code = r#"
     module ModuleA {
-        #[els]
+        #[else]
         let _a: logic = 0;
     }
     "#;
