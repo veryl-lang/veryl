@@ -4804,6 +4804,7 @@ fn evaluator() {
         const I: u32 = if B == 6 ? 10 : 20;
         const J: u32 = $clog2(12);
         const K: u32 = B[2:1];
+        const L: u32 = $clog2(8);
     }
     "#;
 
@@ -4822,6 +4823,7 @@ fn evaluator() {
     let i = symbol_table::resolve((&Into::<SymbolPath>::into("I"), &namespace)).unwrap();
     let j = symbol_table::resolve((&Into::<SymbolPath>::into("J"), &namespace)).unwrap();
     let k = symbol_table::resolve((&Into::<SymbolPath>::into("K"), &namespace)).unwrap();
+    let l = symbol_table::resolve((&Into::<SymbolPath>::into("L"), &namespace)).unwrap();
 
     let a = a.found.evaluate();
     let b = b.found.evaluate();
@@ -4834,6 +4836,7 @@ fn evaluator() {
     let i = i.found.evaluate();
     let j = j.found.evaluate();
     let k = k.found.evaluate();
+    let l = l.found.evaluate();
 
     assert_eq!((a.get_value(), a.get_total_width()), (Some(0), Some(32)));
     assert_eq!((b.get_value(), b.get_total_width()), (Some(6), Some(32)));
@@ -4846,6 +4849,7 @@ fn evaluator() {
     assert_eq!((i.get_value(), i.get_total_width()), (Some(10), Some(32)));
     assert_eq!((j.get_value(), j.get_total_width()), (Some(4), Some(32)));
     assert_eq!((k.get_value(), k.get_total_width()), (Some(3), Some(2)));
+    assert_eq!((l.get_value(), l.get_total_width()), (Some(3), Some(32)));
 }
 
 #[test]
