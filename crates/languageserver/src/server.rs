@@ -715,6 +715,8 @@ impl Server {
                                         AnalyzerError::UndefinedIdentifier { .. }
                                             | AnalyzerError::UnknownMember { .. }
                                             | AnalyzerError::UnassignVariable { .. }
+                                            | AnalyzerError::UnusedVariable { .. }
+                                            | AnalyzerError::AnonymousIdentifierUsage { .. }
                                     )
                                 }
                             })
