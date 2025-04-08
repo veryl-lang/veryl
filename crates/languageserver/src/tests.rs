@@ -185,7 +185,7 @@ async fn diagnostics() {
     assert_eq!(res.method(), "window/logMessage");
     assert_eq!(res.params().unwrap()["message"], "server initialized!");
 
-    let req = build_did_open("module A { var a: logic; }");
+    let req = build_did_open("module A  var a: logic; }");
     server.send_request(req).await;
 
     let res = server.recv_notification().await;
@@ -196,10 +196,10 @@ async fn diagnostics() {
     dbg!(&res);
     assert_eq!(res.method(), "textDocument/publishDiagnostics");
     let diags = res.params().unwrap()["diagnostics"].as_array().unwrap();
-    assert_eq!(diags[0]["code"], Value::from("unused_variable"));
-    assert_eq!(diags[0]["range"]["start"]["character"], Value::from(15));
+    assert_eq!(diags[0]["code"], Value::from("ParserError::SyntaxError"));
+    assert_eq!(diags[0]["range"]["start"]["character"], Value::from(0));
     assert_eq!(diags[0]["range"]["start"]["line"], Value::from(0));
-    assert_eq!(diags[0]["range"]["end"]["character"], Value::from(16));
+    assert_eq!(diags[0]["range"]["end"]["character"], Value::from(6));
     assert_eq!(diags[0]["range"]["end"]["line"], Value::from(0));
 }
 
