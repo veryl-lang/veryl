@@ -7,9 +7,10 @@ use std::collections::VecDeque;
 use std::env;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tower_lsp::jsonrpc::{Id, Request, Response};
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::jsonrpc::{Id, Request, Response};
+use tower_lsp_server::lsp_types::Uri as Url;
+use tower_lsp_server::lsp_types::*;
+use tower_lsp_server::{Client, LanguageServer, LspService, Server, UriExt};
 
 struct TestServer {
     req_stream: DuplexStream,

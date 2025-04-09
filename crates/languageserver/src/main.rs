@@ -7,7 +7,7 @@ mod server;
 mod tests;
 
 use backend::Backend;
-use tower_lsp::{LspService, Server};
+use tower_lsp_server::{LspService, Server};
 
 #[tokio::main]
 async fn main() {
