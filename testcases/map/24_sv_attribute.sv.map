@@ -1,0 +1,1 @@
+{"version":3,"file":"24_sv_attribute.sv.map","sources":["../veryl/24_sv_attribute.veryl"],"names":["","module","Module24",";","ram_style=\"block\"","logic","_a","=","1","mark_debug=\"true\"","_b","endmodule"],"mappings":"AAAAA,AAAAC,sBAAOC,QAASC;OACPC;IACGC,MAAJC,gBAAAA,GAAUC,EAAEC,CAACL;OACZM;IACGJ,MAAJK,gBAAAA,GAAUH,EAAEC,CAACL;AACrBQ"}

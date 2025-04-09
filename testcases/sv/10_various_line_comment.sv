@@ -60,4 +60,4 @@ module //a
         end
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/10_various_line_comment.sv.map
+//# sourceMappingURL=../map/10_various_line_comment.sv.map

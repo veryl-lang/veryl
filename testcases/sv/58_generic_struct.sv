@@ -36,4 +36,4 @@ module veryl_testcase_Module58;
     __StructB__C           _e;
     __StructC__C__C        _g;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/58_generic_struct.sv.map
+//# sourceMappingURL=../map/58_generic_struct.sv.map

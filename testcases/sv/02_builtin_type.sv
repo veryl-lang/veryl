@@ -33,4 +33,4 @@ module veryl_testcase_Module02;
     shortreal        _ggggg  [0:2-1]; always_comb _ggggg  = '{1, 1};
     real             _gggggg [0:2-1]; always_comb _gggggg = '{1, 1};
 endmodule
-//# sourceMappingURL=../map/testcases/sv/02_builtin_type.sv.map
+//# sourceMappingURL=../map/02_builtin_type.sv.map

@@ -17,4 +17,4 @@ module veryl_testcase_Module65;
     logic _x8_n; always_comb _x8_n = ~e;
     logic _x9_n; always_comb _x9_n = f;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/65_cast_to_clock_reset.sv.map
+//# sourceMappingURL=../map/65_cast_to_clock_reset.sv.map

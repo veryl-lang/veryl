@@ -24,4 +24,4 @@ module veryl_testcase_Module29A (
     input var logic rst_n
 );
 endmodule
-//# sourceMappingURL=../map/testcases/sv/29_allow.sv.map
+//# sourceMappingURL=../map/29_allow.sv.map

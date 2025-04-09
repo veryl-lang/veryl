@@ -53,4 +53,4 @@ module veryl_testcase_Module03;
     logic _h ; always_comb _h  = 1 && 1;
     logic _hh; always_comb _hh = 1 || 1;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/03_operator.sv.map
+//# sourceMappingURL=../map/03_operator.sv.map

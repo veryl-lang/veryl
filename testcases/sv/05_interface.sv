@@ -21,4 +21,4 @@ interface veryl_testcase_Interface05 #(
         inout  ccc
     );
 endinterface
-//# sourceMappingURL=../map/testcases/sv/05_interface.sv.map
+//# sourceMappingURL=../map/05_interface.sv.map

@@ -43,4 +43,4 @@ endmodule
 interface veryl_testcase_Interface54;
     logic a;
 endinterface
-//# sourceMappingURL=../map/testcases/sv/54_generic_function.sv.map
+//# sourceMappingURL=../map/54_generic_function.sv.map

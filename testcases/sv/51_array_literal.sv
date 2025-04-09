@@ -7,4 +7,4 @@ module veryl_testcase_Module51;
         1, 1
     };
 endmodule
-//# sourceMappingURL=../map/testcases/sv/51_array_literal.sv.map
+//# sourceMappingURL=../map/51_array_literal.sv.map

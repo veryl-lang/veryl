@@ -51,4 +51,4 @@ endinterface
 /// * list item1
 package veryl_testcase_Package36;
 endpackage
-//# sourceMappingURL=../map/testcases/sv/36_doc_comment.sv.map
+//# sourceMappingURL=../map/36_doc_comment.sv.map

@@ -4,4 +4,4 @@ module veryl_testcase_Module22;
     tri logic signed [10-1:0] _c; assign _c = 1;
     logic            [10-1:0] _d; always_comb _d = 1;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/22_type_modifier.sv.map
+//# sourceMappingURL=../map/22_type_modifier.sv.map

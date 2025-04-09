@@ -77,4 +77,4 @@ module veryl_testcase_Module72 (
         end
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/72_cond_type.sv.map
+//# sourceMappingURL=../map/72_cond_type.sv.map

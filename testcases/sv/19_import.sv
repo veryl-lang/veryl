@@ -29,4 +29,4 @@ package veryl_testcase_Package19;
     import veryl_testcase_PackageA::A;
     import veryl_testcase_PackageA::*;
 endpackage
-//# sourceMappingURL=../map/testcases/sv/19_import.sv.map
+//# sourceMappingURL=../map/19_import.sv.map

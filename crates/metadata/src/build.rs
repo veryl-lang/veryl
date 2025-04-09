@@ -18,6 +18,8 @@ pub struct Build {
     pub reset_low_suffix: Option<String>,
     #[serde(default)]
     pub filelist_type: FilelistType,
+    #[serde(default = "default_source")]
+    pub source: PathBuf,
     #[serde(default)]
     pub target: Target,
     #[serde(default)]
@@ -38,6 +40,10 @@ pub struct Build {
     pub instance_depth_limit: usize,
     #[serde(default = "default_instance_total_limit")]
     pub instance_total_limit: usize,
+}
+
+fn default_source() -> PathBuf {
+    PathBuf::new()
 }
 
 fn default_instance_depth_limit() -> usize {

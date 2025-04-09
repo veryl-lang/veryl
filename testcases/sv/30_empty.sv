@@ -1,2 +1,2 @@
 
-//# sourceMappingURL=../map/testcases/sv/30_empty.sv.map
+//# sourceMappingURL=../map/30_empty.sv.map

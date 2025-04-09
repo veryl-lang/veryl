@@ -18,4 +18,4 @@ module veryl_testcase_Module44;
     always_comb b = z;
     always_comb c = y;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/44_import_resolve.sv.map
+//# sourceMappingURL=../map/44_import_resolve.sv.map

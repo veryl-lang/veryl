@@ -12,4 +12,4 @@ module veryl_testcase_Module69A #(
 );
     always_comb c = a;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/69_proto.sv.map
+//# sourceMappingURL=../map/69_proto.sv.map

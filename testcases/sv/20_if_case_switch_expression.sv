@@ -33,4 +33,4 @@ module veryl_testcase_Module20;
         3
     ));
 endmodule
-//# sourceMappingURL=../map/testcases/sv/20_if_case_switch_expression.sv.map
+//# sourceMappingURL=../map/20_if_case_switch_expression.sv.map

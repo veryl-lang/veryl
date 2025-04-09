@@ -68,4 +68,4 @@ module veryl_testcase_Module09;
     always_comb h     = FOO_H_0;
     always_comb i     = a.a;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/09_struct_enum.sv.map
+//# sourceMappingURL=../map/09_struct_enum.sv.map

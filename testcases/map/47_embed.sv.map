@@ -1,0 +1,1 @@
+{"version":3,"file":"47_embed.sv.map","sources":["../veryl/47_embed.veryl"],"names":["","module","Module47",";","endmodule","\nmodule test;\n   initial begin\n       $display(\"hello\");\n   end\nendmodule"],"mappings":"AAAAA,AAAAC,sBAAOC,QAASC;AAACC;;AAEAC"}

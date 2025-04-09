@@ -16,4 +16,4 @@ module veryl_testcase_Module79;
 
     StructA _c; always_comb _c = '{a : 10, bb: 10};
 endmodule
-//# sourceMappingURL=../map/testcases/sv/79_struct_constroctur.sv.map
+//# sourceMappingURL=../map/79_struct_constroctur.sv.map

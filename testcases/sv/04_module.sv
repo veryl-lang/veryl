@@ -32,4 +32,4 @@ interface veryl_testcase_Interface04;
         input c
     );
 endinterface
-//# sourceMappingURL=../map/testcases/sv/04_module.sv.map
+//# sourceMappingURL=../map/04_module.sv.map

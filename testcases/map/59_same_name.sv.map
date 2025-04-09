@@ -1,0 +1,1 @@
+{"version":3,"file":"59_same_name.sv.map","sources":["../veryl/59_same_name.veryl"],"names":["","package","Package59A",";","localparam","int unsigned","XLEN","=","32","endpackage","Package59B","veryl_testcase_Package59A::XLEN"],"mappings":"AAAAA,AAAAC,uBAAQC,UAAWC;IACfC,WAAYC,aAANC,KAAUC,EAAEC,EAAEL;AACxBM;;AAEAR,uBAAQS,UAAWP;IACfC,WAAYC,aAANC,KAAUC,EAAEI,+BAAgBR;AACtCM"}

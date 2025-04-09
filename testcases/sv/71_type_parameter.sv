@@ -17,4 +17,4 @@ module veryl_testcase_Module71A #(
     parameter type T4 = logic   
 );
 endmodule
-//# sourceMappingURL=../map/testcases/sv/71_type_parameter.sv.map
+//# sourceMappingURL=../map/71_type_parameter.sv.map

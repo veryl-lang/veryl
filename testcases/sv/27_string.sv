@@ -3,4 +3,4 @@ module veryl_testcase_Module27;
 
     string _b; always_comb _b = "bbb";
 endmodule
-//# sourceMappingURL=../map/testcases/sv/27_string.sv.map
+//# sourceMappingURL=../map/27_string.sv.map

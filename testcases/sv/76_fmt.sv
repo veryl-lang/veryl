@@ -30,4 +30,4 @@ module veryl_testcase_Module76A #(
 );
     always_comb y = x;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/76_fmt.sv.map
+//# sourceMappingURL=../map/76_fmt.sv.map

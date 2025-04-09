@@ -11,4 +11,4 @@ module veryl_testcase_Module11;
     always_comb b  = 1;
     always_comb bb = 1;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/11_let.sv.map
+//# sourceMappingURL=../map/11_let.sv.map
