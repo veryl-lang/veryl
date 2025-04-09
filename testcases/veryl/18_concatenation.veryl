@@ -20,4 +20,18 @@ module Module18 {
     var d: logic<20>;
     var e: logic    ;
     assign {d, e} = a;
+
+    inst u: Module18A (
+        a: {
+            1'b1,
+            2'b1,
+            1'b1
+        },
+        b: 0,
+    );
 }
+
+module Module18A (
+    a: input logic,
+    b: input logic,
+) {}

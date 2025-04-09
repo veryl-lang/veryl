@@ -55,17 +55,19 @@ impl Align {
     }
 
     pub fn finish_item(&mut self) {
-        self.enable = false;
-        if let Some(loc) = self.last_location {
-            if !self.disable_auto_finish && (self.line > loc.line || loc.line - self.line > 1) {
-                self.finish_group();
-            }
-            self.max_width = u32::max(self.max_width, self.width);
-            self.line = loc.line;
-            self.rest.push((loc, self.width));
+        if self.enable {
+            self.enable = false;
+            if let Some(loc) = self.last_location {
+                if !self.disable_auto_finish && (self.line > loc.line || loc.line - self.line > 1) {
+                    self.finish_group();
+                }
+                self.max_width = u32::max(self.max_width, self.width);
+                self.line = loc.line;
+                self.rest.push((loc, self.width));
 
-            self.width = 0;
-            self.index += 1;
+                self.width = 0;
+                self.index += 1;
+            }
         }
     }
 
@@ -158,6 +160,12 @@ impl Aligner {
     pub fn finish_group(&mut self) {
         for i in 0..self.aligns.len() {
             self.aligns[i].finish_group();
+        }
+    }
+
+    pub fn finish_item(&mut self) {
+        for i in 0..self.aligns.len() {
+            self.aligns[i].finish_item();
         }
     }
 
