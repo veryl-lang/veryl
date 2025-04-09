@@ -20,5 +20,20 @@ module veryl_testcase_Module18;
     logic [20-1:0] d;
     logic          e;
     always_comb {d, e} = a;
+
+    veryl_testcase_Module18A u (
+        .a ({
+            1'b1,
+            2'b1,
+            1'b1
+        }),
+        .b (0)
+    );
+endmodule
+
+module veryl_testcase_Module18A (
+    input var logic a,
+    input var logic b
+);
 endmodule
 //# sourceMappingURL=../map/testcases/sv/18_concatenation.sv.map

@@ -324,6 +324,7 @@ impl Formatter {
 
     fn align_reset(&mut self) {
         if self.mode == Mode::Align {
+            self.aligner.finish_item();
             self.aligner.finish_group();
         }
     }
@@ -774,6 +775,7 @@ impl VerylWalker for Formatter {
         }
         if self.multi_line() {
             self.newline_pop();
+            self.align_reset();
         }
         self.r_brace(&arg.r_brace);
         if arg.quote_l_brace.line() != arg.r_brace.line() {
@@ -830,6 +832,7 @@ impl VerylWalker for Formatter {
         }
         if self.multi_line() {
             self.newline_pop();
+            self.align_reset();
         }
     }
 
@@ -864,6 +867,7 @@ impl VerylWalker for Formatter {
         }
         if self.multi_line() {
             self.newline_pop();
+            self.align_reset();
         }
     }
 
