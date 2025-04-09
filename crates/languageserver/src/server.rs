@@ -4,9 +4,10 @@ use dashmap::DashMap;
 use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
-use tower_lsp::Client;
-use tower_lsp::lsp_types::*;
+use std::path::PathBuf;
+use tower_lsp_server::lsp_types::Uri as Url;
+use tower_lsp_server::lsp_types::*;
+use tower_lsp_server::{Client, UriExt};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
@@ -220,7 +221,7 @@ impl Server {
             self.background_done = false;
             self.on_change(&metadata.project.name, url, text, version);
 
-            if let Ok(path) = url.to_file_path() {
+            if let Some(path) = url.to_file_path() {
                 if !path.starts_with(&self.cache_dir) {
                     if let Ok(paths) = metadata.paths::<&str>(&[], true) {
                         let total = paths.len();
@@ -279,8 +280,8 @@ impl Server {
     }
 
     fn get_line(&self, url: &Url, line: usize) -> Option<String> {
-        if let Ok(path) = url.to_file_path() {
-            if let Some(rope) = self.document_map.get(&path) {
+        if let Some(path) = url.to_file_path() {
+            if let Some(rope) = self.document_map.get(path.as_ref()) {
                 if let Some(text) = rope.line(line - 1).as_str() {
                     return Some(text.to_string());
                 }
@@ -336,8 +337,8 @@ impl Server {
     }
 
     fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
-        if let Ok(path) = url.to_file_path() {
-            if let Some(parser) = self.parser_map.get(&path) {
+        if let Some(path) = url.to_file_path() {
+            if let Some(parser) = self.parser_map.get(path.as_ref()) {
                 let mut finder = Finder::new();
                 finder.line = line as u32;
                 finder.column = column as u32;
@@ -430,8 +431,8 @@ impl Server {
     }
 
     fn hover(&mut self, url: &Url, line: usize, column: usize) {
-        if let Ok(path) = url.to_file_path() {
-            if let Some(parser) = self.parser_map.get(&path) {
+        if let Some(path) = url.to_file_path() {
+            if let Some(parser) = self.parser_map.get(path.as_ref()) {
                 let mut finder = Finder::new();
                 finder.line = line as u32;
                 finder.column = column as u32;
@@ -463,8 +464,8 @@ impl Server {
 
     fn references(&mut self, url: &Url, line: usize, column: usize) {
         let mut ret = Vec::new();
-        if let Ok(path) = url.to_file_path() {
-            if let Some(parser) = self.parser_map.get(&path) {
+        if let Some(path) = url.to_file_path() {
+            if let Some(parser) = self.parser_map.get(path.as_ref()) {
                 let mut finder = Finder::new();
                 finder.line = line as u32;
                 finder.column = column as u32;
@@ -494,8 +495,8 @@ impl Server {
     fn semantic_tokens(&mut self, url: &Url) {
         let mut ret = None;
 
-        if let Ok(path) = url.to_file_path() {
-            if let Some(path) = resource_table::get_path_id(path) {
+        if let Some(path) = url.to_file_path() {
+            if let Some(path) = resource_table::get_path_id(path.to_path_buf()) {
                 let mut tokens = Vec::new();
                 for symbol in &symbol_table::get_all() {
                     if symbol.token.source == path {
@@ -559,11 +560,11 @@ impl Server {
     }
 
     fn formatting(&mut self, url: &Url) {
-        if let Ok(path) = url.to_file_path() {
+        if let Some(path) = url.to_file_path() {
             if let Some(metadata) = self.get_metadata(url) {
-                if let Some(rope) = self.document_map.get(&path) {
+                if let Some(rope) = self.document_map.get(path.as_ref()) {
                     let line = rope.len_lines() as u32;
-                    if let Some(parser) = self.parser_map.get(&path) {
+                    if let Some(parser) = self.parser_map.get(path.as_ref()) {
                         let mut formatter = Formatter::new(&metadata);
                         formatter.format(&parser.veryl);
 
@@ -668,12 +669,13 @@ impl Server {
     }
 
     fn get_metadata(&mut self, url: &Url) -> Option<Metadata> {
-        if let Ok(path) = url.to_file_path() {
-            if let Some(metadata) = self.metadata_map.get(&path) {
+        if let Some(path) = url.to_file_path() {
+            if let Some(metadata) = self.metadata_map.get(path.as_ref()) {
                 return Some(metadata.to_owned());
-            } else if let Ok(metadata_path) = Metadata::search_from(&path) {
+            } else if let Ok(metadata_path) = Metadata::search_from(path.as_ref()) {
                 if let Ok(metadata) = Metadata::load(metadata_path) {
-                    self.metadata_map.insert(path, metadata.clone());
+                    self.metadata_map
+                        .insert(path.to_path_buf(), metadata.clone());
                     return Some(metadata);
                 }
             }
@@ -682,7 +684,7 @@ impl Server {
     }
 
     fn on_change(&mut self, prj: &str, url: &Url, text: &str, version: i32) {
-        if let Ok(path) = url.to_file_path() {
+        if let Some(path) = url.to_file_path() {
             let rope = Rope::from_str(text);
 
             if path.starts_with(&self.cache_dir) {
@@ -692,9 +694,7 @@ impl Server {
             if let Some(metadata) = self.get_metadata(url) {
                 let diag = match Parser::parse(text, &path) {
                     Ok(x) => {
-                        if let Some(path) =
-                            resource_table::get_path_id(Path::new(&path).to_path_buf())
-                        {
+                        if let Some(path) = resource_table::get_path_id(path.to_path_buf()) {
                             drop_tables(path);
                         }
                         let analyzer = Analyzer::new(&metadata);
@@ -725,11 +725,11 @@ impl Server {
                                 to_diag(x, &rope)
                             })
                             .collect();
-                        self.parser_map.insert(path.clone(), x);
+                        self.parser_map.insert(path.to_path_buf(), x);
                         ret
                     }
                     Err(x) => {
-                        self.parser_map.remove(&path);
+                        self.parser_map.remove(path.as_ref());
                         vec![to_diag(x.into(), &rope)]
                     }
                 };
@@ -739,19 +739,19 @@ impl Server {
                         .publish_diagnostics(url.clone(), diag, Some(version)),
                 );
             } else {
-                block_on(
-                    self.client
-                        .log_message(MessageType::INFO, format!("failed to load metadata: {url}")),
-                );
+                block_on(self.client.log_message(
+                    MessageType::INFO,
+                    format!("failed to load metadata: {}", url.as_str()),
+                ));
             }
 
-            self.document_map.insert(path.clone(), rope);
+            self.document_map.insert(path.to_path_buf(), rope);
         }
     }
 
     fn on_remove(&mut self, path: Url) {
-        if let Ok(path) = path.to_file_path() {
-            if let Some(path_id) = resource_table::get_path_id(Path::new(&path).to_path_buf()) {
+        if let Some(path) = path.to_file_path() {
+            if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
                 drop_tables(path_id);
             }
         }
@@ -1087,8 +1087,8 @@ fn completion_symbol(
 }
 
 fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace> {
-    let path = url.to_file_path().ok()?;
-    let url = resource_table::get_path_id(path)?;
+    let path = url.to_file_path()?;
+    let url = resource_table::get_path_id(path.to_path_buf())?;
 
     let mut ret = None;
     let mut ret_func = None;

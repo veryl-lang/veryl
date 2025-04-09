@@ -3,9 +3,10 @@ use std::str::FromStr;
 use crate::server::{MsgFromServer, MsgToServer, Server, ServerConfigItem, semantic_legend};
 use async_channel::{Receiver, Sender, unbounded};
 use serde_json::Value;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::Uri as Url;
+use tower_lsp_server::lsp_types::*;
+use tower_lsp_server::{Client, LanguageServer};
 
 const COMPLETION_TRIGGER: &[&str] = &["<", ">", "=", "!", "."];
 
@@ -47,7 +48,6 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
