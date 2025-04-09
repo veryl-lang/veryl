@@ -17,6 +17,7 @@ pub enum Attribute {
     CondType(CondTypeItem),
     Align(Vec<AlignItem>),
     Format(Vec<FormatItem>),
+    Expand(Vec<ExpandItem>),
 }
 
 impl Attribute {
@@ -44,6 +45,14 @@ impl Attribute {
                 | Attribute::Elsif(_, _, _)
                 | Attribute::Else(_, _)
         )
+    }
+
+    pub fn is_expand(&self, item: ExpandItem) -> bool {
+        if let Attribute::Expand(x) = self {
+            x.contains(&item)
+        } else {
+            false
+        }
     }
 }
 
@@ -73,6 +82,13 @@ impl fmt::Display for Attribute {
                     arg.push_str(&format!("{}, ", x));
                 }
                 format!("format({})", arg)
+            }
+            Attribute::Expand(x) => {
+                let mut arg = String::new();
+                for x in x {
+                    arg.push_str(&format!("{}, ", x));
+                }
+                format!("expand({})", arg)
             }
         };
         text.fmt(f)
@@ -167,6 +183,8 @@ struct Pattern {
     pub identifier: StrId,
     pub fmt: StrId,
     pub compact: StrId,
+    pub expand: StrId,
+    pub modport: StrId,
 }
 
 impl Pattern {
@@ -197,6 +215,8 @@ impl Pattern {
             identifier: resource_table::insert_str("identifier"),
             fmt: resource_table::insert_str("fmt"),
             compact: resource_table::insert_str("compact"),
+            expand: resource_table::insert_str("expand"),
+            modport: resource_table::insert_str("modport"),
         }
     }
 }
@@ -354,6 +374,25 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Ok(Attribute::Format(items))
                 }
             }
+            x if x == pat.expand => {
+                let args = get_args_ident(&value.attribute_opt);
+                let mut items = Vec::new();
+
+                let err = AttributeError::MismatchArgs("expand type: (modport)");
+
+                for arg in &args {
+                    match arg.text {
+                        x if x == pat.modport => items.push(ExpandItem::Modport),
+                        _ => return Err(err),
+                    }
+                }
+
+                if args.is_empty() {
+                    Err(err)
+                } else {
+                    Ok(Attribute::Expand(items))
+                }
+            }
             _ => Err(AttributeError::UnknownAttribute),
         })
     }
@@ -441,6 +480,20 @@ impl fmt::Display for FormatItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
             FormatItem::Compact => "compact",
+        };
+        text.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ExpandItem {
+    Modport,
+}
+
+impl fmt::Display for ExpandItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            ExpandItem::Modport => "modport",
         };
         text.fmt(f)
     }

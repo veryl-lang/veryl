@@ -295,7 +295,7 @@ impl CreateSymbolTable {
 
     fn evaluate_enum_value(&mut self, arg: &EnumItem) -> EnumMemberValue {
         if let Some(ref x) = arg.enum_item_opt {
-            let evaluated = Evaluator::new().expression(&x.expression);
+            let evaluated = Evaluator::new(&[]).expression(&x.expression);
             if let EvaluatedValue::Fixed(value) = evaluated.value {
                 let valid_variant = match self.enum_encoding {
                     EnumEncodingItem::OneHot => value.count_ones() == 1,
@@ -767,6 +767,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         kind: TypeKind::Type,
                         width: vec![],
                         array: vec![],
+                        array_type: None,
                         is_const: false,
                     };
                     ParameterProperty {
@@ -911,7 +912,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .as_ref()
                     .map(|x| x.scalar_type.as_ref().into());
                 let width = if let Some(x) = r#type.clone() {
-                    if let Some(x) = Evaluator::new().type_width(x) {
+                    if let Some(x) = Evaluator::new(&[]).type_width(x) {
                         *x.first().unwrap_or(&0)
                     } else {
                         0
@@ -1132,6 +1133,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         kind: TypeKind::Type,
                         width: vec![],
                         array: vec![],
+                        array_type: None,
                         is_const: false,
                     };
                     ParameterProperty {
@@ -1276,6 +1278,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         modifier: vec![],
                         width: vec![],
                         array,
+                        array_type: None,
                         is_const: false,
                     };
                     PortProperty {
@@ -1765,6 +1768,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     kind: TypeKind::Type,
                     width: vec![],
                     array: vec![],
+                    array_type: None,
                     is_const: false,
                 },
             };

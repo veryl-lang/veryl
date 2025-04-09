@@ -298,6 +298,12 @@ impl GenericSymbol {
             Some((token, symbol))
         }
     }
+
+    pub fn replace_generic_argument(&mut self, index: usize, value: GenericSymbolPath) {
+        if index < self.arguments.len() {
+            self.arguments[index] = value;
+        }
+    }
 }
 
 impl GenericSymbolPath {
@@ -452,6 +458,20 @@ impl GenericSymbolPath {
             for arg in &mut path.arguments {
                 arg.resolve_imported(namespace);
             }
+        }
+    }
+}
+
+impl From<&Token> for GenericSymbolPath {
+    fn from(value: &Token) -> Self {
+        let path = GenericSymbol {
+            base: *value,
+            arguments: vec![],
+        };
+        GenericSymbolPath {
+            paths: vec![path],
+            kind: GenericSymbolPathKind::Identifier,
+            range: value.into(),
         }
     }
 }

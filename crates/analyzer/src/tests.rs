@@ -5286,3 +5286,132 @@ fn ambiguous_elsif() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::AmbiguousElsif { .. }));
 }
+
+#[test]
+fn unexpandable_modport() {
+    let code = r#"
+    interface InterfaceA #(
+        param WIDTH: u32 = 1
+    ) {
+        var a: logic<WIDTH>;
+        modport mp {
+            a: input,
+        }
+    }
+    #[expand(modport)]
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnexpandableModport { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        struct StructA {
+            a: logic,
+        }
+        var a: StructA;
+        modport mp {
+            a: input,
+        }
+    }
+    #[expand(modport)]
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnexpandableModport { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        enum EnumA {
+            A,
+        }
+        var a: EnumA;
+        modport mp {
+            a: input,
+        }
+    }
+    #[expand(modport)]
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnexpandableModport { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        type VectorA = logic<2>;
+        var a: VectorA;
+        modport mp {
+            a: input,
+        }
+    }
+    #[expand(modport)]
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        struct StructA {
+            a: logic,
+        }
+    }
+    interface InterfaceA {
+        type StructA = PkgA::StructA;
+        var a: StructA;
+        modport mp {
+            a: input,
+        }
+    }
+    #[expand(modport)]
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        enum EnumA {
+            A,
+        }
+    }
+    interface InterfaceA {
+        type EnumA = PkgA::EnumA;
+        var a: EnumA;
+        modport mp {
+            a: input,
+        }
+    }
+    #[expand(modport)]
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}

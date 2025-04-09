@@ -29,24 +29,24 @@ endmodule
 
 /// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__Package56A_X;
-    logic [veryl_testcase_Package56A::X-1:0]                            _a;
+    logic [veryl_testcase_Package56A::X-1:0] _a;
 endinterface
 
 /// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__Package56B_X;
-    logic [veryl_testcase_Package56B::X-1:0]                            _a;
+    logic [veryl_testcase_Package56B::X-1:0] _a;
 endinterface
 
 /// Generic interface test for doc comment
 interface veryl_testcase___Interface56A__1;
-    logic [1-1:0]                            _a;
+    logic [1-1:0] _a;
 endinterface
 
 /// Generic interface test for doc comment
 interface veryl_testcase___Interface56B__Package56A_X;
-    logic [veryl_testcase_Package56A::X-1:0]                            _b;
+    logic [veryl_testcase_Package56A::X-1:0] _b;
 endinterface
 interface veryl_testcase___Interface56B__3;
-    logic [3-1:0]                            _b;
+    logic [3-1:0] _b;
 endinterface
 //# sourceMappingURL=../map/56_generic_interface.sv.map

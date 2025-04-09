@@ -1,4 +1,4 @@
-use crate::attribute::{AlignItem, Attribute, FormatItem};
+use crate::attribute::{AlignItem, Attribute, ExpandItem, FormatItem};
 use crate::range_table::RangeTable;
 use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
@@ -31,6 +31,11 @@ pub fn is_align(token: &Token, item: AlignItem) -> bool {
 pub fn is_format(token: &Token, item: FormatItem) -> bool {
     let attrs = ATTRIBUTE_TABLE.with(|f| f.borrow().get(token));
     attrs.iter().any(|x| x.is_format(item))
+}
+
+pub fn is_expand(token: &Token, item: ExpandItem) -> bool {
+    let attrs = ATTRIBUTE_TABLE.with(|f| f.borrow().get(token));
+    attrs.iter().any(|x| x.is_expand(item))
 }
 
 pub fn contains(token: &Token, value: Attribute) -> bool {

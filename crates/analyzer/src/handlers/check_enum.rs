@@ -34,7 +34,7 @@ impl VerylGrammarTrait for CheckEnum {
             let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
             if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
                 if let Some(r#type) = r#enum.r#type {
-                    if let Some(width) = Evaluator::new().type_width(r#type) {
+                    if let Some(width) = Evaluator::new(&[]).type_width(r#type) {
                         if width.len() != 1 {
                             unimplemented!();
                         } else {

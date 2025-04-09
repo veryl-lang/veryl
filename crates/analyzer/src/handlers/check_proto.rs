@@ -454,6 +454,7 @@ fn check_members_compat(actual: &[SymbolId], proto: &[SymbolId]) -> Vec<ProtoInc
         kind: TypeKind::Bit,
         width: Vec::new(),
         array: Vec::new(),
+        array_type: None,
         is_const: false,
     };
 

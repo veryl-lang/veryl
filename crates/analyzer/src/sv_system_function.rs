@@ -38,6 +38,7 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
                 kind: TypeKind::Any,
                 width: vec![],
                 array: vec![],
+                array_type: None,
                 is_const: false,
             };
             let property = PortProperty {
