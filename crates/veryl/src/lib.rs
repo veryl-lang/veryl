@@ -18,6 +18,7 @@ pub mod diff;
 pub mod doc;
 pub mod runner;
 pub mod stopwatch;
+pub mod utils;
 pub use stopwatch::StopWatch;
 
 // ---------------------------------------------------------------------------------------------------------------------
