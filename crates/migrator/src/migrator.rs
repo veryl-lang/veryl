@@ -87,22 +87,8 @@ impl VerylWalker for Migrator {
         self.token(arg);
     }
 
-    /// Semantic action for non-terminal 'IfExpression'
-    fn if_expression(&mut self, arg: &IfExpression) {
-        self.str("(");
-        self.r#if(&arg.r#if);
-        self.expression(&arg.expression);
-        self.token(&arg.l_brace.l_brace_token.replace("?"));
-        self.expression(&arg.expression0);
-        for x in &arg.if_expression_list {
-            self.token(&x.r#else.else_token.replace(" :  "));
-            self.r#if(&x.r#if);
-            self.expression(&x.expression);
-            self.token(&x.l_brace.l_brace_token.replace("?"));
-            self.expression(&x.expression0);
-        }
-        self.token(&arg.r#else.else_token.replace(" :  "));
-        self.expression(&arg.expression1);
-        self.str(")");
+    /// Semantic action for non-terminal 'BackQuote'
+    fn back_quote(&mut self, arg: &BackQuote) {
+        self.token(&arg.back_quote_token.replace("'"));
     }
 }

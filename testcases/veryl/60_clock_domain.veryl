@@ -1,20 +1,20 @@
 pub module Module60A (
-    i_clk_a: input  `a clock,
-    i_rst_a: input  `a reset,
-    i_dat_a: input  `a logic,
-    o_dat_a: output `a logic,
-    i_clk_b: input  `b clock,
-    i_rst_b: input  `b reset,
-    i_dat_b: input  `b logic,
-    o_dat_b: output `b logic,
+    i_clk_a: input  'a clock,
+    i_rst_a: input  'a reset,
+    i_dat_a: input  'a logic,
+    o_dat_a: output 'a logic,
+    i_clk_b: input  'b clock,
+    i_rst_b: input  'b reset,
+    i_dat_b: input  'b logic,
+    o_dat_b: output 'b logic,
 ) {
     assign o_dat_a = i_dat_a;
     assign o_dat_b = i_dat_b;
 }
 
 pub module Module60B (
-    i_clk   : input  `_ clock,
-    i_clk_x2: input  `_ clock,
+    i_clk   : input  '_ clock,
+    i_clk_x2: input  '_ clock,
     i_dat   : input     logic,
     o_dat   : output    logic,
 ) {
@@ -25,8 +25,8 @@ pub module Module60C (
     i_clk: input     clock,
     i_dat: input     logic,
     o_dat: output    logic,
-    i_thr: input  `a logic,
-    o_thr: output `a logic,
+    i_thr: input  'a logic,
+    o_thr: output 'a logic,
 ) {
     assign o_dat = i_dat;
     assign o_thr = i_thr;

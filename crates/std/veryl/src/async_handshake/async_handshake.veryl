@@ -12,24 +12,24 @@ pub module async_handshake::<S: synchronizer> #(
     param MERGE_RESET        : bit               = '0          , /// Whether both reset are merged
     param RESET_SYNC_STAGES  : u32               = 2           , /// Stages of reset synchronizer
 ) (
-    is_clk  : input  `s clock, /// src clock
-    is_rst  : input  `s reset, /// src reset
-    is_valid: input  `s logic, /// src data is valid
-    os_ready: output `s logic, /// src data is acceptable
-    is_data : input  `s TYPE , /// src data
-    id_clk  : input  `d clock, /// dst clock
-    id_rst  : input  `d reset, /// dst reset
-    od_valid: output `d logic, /// dst data is valid
-    id_ready: input  `d logic, /// dst data is acceptable
-    od_data : output `d TYPE , /// dst data
+    is_clk  : input  's clock, /// src clock
+    is_rst  : input  's reset, /// src reset
+    is_valid: input  's logic, /// src data is valid
+    os_ready: output 's logic, /// src data is acceptable
+    is_data : input  's TYPE , /// src data
+    id_clk  : input  'd clock, /// dst clock
+    id_rst  : input  'd reset, /// dst reset
+    od_valid: output 'd logic, /// dst data is valid
+    id_ready: input  'd logic, /// dst data is acceptable
+    od_data : output 'd TYPE, /// dst data
 ) {
-    var srst        : `s reset;
-    var src_state_s : `s logic;
-    var src_state_d : `d logic;
-    var drst        : `d reset;
-    var dst_state_s : `s logic;
-    var dst_state_d : `d logic;
-    var latched_data: `s TYPE ;
+    var srst        : 's reset;
+    var src_state_s : 's logic;
+    var src_state_d : 'd logic;
+    var drst        : 'd reset;
+    var dst_state_s : 's logic;
+    var dst_state_d : 'd logic;
+    var latched_data: 's TYPE ;
 
     //--------------------------------------------------------------
     //  Reset
@@ -50,9 +50,9 @@ pub module async_handshake::<S: synchronizer> #(
     //  Source Side
     //--------------------------------------------------------------
     :g_src_side {
-        var ready            : `s logic;
-        var state            : `s logic;
-        var dst_state_changed: `s logic;
+        var ready            : 's logic;
+        var state            : 's logic;
+        var dst_state_changed: 's logic;
 
         assign os_ready = ready;
         always_ff (is_clk, srst) {
@@ -121,10 +121,10 @@ pub module async_handshake::<S: synchronizer> #(
     //  Destination Side
     //--------------------------------------------------------------
     :g_dst_side {
-        var valid            : `d logic;
-        var data             : `d TYPE ;
-        var state            : `d logic;
-        var src_state_changed: `d logic;
+        var valid            : 'd logic;
+        var data             : 'd TYPE ;
+        var state            : 'd logic;
+        var src_state_changed: 'd logic;
 
         assign od_valid = valid;
         always_ff (id_clk, drst) {

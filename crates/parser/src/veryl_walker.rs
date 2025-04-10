@@ -174,13 +174,6 @@ pub trait VerylWalker {
         after!(self, unary_operator, arg);
     }
 
-    /// Semantic action for non-terminal 'BackQuote'
-    fn back_quote(&mut self, arg: &BackQuote) {
-        before!(self, back_quote, arg);
-        self.veryl_token(&arg.back_quote_token);
-        after!(self, back_quote, arg);
-    }
-
     /// Semantic action for non-terminal 'Colon'
     fn colon(&mut self, arg: &Colon) {
         before!(self, colon, arg);
@@ -249,6 +242,13 @@ pub trait VerylWalker {
         before!(self, question, arg);
         self.veryl_token(&arg.question_token);
         after!(self, question, arg);
+    }
+
+    /// Semantic action for non-terminal 'Quote'
+    fn quote(&mut self, arg: &Quote) {
+        before!(self, quote, arg);
+        self.veryl_token(&arg.quote_token);
+        after!(self, quote, arg);
     }
 
     /// Semantic action for non-terminal 'QuoteLBrace'
@@ -1655,7 +1655,7 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ClockDomain'
     fn clock_domain(&mut self, arg: &ClockDomain) {
         before!(self, clock_domain, arg);
-        self.back_quote(&arg.back_quote);
+        self.quote(&arg.quote);
         self.identifier(&arg.identifier);
         after!(self, clock_domain, arg);
     }

@@ -344,7 +344,6 @@ token_with_comments!(Based);
 token_with_comments!(BaseLess);
 token_with_comments!(AllBit);
 
-token_with_comments!(BackQuote);
 token_with_comments!(Colon);
 token_with_comments!(ColonColon);
 token_with_comments!(ColonColonLAngle);
@@ -355,6 +354,7 @@ token_with_comments!(Dot);
 token_with_comments!(Equ);
 token_with_comments!(Hash);
 token_with_comments!(Question);
+token_with_comments!(Quote);
 token_with_comments!(QuoteLBrace);
 token_with_comments!(LAngle);
 token_with_comments!(LBrace);

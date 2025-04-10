@@ -41,12 +41,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleB (
-        clk_a: input `_a clock<2>,
-        clk_b: input `_b clock[2]
+        clk_a: input '_a clock<2>,
+        clk_b: input '_b clock[2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS]) {
             a = 0;
         }
@@ -61,12 +61,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleC (
-        clk_a: input `_a clock<2, 2>,
-        clk_b: input `_b clock[2, 2]
+        clk_a: input '_a clock<2, 2>,
+        clk_b: input '_b clock[2, 2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS][POS]) {
             a = 0;
         }
@@ -95,12 +95,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleE (
-        clk_a: input `_a clock<2>,
-        clk_b: input `_b clock[2]
+        clk_a: input '_a clock<2>,
+        clk_b: input '_b clock[2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a) {
             a = 0;
         }
@@ -115,12 +115,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleF (
-        clk_a: input `_a clock<2>,
-        clk_b: input `_b clock[2]
+        clk_a: input '_a clock<2>,
+        clk_b: input '_b clock[2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS]) {
             a = 0;
         }
@@ -135,12 +135,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleG (
-        clk_a: input `_a clock<2, 2>,
-        clk_b: input `_b clock[2, 2]
+        clk_a: input '_a clock<2, 2>,
+        clk_b: input '_b clock[2, 2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS]) {
             a = 0;
         }
@@ -155,12 +155,12 @@ fn clock_check() {
 
     let code = r#"
     module ModuleH (
-        clk_a: input `_a clock<2, 2>,
-        clk_b: input `_b clock[2, 2]
+        clk_a: input '_a clock<2, 2>,
+        clk_b: input '_b clock[2, 2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a[POS][POS]) {
             a = 0;
         }
@@ -175,8 +175,8 @@ fn clock_check() {
 
     let code = r#"
     module ModuleA (
-        i_clk_a: input `a default clock,
-        i_clk_b: input `b default clock,
+        i_clk_a: input 'a default clock,
+        i_clk_b: input 'b default clock,
     ) {
     }
     "#;
@@ -209,14 +209,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleB (
-        clk_a: input `_a clock,
-        rst_a: input `_a reset<2>,
-        clk_b: input `_b clock,
-        rst_b: input `_b reset[2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS]) {
             if_reset {
                 a = 0;
@@ -235,14 +235,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleC (
-        clk_a: input `_a clock,
-        rst_a: input `_a reset<2, 2>,
-        clk_b: input `_b clock,
-        rst_b: input `_b reset[2, 2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2, 2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2, 2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS][POS]) {
             if_reset {
                 a = 0;
@@ -278,14 +278,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleE (
-        clk_a: input `_a clock,
-        rst_a: input `_a reset<2>,
-        clk_b: input `_b clock,
-        rst_b: input `_b reset[2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a) {
             if_reset {
                 a = 0;
@@ -304,14 +304,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleF (
-        clk_a: input `_a clock,
-        rst_a: input `_a reset<2>,
-        clk_b: input `_b clock,
-        rst_b: input `_b reset[2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS]) {
             if_reset {
                 a = 0;
@@ -330,14 +330,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleG (
-        clk_a: input `_a clock,
-        rst_a: input `_a reset<2, 2>,
-        clk_b: input `_b clock,
-        rst_b: input `_b reset[2, 2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2, 2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2, 2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS]) {
             if_reset {
                 a = 0;
@@ -356,14 +356,14 @@ fn reset_check() {
 
     let code = r#"
     module ModuleH (
-        clk_a: input `_a clock,
-        rst_a: input `_a reset<2, 2>,
-        clk_b: input `_b clock,
-        rst_b: input `_b reset[2, 2]
+        clk_a: input '_a clock,
+        rst_a: input '_a reset<2, 2>,
+        clk_b: input '_b clock,
+        rst_b: input '_b reset[2, 2]
     ) {
         const POS: u32 = 0;
-        var a: `_a logic;
-        var b: `_b logic;
+        var a: '_a logic;
+        var b: '_b logic;
         always_ff (clk_a, rst_a[POS][POS]) {
             if_reset {
                 a = 0;
@@ -2142,8 +2142,8 @@ fn missing_clock_signal() {
 
     let code = r#"
     module ModuleC (
-        clk_0: input `_0 clock,
-        clk_1: input `_1 clock
+        clk_0: input '_0 clock,
+        clk_1: input '_1 clock
     ){
         always_ff {}
     }
@@ -2364,7 +2364,7 @@ fn invalid_clock_domain() {
     let code = r#"
     module ModuleA {}
     module ModuleB {
-        inst u: `a ModuleA;
+        inst u: 'a ModuleA;
     }
     "#;
 
@@ -3173,11 +3173,11 @@ fn unused_variable() {
 
     let code = r#"
     module ModuleD (
-        i_clk:    input `a clock,
-        i_clk_en: input `a logic,
+        i_clk:    input 'a clock,
+        i_clk_en: input 'a logic,
     ) {
-        let clk: `a default clock = i_clk & i_clk_en;
-        var _a : `a logic;
+        let clk: 'a default clock = i_clk & i_clk_en;
+        var _a : 'a logic;
 
         always_ff {
             _a = 0;
@@ -3709,7 +3709,7 @@ fn uncovered_branch() {
 fn anonymous_identifier() {
     let code = r#"
     module ModuleA (
-        i_clk: input `_ clock,
+        i_clk: input '_ clock,
     ) {
     }
     "#;
@@ -4294,9 +4294,9 @@ fn invalid_select() {
 fn clock_domain() {
     let code = r#"
     module ModuleA (
-        i_clk: input  `a clock,
-        i_dat: input  `a logic,
-        o_dat: output `b logic,
+        i_clk: input  'a clock,
+        i_dat: input  'a logic,
+        o_dat: output 'b logic,
     ) {
         assign o_dat = i_dat;
     }
@@ -4310,10 +4310,10 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleB (
-        i_clk : input  `a clock,
-        i_dat0: input  `a logic,
-        i_dat1: input  `b logic,
-        o_dat : output `a logic,
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'a logic,
     ) {
         assign o_dat = {i_dat0, i_dat1};
     }
@@ -4327,10 +4327,10 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleC (
-        i_clk : input  `a clock,
-        i_dat0: input  `a logic,
-        i_dat1: input  `b logic,
-        o_dat : output `a logic,
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'a logic,
     ) {
         inst u: ModuleD (
             i_dat: i_dat1,
@@ -4354,10 +4354,10 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleE (
-        i_clk : input  `a clock,
-        i_dat0: input  `a logic,
-        i_dat1: input  `b logic,
-        o_dat : output `a logic,
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'a logic,
     ) {
         inst u: $sv::Module (
             i_dat: i_dat1,
@@ -4374,12 +4374,12 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleF (
-        i_clk : input  `a clock,
-        i_dat0: input  `a logic,
-        i_dat1: input  `b logic,
-        o_dat : output `b logic,
+        i_clk : input  'a clock,
+        i_dat0: input  'a logic,
+        i_dat1: input  'b logic,
+        o_dat : output 'b logic,
     ) {
-        var r_dat: `b logic;
+        var r_dat: 'b logic;
 
         always_ff {
             r_dat = i_dat1;
@@ -4397,9 +4397,9 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleG (
-        i_clk: input   `a clock,
-        i_dat: input   `a logic,
-        o_dat: modport `b InterfaceA::port,
+        i_clk: input   'a clock,
+        i_dat: input   'a logic,
+        o_dat: modport 'b InterfaceA::port,
     ) {
         assign o_dat.a = i_dat;
     }
@@ -4421,9 +4421,9 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleH (
-        i_clk: input  `a clock,
-        i_dat: input  `a logic,
-        o_dat: output `b logic,
+        i_clk: input  'a clock,
+        i_dat: input  'a logic,
+        o_dat: output 'b logic,
     ) {
         always_comb {
             o_dat = i_dat;
@@ -4442,10 +4442,10 @@ fn clock_domain() {
       var v: logic;
     }
     module ModuleI (
-      i_clk: input `a clock,
-      i_dat: input `a logic,
+      i_clk: input 'a clock,
+      i_dat: input 'a logic,
     ) {
-        inst intf: `a InterfaceI;
+        inst intf: 'a InterfaceI;
         assign intf.v = i_dat;
     }
     "#;
@@ -4458,10 +4458,10 @@ fn clock_domain() {
       var v: logic;
     }
     module ModuleJ (
-      i_clk: input `a clock,
-      i_dat: input `a logic,
+      i_clk: input 'a clock,
+      i_dat: input 'a logic,
     ) {
-        inst intf: `b InterfaceJ;
+        inst intf: 'b InterfaceJ;
         assign intf.v = i_dat;
     }
     "#;
@@ -4477,10 +4477,10 @@ fn clock_domain() {
       var v: logic;
     }
     module ModuleK (
-      i_clk: input  `a clock,
-      o_dat: output `b logic,
+      i_clk: input  'a clock,
+      o_dat: output 'b logic,
     ) {
-        inst intf: `a InterfaceK;
+        inst intf: 'a InterfaceK;
 
         assign intf.v = '0;
         assign o_dat  = intf.v;
@@ -4495,12 +4495,12 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleL (
-        i_clk_a: input `a clock,
-        i_rst_a: input `a reset,
-        i_clk_b: input `b clock,
-        i_rst_b: input `b reset,
+        i_clk_a: input 'a clock,
+        i_rst_a: input 'a reset,
+        i_clk_b: input 'b clock,
+        i_rst_b: input 'b reset,
     ) {
-        var _a: `a logic;
+        var _a: 'a logic;
         always_ff (i_clk_a, i_rst_b) {
             if_reset {
                 _a = 0;
@@ -4517,11 +4517,11 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleM (
-        i_clk_a: input `a clock,
-        i_clk_b: input `b clock,
-        i_rst_b: input `b reset,
+        i_clk_a: input 'a clock,
+        i_clk_b: input 'b clock,
+        i_rst_b: input 'b reset,
     ) {
-        var _a: `a logic;
+        var _a: 'a logic;
         always_ff (i_clk_a) {
             if_reset {
                 _a = 0;
@@ -4538,8 +4538,8 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleO (
-        i_clk_a: input `a clock,
-        i_rst_b: input `b reset,
+        i_clk_a: input 'a clock,
+        i_rst_b: input 'b reset,
     ) {}
     "#;
 
@@ -4551,10 +4551,10 @@ fn clock_domain() {
 
     let code = r#"
     module ModuleO (
-        i_clk_a: input `a default clock,
-        i_rst_a: input `a         reset,
-        i_clk_b: input `b         clock,
-        i_rst_b: input `b default reset,
+        i_clk_a: input 'a default clock,
+        i_rst_a: input 'a         reset,
+        i_clk_b: input 'b         clock,
+        i_rst_b: input 'b default reset,
     ) {}
     "#;
 

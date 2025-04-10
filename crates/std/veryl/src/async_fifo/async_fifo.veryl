@@ -15,34 +15,34 @@ pub module async_fifo::<S: synchronizer> #(
     param MERGE_RESET       : bit  = '0                        , /// Whether both reset are merged
     param RESET_SYNC_STAGES : u32  = 2                         , /// Stages of reset synchronizer
 ) (
-    is_clk        : input  `s clock, /// src clock
-    is_rst        : input  `s reset, /// src reset
-    os_almost_full: output `s logic, /// FIFO is almost full
-    os_full       : output `s logic, /// FIFO is full
-    is_push       : input  `s logic, /// push to FIFO
-    is_data       : input  `s TYPE , /// push data
-    id_clk        : input  `d clock, /// dst clock
-    id_rst        : input  `d reset, /// dst reset
-    od_empty      : output `d logic, /// FIFO is empty
-    id_pop        : input  `d logic, /// pop from FIFO
-    od_data       : output `d TYPE , /// pop data
+    is_clk        : input  's clock, /// src clock
+    is_rst        : input  's reset, /// src reset
+    os_almost_full: output 's logic, /// FIFO is almost full
+    os_full       : output 's logic, /// FIFO is full
+    is_push       : input  's logic, /// push to FIFO
+    is_data       : input  's TYPE , /// push data
+    id_clk        : input  'd clock, /// dst clock
+    id_rst        : input  'd reset, /// dst reset
+    od_empty      : output 'd logic, /// FIFO is empty
+    id_pop        : input  'd logic, /// pop from FIFO
+    od_data       : output 'd TYPE, /// pop data
 ) {
     const POINTER_WIDTH: u32 = $clog2(DEPTH) + 1;
 
-    var srst           : `s reset               ;
-    var wp_sclk        : `s logic<POINTER_WIDTH>;
-    var wp_sclk_next   : `s logic<POINTER_WIDTH>;
-    var wp_sclk_gray   : `s logic<POINTER_WIDTH>;
-    var wp_sclk_gray_ff: `s logic<POINTER_WIDTH>;
-    var rp_sclk        : `s logic<POINTER_WIDTH>;
-    var rp_sclk_gray   : `s logic<POINTER_WIDTH>;
-    var drst           : `d reset               ;
-    var wp_dclk        : `d logic<POINTER_WIDTH>;
-    var wp_dclk_gray   : `d logic<POINTER_WIDTH>;
-    var rp_dclk        : `d logic<POINTER_WIDTH>;
-    var rp_dclk_next   : `d logic<POINTER_WIDTH>;
-    var rp_dclk_gray   : `d logic<POINTER_WIDTH>;
-    var rp_dclk_gray_ff: `d logic<POINTER_WIDTH>;
+    var srst           : 's reset               ;
+    var wp_sclk        : 's logic<POINTER_WIDTH>;
+    var wp_sclk_next   : 's logic<POINTER_WIDTH>;
+    var wp_sclk_gray   : 's logic<POINTER_WIDTH>;
+    var wp_sclk_gray_ff: 's logic<POINTER_WIDTH>;
+    var rp_sclk        : 's logic<POINTER_WIDTH>;
+    var rp_sclk_gray   : 's logic<POINTER_WIDTH>;
+    var drst           : 'd reset               ;
+    var wp_dclk        : 'd logic<POINTER_WIDTH>;
+    var wp_dclk_gray   : 'd logic<POINTER_WIDTH>;
+    var rp_dclk        : 'd logic<POINTER_WIDTH>;
+    var rp_dclk_next   : 'd logic<POINTER_WIDTH>;
+    var rp_dclk_gray   : 'd logic<POINTER_WIDTH>;
+    var rp_dclk_gray_ff: 'd logic<POINTER_WIDTH>;
 
     //--------------------------------------------------------------
     //  Reset
@@ -62,10 +62,10 @@ pub module async_fifo::<S: synchronizer> #(
     //--------------------------------------------------------------
     //  FIFO Control (Write Side)
     //--------------------------------------------------------------
-    var word_count : `s logic<POINTER_WIDTH>;
-    var almost_full: `s logic               ;
-    var full       : `s logic               ;
-    var push       : `s logic               ;
+    var word_count : 's logic<POINTER_WIDTH>;
+    var almost_full: 's logic               ;
+    var full       : 's logic               ;
+    var push       : 's logic               ;
 
     always_comb {
         os_almost_full = almost_full;
@@ -131,9 +131,9 @@ pub module async_fifo::<S: synchronizer> #(
     //--------------------------------------------------------------
     //  FIFO Control (Read Side)
     //--------------------------------------------------------------
-    var empty     : `d logic;
-    var empty_next: `d logic;
-    var pop       : `d logic;
+    var empty     : 'd logic;
+    var empty_next: 'd logic;
+    var pop       : 'd logic;
 
     always_comb {
         od_empty = empty;
@@ -214,8 +214,8 @@ pub module async_fifo::<S: synchronizer> #(
         o_d  : rp_sclk_gray,
     );
 
-    var ram: `s logic<$bits(TYPE)> [DEPTH];
-    var q  : `d logic<$bits(TYPE)>        ;
+    var ram: 's logic<$bits(TYPE)> [DEPTH];
+    var q  : 'd logic<$bits(TYPE)>        ;
 
     always_ff (is_clk) {
         if push {
