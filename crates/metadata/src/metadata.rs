@@ -259,9 +259,10 @@ impl Metadata {
         symlink: bool,
     ) -> Result<Vec<PathSet>, MetadataError> {
         let base = self.project_path();
+        let src_base = base.join(&self.build.source);
 
         let src_files = if files.is_empty() {
-            veryl_path::gather_files_with_extension(&base, "veryl", symlink)?
+            veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
         } else {
             let mut ret = Vec::new();
             for file in files {
@@ -272,10 +273,11 @@ impl Metadata {
 
         let mut ret = Vec::new();
         for src in src_files {
+            let src_relative = src.strip_prefix(&src_base)?;
             let dst = match self.build.target {
                 Target::Source => src.with_extension("sv"),
                 Target::Directory { ref path } => {
-                    base.join(path.join(src.with_extension("sv").file_name().unwrap()))
+                    base.join(path.join(src_relative.with_extension("sv")))
                 }
                 Target::Bundle { .. } => base.join(
                     PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
@@ -283,8 +285,12 @@ impl Metadata {
             };
             let map = match &self.build.sourcemap_target {
                 SourceMapTarget::Directory { path } => {
-                    let dst = dst.strip_prefix(&base).unwrap();
-                    base.join(path.join(dst.with_extension("sv.map")))
+                    if let Target::Directory { .. } = self.build.target {
+                        base.join(path.join(src_relative.with_extension("sv.map")))
+                    } else {
+                        let dst = dst.strip_prefix(&base).unwrap();
+                        base.join(path.join(dst.with_extension("sv.map")))
+                    }
                 }
                 _ => {
                     let mut map = dst.clone();

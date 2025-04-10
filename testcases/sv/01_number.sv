@@ -43,4 +43,4 @@ module veryl_testcase_Module01;
     localparam logic [32-1:0] hh  = 1'o0;
     localparam logic [32-1:0] hhh = 1'h0;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/01_number.sv.map
+//# sourceMappingURL=../map/01_number.sv.map

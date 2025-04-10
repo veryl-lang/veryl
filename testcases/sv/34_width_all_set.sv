@@ -8,4 +8,4 @@ module veryl_testcase_Module34;
     logic [32-1:0] _a6; always_comb _a6 = 10'bxxxxxxxxxx;
     logic [32-1:0] _a7; always_comb _a7 = 10'bzzzzzzzzzz;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/34_width_all_set.sv.map
+//# sourceMappingURL=../map/34_width_all_set.sv.map

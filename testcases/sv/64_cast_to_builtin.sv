@@ -9,4 +9,4 @@ module veryl_testcase_Module64;
     real             _x5; always_comb _x5 = real'(a);
     logic            _x6; always_comb _x6 = ((a) != 1'b0);
 endmodule
-//# sourceMappingURL=../map/testcases/sv/64_cast_to_builtin.sv.map
+//# sourceMappingURL=../map/64_cast_to_builtin.sv.map

@@ -51,4 +51,4 @@ module veryl_testcase_Module06;
         .bb  (b + 2 )
     );
 endmodule
-//# sourceMappingURL=../map/testcases/sv/06_function.sv.map
+//# sourceMappingURL=../map/06_function.sv.map

@@ -137,7 +137,7 @@ mod emitter {
 
         let src_path = PathBuf::from(format!("../../testcases/veryl/{}.veryl", name));
         let dst_path = PathBuf::from(format!("../../testcases/sv/{}.sv", name));
-        let map_path = PathBuf::from(format!("../../testcases/map/testcases/sv/{}.sv.map", name));
+        let map_path = PathBuf::from(format!("../../testcases/map/{}.sv.map", name));
 
         let input = fs::read_to_string(&src_path).unwrap();
         let ret = Parser::parse(&input, &src_path).unwrap();
@@ -188,10 +188,11 @@ mod path {
     }
 
     #[test]
-    fn source_target() {
+    fn rootdir_source_target() {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
+        metadata.build.source = PathBuf::from("");
         metadata.build.target = Target::Source;
         metadata.build.sourcemap_target = SourceMapTarget::Target;
 
@@ -204,10 +205,11 @@ mod path {
     }
 
     #[test]
-    fn source_directory() {
+    fn rootdir_source_directory() {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
+        metadata.build.source = PathBuf::from("");
         metadata.build.target = Target::Source;
         metadata.build.sourcemap_target = SourceMapTarget::Directory {
             path: "testcases/map".into(),
@@ -222,10 +224,87 @@ mod path {
     }
 
     #[test]
-    fn directory_target() {
+    fn rootdir_directory_target() {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
+        metadata.build.source = PathBuf::from("");
+        metadata.build.target = Target::Directory {
+            path: "testcases/sv".into(),
+        };
+        metadata.build.sourcemap_target = SourceMapTarget::Target;
+
+        path_test(
+            metadata,
+            "testcases/veryl/01_number.veryl",
+            "testcases/sv/testcases/veryl/01_number.sv",
+            "testcases/sv/testcases/veryl/01_number.sv.map",
+        );
+    }
+
+    #[test]
+    fn rootdir_directory_directory() {
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+
+        metadata.build.source = PathBuf::from("");
+        metadata.build.target = Target::Directory {
+            path: "testcases/sv".into(),
+        };
+        metadata.build.sourcemap_target = SourceMapTarget::Directory {
+            path: "testcases/map".into(),
+        };
+
+        path_test(
+            metadata,
+            "testcases/veryl/01_number.veryl",
+            "testcases/sv/testcases/veryl/01_number.sv",
+            "testcases/map/testcases/veryl/01_number.sv.map",
+        );
+    }
+
+    #[test]
+    fn subdir_source_target() {
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+
+        metadata.build.source = PathBuf::from("testcases/veryl/");
+        metadata.build.target = Target::Source;
+        metadata.build.sourcemap_target = SourceMapTarget::Target;
+
+        path_test(
+            metadata,
+            "testcases/veryl/01_number.veryl",
+            "testcases/veryl/01_number.sv",
+            "testcases/veryl/01_number.sv.map",
+        );
+    }
+
+    #[test]
+    fn subdir_source_directory() {
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+
+        metadata.build.source = PathBuf::from("testcases/veryl/");
+        metadata.build.target = Target::Source;
+        metadata.build.sourcemap_target = SourceMapTarget::Directory {
+            path: "testcases/map".into(),
+        };
+
+        path_test(
+            metadata,
+            "testcases/veryl/01_number.veryl",
+            "testcases/veryl/01_number.sv",
+            "testcases/map/testcases/veryl/01_number.sv.map",
+        );
+    }
+
+    #[test]
+    fn subdir_directory_target() {
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+
+        metadata.build.source = PathBuf::from("testcases/veryl/");
         metadata.build.target = Target::Directory {
             path: "testcases/sv".into(),
         };
@@ -240,10 +319,11 @@ mod path {
     }
 
     #[test]
-    fn directory_directory() {
+    fn subdir_directory_directory() {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
+        metadata.build.source = PathBuf::from("testcases/veryl/");
         metadata.build.target = Target::Directory {
             path: "testcases/sv".into(),
         };
@@ -255,7 +335,7 @@ mod path {
             metadata,
             "testcases/veryl/01_number.veryl",
             "testcases/sv/01_number.sv",
-            "testcases/map/testcases/sv/01_number.sv.map",
+            "testcases/map/01_number.sv.map",
         );
     }
 }

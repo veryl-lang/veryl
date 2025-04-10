@@ -14,4 +14,4 @@ module veryl_testcase_Module77 (
         end
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/77_default_clock_reset.sv.map
+//# sourceMappingURL=../map/77_default_clock_reset.sv.map

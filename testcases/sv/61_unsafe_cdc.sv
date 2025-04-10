@@ -20,4 +20,4 @@ module veryl_testcase_Module61B (
     );
 
 endmodule
-//# sourceMappingURL=../map/testcases/sv/61_unsafe_cdc.sv.map
+//# sourceMappingURL=../map/61_unsafe_cdc.sv.map

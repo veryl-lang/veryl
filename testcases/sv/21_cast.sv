@@ -20,4 +20,4 @@ module veryl_testcase_Module21;
     always_comb a = EnumD'((EnumC'((EnumB'((EnumA'(c)))))));
     always_comb b = 2'(c);
 endmodule
-//# sourceMappingURL=../map/testcases/sv/21_cast.sv.map
+//# sourceMappingURL=../map/21_cast.sv.map

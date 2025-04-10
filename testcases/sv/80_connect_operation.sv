@@ -112,4 +112,4 @@ module veryl_testcase_Module80B (
         bus_if.status        = 0;
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/80_connect_operation.sv.map
+//# sourceMappingURL=../map/80_connect_operation.sv.map

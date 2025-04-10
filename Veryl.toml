@@ -11,6 +11,7 @@ clock_type       = "posedge"
 reset_type       = "async_low"
 reset_low_suffix = "_n"
 filelist_type    = "absolute"
+source           = "testcases/veryl"
 target           = {type = "directory", path = "testcases/sv"}
 sourcemap_target = {type = "directory", path = "testcases/map"}
 

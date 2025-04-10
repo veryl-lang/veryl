@@ -1,0 +1,1 @@
+{"version":3,"file":"27_string.sv.map","sources":["../veryl/27_string.veryl"],"names":["","module","Module27",";","localparam","string","a","=","\"aaa\"","_b","\"bbb\"","endmodule"],"mappings":"AAAAA,AAAAC,sBAAOC,QAASC;IACZC,WAASC,OAAHC,EAAUC,EAAEC,KAAKL;;IAEfE,OAAJI,gBAAAA,GAAWF,EAAEG,KAAKP;AAC1BQ"}

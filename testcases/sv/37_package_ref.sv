@@ -15,4 +15,4 @@ module veryl_testcase_Module37;
     int unsigned _b; always_comb _b = veryl_testcase_Package37::B_C;
     int unsigned _c; always_comb _c = veryl_testcase_Package37::X();
 endmodule
-//# sourceMappingURL=../map/testcases/sv/37_package_ref.sv.map
+//# sourceMappingURL=../map/37_package_ref.sv.map

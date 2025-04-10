@@ -25,4 +25,4 @@ module veryl_testcase_Module66A (
     interface.port c
 );
 endmodule
-//# sourceMappingURL=../map/testcases/sv/66_modport_connect.sv.map
+//# sourceMappingURL=../map/66_modport_connect.sv.map

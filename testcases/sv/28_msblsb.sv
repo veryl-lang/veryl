@@ -37,4 +37,4 @@ module veryl_testcase_ModuleB;
     logic _y; always_comb _y = veryl_testcase_Package28C::C[($size(veryl_testcase_Package28C::C, 1) - 1)];
     logic _z; always_comb _z = veryl_testcase_Package28C::C[0][($size(veryl_testcase_Package28C::C, 2) - 1)];
 endmodule
-//# sourceMappingURL=../map/testcases/sv/28_msblsb.sv.map
+//# sourceMappingURL=../map/28_msblsb.sv.map

@@ -49,4 +49,4 @@ endinterface
 interface veryl_testcase___Interface56B__3;
     logic [3-1:0]                            _b;
 endinterface
-//# sourceMappingURL=../map/testcases/sv/56_generic_interface.sv.map
+//# sourceMappingURL=../map/56_generic_interface.sv.map

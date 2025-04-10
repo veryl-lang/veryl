@@ -21,4 +21,4 @@ module veryl_testcase_Module78 (
         end
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/78_interface_with_clock_reset.sv.map
+//# sourceMappingURL=../map/78_interface_with_clock_reset.sv.map

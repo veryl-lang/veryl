@@ -31,4 +31,4 @@ module veryl_testcase_Module60C (
     always_comb o_dat = i_dat;
     always_comb o_thr = i_thr;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/60_clock_domain.sv.map
+//# sourceMappingURL=../map/60_clock_domain.sv.map

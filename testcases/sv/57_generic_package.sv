@@ -63,4 +63,4 @@ module veryl_testcase_Module57;
 
     veryl_testcase_Module57F u ();
 endmodule
-//# sourceMappingURL=../map/testcases/sv/57_generic_package.sv.map
+//# sourceMappingURL=../map/57_generic_package.sv.map

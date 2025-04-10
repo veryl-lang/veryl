@@ -47,4 +47,4 @@ interface veryl_testcase_InterfaceA #(
     parameter int unsigned b = 1
 );
 endinterface
-//# sourceMappingURL=../map/testcases/sv/14_inst.sv.map
+//# sourceMappingURL=../map/14_inst.sv.map

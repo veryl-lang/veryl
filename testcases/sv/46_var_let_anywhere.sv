@@ -40,4 +40,4 @@ module veryl_testcase_Module46;
         return a + 2;
     endfunction
 endmodule
-//# sourceMappingURL=../map/testcases/sv/46_var_let_anywhere.sv.map
+//# sourceMappingURL=../map/46_var_let_anywhere.sv.map

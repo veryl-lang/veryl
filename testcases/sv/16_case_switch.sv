@@ -41,4 +41,4 @@ module veryl_testcase_Module16;
         endcase
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/16_case_switch.sv.map
+//# sourceMappingURL=../map/16_case_switch.sv.map

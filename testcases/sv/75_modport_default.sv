@@ -60,4 +60,4 @@ interface veryl_testcase_Interface75;
         output d
     );
 endinterface
-//# sourceMappingURL=../map/testcases/sv/75_modport_default.sv.map
+//# sourceMappingURL=../map/75_modport_default.sv.map

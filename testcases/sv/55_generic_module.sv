@@ -68,4 +68,4 @@ module veryl_testcase___Module55I____Package55__8__16;
     veryl_testcase___Package55__8__16::data_a _a; always_comb _a = 0;
     veryl_testcase___Package55__8__16::data_b _b; always_comb _b = 0;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/55_generic_module.sv.map
+//# sourceMappingURL=../map/55_generic_module.sv.map

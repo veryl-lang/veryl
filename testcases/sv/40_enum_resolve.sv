@@ -16,4 +16,4 @@ module veryl_testcase_Module40;
         return e == EnumA_member_a;
     endfunction
 endmodule
-//# sourceMappingURL=../map/testcases/sv/40_enum_resolve.sv.map
+//# sourceMappingURL=../map/40_enum_resolve.sv.map

@@ -15,4 +15,4 @@ module veryl_testcase_Module15;
         end
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/15_named_block.sv.map
+//# sourceMappingURL=../map/15_named_block.sv.map

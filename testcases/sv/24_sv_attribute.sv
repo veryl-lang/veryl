@@ -4,4 +4,4 @@ module veryl_testcase_Module24;
     (* mark_debug="true" *)
     logic _b; always_comb _b = 1;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/24_sv_attribute.sv.map
+//# sourceMappingURL=../map/24_sv_attribute.sv.map

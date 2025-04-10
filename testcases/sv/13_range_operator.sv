@@ -19,4 +19,4 @@ module veryl_testcase_Module13;
     // index by step
     always_comb e = X[1*(2)+:(2)];
 endmodule
-//# sourceMappingURL=../map/testcases/sv/13_range_operator.sv.map
+//# sourceMappingURL=../map/13_range_operator.sv.map

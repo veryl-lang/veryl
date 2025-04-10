@@ -1,0 +1,1 @@
+{"version":3,"file":"31_initial_final.sv.map","sources":["../veryl/31_initial_final.veryl"],"names":["","module","Module31",";","initial","begin","$display","(","\"initial\"",")","end","final","\"final\"","endmodule"],"mappings":"AAAAA,AAAAC,sBAAOC,QAASC;IACZC,QAAQC;QACJC,QAAQC,CAACC,SAASC,CAACN;IACvBO;;IAEAC,MAAMN;QACFC,QAAQC,CAACK,OAAOH,CAACN;IACrBO;AACJG"}

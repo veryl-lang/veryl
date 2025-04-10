@@ -9,4 +9,4 @@ module veryl_testcase_Module43 (
 
     logic _d; always_comb _d = c.memberA;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/43_sv_member.sv.map
+//# sourceMappingURL=../map/43_sv_member.sv.map

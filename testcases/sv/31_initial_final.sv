@@ -7,4 +7,4 @@ module veryl_testcase_Module31;
         $display("final");
     end
 endmodule
-//# sourceMappingURL=../map/testcases/sv/31_initial_final.sv.map
+//# sourceMappingURL=../map/31_initial_final.sv.map

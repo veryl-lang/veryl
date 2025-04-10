@@ -10,4 +10,4 @@ endmodule
 
 
 // comment
-//# sourceMappingURL=../map/testcases/sv/47_embed.sv.map
+//# sourceMappingURL=../map/47_embed.sv.map

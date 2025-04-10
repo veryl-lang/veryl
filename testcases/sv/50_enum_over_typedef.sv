@@ -11,4 +11,4 @@ module veryl_testcase_Module50;
     veryl_testcase_Package50::EnumA _a; always_comb _a = veryl_testcase_Package50::EnumA_memberA;
     EnumB                           _b; always_comb _b = veryl_testcase_Package50::EnumA_memberB;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/50_enum_over_typedef.sv.map
+//# sourceMappingURL=../map/50_enum_over_typedef.sv.map

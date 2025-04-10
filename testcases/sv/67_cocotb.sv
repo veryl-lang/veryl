@@ -32,4 +32,4 @@ endmodule
     `endif
 
 `endif
-//# sourceMappingURL=../map/testcases/sv/67_cocotb.sv.map
+//# sourceMappingURL=../map/67_cocotb.sv.map

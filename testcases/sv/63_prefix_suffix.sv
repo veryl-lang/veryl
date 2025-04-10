@@ -28,4 +28,4 @@ module veryl_testcase_Module63A (
     input var logic i_data_a
 );
 endmodule
-//# sourceMappingURL=../map/testcases/sv/63_prefix_suffix.sv.map
+//# sourceMappingURL=../map/63_prefix_suffix.sv.map

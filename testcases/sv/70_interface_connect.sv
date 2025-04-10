@@ -33,4 +33,4 @@ module veryl_testcase_Module70A (
     interface c
 );
 endmodule
-//# sourceMappingURL=../map/testcases/sv/70_interface_connect.sv.map
+//# sourceMappingURL=../map/70_interface_connect.sv.map

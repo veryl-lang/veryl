@@ -7,4 +7,4 @@ module veryl_testcase_Module62;
     always_comb reset = 1;
     always_comb out   = in;
 endmodule
-//# sourceMappingURL=../map/testcases/sv/62_raw_identifier.sv.map
+//# sourceMappingURL=../map/62_raw_identifier.sv.map

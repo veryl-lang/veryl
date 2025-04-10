@@ -24,4 +24,4 @@ package veryl_testcase_Package38;
 
     typedef bit [8-1:0] octbyte [0:8-1];
 endpackage
-//# sourceMappingURL=../map/testcases/sv/38_typedef.sv.map
+//# sourceMappingURL=../map/38_typedef.sv.map
