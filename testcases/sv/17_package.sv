@@ -11,8 +11,8 @@ package veryl_testcase_Package17;
 
     // enum declaration
     typedef enum logic [2-1:0] {
-        B_X = 1,
-        B_Y = 2,
+        B_X = $bits(logic [2-1:0])'(1),
+        B_Y = $bits(logic [2-1:0])'(2),
         B_Z
     } B;
 

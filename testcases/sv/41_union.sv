@@ -1,7 +1,7 @@
 module veryl_testcase_Module41;
     typedef enum logic {
-        Boolean_True = 1,
-        Boolean_False = 0
+        Boolean_True = $bits(logic)'(1),
+        Boolean_False = $bits(logic)'(0)
     } Boolean;
 
     typedef union packed {

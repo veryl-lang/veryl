@@ -75,6 +75,7 @@ pub struct Emitter {
     reset_signal: Option<String>,
     default_block: Option<Identifier>,
     enum_width: usize,
+    enum_type: Option<ScalarType>,
     emit_enum_implicit_valiant: bool,
     file_scope_import: Vec<String>,
     attribute: Vec<AttributeType>,
@@ -123,6 +124,7 @@ impl Default for Emitter {
             reset_signal: None,
             default_block: None,
             enum_width: 0,
+            enum_type: None,
             emit_enum_implicit_valiant: false,
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
@@ -3687,6 +3689,7 @@ impl VerylWalker for Emitter {
         );
         self.space(1);
         if let Some(ref x) = arg.enum_declaration_opt {
+            self.enum_type = Some(x.scalar_type.as_ref().clone());
             self.scalar_type(&x.scalar_type);
         } else {
             self.str(&format!("logic [{}-1:0]", self.enum_width));
@@ -3701,6 +3704,8 @@ impl VerylWalker for Emitter {
         self.identifier(&arg.identifier);
         self.str(";");
         self.token(&arg.r_brace.r_brace_token.replace(""));
+
+        self.enum_type = None;
     }
 
     /// Semantic action for non-terminal 'EnumList'
@@ -3750,7 +3755,18 @@ impl VerylWalker for Emitter {
             self.space(1);
             self.equ(&x.equ);
             self.space(1);
+            if let Some(enum_type) = self.enum_type.as_ref().cloned() {
+                self.str("$bits(");
+                self.force_duplicated = true;
+                self.scalar_type(&enum_type);
+                self.force_duplicated = false;
+                self.str(")");
+            } else {
+                self.str(&self.enum_width.to_string());
+            }
+            self.str("'(");
             self.expression(&x.expression);
+            self.str(")");
         } else if self.emit_enum_implicit_valiant {
             self.str(&format!(
                 " = {}'d{}",
