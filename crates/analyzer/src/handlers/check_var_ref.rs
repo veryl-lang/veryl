@@ -691,7 +691,7 @@ impl VerylGrammarTrait for CheckVarRef {
                         r#type: AssignDeclarationType::Inst,
                     });
 
-                    let mut evaluator = Evaluator::new();
+                    let mut evaluator = Evaluator::new(&[]);
 
                     for (token, target) in &x.connects {
                         // Gather port information

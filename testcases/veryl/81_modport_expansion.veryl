@@ -1,0 +1,70 @@
+proto package ProtoPkg81 {
+    enum Command {
+        WRITE,
+        READ,
+    }
+
+    type Address;
+    type Data   ;
+}
+
+package BasePkg81::<AW: const, DW: const> for ProtoPkg81 {
+    enum Command {
+        WRITE,
+        READ,
+    }
+
+    type Address = logic<AW>;
+    type Data    = logic<DW>;
+}
+
+alias package Pkg81 = BasePkg81::<8, 32>;
+
+interface Interface81::<PKG: ProtoPkg81> {
+    var ready  : logic       ;
+    var valid  : logic       ;
+    var command: PKG::Command;
+    var address: PKG::Address;
+    var data   : PKG::Data   ;
+
+    modport master {
+        ready  : input ,
+        valid  : output,
+        command: output,
+        address: output,
+        data   : output,
+    }
+
+    modport slave {
+        ..converse(master)
+    }
+}
+
+#[expand(modport)]
+module Module81A (
+    m_if: modport Interface81::<Pkg81>::master [1, 2],
+    s_if: modport Interface81::<Pkg81>::slave  [1, 2],
+) {
+    for i in 0..1 :g {
+        for j in 0..2 :g {
+            connect m_if[i][j] <> s_if[i][j];
+        }
+    }
+}
+
+module Module81B {
+    inst a_if: Interface81::<Pkg81> [1, 2];
+    inst b_if: Interface81::<Pkg81> [1, 2];
+
+    for i in 0..1 :g {
+        for j in 0..2 :g {
+            connect a_if[i][j].slave  <> 0;
+            connect b_if[i][j].master <> 0;
+        }
+    }
+
+    inst u: Module81A (
+        m_if: a_if,
+        s_if: b_if,
+    );
+}

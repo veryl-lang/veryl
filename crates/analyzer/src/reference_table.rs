@@ -225,7 +225,6 @@ impl ReferenceTable {
         let prefix_len = path.len() - orig_len;
         for i in prefix_len..path.len() {
             let base_path = path.base_path(i);
-
             match symbol_table::resolve((&base_path, namespace)) {
                 Ok(symbol) => {
                     self.check_pacakge_reference(&symbol.found, &path.range);
@@ -256,11 +255,12 @@ impl ReferenceTable {
                         args.push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
-                    for arg in &mut args {
+                    for (j, arg) in args.iter_mut().enumerate() {
                         if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace))
                         {
                             // Replace arg with its target if arg is alias
                             if let Some(target) = symbol.found.alias_target() {
+                                path.paths[i].replace_generic_argument(j, target.clone());
                                 *arg = target;
                             }
                         }
@@ -297,7 +297,6 @@ impl ReferenceTable {
                     if single_path && !path.is_resolvable() {
                         return;
                     }
-
                     self.push_resolve_error(err, &path.range, generics_token, None);
                 }
             }

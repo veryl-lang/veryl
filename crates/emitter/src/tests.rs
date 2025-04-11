@@ -993,3 +993,189 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn expand_modport() {
+    let code = r#"
+proto package ProtoPkgA {
+    enum Command {
+        WRITE,
+        READ
+    }
+}
+package PkgA for ProtoPkgA {
+    enum Command {
+        WRITE,
+        READ
+    }
+}
+interface InterfaceA::<PKG: ProtoPkgA> {
+    var ready  : logic;
+    var valid  : logic;
+    var command: PKG::Command;
+
+    modport master {
+        ready  : input ,
+        valid  : output,
+        command: output,
+    }
+
+    modport slave {
+        ready  : output,
+        valid  : input ,
+        command: input ,
+    }
+}
+#[expand(modport)]
+module ModuleA::<X: const, Y: const> (
+    a_if: modport InterfaceA::<PkgA>::master[X, Y],
+    b_if: modport InterfaceA::<PkgA>::slave [X, Y],
+) {
+    for i in 0..X: g {
+        for j in 0..Y: g {
+            connect a_if[i][j] <> b_if[i][j];
+        }
+    }
+}
+module ModuleB {
+    inst a_if: InterfaceA::<PkgA>[1, 2];
+    inst b_if: InterfaceA::<PkgA>[1, 2];
+
+    for i in 0..1: g {
+        for j in 0..2: g {
+            always_comb {
+                a_if[i][j].ready = '0;
+            }
+
+            always_comb {
+                b_if[i][j].valid   = '0;
+                b_if[i][j].command = 0 as PkgA::Command;
+            }
+        }
+    }
+
+    inst u: ModuleA::<1, 2> (
+        a_if,
+        b_if,
+    );
+}
+"#;
+
+    let expect = r#"
+
+package prj_PkgA;
+    typedef enum logic [1-1:0] {
+        Command_WRITE,
+        Command_READ
+    } Command;
+endpackage
+interface prj___InterfaceA__PkgA;
+    logic             ready  ;
+    logic             valid  ;
+    prj_PkgA::Command command;
+
+    modport master (
+        input  ready  ,
+        output valid  ,
+        output command
+    );
+
+    modport slave (
+        output ready  ,
+        input  valid  ,
+        input  command
+    );
+endinterface
+
+module prj___ModuleA__1__2 (
+    input  logic             __a_if_0_0_ready  ,
+    output logic             __a_if_0_0_valid  ,
+    output prj_PkgA::Command __a_if_0_0_command,
+    input  logic             __a_if_0_1_ready  ,
+    output logic             __a_if_0_1_valid  ,
+    output prj_PkgA::Command __a_if_0_1_command,
+    output logic             __b_if_0_0_ready  ,
+    input  logic             __b_if_0_0_valid  ,
+    input  prj_PkgA::Command __b_if_0_0_command,
+    output logic             __b_if_0_1_ready  ,
+    input  logic             __b_if_0_1_valid  ,
+    input  prj_PkgA::Command __b_if_0_1_command
+);
+    prj___InterfaceA__PkgA a_if [0:1-1][0:2-1] ();
+    always_comb begin
+        a_if[0][0].ready   = __a_if_0_0_ready  ;
+        __a_if_0_0_valid   = a_if[0][0].valid  ;
+        __a_if_0_0_command = a_if[0][0].command;
+    end
+    always_comb begin
+        a_if[0][1].ready   = __a_if_0_1_ready  ;
+        __a_if_0_1_valid   = a_if[0][1].valid  ;
+        __a_if_0_1_command = a_if[0][1].command;
+    end
+    prj___InterfaceA__PkgA b_if [0:1-1][0:2-1] ();
+    always_comb begin
+        __b_if_0_0_ready   = b_if[0][0].ready  ;
+        b_if[0][0].valid   = __b_if_0_0_valid  ;
+        b_if[0][0].command = __b_if_0_0_command;
+    end
+    always_comb begin
+        __b_if_0_1_ready   = b_if[0][1].ready  ;
+        b_if[0][1].valid   = __b_if_0_1_valid  ;
+        b_if[0][1].command = __b_if_0_1_command;
+    end
+    for (genvar i = 0; i < 1; i++) begin :g
+        for (genvar j = 0; j < 2; j++) begin :g
+            always_comb begin
+                b_if[i][j].ready   = a_if[i][j].ready;
+                a_if[i][j].valid   = b_if[i][j].valid;
+                a_if[i][j].command = b_if[i][j].command;
+            end
+        end
+    end
+endmodule
+module prj_ModuleB;
+    prj___InterfaceA__PkgA a_if [0:1-1][0:2-1] ();
+    prj___InterfaceA__PkgA b_if [0:1-1][0:2-1] ();
+
+    for (genvar i = 0; i < 1; i++) begin :g
+        for (genvar j = 0; j < 2; j++) begin :g
+            always_comb begin
+                a_if[i][j].ready = '0;
+            end
+
+            always_comb begin
+                b_if[i][j].valid   = '0;
+                b_if[i][j].command = prj_PkgA::Command'(0);
+            end
+        end
+    end
+
+    prj___ModuleA__1__2 u (
+        .__a_if_0_0_ready   (a_if[0][0].ready  ),
+        .__a_if_0_0_valid   (a_if[0][0].valid  ),
+        .__a_if_0_0_command (a_if[0][0].command),
+        .__a_if_0_1_ready   (a_if[0][1].ready  ),
+        .__a_if_0_1_valid   (a_if[0][1].valid  ),
+        .__a_if_0_1_command (a_if[0][1].command),
+        .__b_if_0_0_ready   (b_if[0][0].ready  ),
+        .__b_if_0_0_valid   (b_if[0][0].valid  ),
+        .__b_if_0_0_command (b_if[0][0].command),
+        .__b_if_0_1_ready   (b_if[0][1].ready  ),
+        .__b_if_0_1_valid   (b_if[0][1].valid  ),
+        .__b_if_0_1_command (b_if[0][1].command)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}

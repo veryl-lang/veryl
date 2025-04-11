@@ -165,7 +165,7 @@ impl From<&SymbolId> for VarRefPathItem {
 impl From<&Select> for VarRefPathItem {
     fn from(arg: &Select) -> Self {
         if let Some(ref x) = arg.select_opt {
-            let mut evaluator = Evaluator::new();
+            let mut evaluator = Evaluator::new(&[]);
             let exp0 = evaluator.expression(&arg.expression);
             let exp1 = evaluator.expression(&x.expression);
             match &*x.select_operator {
@@ -187,7 +187,7 @@ impl From<&Select> for VarRefPathItem {
                 },
             }
         } else {
-            let exp = Evaluator::new().expression(&arg.expression);
+            let exp = Evaluator::new(&[]).expression(&arg.expression);
             VarRefPathItem::SelectSingle { index: exp }
         }
     }
@@ -195,7 +195,7 @@ impl From<&Select> for VarRefPathItem {
 
 impl From<&Expression> for VarRefPathItem {
     fn from(arg: &Expression) -> Self {
-        let exp = Evaluator::new().expression(arg);
+        let exp = Evaluator::new(&[]).expression(arg);
         VarRefPathItem::SelectSingle { index: exp }
     }
 }

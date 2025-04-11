@@ -12,7 +12,7 @@ use std::fmt;
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::token_range::TokenRange;
-use veryl_parser::veryl_grammar_trait as syntax_tree;
+use veryl_parser::veryl_grammar_trait::{self as syntax_tree, ArrayType};
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 
@@ -126,7 +126,7 @@ impl Symbol {
         } else {
             let evaluated = match &self.kind {
                 SymbolKind::Variable(x) => {
-                    let mut evaluator = Evaluator::new();
+                    let mut evaluator = Evaluator::new(&[]);
                     let width = evaluator.type_width(x.r#type.clone());
                     let array = evaluator.type_array(x.r#type.clone());
 
@@ -161,7 +161,7 @@ impl Symbol {
                     }
                 }
                 SymbolKind::Port(x) => {
-                    let mut evaluator = Evaluator::new();
+                    let mut evaluator = Evaluator::new(&[]);
                     let width = evaluator.type_width(x.r#type.clone());
                     let array = evaluator.type_array(x.r#type.clone());
 
@@ -194,7 +194,7 @@ impl Symbol {
                     }
                 }
                 SymbolKind::Parameter(x) => {
-                    let mut evaluator = Evaluator::new();
+                    let mut evaluator = Evaluator::new(&[]);
                     if let Some(width) = evaluator.type_width(x.r#type.clone()) {
                         evaluator.context_width = width;
                     }
@@ -226,7 +226,7 @@ impl Symbol {
                     ret
                 }
                 SymbolKind::Instance(x) => {
-                    let mut evaluator = Evaluator::new();
+                    let mut evaluator = Evaluator::new(&[]);
                     if let Ok(symbol) =
                         symbol_table::resolve((&x.type_name.mangled_path(), &self.namespace))
                     {
@@ -931,6 +931,7 @@ pub struct Type {
     pub kind: TypeKind,
     pub width: Vec<syntax_tree::Expression>,
     pub array: Vec<syntax_tree::Expression>,
+    pub array_type: Option<syntax_tree::ArrayType>,
     pub is_const: bool,
 }
 
@@ -965,6 +966,26 @@ impl Type {
         }
 
         None
+    }
+
+    pub fn trace_user_defined(&self, namespace: &Namespace) -> Option<(Type, Option<Symbol>)> {
+        if let TypeKind::UserDefined(x) = &self.kind {
+            let symbol = symbol_table::resolve((&x.path.generic_path(), namespace)).ok()?;
+            match symbol.found.kind {
+                SymbolKind::TypeDef(x) => {
+                    return x.r#type.trace_user_defined(&symbol.found.namespace);
+                }
+                SymbolKind::Enum(_)
+                | SymbolKind::Struct(_)
+                | SymbolKind::Union(_)
+                | SymbolKind::Modport(_) => {
+                    return Some((self.clone(), Some(symbol.found)));
+                }
+                _ => {}
+            }
+        }
+
+        Some((self.clone(), None))
     }
 }
 
@@ -1266,6 +1287,7 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                         modifier: vec![],
                         width,
                         array: vec![],
+                        array_type: None,
                         is_const: false,
                     })
                 }
@@ -1301,6 +1323,7 @@ impl From<&syntax_tree::FactorType> for Type {
                     modifier: vec![],
                     width,
                     array: vec![],
+                    array_type: None,
                     is_const: false,
                 }
             }
@@ -1320,6 +1343,7 @@ impl From<&syntax_tree::FactorType> for Type {
                     modifier: vec![],
                     width: vec![],
                     array: vec![],
+                    array_type: None,
                     is_const: false,
                 }
             }
@@ -1333,6 +1357,12 @@ impl From<&syntax_tree::ScalarType> for Type {
         for x in &value.scalar_type_list {
             modifier.push(TypeModifier::from(&*x.type_modifier));
         }
+
+        let array_type = ArrayType {
+            scalar_type: Box::new(value.clone()),
+            array_type_opt: None,
+        };
+
         match &*value.scalar_type_group {
             syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
                 let path: GenericSymbolPath = x.user_defined_type.scoped_identifier.as_ref().into();
@@ -1348,6 +1378,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                     modifier,
                     width,
                     array: vec![],
+                    array_type: Some(array_type),
                     is_const: false,
                 }
             }
@@ -1358,6 +1389,7 @@ impl From<&syntax_tree::ScalarType> for Type {
                     modifier,
                     width: factor_type.width,
                     array: vec![],
+                    array_type: Some(array_type),
                     is_const: false,
                 }
             }
@@ -1368,7 +1400,9 @@ impl From<&syntax_tree::ScalarType> for Type {
 impl From<&syntax_tree::ArrayType> for Type {
     fn from(value: &syntax_tree::ArrayType) -> Self {
         let scalar_type: Type = value.scalar_type.as_ref().into();
+        let mut array_type = scalar_type.array_type.unwrap();
         let array: Vec<syntax_tree::Expression> = if let Some(ref x) = value.array_type_opt {
+            array_type.array_type_opt.replace(x.clone());
             x.array.as_ref().into()
         } else {
             Vec::new()
@@ -1378,6 +1412,7 @@ impl From<&syntax_tree::ArrayType> for Type {
             modifier: scalar_type.modifier,
             width: scalar_type.width,
             array,
+            array_type: Some(array_type),
             is_const: false,
         }
     }

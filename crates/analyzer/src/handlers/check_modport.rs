@@ -1,7 +1,11 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::attribute::ExpandItem;
+use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Symbol, SymbolKind};
+use crate::symbol::Direction as SymDirection;
+use crate::symbol::Type as SymType;
+use crate::symbol::{Symbol, SymbolKind, TypeKind};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use veryl_parser::ParolError;
@@ -32,7 +36,87 @@ impl Handler for CheckModport {
     }
 }
 
+fn is_unexpandable_modport(symbol: &Symbol) -> bool {
+    if let SymbolKind::Port(x) = &symbol.kind {
+        if !matches!(x.direction, SymDirection::Modport) {
+            return false;
+        }
+
+        match &x.r#type.kind {
+            TypeKind::UserDefined(x) => {
+                let Ok(symbol) = symbol_table::resolve((&x.path.generic_path(), &symbol.namespace))
+                else {
+                    return false;
+                };
+
+                if let SymbolKind::Modport(modport) = &symbol.found.kind {
+                    if let Some(symbol) = symbol_table::get(modport.interface) {
+                        let SymbolKind::Interface(x) = symbol.kind else {
+                            unreachable!()
+                        };
+                        if !x.parameters.is_empty() {
+                            return true;
+                        }
+                    }
+
+                    let mut member_variables = modport.members.iter().filter_map(|x| {
+                        let symbol = symbol_table::get(*x).unwrap();
+                        if let SymbolKind::ModportVariableMember(x) = symbol.kind {
+                            symbol_table::get(x.variable)
+                        } else {
+                            None
+                        }
+                    });
+                    return member_variables.any(|x| {
+                        let SymbolKind::Variable(variable) = x.kind else {
+                            unreachable!()
+                        };
+                        is_invisible_type(&variable.r#type, &x.namespace)
+                    });
+                }
+            }
+            TypeKind::AbstractInterface(_) => return true,
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn is_invisible_type(r#type: &SymType, namespace: &Namespace) -> bool {
+    if let Some((_, Some(symbol))) = r#type.trace_user_defined(namespace) {
+        // enum, struct and union must be defined in package
+        let parent = symbol.get_parent().unwrap();
+        !parent.is_package(true)
+    } else {
+        false
+    }
+}
+
 impl VerylGrammarTrait for CheckModport {
+    fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
+        if matches!(self.point, HandlerPoint::Before)
+            && attribute_table::is_expand(
+                &arg.identifier.identifier_token.token,
+                ExpandItem::Modport,
+            )
+        {
+            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
+                // TODO
+                // This check will be removed after removing enum/struct/uniton definition
+                // from interface declaration.
+                // https://github.com/veryl-lang/veryl/issues/1484
+                if is_unexpandable_modport(&symbol.found) {
+                    self.errors.push(AnalyzerError::unexpandable_modport(
+                        &arg.identifier.identifier_token.token.to_string(),
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.interface_namespace =

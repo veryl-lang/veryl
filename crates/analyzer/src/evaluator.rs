@@ -1,4 +1,5 @@
-use crate::symbol::{SymbolId, SymbolKind, Type, TypeKind};
+use crate::symbol::{GenericMap, SymbolId, SymbolKind, Type, TypeKind};
+use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -858,11 +859,15 @@ impl Evaluated {
 #[derive(Default)]
 pub struct Evaluator {
     pub context_width: Vec<usize>,
+    generic_maps: Vec<GenericMap>,
 }
 
 impl Evaluator {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(generic_maps: &[GenericMap]) -> Self {
+        Self {
+            generic_maps: generic_maps.to_vec(),
+            ..Default::default()
+        }
     }
 
     pub fn evaluate_select(&mut self, value: &Select) -> (Evaluated, Evaluated, bool) {
@@ -1338,6 +1343,23 @@ impl Evaluator {
 
     fn identifier_helper(&mut self, symbol: Result<ResolveResult, ResolveError>) -> Evaluated {
         if let Ok(symbol) = symbol {
+            if matches!(&symbol.found.kind, SymbolKind::GenericParameter(_))
+                && !self.generic_maps.is_empty()
+            {
+                let mut path: GenericSymbolPath = (&symbol.found.token).into();
+                path.apply_map(&self.generic_maps);
+
+                let result = symbol_table::resolve((&path.mangled_path(), &symbol.found.namespace));
+                if result.is_ok() {
+                    return self.identifier_helper(result);
+                } else {
+                    let text = path.base_path(0).0[0].to_string();
+                    if let Ok(value) = text.parse::<isize>() {
+                        return Evaluated::create_fixed(value, true, vec![], vec![]);
+                    }
+                }
+            }
+
             let mut ret = symbol.found.evaluate();
             if let SymbolKind::Parameter(_) = symbol.found.kind {
                 // Parameter is static

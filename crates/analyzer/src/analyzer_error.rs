@@ -362,6 +362,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(unexpandable_modport), help(""), url(""))]
+    #[error("#{identifier} can't be expanded")]
+    UnexpandableModport {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(severity(Error), code(invalid_port_default_value), help(""), url(""))]
     #[error("#{direction} port #{identifier} cannot have a port default value")]
     InvalidPortDefaultValue {
@@ -1521,6 +1531,14 @@ impl AnalyzerError {
 
     pub fn invalid_modport_function_item(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidModportFunctionItem {
+            identifier: identifier.into(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unexpandable_modport(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnexpandableModport {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
