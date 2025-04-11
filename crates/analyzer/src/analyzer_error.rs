@@ -468,6 +468,15 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_type_declaration), help(""), url(""))]
+    #[error("{kind} can't be declared in interface declaration")]
+    InvalidTypeDeclaration {
+        kind: String,
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(incompat_proto),
@@ -1516,6 +1525,14 @@ impl AnalyzerError {
     pub fn invalid_test(cause: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidTest {
             cause: cause.into(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_type_declaration(kind: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidTypeDeclaration {
+            kind: kind.into(),
             input: source(token),
             error_location: token.into(),
         }

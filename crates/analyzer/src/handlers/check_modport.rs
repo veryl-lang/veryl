@@ -4,7 +4,6 @@ use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
-use crate::symbol::Type as SymType;
 use crate::symbol::{Symbol, SymbolKind, TypeKind};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
@@ -58,21 +57,6 @@ fn is_unexpandable_modport(symbol: &Symbol) -> bool {
                             return true;
                         }
                     }
-
-                    let mut member_variables = modport.members.iter().filter_map(|x| {
-                        let symbol = symbol_table::get(*x).unwrap();
-                        if let SymbolKind::ModportVariableMember(x) = symbol.kind {
-                            symbol_table::get(x.variable)
-                        } else {
-                            None
-                        }
-                    });
-                    return member_variables.any(|x| {
-                        let SymbolKind::Variable(variable) = x.kind else {
-                            unreachable!()
-                        };
-                        is_invisible_type(&variable.r#type, &x.namespace)
-                    });
                 }
             }
             TypeKind::AbstractInterface(_) => return true,
@@ -81,16 +65,6 @@ fn is_unexpandable_modport(symbol: &Symbol) -> bool {
     }
 
     false
-}
-
-fn is_invisible_type(r#type: &SymType, namespace: &Namespace) -> bool {
-    if let Some((_, Some(symbol))) = r#type.trace_user_defined(namespace) {
-        // enum, struct and union must be defined in package
-        let parent = symbol.get_parent().unwrap();
-        !parent.is_package(true)
-    } else {
-        false
-    }
 }
 
 impl VerylGrammarTrait for CheckModport {
@@ -102,10 +76,6 @@ impl VerylGrammarTrait for CheckModport {
             )
         {
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                // TODO
-                // This check will be removed after removing enum/struct/uniton definition
-                // from interface declaration.
-                // https://github.com/veryl-lang/veryl/issues/1484
                 if is_unexpandable_modport(&symbol.found) {
                     self.errors.push(AnalyzerError::unexpandable_modport(
                         &arg.identifier.identifier_token.token.to_string(),
