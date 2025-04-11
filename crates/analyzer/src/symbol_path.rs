@@ -339,6 +339,11 @@ impl GenericSymbolPath {
         SymbolPath::new(&path)
     }
 
+    pub fn generic_arguments(&self) -> Vec<Vec<GenericSymbolPath>> {
+        let path: Vec<_> = self.paths.iter().map(|x| x.arguments.clone()).collect();
+        path
+    }
+
     pub fn is_resolvable(&self) -> bool {
         self.kind == GenericSymbolPathKind::Identifier
     }
