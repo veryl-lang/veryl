@@ -2,12 +2,11 @@ use crate::OptBuild;
 use crate::StopWatch;
 use crate::cmd_check::CheckError;
 use crate::diff::print_diff;
+use crate::utils;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::HashMap;
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
@@ -121,17 +120,11 @@ impl CmdBuild {
                     all_pass = false;
                 }
             } else {
-                let mut file = OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(&dst)
-                    .into_diagnostic()?;
-                file.write_all(emitter.as_str().as_bytes())
-                    .into_diagnostic()?;
-                file.flush().into_diagnostic()?;
+                let written = utils::write_file_if_changed(&dst, emitter.as_str().as_bytes())?;
+                if written {
+                    debug!("Output file ({})", dst.to_string_lossy());
+                }
 
-                debug!("Output file ({})", dst.to_string_lossy());
                 metadata.build_info.generated_files.insert(dst);
 
                 if metadata.build.sourcemap_target != SourceMapTarget::None {
@@ -144,16 +137,11 @@ impl CmdBuild {
                         std::fs::create_dir_all(map.parent().unwrap()).into_diagnostic()?;
                     }
 
-                    let mut file = OpenOptions::new()
-                        .create(true)
-                        .write(true)
-                        .truncate(true)
-                        .open(&map)
-                        .into_diagnostic()?;
-                    file.write_all(&source_map).into_diagnostic()?;
-                    file.flush().into_diagnostic()?;
+                    let written = utils::write_file_if_changed(&map, &source_map)?;
+                    if written {
+                        debug!("Output map ({})", map.to_string_lossy());
+                    }
 
-                    debug!("Output map ({})", map.to_string_lossy());
                     metadata.build_info.generated_files.insert(map);
                 }
             }
@@ -205,16 +193,11 @@ impl CmdBuild {
                 text.push_str(&fs::read_to_string(&dst).into_diagnostic()?);
             }
 
-            let mut file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&target_path)
-                .into_diagnostic()?;
-            file.write_all(text.as_bytes()).into_diagnostic()?;
-            file.flush().into_diagnostic()?;
+            let written = utils::write_file_if_changed(&target_path, text.as_bytes())?;
+            if written {
+                debug!("Output file ({})", target_path.to_string_lossy());
+            }
 
-            debug!("Output file ({})", target_path.to_string_lossy());
             metadata
                 .build_info
                 .generated_files
@@ -230,14 +213,7 @@ impl CmdBuild {
             text
         };
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&filelist_path)
-            .into_diagnostic()?;
-        file.write_all(text.as_bytes()).into_diagnostic()?;
-        file.flush().into_diagnostic()?;
+        utils::write_file_if_changed(&filelist_path, text.as_bytes())?;
 
         info!("Output filelist ({})", filelist_path.to_string_lossy());
         metadata.build_info.generated_files.insert(filelist_path);

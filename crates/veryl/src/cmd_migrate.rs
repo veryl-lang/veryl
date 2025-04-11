@@ -1,10 +1,9 @@
 use crate::OptMigrate;
 use crate::diff::print_diff;
+use crate::utils;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::Write;
 use veryl_analyzer::Analyzer;
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
@@ -56,15 +55,11 @@ impl CmdMigrate {
                         }
                         all_pass = false;
                     } else {
-                        let mut file = OpenOptions::new()
-                            .write(true)
-                            .truncate(true)
-                            .open(&path.src)
-                            .into_diagnostic()?;
-                        file.write_all(formatter.as_str().as_bytes())
-                            .into_diagnostic()?;
-                        file.flush().into_diagnostic()?;
-                        debug!("Overwritten file ({})", path.src.to_string_lossy());
+                        let written =
+                            utils::write_file_if_changed(&path.src, formatter.as_str().as_bytes())?;
+                        if written {
+                            debug!("Overwritten file ({})", path.src.to_string_lossy());
+                        }
                     }
                 }
             }
