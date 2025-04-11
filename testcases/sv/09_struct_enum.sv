@@ -8,14 +8,14 @@ module veryl_testcase_Module09;
 
     // enum declaration
     typedef enum logic [2-1:0] {
-        B_X = 1,
-        B_Y = 2,
+        B_X = $bits(logic [2-1:0])'(1),
+        B_Y = $bits(logic [2-1:0])'(2),
         B_Z
     } B;
 
     typedef enum logic [3-1:0] {
-        C_X = 2,
-        C_Y = 3,
+        C_X = 3'(2),
+        C_Y = 3'(3),
         C_Z
     } C;
 

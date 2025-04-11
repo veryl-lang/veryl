@@ -4,7 +4,7 @@ module veryl_testcase_Module40;
         EnumA_member_a,
 
         EnumA_member_b,
-        EnumA_member_c = 3
+        EnumA_member_c = $bits(logic [2-1:0])'(3)
     } EnumA;
 
     EnumA a;
