@@ -284,7 +284,6 @@ impl_token_range_singular!(Operator12);
 impl_token_range_singular!(UnaryOperator);
 
 // Symbol
-impl_token_range_singular!(BackQuote);
 impl_token_range_singular!(Colon);
 impl_token_range_singular!(ColonColonLAngle);
 impl_token_range_singular!(ColonColon);
@@ -295,6 +294,7 @@ impl_token_range_singular!(Dot);
 impl_token_range_singular!(Equ);
 impl_token_range_singular!(Hash);
 impl_token_range_singular!(Question);
+impl_token_range_singular!(Quote);
 impl_token_range_singular!(QuoteLBrace);
 impl_token_range_singular!(LAngle);
 impl_token_range_singular!(LBrace);
@@ -789,7 +789,7 @@ impl_token_range_enum!(
 // ClockDomain
 // ----------------------------------------------------------------------------
 
-impl_token_range!(ClockDomain, back_quote, identifier);
+impl_token_range!(ClockDomain, quote, identifier);
 
 // ----------------------------------------------------------------------------
 // Statement

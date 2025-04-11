@@ -140,11 +140,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BackQuoteTerm'
-    fn back_quote_term(&mut self, _arg: &BackQuoteTerm) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'ColonColonLAngleTerm'
     fn colon_colon_l_angle_term(&mut self, _arg: &ColonColonLAngleTerm) -> Result<()> {
         Ok(())
@@ -197,6 +192,11 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'QuestionTerm'
     fn question_term(&mut self, _arg: &QuestionTerm) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'QuoteTerm'
+    fn quote_term(&mut self, _arg: &QuoteTerm) -> Result<()> {
         Ok(())
     }
 
@@ -730,11 +730,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BackQuoteToken'
-    fn back_quote_token(&mut self, _arg: &BackQuoteToken) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'ColonToken'
     fn colon_token(&mut self, _arg: &ColonToken) -> Result<()> {
         Ok(())
@@ -782,6 +777,11 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'QuestionToken'
     fn question_token(&mut self, _arg: &QuestionToken) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'QuoteToken'
+    fn quote_token(&mut self, _arg: &QuoteToken) -> Result<()> {
         Ok(())
     }
 
@@ -1325,11 +1325,6 @@ pub trait VerylGrammarTrait {
         Ok(())
     }
 
-    /// Semantic action for non-terminal 'BackQuote'
-    fn back_quote(&mut self, _arg: &BackQuote) -> Result<()> {
-        Ok(())
-    }
-
     /// Semantic action for non-terminal 'Colon'
     fn colon(&mut self, _arg: &Colon) -> Result<()> {
         Ok(())
@@ -1377,6 +1372,11 @@ pub trait VerylGrammarTrait {
 
     /// Semantic action for non-terminal 'Question'
     fn question(&mut self, _arg: &Question) -> Result<()> {
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'Quote'
+    fn quote(&mut self, _arg: &Quote) -> Result<()> {
         Ok(())
     }
 
@@ -6067,37 +6067,6 @@ pub struct AttributeOpt {
 }
 
 ///
-/// Type derived for non-terminal BackQuote
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct BackQuote {
-    pub back_quote_token: crate::veryl_token::VerylToken,
-}
-
-///
-/// Type derived for non-terminal BackQuoteTerm
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct BackQuoteTerm {
-    pub back_quote_term: crate::veryl_token::Token, /* ` */
-}
-
-///
-/// Type derived for non-terminal BackQuoteToken
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct BackQuoteToken {
-    pub back_quote_term: crate::veryl_token::Token,
-    pub comments: Box<Comments>,
-}
-
-///
 /// Type derived for non-terminal BaseLess
 ///
 #[allow(dead_code)]
@@ -6470,7 +6439,7 @@ pub struct Clock {
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct ClockDomain {
-    pub back_quote: Box<BackQuote>,
+    pub quote: Box<Quote>,
     pub identifier: Box<Identifier>,
 }
 
@@ -11393,6 +11362,16 @@ pub struct QuestionToken {
 }
 
 ///
+/// Type derived for non-terminal Quote
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct Quote {
+    pub quote_token: crate::veryl_token::VerylToken,
+}
+
+///
 /// Type derived for non-terminal QuoteLBrace
 ///
 #[allow(dead_code)]
@@ -11420,6 +11399,27 @@ pub struct QuoteLBraceTerm {
 #[builder(crate = "parol_runtime::derive_builder")]
 pub struct QuoteLBraceToken {
     pub quote_l_brace_term: crate::veryl_token::Token,
+    pub comments: Box<Comments>,
+}
+
+///
+/// Type derived for non-terminal QuoteTerm
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct QuoteTerm {
+    pub quote_term: crate::veryl_token::Token, /* ' */
+}
+
+///
+/// Type derived for non-terminal QuoteToken
+///
+#[allow(dead_code)]
+#[derive(Builder, Debug, Clone)]
+#[builder(crate = "parol_runtime::derive_builder")]
+pub struct QuoteToken {
+    pub quote_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
 }
 
@@ -13452,9 +13452,6 @@ pub enum ASTType {
     AttributeListList(Vec<AttributeListList>),
     AttributeListOpt(Option<AttributeListOpt>),
     AttributeOpt(Option<AttributeOpt>),
-    BackQuote(BackQuote),
-    BackQuoteTerm(BackQuoteTerm),
-    BackQuoteToken(BackQuoteToken),
     BaseLess(BaseLess),
     BaseLessTerm(BaseLessTerm),
     BaseLessToken(BaseLessToken),
@@ -13938,9 +13935,12 @@ pub enum ASTType {
     Question(Question),
     QuestionTerm(QuestionTerm),
     QuestionToken(QuestionToken),
+    Quote(Quote),
     QuoteLBrace(QuoteLBrace),
     QuoteLBraceTerm(QuoteLBraceTerm),
     QuoteLBraceToken(QuoteLBraceToken),
+    QuoteTerm(QuoteTerm),
+    QuoteToken(QuoteToken),
     RAngle(RAngle),
     RAngleTerm(RAngleTerm),
     RAngleToken(RAngleToken),
@@ -14187,7 +14187,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 0:
     ///
-    /// `CommentsTerm: <INITIAL, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;`
+    /// `CommentsTerm: <INITIAL, Generic, Attr, ClockDomain>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn comments_term(&mut self, comments_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14672,25 +14672,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 24:
     ///
-    /// `BackQuoteTerm: <INITIAL, Generic>"`" : Token;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn back_quote_term(&mut self, back_quote_term: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let back_quote_term = back_quote_term
-            .token()?
-            .try_into()
-            .map_err(parol_runtime::ParolError::UserError)?;
-        let back_quote_term_built = BackQuoteTerm { back_quote_term };
-        // Calling user action here
-        self.user_grammar.back_quote_term(&back_quote_term_built)?;
-        self.push(ASTType::BackQuoteTerm(back_quote_term_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 25:
-    ///
     /// `ColonColonLAngleTerm: <INITIAL, Generic>'::<' : Token;`
     ///
     #[parol_runtime::function_name::named]
@@ -14717,7 +14698,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 26:
+    /// Semantic action for production 25:
     ///
     /// `ColonColonTerm: <INITIAL, Generic>'::' : Token;`
     ///
@@ -14737,9 +14718,9 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 27:
+    /// Semantic action for production 26:
     ///
-    /// `ColonTerm: <INITIAL, Generic>':' : Token;`
+    /// `ColonTerm: <INITIAL, Generic, ClockDomain>':' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn colon_term(&mut self, colon_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14756,7 +14737,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 28:
+    /// Semantic action for production 27:
     ///
     /// `CommaTerm: <INITIAL, Generic, Attr>',' : Token;`
     ///
@@ -14775,7 +14756,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 29:
+    /// Semantic action for production 28:
     ///
     /// `DotDotEquTerm: <INITIAL, Generic>'..=' : Token;`
     ///
@@ -14795,7 +14776,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 30:
+    /// Semantic action for production 29:
     ///
     /// `DotDotTerm: <INITIAL, Generic>'..' : Token;`
     ///
@@ -14814,7 +14795,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 31:
+    /// Semantic action for production 30:
     ///
     /// `DotTerm: <INITIAL, Generic>'.' : Token;`
     ///
@@ -14833,7 +14814,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 32:
+    /// Semantic action for production 31:
     ///
     /// `EquTerm: <INITIAL, Generic>'=' : Token;`
     ///
@@ -14852,7 +14833,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 33:
+    /// Semantic action for production 32:
     ///
     /// `HashTerm: <INITIAL, Generic, Attr>'#' : Token;`
     ///
@@ -14871,7 +14852,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 34:
+    /// Semantic action for production 33:
     ///
     /// `LAngleTerm: <INITIAL, Generic>'<' : Token;`
     ///
@@ -14890,7 +14871,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 35:
+    /// Semantic action for production 34:
     ///
     /// `QuestionTerm: '?' : Token;`
     ///
@@ -14906,6 +14887,25 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         // Calling user action here
         self.user_grammar.question_term(&question_term_built)?;
         self.push(ASTType::QuestionTerm(question_term_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 35:
+    ///
+    /// `QuoteTerm: <ClockDomain>"'" : Token;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn quote_term(&mut self, quote_term: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let quote_term = quote_term
+            .token()?
+            .try_into()
+            .map_err(parol_runtime::ParolError::UserError)?;
+        let quote_term_built = QuoteTerm { quote_term };
+        // Calling user action here
+        self.user_grammar.quote_term(&quote_term_built)?;
+        self.push(ASTType::QuoteTerm(quote_term_built), context);
         Ok(())
     }
 
@@ -15102,7 +15102,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 46:
     ///
-    /// `AliasTerm: <INITIAL, Generic>/(?-u:\b)alias(?-u:\b)/ : Token;`
+    /// `AliasTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)alias(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn alias_term(&mut self, alias_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15121,7 +15121,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 47:
     ///
-    /// `AlwaysCombTerm: <INITIAL, Generic>/(?-u:\b)always_comb(?-u:\b)/ : Token;`
+    /// `AlwaysCombTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)always_comb(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn always_comb_term(&mut self, always_comb_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15141,7 +15141,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 48:
     ///
-    /// `AlwaysFfTerm: <INITIAL, Generic>/(?-u:\b)always_ff(?-u:\b)/ : Token;`
+    /// `AlwaysFfTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)always_ff(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn always_ff_term(&mut self, always_ff_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15160,7 +15160,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 49:
     ///
-    /// `AssignTerm: <INITIAL, Generic>/(?-u:\b)assign(?-u:\b)/ : Token;`
+    /// `AssignTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)assign(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn assign_term(&mut self, assign_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15179,7 +15179,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 50:
     ///
-    /// `AsTerm: <INITIAL, Generic>/(?-u:\b)as(?-u:\b)/ : Token;`
+    /// `AsTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)as(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn as_term(&mut self, as_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15198,7 +15198,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 51:
     ///
-    /// `BitTerm: <INITIAL, Generic>/(?-u:\b)bit(?-u:\b)/ : Token;`
+    /// `BitTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)bit(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn bit_term(&mut self, bit_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15217,7 +15217,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 52:
     ///
-    /// `BoolTerm: <INITIAL, Generic>/(?-u:\b)bool(?-u:\b)/ : Token;`
+    /// `BoolTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)bool(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn bool_term(&mut self, bool_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15236,7 +15236,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 53:
     ///
-    /// `CaseTerm: <INITIAL, Generic>/(?-u:\b)case(?-u:\b)/ : Token;`
+    /// `CaseTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)case(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn case_term(&mut self, case_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15255,7 +15255,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 54:
     ///
-    /// `ClockTerm: <INITIAL, Generic>/(?-u:\b)clock(?-u:\b)/ : Token;`
+    /// `ClockTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)clock(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn clock_term(&mut self, clock_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15274,7 +15274,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 55:
     ///
-    /// `ClockPosedgeTerm: <INITIAL, Generic>/(?-u:\b)clock_posedge(?-u:\b)/ : Token;`
+    /// `ClockPosedgeTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)clock_posedge(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn clock_posedge_term(&mut self, clock_posedge_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15294,7 +15294,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 56:
     ///
-    /// `ClockNegedgeTerm: <INITIAL, Generic>/(?-u:\b)clock_negedge(?-u:\b)/ : Token;`
+    /// `ClockNegedgeTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)clock_negedge(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn clock_negedge_term(&mut self, clock_negedge_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15314,7 +15314,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 57:
     ///
-    /// `ConnectTerm: <INITIAL, Generic>/(?-u:\b)connect(?-u:\b)/ : Token;`
+    /// `ConnectTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)connect(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn connect_term(&mut self, connect_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15333,7 +15333,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 58:
     ///
-    /// `ConstTerm: <INITIAL, Generic>/(?-u:\b)const(?-u:\b)/ : Token;`
+    /// `ConstTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)const(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn const_term(&mut self, const_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15352,7 +15352,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 59:
     ///
-    /// `ConverseTerm: <INITIAL, Generic>/(?-u:\b)converse(?-u:\b)/ : Token;`
+    /// `ConverseTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)converse(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn converse_term(&mut self, converse_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15371,7 +15371,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 60:
     ///
-    /// `DefaultTerm: <INITIAL, Generic>/(?-u:\b)default(?-u:\b)/ : Token;`
+    /// `DefaultTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)default(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn default_term(&mut self, default_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15390,7 +15390,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 61:
     ///
-    /// `ElseTerm: <INITIAL, Generic>/(?-u:\b)else(?-u:\b)/ : Token;`
+    /// `ElseTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)else(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn else_term(&mut self, else_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15409,7 +15409,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 62:
     ///
-    /// `EmbedTerm: <INITIAL, Generic>/(?-u:\b)embed(?-u:\b)/ : Token;`
+    /// `EmbedTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)embed(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn embed_term(&mut self, embed_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15428,7 +15428,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 63:
     ///
-    /// `EnumTerm: <INITIAL, Generic>/(?-u:\b)enum(?-u:\b)/ : Token;`
+    /// `EnumTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)enum(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn enum_term(&mut self, enum_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15447,7 +15447,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 64:
     ///
-    /// `F32Term: <INITIAL, Generic>/(?-u:\b)f32(?-u:\b)/ : Token;`
+    /// `F32Term: <INITIAL, Generic, ClockDomain>/(?-u:\b)f32(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn f32_term(&mut self, f32_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15466,7 +15466,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 65:
     ///
-    /// `F64Term: <INITIAL, Generic>/(?-u:\b)f64(?-u:\b)/ : Token;`
+    /// `F64Term: <INITIAL, Generic, ClockDomain>/(?-u:\b)f64(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn f64_term(&mut self, f64_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15485,7 +15485,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 66:
     ///
-    /// `FalseTerm: <INITIAL, Generic>/(?-u:\b)false(?-u:\b)/ : Token;`
+    /// `FalseTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)false(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn false_term(&mut self, false_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15504,7 +15504,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 67:
     ///
-    /// `FinalTerm: <INITIAL, Generic>/(?-u:\b)final(?-u:\b)/ : Token;`
+    /// `FinalTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)final(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn final_term(&mut self, final_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15523,7 +15523,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 68:
     ///
-    /// `ForTerm: <INITIAL, Generic>/(?-u:\b)for(?-u:\b)/ : Token;`
+    /// `ForTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)for(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn for_term(&mut self, for_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15542,7 +15542,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 69:
     ///
-    /// `FunctionTerm: <INITIAL, Generic>/(?-u:\b)function(?-u:\b)/ : Token;`
+    /// `FunctionTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)function(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn function_term(&mut self, function_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15561,7 +15561,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 70:
     ///
-    /// `I32Term: <INITIAL, Generic>/(?-u:\b)i32(?-u:\b)/ : Token;`
+    /// `I32Term: <INITIAL, Generic, ClockDomain>/(?-u:\b)i32(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn i32_term(&mut self, i32_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15580,7 +15580,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 71:
     ///
-    /// `I64Term: <INITIAL, Generic>/(?-u:\b)i64(?-u:\b)/ : Token;`
+    /// `I64Term: <INITIAL, Generic, ClockDomain>/(?-u:\b)i64(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn i64_term(&mut self, i64_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15599,7 +15599,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 72:
     ///
-    /// `IfResetTerm: <INITIAL, Generic>/(?-u:\b)if_reset(?-u:\b)/ : Token;`
+    /// `IfResetTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)if_reset(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn if_reset_term(&mut self, if_reset_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15618,7 +15618,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 73:
     ///
-    /// `IfTerm: <INITIAL, Generic>/(?-u:\b)if(?-u:\b)/ : Token;`
+    /// `IfTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)if(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn if_term(&mut self, if_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15637,7 +15637,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 74:
     ///
-    /// `ImportTerm: <INITIAL, Generic>/(?-u:\b)import(?-u:\b)/ : Token;`
+    /// `ImportTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)import(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn import_term(&mut self, import_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15656,7 +15656,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 75:
     ///
-    /// `IncludeTerm: <INITIAL, Generic>/(?-u:\b)include(?-u:\b)/ : Token;`
+    /// `IncludeTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)include(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn include_term(&mut self, include_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15675,7 +15675,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 76:
     ///
-    /// `InitialTerm: <INITIAL, Generic>/(?-u:\b)initial(?-u:\b)/ : Token;`
+    /// `InitialTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)initial(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn initial_term(&mut self, initial_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15694,7 +15694,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 77:
     ///
-    /// `InoutTerm: <INITIAL, Generic>/(?-u:\b)inout(?-u:\b)/ : Token;`
+    /// `InoutTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)inout(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn inout_term(&mut self, inout_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15713,7 +15713,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 78:
     ///
-    /// `InputTerm: <INITIAL, Generic>/(?-u:\b)input(?-u:\b)/ : Token;`
+    /// `InputTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)input(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn input_term(&mut self, input_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15732,7 +15732,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 79:
     ///
-    /// `InsideTerm: <INITIAL, Generic>/(?-u:\b)inside(?-u:\b)/ : Token;`
+    /// `InsideTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)inside(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn inside_term(&mut self, inside_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15751,7 +15751,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 80:
     ///
-    /// `InstTerm: <INITIAL, Generic>/(?-u:\b)inst(?-u:\b)/ : Token;`
+    /// `InstTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)inst(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn inst_term(&mut self, inst_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15770,7 +15770,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 81:
     ///
-    /// `InterfaceTerm: <INITIAL, Generic>/(?-u:\b)interface(?-u:\b)/ : Token;`
+    /// `InterfaceTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)interface(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn interface_term(&mut self, interface_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15789,7 +15789,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 82:
     ///
-    /// `InTerm: <INITIAL, Generic>/(?-u:\b)in(?-u:\b)/ : Token;`
+    /// `InTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)in(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn in_term(&mut self, in_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15808,7 +15808,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 83:
     ///
-    /// `LetTerm: <INITIAL, Generic>/(?-u:\b)let(?-u:\b)/ : Token;`
+    /// `LetTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)let(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn let_term(&mut self, let_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15827,7 +15827,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 84:
     ///
-    /// `LogicTerm: <INITIAL, Generic>/(?-u:\b)logic(?-u:\b)/ : Token;`
+    /// `LogicTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)logic(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn logic_term(&mut self, logic_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15846,7 +15846,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 85:
     ///
-    /// `LsbTerm: <INITIAL, Generic>/(?-u:\b)lsb(?-u:\b)/ : Token;`
+    /// `LsbTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)lsb(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn lsb_term(&mut self, lsb_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15865,7 +15865,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 86:
     ///
-    /// `ModportTerm: <INITIAL, Generic>/(?-u:\b)modport(?-u:\b)/ : Token;`
+    /// `ModportTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)modport(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn modport_term(&mut self, modport_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15884,7 +15884,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 87:
     ///
-    /// `ModuleTerm: <INITIAL, Generic>/(?-u:\b)module(?-u:\b)/ : Token;`
+    /// `ModuleTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)module(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn module_term(&mut self, module_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15903,7 +15903,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 88:
     ///
-    /// `MsbTerm: <INITIAL, Generic>/(?-u:\b)msb(?-u:\b)/ : Token;`
+    /// `MsbTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)msb(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn msb_term(&mut self, msb_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15922,7 +15922,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 89:
     ///
-    /// `OutputTerm: <INITIAL, Generic>/(?-u:\b)output(?-u:\b)/ : Token;`
+    /// `OutputTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)output(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn output_term(&mut self, output_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15941,7 +15941,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 90:
     ///
-    /// `OutsideTerm: <INITIAL, Generic>/(?-u:\b)outside(?-u:\b)/ : Token;`
+    /// `OutsideTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)outside(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn outside_term(&mut self, outside_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15960,7 +15960,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 91:
     ///
-    /// `PackageTerm: <INITIAL, Generic>/(?-u:\b)package(?-u:\b)/ : Token;`
+    /// `PackageTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)package(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn package_term(&mut self, package_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15979,7 +15979,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 92:
     ///
-    /// `ParamTerm: <INITIAL, Generic>/(?-u:\b)param(?-u:\b)/ : Token;`
+    /// `ParamTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)param(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn param_term(&mut self, param_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15998,7 +15998,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 93:
     ///
-    /// `ProtoTerm: <INITIAL, Generic>/(?-u:\b)proto(?-u:\b)/ : Token;`
+    /// `ProtoTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)proto(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn proto_term(&mut self, proto_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16017,7 +16017,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 94:
     ///
-    /// `PubTerm: <INITIAL, Generic>/(?-u:\b)pub(?-u:\b)/ : Token;`
+    /// `PubTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)pub(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn pub_term(&mut self, pub_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16036,7 +16036,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 95:
     ///
-    /// `RepeatTerm: <INITIAL, Generic>/(?-u:\b)repeat(?-u:\b)/ : Token;`
+    /// `RepeatTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)repeat(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn repeat_term(&mut self, repeat_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16055,7 +16055,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 96:
     ///
-    /// `ResetTerm: <INITIAL, Generic>/(?-u:\b)reset(?-u:\b)/ : Token;`
+    /// `ResetTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)reset(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn reset_term(&mut self, reset_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16074,7 +16074,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 97:
     ///
-    /// `ResetAsyncHighTerm: <INITIAL, Generic>/(?-u:\b)reset_async_high(?-u:\b)/ : Token;`
+    /// `ResetAsyncHighTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)reset_async_high(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn reset_async_high_term(&mut self, reset_async_high_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16099,7 +16099,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 98:
     ///
-    /// `ResetAsyncLowTerm: <INITIAL, Generic>/(?-u:\b)reset_async_low(?-u:\b)/ : Token;`
+    /// `ResetAsyncLowTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)reset_async_low(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn reset_async_low_term(&mut self, reset_async_low_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16124,7 +16124,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 99:
     ///
-    /// `ResetSyncHighTerm: <INITIAL, Generic>/(?-u:\b)reset_sync_high(?-u:\b)/ : Token;`
+    /// `ResetSyncHighTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)reset_sync_high(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn reset_sync_high_term(&mut self, reset_sync_high_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16149,7 +16149,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 100:
     ///
-    /// `ResetSyncLowTerm: <INITIAL, Generic>/(?-u:\b)reset_sync_low(?-u:\b)/ : Token;`
+    /// `ResetSyncLowTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)reset_sync_low(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn reset_sync_low_term(&mut self, reset_sync_low_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16174,7 +16174,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 101:
     ///
-    /// `ReturnTerm: <INITIAL, Generic>/(?-u:\b)return(?-u:\b)/ : Token;`
+    /// `ReturnTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)return(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn return_term(&mut self, return_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16193,7 +16193,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 102:
     ///
-    /// `BreakTerm: <INITIAL, Generic>/(?-u:\b)break(?-u:\b)/ : Token;`
+    /// `BreakTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)break(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn break_term(&mut self, break_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16212,7 +16212,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 103:
     ///
-    /// `SameTerm: <INITIAL, Generic>/(?-u:\b)same(?-u:\b)/ : Token;`
+    /// `SameTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)same(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn same_term(&mut self, same_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16231,7 +16231,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 104:
     ///
-    /// `SignedTerm: <INITIAL, Generic>/(?-u:\b)signed(?-u:\b)/ : Token;`
+    /// `SignedTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)signed(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn signed_term(&mut self, signed_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16250,7 +16250,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 105:
     ///
-    /// `StepTerm: <INITIAL, Generic>/(?-u:\b)step(?-u:\b)/ : Token;`
+    /// `StepTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)step(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn step_term(&mut self, step_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16269,7 +16269,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 106:
     ///
-    /// `StringTerm: <INITIAL, Generic>/(?-u:\b)string(?-u:\b)/ : Token;`
+    /// `StringTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)string(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn string_term(&mut self, string_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16288,7 +16288,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 107:
     ///
-    /// `StructTerm: <INITIAL, Generic>/(?-u:\b)struct(?-u:\b)/ : Token;`
+    /// `StructTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)struct(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn struct_term(&mut self, struct_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16307,7 +16307,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 108:
     ///
-    /// `SwitchTerm: <INITIAL, Generic>/(?-u:\b)switch(?-u:\b)/ : Token;`
+    /// `SwitchTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)switch(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn switch_term(&mut self, switch_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16326,7 +16326,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 109:
     ///
-    /// `TriTerm: <INITIAL, Generic>/(?-u:\b)tri(?-u:\b)/ : Token;`
+    /// `TriTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)tri(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn tri_term(&mut self, tri_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16345,7 +16345,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 110:
     ///
-    /// `TrueTerm: <INITIAL, Generic>/(?-u:\b)true(?-u:\b)/ : Token;`
+    /// `TrueTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)true(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn true_term(&mut self, true_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16364,7 +16364,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 111:
     ///
-    /// `TypeTerm: <INITIAL, Generic>/(?-u:\b)type(?-u:\b)/ : Token;`
+    /// `TypeTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)type(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn type_term(&mut self, type_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16383,7 +16383,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 112:
     ///
-    /// `U32Term: <INITIAL, Generic>/(?-u:\b)u32(?-u:\b)/ : Token;`
+    /// `U32Term: <INITIAL, Generic, ClockDomain>/(?-u:\b)u32(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn u32_term(&mut self, u32_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16402,7 +16402,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 113:
     ///
-    /// `U64Term: <INITIAL, Generic>/(?-u:\b)u64(?-u:\b)/ : Token;`
+    /// `U64Term: <INITIAL, Generic, ClockDomain>/(?-u:\b)u64(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn u64_term(&mut self, u64_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16421,7 +16421,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 114:
     ///
-    /// `UnionTerm: <INITIAL, Generic>/(?-u:\b)union(?-u:\b)/ : Token;`
+    /// `UnionTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)union(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn union_term(&mut self, union_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16440,7 +16440,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 115:
     ///
-    /// `UnsafeTerm: <INITIAL, Generic>/(?-u:\b)unsafe(?-u:\b)/ : Token;`
+    /// `UnsafeTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)unsafe(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn unsafe_term(&mut self, unsafe_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16459,7 +16459,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 116:
     ///
-    /// `VarTerm: <INITIAL, Generic>/(?-u:\b)var(?-u:\b)/ : Token;`
+    /// `VarTerm: <INITIAL, Generic, ClockDomain>/(?-u:\b)var(?-u:\b)/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn var_term(&mut self, var_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16478,7 +16478,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 117:
     ///
-    /// `DollarIdentifierTerm: <INITIAL, Generic>/\$[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
+    /// `DollarIdentifierTerm: <INITIAL, Generic, ClockDomain>/\$[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn dollar_identifier_term(&mut self, dollar_identifier_term: &ParseTreeType<'t>) -> Result<()> {
@@ -16503,7 +16503,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 118:
     ///
-    /// `IdentifierTerm: <INITIAL, Generic, Attr>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
+    /// `IdentifierTerm: <INITIAL, Generic, Attr, ClockDomain>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn identifier_term(&mut self, identifier_term: &ParseTreeType<'t>) -> Result<()> {
@@ -17157,33 +17157,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 144:
     ///
-    /// `BackQuoteToken: BackQuoteTerm : Token Comments;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn back_quote_token(
-        &mut self,
-        _back_quote_term: &ParseTreeType<'t>,
-        _comments: &ParseTreeType<'t>,
-    ) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let comments = pop_item!(self, comments, Comments, context);
-        let back_quote_term = pop_item!(self, back_quote_term, BackQuoteTerm, context);
-        let back_quote_token_built = BackQuoteToken {
-            back_quote_term: (&back_quote_term)
-                .try_into()
-                .map_err(parol_runtime::ParolError::UserError)?,
-            comments: Box::new(comments),
-        };
-        // Calling user action here
-        self.user_grammar
-            .back_quote_token(&back_quote_token_built)?;
-        self.push(ASTType::BackQuoteToken(back_quote_token_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 145:
-    ///
     /// `ColonToken: ColonTerm : Token Comments;`
     ///
     #[parol_runtime::function_name::named]
@@ -17208,7 +17181,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 146:
+    /// Semantic action for production 145:
     ///
     /// `ColonColonLAngleToken: ColonColonLAngleTerm : Token Comments;`
     ///
@@ -17243,7 +17216,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 147:
+    /// Semantic action for production 146:
     ///
     /// `ColonColonToken: ColonColonTerm : Token Comments;`
     ///
@@ -17270,7 +17243,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 148:
+    /// Semantic action for production 147:
     ///
     /// `CommaToken: CommaTerm : Token Comments;`
     ///
@@ -17296,7 +17269,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 149:
+    /// Semantic action for production 148:
     ///
     /// `DotDotToken: DotDotTerm : Token Comments;`
     ///
@@ -17322,7 +17295,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 150:
+    /// Semantic action for production 149:
     ///
     /// `DotDotEquToken: DotDotEquTerm : Token Comments;`
     ///
@@ -17349,7 +17322,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 151:
+    /// Semantic action for production 150:
     ///
     /// `DotToken: DotTerm : Token Comments;`
     ///
@@ -17375,7 +17348,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 152:
+    /// Semantic action for production 151:
     ///
     /// `EquToken: EquTerm : Token Comments;`
     ///
@@ -17401,7 +17374,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 153:
+    /// Semantic action for production 152:
     ///
     /// `HashToken: HashTerm : Token Comments;`
     ///
@@ -17427,7 +17400,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 154:
+    /// Semantic action for production 153:
     ///
     /// `QuestionToken: QuestionTerm : Token Comments;`
     ///
@@ -17450,6 +17423,32 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         // Calling user action here
         self.user_grammar.question_token(&question_token_built)?;
         self.push(ASTType::QuestionToken(question_token_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 154:
+    ///
+    /// `QuoteToken: QuoteTerm : Token Comments;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn quote_token(
+        &mut self,
+        _quote_term: &ParseTreeType<'t>,
+        _comments: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let comments = pop_item!(self, comments, Comments, context);
+        let quote_term = pop_item!(self, quote_term, QuoteTerm, context);
+        let quote_token_built = QuoteToken {
+            quote_term: (&quote_term)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+            comments: Box::new(comments),
+        };
+        // Calling user action here
+        self.user_grammar.quote_token(&quote_token_built)?;
+        self.push(ASTType::QuoteToken(quote_token_built), context);
         Ok(())
     }
 
@@ -20193,26 +20192,6 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 263:
     ///
-    /// `BackQuote: BackQuoteToken : VerylToken;`
-    ///
-    #[parol_runtime::function_name::named]
-    fn back_quote(&mut self, _back_quote_token: &ParseTreeType<'t>) -> Result<()> {
-        let context = function_name!();
-        trace!("{}", self.trace_item_stack(context));
-        let back_quote_token = pop_item!(self, back_quote_token, BackQuoteToken, context);
-        let back_quote_built = BackQuote {
-            back_quote_token: (&back_quote_token)
-                .try_into()
-                .map_err(parol_runtime::ParolError::UserError)?,
-        };
-        // Calling user action here
-        self.user_grammar.back_quote(&back_quote_built)?;
-        self.push(ASTType::BackQuote(back_quote_built), context);
-        Ok(())
-    }
-
-    /// Semantic action for production 264:
-    ///
     /// `Colon: ColonToken : VerylToken;`
     ///
     #[parol_runtime::function_name::named]
@@ -20231,7 +20210,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 265:
+    /// Semantic action for production 264:
     ///
     /// `ColonColonLAngle: ColonColonLAngleToken : VerylToken;`
     ///
@@ -20263,7 +20242,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 266:
+    /// Semantic action for production 265:
     ///
     /// `ColonColon: ColonColonToken : VerylToken;`
     ///
@@ -20283,7 +20262,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 267:
+    /// Semantic action for production 266:
     ///
     /// `Comma: CommaToken : VerylToken;`
     ///
@@ -20303,7 +20282,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 268:
+    /// Semantic action for production 267:
     ///
     /// `DotDot: DotDotToken : VerylToken;`
     ///
@@ -20323,7 +20302,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 269:
+    /// Semantic action for production 268:
     ///
     /// `DotDotEqu: DotDotEquToken : VerylToken;`
     ///
@@ -20343,7 +20322,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 270:
+    /// Semantic action for production 269:
     ///
     /// `Dot: DotToken : VerylToken;`
     ///
@@ -20363,7 +20342,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 271:
+    /// Semantic action for production 270:
     ///
     /// `Equ: EquToken : VerylToken;`
     ///
@@ -20383,7 +20362,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 272:
+    /// Semantic action for production 271:
     ///
     /// `Hash: HashToken : VerylToken;`
     ///
@@ -20403,7 +20382,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 273:
+    /// Semantic action for production 272:
     ///
     /// `Question: QuestionToken : VerylToken;`
     ///
@@ -20420,6 +20399,26 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         // Calling user action here
         self.user_grammar.question(&question_built)?;
         self.push(ASTType::Question(question_built), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 273:
+    ///
+    /// `Quote: QuoteToken : VerylToken;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn quote(&mut self, _quote_token: &ParseTreeType<'t>) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let quote_token = pop_item!(self, quote_token, QuoteToken, context);
+        let quote_built = Quote {
+            quote_token: (&quote_token)
+                .try_into()
+                .map_err(parol_runtime::ParolError::UserError)?,
+        };
+        // Calling user action here
+        self.user_grammar.quote(&quote_built)?;
+        self.push(ASTType::Quote(quote_built), context);
         Ok(())
     }
 
@@ -27370,20 +27369,20 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 600:
     ///
-    /// `ClockDomain: BackQuote Identifier;`
+    /// `ClockDomain: Quote Identifier;`
     ///
     #[parol_runtime::function_name::named]
     fn clock_domain(
         &mut self,
-        _back_quote: &ParseTreeType<'t>,
+        _quote: &ParseTreeType<'t>,
         _identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
         let identifier = pop_item!(self, identifier, Identifier, context);
-        let back_quote = pop_item!(self, back_quote, BackQuote, context);
+        let quote = pop_item!(self, quote, Quote, context);
         let clock_domain_built = ClockDomain {
-            back_quote: Box::new(back_quote),
+            quote: Box::new(quote),
             identifier: Box::new(identifier),
         };
         // Calling user action here
@@ -27884,7 +27883,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 622:
     ///
-    /// `LetStatement: Let Identifier Colon LetStatementOpt /* Option */ ArrayType Equ Expression Semicolon;`
+    /// `LetStatement: Let Identifier %push(ClockDomain) Colon LetStatementOpt /* Option */ %pop() ArrayType Equ Expression Semicolon;`
     ///
     #[parol_runtime::function_name::named]
     fn let_statement(
@@ -29172,7 +29171,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 679:
     ///
-    /// `LetDeclaration: Let Identifier Colon LetDeclarationOpt /* Option */ ArrayType Equ Expression Semicolon;`
+    /// `LetDeclaration: Let Identifier %push(ClockDomain) Colon LetDeclarationOpt /* Option */ %pop() ArrayType Equ Expression Semicolon;`
     ///
     #[parol_runtime::function_name::named]
     fn let_declaration(
@@ -29245,7 +29244,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 682:
     ///
-    /// `VarDeclaration: Var Identifier Colon VarDeclarationOpt /* Option */ ArrayType Semicolon;`
+    /// `VarDeclaration: Var Identifier %push(ClockDomain) Colon VarDeclarationOpt /* Option */ %pop() ArrayType Semicolon;`
     ///
     #[parol_runtime::function_name::named]
     fn var_declaration(
@@ -31191,7 +31190,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 762:
     ///
-    /// `InstDeclaration: Inst Identifier Colon InstDeclarationOpt /* Option */ ScopedIdentifier InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ InstDeclarationOpt2 /* Option */ Semicolon;`
+    /// `InstDeclaration: Inst Identifier %push(ClockDomain) Colon InstDeclarationOpt /* Option */ %pop() ScopedIdentifier InstDeclarationOpt0 /* Option */ InstDeclarationOpt1 /* Option */ InstDeclarationOpt2 /* Option */ Semicolon;`
     ///
     #[parol_runtime::function_name::named]
     fn inst_declaration(
@@ -33450,7 +33449,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 856:
     ///
-    /// `PortDeclarationItem: Identifier Colon PortDeclarationItemGroup;`
+    /// `PortDeclarationItem: Identifier %push(ClockDomain) Colon PortDeclarationItemGroup;`
     ///
     #[parol_runtime::function_name::named]
     fn port_declaration_item(
@@ -33534,7 +33533,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 859:
     ///
-    /// `PortTypeConcrete: Direction PortTypeConcreteOpt /* Option */ ArrayType PortTypeConcreteOpt0 /* Option */;`
+    /// `PortTypeConcrete: Direction PortTypeConcreteOpt /* Option */ %pop() ArrayType PortTypeConcreteOpt0 /* Option */;`
     ///
     #[parol_runtime::function_name::named]
     fn port_type_concrete(
@@ -33654,7 +33653,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 865:
     ///
-    /// `PortTypeAbstract: PortTypeAbstractOpt /* Option */ Interface PortTypeAbstractOpt0 /* Option */ PortTypeAbstractOpt1 /* Option */;`
+    /// `PortTypeAbstract: PortTypeAbstractOpt /* Option */ %pop() Interface PortTypeAbstractOpt0 /* Option */ PortTypeAbstractOpt1 /* Option */;`
     ///
     #[parol_runtime::function_name::named]
     fn port_type_abstract(
@@ -38275,18 +38274,18 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             21 => self.operator05_term(&children[0]),
             22 => self.operator04_term(&children[0]),
             23 => self.unary_operator_term(&children[0]),
-            24 => self.back_quote_term(&children[0]),
-            25 => self.colon_colon_l_angle_term(&children[0]),
-            26 => self.colon_colon_term(&children[0]),
-            27 => self.colon_term(&children[0]),
-            28 => self.comma_term(&children[0]),
-            29 => self.dot_dot_equ_term(&children[0]),
-            30 => self.dot_dot_term(&children[0]),
-            31 => self.dot_term(&children[0]),
-            32 => self.equ_term(&children[0]),
-            33 => self.hash_term(&children[0]),
-            34 => self.l_angle_term(&children[0]),
-            35 => self.question_term(&children[0]),
+            24 => self.colon_colon_l_angle_term(&children[0]),
+            25 => self.colon_colon_term(&children[0]),
+            26 => self.colon_term(&children[0]),
+            27 => self.comma_term(&children[0]),
+            28 => self.dot_dot_equ_term(&children[0]),
+            29 => self.dot_dot_term(&children[0]),
+            30 => self.dot_term(&children[0]),
+            31 => self.equ_term(&children[0]),
+            32 => self.hash_term(&children[0]),
+            33 => self.l_angle_term(&children[0]),
+            34 => self.question_term(&children[0]),
+            35 => self.quote_term(&children[0]),
             36 => self.quote_l_brace_term(&children[0]),
             37 => self.l_brace_term(&children[0]),
             38 => self.l_bracket_term(&children[0]),
@@ -38395,17 +38394,17 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             141 => self.operator11_token(&children[0], &children[1]),
             142 => self.operator12_token(&children[0], &children[1]),
             143 => self.unary_operator_token(&children[0], &children[1]),
-            144 => self.back_quote_token(&children[0], &children[1]),
-            145 => self.colon_token(&children[0], &children[1]),
-            146 => self.colon_colon_l_angle_token(&children[0], &children[1]),
-            147 => self.colon_colon_token(&children[0], &children[1]),
-            148 => self.comma_token(&children[0], &children[1]),
-            149 => self.dot_dot_token(&children[0], &children[1]),
-            150 => self.dot_dot_equ_token(&children[0], &children[1]),
-            151 => self.dot_token(&children[0], &children[1]),
-            152 => self.equ_token(&children[0], &children[1]),
-            153 => self.hash_token(&children[0], &children[1]),
-            154 => self.question_token(&children[0], &children[1]),
+            144 => self.colon_token(&children[0], &children[1]),
+            145 => self.colon_colon_l_angle_token(&children[0], &children[1]),
+            146 => self.colon_colon_token(&children[0], &children[1]),
+            147 => self.comma_token(&children[0], &children[1]),
+            148 => self.dot_dot_token(&children[0], &children[1]),
+            149 => self.dot_dot_equ_token(&children[0], &children[1]),
+            150 => self.dot_token(&children[0], &children[1]),
+            151 => self.equ_token(&children[0], &children[1]),
+            152 => self.hash_token(&children[0], &children[1]),
+            153 => self.question_token(&children[0], &children[1]),
+            154 => self.quote_token(&children[0], &children[1]),
             155 => self.quote_l_brace_token(&children[0], &children[1]),
             156 => self.l_angle_token(&children[0], &children[1]),
             157 => self.l_brace_token(&children[0], &children[1]),
@@ -38514,17 +38513,17 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             260 => self.operator11(&children[0]),
             261 => self.operator12(&children[0]),
             262 => self.unary_operator(&children[0]),
-            263 => self.back_quote(&children[0]),
-            264 => self.colon(&children[0]),
-            265 => self.colon_colon_l_angle(&children[0]),
-            266 => self.colon_colon(&children[0]),
-            267 => self.comma(&children[0]),
-            268 => self.dot_dot(&children[0]),
-            269 => self.dot_dot_equ(&children[0]),
-            270 => self.dot(&children[0]),
-            271 => self.equ(&children[0]),
-            272 => self.hash(&children[0]),
-            273 => self.question(&children[0]),
+            263 => self.colon(&children[0]),
+            264 => self.colon_colon_l_angle(&children[0]),
+            265 => self.colon_colon(&children[0]),
+            266 => self.comma(&children[0]),
+            267 => self.dot_dot(&children[0]),
+            268 => self.dot_dot_equ(&children[0]),
+            269 => self.dot(&children[0]),
+            270 => self.equ(&children[0]),
+            271 => self.hash(&children[0]),
+            272 => self.question(&children[0]),
+            273 => self.quote(&children[0]),
             274 => self.quote_l_brace(&children[0]),
             275 => self.l_angle(&children[0]),
             276 => self.l_brace(&children[0]),

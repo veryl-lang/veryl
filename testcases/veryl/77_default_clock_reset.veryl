@@ -1,10 +1,10 @@
 module Module77 (
-    i_clk_a: input  `a default clock,
-    i_rst_a: input  `a default reset,
-    i_clk_b: input  `b clock        ,
-    i_rst_b: input  `b reset        ,
-    i_d    : input  `a logic        ,
-    o_d    : output `a logic        ,
+    i_clk_a: input  'a default clock,
+    i_rst_a: input  'a default reset,
+    i_clk_b: input  'b clock        ,
+    i_rst_b: input  'b reset        ,
+    i_d    : input  'a logic        ,
+    o_d    : output 'a logic        ,
 ) {
     always_ff {
         if_reset {
