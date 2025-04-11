@@ -1994,6 +1994,51 @@ fn mismatch_type() {
 }
 
 #[test]
+fn invalid_type_declaration() {
+    let code = r#"
+    interface InterfaceA {
+        enum Foo {
+            FOO
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidTypeDeclaration { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        struct Foo {
+            foo: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidTypeDeclaration { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        union Foo {
+            foo: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidTypeDeclaration { .. }
+    ));
+}
+
+#[test]
 fn mismatch_assignment() {
     let code = r#"
     module ModuleA {
@@ -5127,35 +5172,9 @@ fn check_connect_operation() {
 
     let code = r#"
     interface InterfaceA {
-        enum EnumA: logic {
-            A
-        }
+        type A = logic<2>;
 
-        var a: EnumA;
-
-        modport mp {
-            a: output,
-        }
-    }
-    module ModuleA {
-        inst a_if: InterfaceA;
-        connect a_if.mp <> 0;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidConnectOperand { .. }
-    ));
-
-    let code = r#"
-    interface InterfaceA {
-        enum EnumA: logic {
-            A
-        }
-
-        var a: EnumA;
+        var a: A;
 
         modport mp {
             a: output,
@@ -5294,50 +5313,6 @@ fn unexpandable_modport() {
         param WIDTH: u32 = 1
     ) {
         var a: logic<WIDTH>;
-        modport mp {
-            a: input,
-        }
-    }
-    #[expand(modport)]
-    module ModuleA (
-        if_a: modport InterfaceA::mp,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnexpandableModport { .. }
-    ));
-
-    let code = r#"
-    interface InterfaceA {
-        struct StructA {
-            a: logic,
-        }
-        var a: StructA;
-        modport mp {
-            a: input,
-        }
-    }
-    #[expand(modport)]
-    module ModuleA (
-        if_a: modport InterfaceA::mp,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnexpandableModport { .. }
-    ));
-
-    let code = r#"
-    interface InterfaceA {
-        enum EnumA {
-            A,
-        }
-        var a: EnumA;
         modport mp {
             a: input,
         }

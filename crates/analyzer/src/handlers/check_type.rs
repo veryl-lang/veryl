@@ -17,6 +17,7 @@ pub struct CheckType {
     pub errors: Vec<AnalyzerError>,
     point: HandlerPoint,
     in_module: bool,
+    in_interface: bool,
     in_user_defined_type: Vec<()>,
     in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
@@ -370,11 +371,43 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
+    fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if self.in_interface {
+                self.errors
+                    .push(AnalyzerError::invalid_type_declaration("enum", &arg.into()));
+            }
+        }
+        Ok(())
+    }
+
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if self.in_interface {
+                let kind = match *arg.struct_union {
+                    StructUnion::Struct(_) => "struct",
+                    StructUnion::Union(_) => "union",
+                };
+                self.errors
+                    .push(AnalyzerError::invalid_type_declaration(kind, &arg.into()));
+            }
+        }
+        Ok(())
+    }
+
     fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.in_module = true,
             HandlerPoint::After => self.in_module = false,
         };
+        Ok(())
+    }
+
+    fn interface_declaration(&mut self, _arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_interface = true,
+            HandlerPoint::After => self.in_interface = false,
+        }
         Ok(())
     }
 
