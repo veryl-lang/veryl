@@ -544,6 +544,71 @@ fn duplicated_identifier() {
         errors[0],
         AnalyzerError::DuplicatedIdentifier { .. }
     ));
+
+    let code = r#"
+    module ModuleA {}
+    module ModuleB {
+        inst ModuleA: ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        inst ModuleB: ModuleB;
+    }
+    module ModuleB {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {}
+    module ModuleB {
+        inst InterfaceA: InterfaceA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        inst InterfaceB: InterfaceB;
+    }
+    interface InterfaceB {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        x: input x,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -4621,19 +4686,6 @@ fn r#unsafe() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownUnsafe { .. }));
-}
-
-#[test]
-fn detect_recursive() {
-    let code = r#"
-    module ModuleA (
-        x: input x,
-    ) {
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]
