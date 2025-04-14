@@ -117,6 +117,10 @@ fn reduction<T: Fn(isize, isize) -> isize>(
 }
 
 impl Evaluated {
+    pub fn is_fixed(&self) -> bool {
+        matches!(self.value, EvaluatedValue::Fixed(_))
+    }
+
     pub fn is_known_static(&self) -> bool {
         matches!(
             self.value,
