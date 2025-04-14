@@ -126,6 +126,32 @@ impl CreateSymbolTable {
         }
     }
 
+    fn check_identifer_with_type_path(
+        &mut self,
+        identifier: &Identifier,
+        type_path: &GenericSymbolPath,
+    ) -> bool {
+        let identifier_token = identifier.identifier_token.token;
+        let type_base = type_path.paths[0].base;
+        if identifier_token.text == type_base.text {
+            self.errors.push(AnalyzerError::duplicated_identifier(
+                &identifier_token.to_string(),
+                &identifier_token.into(),
+            ));
+            false
+        } else {
+            true
+        }
+    }
+
+    fn check_identifer_with_type(&mut self, identifier: &Identifier, r#type: &SymType) -> bool {
+        if let Some(user_defined) = r#type.get_user_defined() {
+            self.check_identifer_with_type_path(identifier, &user_defined.path)
+        } else {
+            true
+        }
+    }
+
     fn get_namespace(&self, token: &Token) -> Namespace {
         let attrs = attribute_table::get(token);
         let mut ret = self.namespace.clone();
@@ -622,6 +648,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut r#type: SymType = arg.array_type.as_ref().into();
+            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                return Ok(());
+            }
+
             r#type.is_const = true;
             let affiliation = self.affiliation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
@@ -661,6 +691,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.anonymous_namespace += 1;
 
                 let r#type: SymType = arg.scalar_type.as_ref().into();
+                if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                    return Ok(());
+                }
+
                 let affiliation = self.affiliation.last().cloned().unwrap();
                 let property = VariableProperty {
                     r#type,
@@ -683,6 +717,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut r#type: SymType = arg.array_type.as_ref().into();
+            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                return Ok(());
+            }
+
             r#type.is_const = true;
             let affiliation = self.affiliation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
@@ -716,6 +754,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = arg.array_type.as_ref().into();
+            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                return Ok(());
+            }
+
             let affiliation = self.affiliation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.var_declaration_opt {
@@ -754,6 +796,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = match &*arg.const_declaration_group {
                 ConstDeclarationGroup::ArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
+                    if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                        return Ok(());
+                    }
+
                     ParameterProperty {
                         token,
                         r#type,
@@ -911,6 +957,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .enum_declaration_opt
                     .as_ref()
                     .map(|x| x.scalar_type.as_ref().into());
+                if let Some(r#type) = &r#type {
+                    if !self.check_identifer_with_type(&arg.identifier, r#type) {
+                        return Ok(());
+                    }
+                }
+
                 let width = if let Some(x) = r#type.clone() {
                     if let Some(x) = Evaluator::new(&[]).type_width(x) {
                         *x.first().unwrap_or(&0)
@@ -1022,6 +1074,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let r#type = arg.array_type.as_ref().into();
+            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                return Ok(());
+            }
+
             let property = TypeDefProperty { r#type };
             let kind = SymbolKind::TypeDef(property);
             if let Some(id) =
@@ -1036,6 +1092,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn struct_union_item(&mut self, arg: &StructUnionItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = arg.scalar_type.as_ref().into();
+            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                return Ok(());
+            }
+
             let kind = match self.struct_or_union.clone().unwrap() {
                 StructOrUnion::InStruct => {
                     let property = StructMemberProperty { r#type };
@@ -1060,6 +1120,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 Vec::new()
             };
             let type_name: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            if !self.check_identifer_with_type_path(&arg.identifier, &type_name) {
+                return Ok(());
+            }
+
             let connects = self.connects.drain().collect();
             let clock_domain = if let Some(ref x) = arg.inst_declaration_opt {
                 self.insert_clock_domain(&x.clock_domain)
@@ -1120,6 +1184,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = match &*arg.with_parameter_item_group0 {
                 WithParameterItemGroup0::ArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();
+                    if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                        return Ok(());
+                    }
+
                     ParameterProperty {
                         token,
                         r#type,
@@ -1190,10 +1258,18 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 GenericBound::Const(_) => GenericBoundKind::Const,
                 GenericBound::Type(_) => GenericBoundKind::Type,
                 GenericBound::InstScopedIdentifier(x) => {
-                    GenericBoundKind::Inst(x.scoped_identifier.as_ref().into())
+                    let type_path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                    if !self.check_identifer_with_type_path(&arg.identifier, &type_path) {
+                        return Ok(());
+                    }
+                    GenericBoundKind::Inst(type_path.mangled_path())
                 }
                 GenericBound::ScopedIdentifier(x) => {
-                    GenericBoundKind::Proto(x.scoped_identifier.as_ref().into())
+                    let type_path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                    if !self.check_identifer_with_type_path(&arg.identifier, &type_path) {
+                        return Ok(());
+                    }
+                    GenericBoundKind::Proto(type_path.mangled_path())
                 }
             };
 
@@ -1226,6 +1302,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 PortDeclarationItemGroup::PortTypeConcrete(x) => {
                     let x = x.port_type_concrete.as_ref();
                     let r#type: SymType = x.array_type.as_ref().into();
+                    if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                        return Ok(());
+                    }
+
                     let direction: SymDirection = x.direction.as_ref().into();
                     let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
                     let clock_domain = if let Some(ref x) = x.port_type_concrete_opt {
@@ -1329,6 +1409,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .function_declaration_opt1
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
+                if let Some(ret) = &ret {
+                    if !self.check_identifer_with_type(&arg.identifier, ret) {
+                        return Ok(());
+                    }
+                }
 
                 let range = TokenRange::new(
                     &arg.function.function_token,
@@ -1434,11 +1519,16 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .module_declaration_opt0
                     .as_ref()
                     .map(|x| x.scoped_identifier.as_ref().into());
+                if let Some(type_path) = &proto {
+                    if !self.check_identifer_with_type_path(&arg.identifier, type_path) {
+                        return Ok(());
+                    }
+                }
 
                 let definition = definition_table::insert(Definition::Module(arg.clone()));
                 let property = ModuleProperty {
                     range,
-                    proto,
+                    proto: proto.map(|x| x.mangled_path()),
                     generic_parameters,
                     generic_references,
                     parameters,
@@ -1645,10 +1735,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .package_declaration_opt0
                     .as_ref()
                     .map(|x| x.scoped_identifier.as_ref().into());
+                if let Some(type_path) = &proto {
+                    if !self.check_identifer_with_type_path(&arg.identifier, type_path) {
+                        return Ok(());
+                    }
+                }
 
                 let property = PackageProperty {
                     range,
-                    proto,
+                    proto: proto.map(|x| x.mangled_path()),
                     generic_parameters,
                     generic_references,
                     members: self.package_members.drain(..).collect(),
@@ -1667,6 +1762,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn alias_declaration(&mut self, arg: &AliasDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            if !self.check_identifer_with_type_path(&arg.identifier, &target) {
+                return Ok(());
+            }
+
             let kind = match &*arg.alias_declaration_group {
                 AliasDeclarationGroup::Module(_) => {
                     let property = AliasModuleProperty { target };
@@ -1772,6 +1871,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     is_const: false,
                 },
             };
+            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                return Ok(());
+            }
+
             let property = ProtoConstProperty { token, r#type };
             let kind = SymbolKind::ProtoConst(property);
             if let Some(id) = self.insert_symbol(&token, kind, false) {
@@ -1818,6 +1921,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .proto_function_declaration_opt1
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
+                if let Some(ret) = &ret {
+                    if !self.check_identifer_with_type(&arg.identifier, ret) {
+                        return Ok(());
+                    }
+                }
 
                 let range =
                     TokenRange::new(&arg.function.function_token, &arg.semicolon.semicolon_token);
@@ -1847,6 +1955,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn proto_alias_declaration(&mut self, arg: &ProtoAliasDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            if !self.check_identifer_with_type_path(&arg.identifier, &target) {
+                return Ok(());
+            }
+
             let kind = match &*arg.proto_alias_declaration_group {
                 ProtoAliasDeclarationGroup::Module(_) => {
                     let property = AliasModuleProperty { target };
