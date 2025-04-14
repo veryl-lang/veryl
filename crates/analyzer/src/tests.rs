@@ -447,6 +447,22 @@ fn clock_connection_check() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB (
+            clk: '0,
+            rst: '0,
+        );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -709,7 +709,7 @@ impl VerylGrammarTrait for CheckVarRef {
                         let exp = evaluator.expression(&target.expression);
 
                         // Check assignment of clock/reset type
-                        if is_clock && !exp.is_clock() {
+                        if is_clock && !(exp.is_fixed() || exp.is_clock()) {
                             self.errors.push(AnalyzerError::mismatch_type(
                                 &token.text.to_string(),
                                 "clock type",
@@ -718,7 +718,7 @@ impl VerylGrammarTrait for CheckVarRef {
                             ));
                         }
 
-                        if is_reset && !exp.is_reset() {
+                        if is_reset && !(exp.is_fixed() || exp.is_reset()) {
                             self.errors.push(AnalyzerError::mismatch_type(
                                 &token.text.to_string(),
                                 "reset type",
