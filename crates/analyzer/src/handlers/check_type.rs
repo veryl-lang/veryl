@@ -72,7 +72,10 @@ fn is_casting_type(symbol: &Symbol) -> bool {
     }
 }
 
-fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
+fn resolve_inst_generic_arg_type(
+    arg: &GenericSymbolPath,
+    namespace: &Namespace,
+) -> Option<SymbolId> {
     if !arg.is_resolvable() {
         return None;
     }
@@ -84,28 +87,24 @@ fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace)
         return None;
     };
 
-    if let Some(ref proto) = inst_symbol.found.proto() {
-        symbol_table::resolve((proto, namespace))
-            .ok()
-            .map(|s| s.found)
+    let proto = inst_symbol.found.proto();
+    if proto.is_some() {
+        proto
     } else {
-        Some(inst_symbol.found)
+        Some(inst_symbol.found.id)
     }
 }
 
 fn resolve_proto_generic_arg_type(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
-) -> Option<Symbol> {
+) -> Option<SymbolId> {
     if !arg.is_resolvable() {
         return None;
     }
 
     let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
-    let proto = arg_symbol.found.proto()?;
-    symbol_table::resolve((&proto, namespace))
-        .ok()
-        .map(|s| s.found)
+    arg_symbol.found.proto()
 }
 
 enum InstTypeSource {
@@ -328,7 +327,7 @@ impl VerylGrammarTrait for CheckType {
                                         symbol_table::resolve((proto, &defined_namespace));
                                     let proto_match =
                                         if let (Some(actual), Ok(required)) = (actual, required) {
-                                            actual.id == required.found.id
+                                            actual == required.found.id
                                         } else {
                                             false
                                         };
@@ -348,7 +347,7 @@ impl VerylGrammarTrait for CheckType {
                                         symbol_table::resolve((proto, &defined_namespace));
                                     let proto_match =
                                         if let (Some(actual), Ok(required)) = (actual, required) {
-                                            actual.id == required.found.id
+                                            actual == required.found.id
                                         } else {
                                             false
                                         };

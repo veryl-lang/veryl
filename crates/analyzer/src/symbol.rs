@@ -382,21 +382,53 @@ impl Symbol {
         }
     }
 
-    pub fn proto(&self) -> Option<SymbolPath> {
+    pub fn proto(&self) -> Option<SymbolId> {
         match &self.kind {
-            SymbolKind::Module(x) => x.proto.clone(),
-            SymbolKind::Package(x) => x.proto.clone(),
+            SymbolKind::Module(x) => {
+                if x.proto.is_some() {
+                    return x.proto;
+                } else if x.generic_parameters.is_empty() {
+                    return Some(self.id);
+                }
+            }
+            SymbolKind::AliasModule(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
+                return symbol.found.proto();
+            }
+            SymbolKind::Interface(x) => {
+                if x.generic_parameters.is_empty() {
+                    return Some(self.id);
+                }
+            }
+            SymbolKind::AliasInterface(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
+                return symbol.found.proto();
+            }
+            SymbolKind::Package(x) => {
+                if x.proto.is_some() {
+                    return x.proto;
+                } else if x.generic_parameters.is_empty() {
+                    return Some(self.id);
+                }
+            }
             SymbolKind::AliasPackage(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
-                symbol.found.proto()
+                return symbol.found.proto();
             }
-            SymbolKind::GenericParameter(x) => match x.bound {
-                GenericBoundKind::Proto(ref x) => Some(x.clone()),
-                _ => None,
-            },
-            _ => None,
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(ref x) = x.bound {
+                    return symbol_table::resolve((x, &self.namespace))
+                        .ok()
+                        .map(|x| x.found.id);
+                }
+            }
+            _ => {}
         }
+
+        None
     }
 
     pub fn alias_target(&self) -> Option<GenericSymbolPath> {
@@ -430,6 +462,7 @@ impl Symbol {
 
     pub fn is_proto_module(&self) -> bool {
         match &self.kind {
+            SymbolKind::Module(x) => return x.generic_parameters.is_empty(),
             SymbolKind::ProtoModule(_) => return true,
             SymbolKind::GenericParameter(x) => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
@@ -463,12 +496,16 @@ impl Symbol {
     }
 
     pub fn is_proto_interface(&self) -> bool {
-        if let SymbolKind::GenericParameter(x) = &self.kind {
-            if let GenericBoundKind::Proto(proto) = &x.bound {
-                if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                    return symbol.found.is_proto_interface();
+        match &self.kind {
+            SymbolKind::Interface(x) => return x.generic_parameters.is_empty(),
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_proto_interface();
+                    }
                 }
             }
+            _ => {}
         }
         false
     }
@@ -495,6 +532,7 @@ impl Symbol {
 
     pub fn is_proto_package(&self) -> bool {
         match &self.kind {
+            SymbolKind::Package(x) => return x.generic_parameters.is_empty(),
             SymbolKind::ProtoPackage(_) => return true,
             SymbolKind::GenericParameter(x) => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
@@ -1554,7 +1592,7 @@ impl Parameter {
 #[derive(Debug, Clone)]
 pub struct ModuleProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolPath>,
+    pub proto: Option<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
@@ -1671,7 +1709,7 @@ pub struct InstanceProperty {
 #[derive(Debug, Clone)]
 pub struct PackageProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolPath>,
+    pub proto: Option<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub members: Vec<SymbolId>,

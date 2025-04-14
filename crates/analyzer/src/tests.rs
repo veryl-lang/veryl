@@ -1759,6 +1759,19 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
+    module ModuleA {}
+    module ModuleB::<T: ModuleA> {
+        inst u: T;
+    }
+    module ModuleC {
+        inst u: ModuleB::<ModuleA>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     interface InterfaceA {}
     interface InterfaceB {
       inst u: InterfaceA();
@@ -1939,6 +1952,19 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    package PkgA {}
+    package PkgB::<PKG: PkgA> {
+        import PKG::*;
+    }
+    package PkgC {
+        import PkgB::<PkgA>::*;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleA {}
