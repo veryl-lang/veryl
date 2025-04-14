@@ -382,21 +382,41 @@ impl Symbol {
         }
     }
 
-    pub fn proto(&self) -> Option<SymbolPath> {
+    pub fn proto(&self) -> Option<SymbolId> {
         match &self.kind {
-            SymbolKind::Module(x) => x.proto.clone(),
-            SymbolKind::Package(x) => x.proto.clone(),
+            SymbolKind::Module(x) => return x.proto,
+            SymbolKind::AliasModule(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
+                return symbol.found.proto();
+            }
+            SymbolKind::Interface(x) => {
+                if x.generic_parameters.is_empty() {
+                    return Some(self.id);
+                }
+            }
+            SymbolKind::AliasInterface(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
+                return symbol.found.proto();
+            }
+            SymbolKind::Package(x) => return x.proto,
             SymbolKind::AliasPackage(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
-                symbol.found.proto()
+                return symbol.found.proto();
             }
-            SymbolKind::GenericParameter(x) => match x.bound {
-                GenericBoundKind::Proto(ref x) => Some(x.clone()),
-                _ => None,
-            },
-            _ => None,
+            SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(ref x) = x.bound {
+                    return symbol_table::resolve((x, &self.namespace))
+                        .ok()
+                        .map(|x| x.found.id);
+                }
+            }
+            _ => {}
         }
+
+        None
     }
 
     pub fn alias_target(&self) -> Option<GenericSymbolPath> {
@@ -428,13 +448,13 @@ impl Symbol {
         false
     }
 
-    pub fn is_proto_module(&self) -> bool {
+    pub fn is_proto_module(&self, trace_generic_param: bool) -> bool {
         match &self.kind {
             SymbolKind::ProtoModule(_) => return true,
-            SymbolKind::GenericParameter(x) => {
+            SymbolKind::GenericParameter(x) if trace_generic_param => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
                     if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_proto_module();
+                        return symbol.found.is_proto_module(trace_generic_param);
                     }
                 }
             }
@@ -462,13 +482,26 @@ impl Symbol {
         false
     }
 
-    pub fn is_proto_interface(&self) -> bool {
-        if let SymbolKind::GenericParameter(x) = &self.kind {
-            if let GenericBoundKind::Proto(proto) = &x.bound {
-                if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                    return symbol.found.is_proto_interface();
+    pub fn is_proto_interface(
+        &self,
+        trace_generic_param: bool,
+        include_non_generic_interface: bool,
+    ) -> bool {
+        match &self.kind {
+            SymbolKind::Interface(x) => {
+                return include_non_generic_interface && x.generic_parameters.is_empty();
+            }
+            SymbolKind::GenericParameter(x) if trace_generic_param => {
+                if let GenericBoundKind::Proto(proto) = &x.bound {
+                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
+                        return symbol.found.is_proto_interface(
+                            trace_generic_param,
+                            include_non_generic_interface,
+                        );
+                    }
                 }
             }
+            _ => {}
         }
         false
     }
@@ -493,13 +526,13 @@ impl Symbol {
         false
     }
 
-    pub fn is_proto_package(&self) -> bool {
+    pub fn is_proto_package(&self, trace_generic_param: bool) -> bool {
         match &self.kind {
             SymbolKind::ProtoPackage(_) => return true,
-            SymbolKind::GenericParameter(x) => {
+            SymbolKind::GenericParameter(x) if trace_generic_param => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
                     if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_proto_package();
+                        return symbol.found.is_proto_package(trace_generic_param);
                     }
                 }
             }
@@ -1554,7 +1587,7 @@ impl Parameter {
 #[derive(Debug, Clone)]
 pub struct ModuleProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolPath>,
+    pub proto: Option<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
@@ -1671,7 +1704,7 @@ pub struct InstanceProperty {
 #[derive(Debug, Clone)]
 pub struct PackageProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolPath>,
+    pub proto: Option<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub members: Vec<SymbolId>,
