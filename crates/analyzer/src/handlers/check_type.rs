@@ -219,6 +219,7 @@ impl VerylGrammarTrait for CheckType {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {
+                println!("Malte: token: {:?} kind: {:?}", symbol.found.token.to_string(), symbol.found.kind);
                 // Mangled enum member can't be used directly
                 if matches!(symbol.found.kind, SymbolKind::EnumMemberMangled) {
                     self.errors.push(AnalyzerError::undefined_identifier(
