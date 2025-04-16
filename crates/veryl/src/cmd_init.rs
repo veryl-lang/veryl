@@ -1,7 +1,7 @@
 use crate::OptInit;
 use log::info;
 use miette::{IntoDiagnostic, Result, bail};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Write;
 use veryl_metadata::{Git, Metadata};
 
@@ -35,6 +35,9 @@ impl CmdInit {
             let mut file = File::create(toml_path).into_diagnostic()?;
             write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
+
+            let src_path = self.opt.path.join("src");
+            fs::create_dir_all(&src_path).into_diagnostic()?;
 
             let gitignore = Metadata::create_default_gitignore();
             let gitignore_path = self.opt.path.join(".gitignore");

@@ -30,6 +30,9 @@ impl CmdNew {
             write!(file, "{toml}").into_diagnostic()?;
             file.flush().into_diagnostic()?;
 
+            let src_path = self.opt.path.join("src");
+            fs::create_dir_all(&src_path).into_diagnostic()?;
+
             if Git::exists() {
                 let gitignore = Metadata::create_default_gitignore();
                 let gitignore_path = self.opt.path.join(".gitignore");

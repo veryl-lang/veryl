@@ -335,7 +335,10 @@ impl Metadata {
         Ok(format!(
             r###"[project]
 name = "{name}"
-version = "0.1.0""###
+version = "0.1.0"
+[build]
+source = "src"
+target = {{type = "directory", path = "target"}}"###
         ))
     }
 
