@@ -381,6 +381,7 @@ impl Server {
                     VerylSymbolKind::AliasModule(_) => SymbolKind::MODULE,
                     VerylSymbolKind::ProtoAliasModule(_) => SymbolKind::MODULE,
                     VerylSymbolKind::Interface(_) => SymbolKind::INTERFACE,
+                    VerylSymbolKind::ProtoInterface(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::AliasInterface(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::ProtoAliasInterface(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::Function(_) => SymbolKind::FUNCTION,

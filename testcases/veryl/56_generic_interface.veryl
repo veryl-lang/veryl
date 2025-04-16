@@ -14,14 +14,15 @@ module Module56 {
     inst u3: Interface56B::<Package56A::X>;
     inst u4: Interface56B::<>;
     inst u5: Interface56B::<X>;
-    inst u6: Module56Sub::<1>;
+    inst u6: Module56A::<1>;
+    inst u7: Module56C::<Interface56C::<2>>;
 
     let _a: logic = u0._a;
     let _b: logic = u2._b;
     let _c: logic = u5._b;
 }
 
-module Module56Sub::<T: const> {
+module Module56A::<T: const> {
     inst u: Interface56A::<T>;
     function f () {}
 }
@@ -34,4 +35,20 @@ pub interface Interface56A::<T: const> {
 /// Generic interface test for doc comment
 pub interface Interface56B::<T: const = 3> {
     var _b: logic<T>;
+}
+
+proto interface ProtoInterface56C {
+    const C_WIDTH: u32;
+
+    var _c: logic<C_WIDTH>;
+}
+
+interface Interface56C::<W: const> for ProtoInterface56C {
+    const C_WIDTH: u32 = W;
+
+    var _c: logic<C_WIDTH>;
+}
+
+module Module56C::<IF: ProtoInterface56C> {
+    inst u: IF;
 }

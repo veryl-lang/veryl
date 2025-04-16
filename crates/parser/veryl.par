@@ -660,7 +660,7 @@ AttributeItem: Identifier
 // ----------------------------------------------------------------------------
 
 LetDeclaration: Let Identifier %push(ClockDomain) Colon [ ClockDomain ] %pop() ArrayType Equ Expression Semicolon;
-                                                 
+
 VarDeclaration: Var Identifier %push(ClockDomain) Colon [ ClockDomain ] %pop() ArrayType Semicolon;
 
 ConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Equ Expression Semicolon;
@@ -835,7 +835,7 @@ ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: GenerateItem;
 
-InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
 
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
@@ -902,9 +902,22 @@ AliasDeclaration: Alias ( Module | Interface | Package ) Identifier Equ ScopedId
 // Proto
 // ----------------------------------------------------------------------------
 
-ProtoModuleDeclaration: Proto Module Identifier [ WithParameter ] [ PortDeclaration ] Semicolon;
+ProtoDeclaration: Proto ( ProtoModuleDeclaration | ProtoInterfaceDeclaration | ProtoPackageDeclaration );
 
-ProtoPackageDeclaration: Proto Package Identifier LBrace { ProtoPacakgeItem } RBrace;
+ProtoModuleDeclaration: Module Identifier [ WithParameter ] [ PortDeclaration ] Semicolon;
+
+ProtoInterfaceDeclaration: Interface Identifier [ WithParameter ] LBrace { ProtoInterfaceItem } RBrace;
+
+ProtoInterfaceItem: VarDeclaration
+                  | ProtoConstDeclaration
+                  | ProtoFunctionDeclaration
+                  | ProtoTypeDefDeclaration
+                  | ProtoAliasDeclaration
+                  | ModportDeclaration
+                  | ImportDeclaration
+                  ;
+
+ProtoPackageDeclaration: Package Identifier LBrace { ProtoPacakgeItem } RBrace;
 
 ProtoPacakgeItem: ProtoConstDeclaration
                 | ProtoTypeDefDeclaration
@@ -958,8 +971,7 @@ PublicDescriptionItem: ModuleDeclaration
                      | InterfaceDeclaration
                      | PackageDeclaration
                      | AliasDeclaration
-                     | ProtoModuleDeclaration
-                     | ProtoPackageDeclaration
+                     | ProtoDeclaration
                      ;
 
 // ----------------------------------------------------------------------------

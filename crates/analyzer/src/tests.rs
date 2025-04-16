@@ -1189,6 +1189,441 @@ fn mismatch_attribute_args() {
 #[test]
 fn incompat_proto() {
     let code = r#"
+    proto interface ProtoInterface #(
+        param P: u32 = 0,
+    ) {}
+    interface Interface for ProtoInterface #(
+        param P: u32 = 0
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface #(
+        param P: u32 = 0,
+    ) {}
+    interface Interface for ProtoInterface {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface #(
+        param P: u32 = 0,
+    ) {}
+    interface Interface for ProtoInterface #(
+        param P: i32 = 0
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface #(
+        param P: u32 = 0,
+    ) {}
+    interface Interface for ProtoInterface #(
+        const P: u32 = 0
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var _v: logic;
+    }
+    interface Interface for ProtoInterface {
+        var _v: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var _v: logic;
+    }
+    interface Interface for ProtoInterface {
+        let _v: logic = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var _v: logic;
+    }
+    interface Interface for ProtoInterface {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var _v: logic;
+    }
+    interface Interface for ProtoInterface {
+        var _v: bit;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var _v: logic;
+    }
+    interface Interface for ProtoInterface {
+        let _v: bit = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var _v: logic;
+    }
+    interface Interface for ProtoInterface {
+        type _v = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        const C: u32;
+    }
+    interface Interface for ProtoInterface {
+        const C: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface {
+        const C: u32;
+    }
+    interface Interface for ProtoInterface {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        const C: u32;
+    }
+    interface Interface for ProtoInterface {
+        const C: i32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        const C: u32;
+    }
+    interface Interface for ProtoInterface {
+        type C = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        type T;
+    }
+    interface Interface for ProtoInterface {
+        type T = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface {
+        type T;
+    }
+    interface Interface for ProtoInterface {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        type T;
+    }
+    interface Interface for ProtoInterface {
+        const T: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    interface Interface for ProtoInterface {
+        function F(
+            a: input logic,
+        ) -> logic {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    interface Interface for ProtoInterface {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    interface Interface for ProtoInterface {
+        function F(
+            a: input logic,
+        ){}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        function F(
+            a: input logic,
+        ) -> logic;
+    }
+    interface Interface for ProtoInterface {
+        const F: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    package PkgA {}
+    proto interface ProtoInterface {
+        alias package P: ProtoPkgA;
+    }
+    interface Interface for ProtoInterface {
+        alias package P = PkgA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    proto package ProtoPkgB {}
+    package PkgB for ProtoPkgB {}
+    proto interface ProtoInterface {
+        alias package P: ProtoPkgA;
+    }
+    interface Interface for ProtoInterface {
+        alias package P = PkgB;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    proto interface ProtoInterface {
+        alias package P: ProtoPkgA;
+    }
+    interface Interface for ProtoInterface {
+        const P: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    interface Interface for ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    interface Interface for ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport n {
+            a: input ,
+            b: output,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    interface Interface for ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: output,
+            b: input ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    interface Interface for ProtoInterface {
+        var a: logic;
+        var b: logic;
+        var c: logic;
+        modport m {
+            a: output,
+            b: input ,
+            c: input ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    interface Interface for ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: output,
+        }
+        modport n {
+            b: output,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport m {
+            a: input ,
+            b: output,
+        }
+    }
+    interface Interface for ProtoInterface {
+        var a: logic;
+        var b: logic;
+        modport n {
+            a: input ,
+            b: output,
+        }
+        const m: u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
     proto package ProtoPkg {
         const C: u32;
     }
@@ -1803,10 +2238,46 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
+    interface InterfaceA {}
+    module ModuleA::<IF: InterfaceA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto interface ProtoInterfaceA {}
+    interface InterfaceA {}
+    module ModuleA::<IF: ProtoInterfaceA> {
+        inst a_if: IF;
+    }
+    module ModuleB {
+        inst u: ModuleA::<InterfaceA>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto interface ProtoInterfaceA {}
+    proto interface ProtoInterfaceB {}
+    interface InterfaceB for ProtoInterfaceB {}
+    module ModuleA::<IF: ProtoInterfaceA> {
+        inst a_if: IF;
+    }
+    module ModuleB {
+        inst u: ModuleA::<InterfaceB>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
     interface InterfaceA {
         var a: logic;
     }
-
     module ModuleA {
         function FuncA::<IF: inst InterfaceA>() -> logic {
             return IF.a;
@@ -1824,23 +2295,54 @@ fn mismatch_type() {
     interface InerfaceA {
         var a: logic;
     }
-
     interface InterfaceB {
         var b: logic;
     }
-
     module ModuleA {
         function FuncA::<IF: inst InerfaceA>() -> logic {
             return IF.a;
         }
 
         inst if_b: InterfaceB;
-        let _b: logic = FuncA::<if_b>;
+        let _b: logic = FuncA::<if_b>();
     }
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto interface ProtoInterfaceA {}
+    interface InterfaceA for ProtoInterfaceA {}
+    module ModuleA {
+        function FuncA::<IF: inst ProtoInterfaceA>() {}
+
+        inst if_a: InterfaceA;
+        always_comb {
+            FuncA::<if_a>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterfaceA {}
+    proto interface ProtoInterfaceB {}
+    interface InterfaceB for ProtoInterfaceB {}
+    module ModuleA {
+        function FuncA::<IF: inst ProtoInterfaceA>() {}
+
+        inst if_b: InterfaceB;
+        always_comb {
+            FuncA::<if_b>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
     interface InterfaceA {

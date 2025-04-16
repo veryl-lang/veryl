@@ -2385,6 +2385,12 @@ impl VerylWalker for Formatter {
         }
         self.space(1);
         if let Some(ref x) = arg.interface_declaration_opt0 {
+            self.r#for(&x.r#for);
+            self.space(1);
+            self.scoped_identifier(&x.scoped_identifier);
+            self.space(1);
+        }
+        if let Some(ref x) = arg.interface_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
         }
@@ -2575,10 +2581,25 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
-    /// Semantic action for non-terminal 'ProtoModuleDeclaration'
-    fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
+    /// Semantic action for non-terminal 'ProtoDeclaration'
+    fn proto_declaration(&mut self, arg: &ProtoDeclaration) {
         self.proto(&arg.proto);
         self.space(1);
+        match &*arg.proto_declaration_group {
+            ProtoDeclarationGroup::ProtoModuleDeclaration(x) => {
+                self.proto_module_declaration(&x.proto_module_declaration);
+            }
+            ProtoDeclarationGroup::ProtoInterfaceDeclaration(x) => {
+                self.proto_interface_declaration(&x.proto_interface_declaration);
+            }
+            ProtoDeclarationGroup::ProtoPackageDeclaration(x) => {
+                self.proto_package_declaration(&x.proto_package_declaration);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'ProtoModuleDeclaration'
+    fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
         self.module(&arg.module);
         self.space(1);
         self.identifier(&arg.identifier);
@@ -2593,10 +2614,27 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'ProtoInterfaceDeclaration'
+    fn proto_interface_declaration(&mut self, arg: &ProtoInterfaceDeclaration) {
+        self.interface(&arg.interface);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_interface_declaration_opt {
+            self.space(1);
+            self.with_parameter(&x.with_parameter);
+        }
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.proto_interface_declaration_list.iter().enumerate() {
+            self.newline_list(i);
+            self.proto_interface_item(&x.proto_interface_item);
+        }
+        self.newline_list_post(arg.proto_interface_declaration_list.is_empty());
+        self.r_brace(&arg.r_brace);
+    }
+
     /// Semantic action for non-terminal 'ProtoPackageDeclaration'
     fn proto_package_declaration(&mut self, arg: &ProtoPackageDeclaration) {
-        self.proto(&arg.proto);
-        self.space(1);
         self.package(&arg.package);
         self.space(1);
         self.identifier(&arg.identifier);
