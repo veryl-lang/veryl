@@ -1515,20 +1515,24 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.defualt_reset_candidates.clear();
 
                 let range = TokenRange::new(&arg.module.module_token, &arg.r_brace.r_brace_token);
-                let proto = arg
-                    .module_declaration_opt0
-                    .as_ref()
-                    .map(|x| x.scoped_identifier.as_ref().into());
-                if let Some(type_path) = &proto {
-                    if !self.check_identifer_with_type_path(&arg.identifier, type_path) {
+                let proto = if let Some(x) = arg.module_declaration_opt0.as_ref() {
+                    let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                    if !self.check_identifer_with_type_path(&arg.identifier, &path) {
                         return Ok(());
                     }
-                }
+
+                    // existance of protptype will be checked at 'analyze_post_pass1' phase
+                    symbol_table::resolve((&path.generic_path(), &self.namespace))
+                        .ok()
+                        .map(|x| x.found.id)
+                } else {
+                    None
+                };
 
                 let definition = definition_table::insert(Definition::Module(arg.clone()));
                 let property = ModuleProperty {
                     range,
-                    proto: proto.map(|x| x.mangled_path()),
+                    proto,
                     generic_parameters,
                     generic_references,
                     parameters,
@@ -1731,19 +1735,23 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (generic_parameters, generic_references) = self.generic_context.pop();
 
                 let range = TokenRange::new(&arg.package.package_token, &arg.r_brace.r_brace_token);
-                let proto = arg
-                    .package_declaration_opt0
-                    .as_ref()
-                    .map(|x| x.scoped_identifier.as_ref().into());
-                if let Some(type_path) = &proto {
-                    if !self.check_identifer_with_type_path(&arg.identifier, type_path) {
+                let proto = if let Some(x) = arg.package_declaration_opt0.as_ref() {
+                    let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                    if !self.check_identifer_with_type_path(&arg.identifier, &path) {
                         return Ok(());
                     }
-                }
+
+                    // existance of protptype will be checked at 'analyze_post_pass1' phase
+                    symbol_table::resolve((&path.generic_path(), &self.namespace))
+                        .ok()
+                        .map(|x| x.found.id)
+                } else {
+                    None
+                };
 
                 let property = PackageProperty {
                     range,
-                    proto: proto.map(|x| x.mangled_path()),
+                    proto,
                     generic_parameters,
                     generic_references,
                     members: self.package_members.drain(..).collect(),

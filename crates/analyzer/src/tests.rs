@@ -1741,6 +1741,30 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
+    module ModuleA {}
+    module ModuleB::<T: ModuleA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    module ModuleB::<T: inst ProtoModuleA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {}
+    module ModuleB::<T: inst ModuleA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
     proto module ProtoA;
     proto module ProtoB;
 
@@ -1911,6 +1935,30 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {}
+    module ModuleA::<PKG: PkgA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
+    module ModuleA::<PKG: inst ProtoPkgA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    package PkgA {}
+    module ModuleA::<PKG: inst PkgA> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
     proto package ProtoPkgA {}

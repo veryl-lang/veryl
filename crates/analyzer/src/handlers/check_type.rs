@@ -21,6 +21,8 @@ pub struct CheckType {
     in_user_defined_type: Vec<()>,
     in_casting_type: Vec<()>,
     in_generic_argument: Vec<()>,
+    in_generic_parameter: bool,
+    in_generic_inst_parameter: bool,
     in_modport: bool,
     in_modport_default_member: bool,
     in_alias_module: bool,
@@ -72,7 +74,10 @@ fn is_casting_type(symbol: &Symbol) -> bool {
     }
 }
 
-fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
+fn resolve_inst_generic_arg_type(
+    arg: &GenericSymbolPath,
+    namespace: &Namespace,
+) -> Option<SymbolId> {
     if !arg.is_resolvable() {
         return None;
     }
@@ -84,28 +89,19 @@ fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace)
         return None;
     };
 
-    if let Some(ref proto) = inst_symbol.found.proto() {
-        symbol_table::resolve((proto, namespace))
-            .ok()
-            .map(|s| s.found)
-    } else {
-        Some(inst_symbol.found)
-    }
+    inst_symbol.found.proto()
 }
 
 fn resolve_proto_generic_arg_type(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
-) -> Option<Symbol> {
+) -> Option<SymbolId> {
     if !arg.is_resolvable() {
         return None;
     }
 
     let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
-    let proto = arg_symbol.found.proto()?;
-    symbol_table::resolve((&proto, namespace))
-        .ok()
-        .map(|s| s.found)
+    arg_symbol.found.proto()
 }
 
 enum InstTypeSource {
@@ -168,6 +164,21 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
+    fn generic_bound(&mut self, arg: &GenericBound) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => match arg {
+                GenericBound::InstScopedIdentifier(_) => self.in_generic_inst_parameter = true,
+                GenericBound::ScopedIdentifier(_) => self.in_generic_parameter = true,
+                _ => {}
+            },
+            HandlerPoint::After => {
+                self.in_generic_parameter = false;
+                self.in_generic_inst_parameter = false;
+            }
+        }
+        Ok(())
+    }
+
     fn with_generic_argument(&mut self, _arg: &WithGenericArgument) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
@@ -219,11 +230,35 @@ impl VerylGrammarTrait for CheckType {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {
+                let symbol = symbol.found;
+
                 // Mangled enum member can't be used directly
-                if matches!(symbol.found.kind, SymbolKind::EnumMemberMangled) {
+                if matches!(symbol.kind, SymbolKind::EnumMemberMangled) {
                     self.errors.push(AnalyzerError::undefined_identifier(
-                        &symbol.found.token.to_string(),
-                        &symbol.found.token.into(),
+                        &symbol.token.to_string(),
+                        &symbol.token.into(),
+                    ));
+                }
+
+                // Check generic parameter
+                if self.in_generic_parameter
+                    && !(symbol.is_proto_module(false)
+                        || symbol.is_proto_interface(false, false)
+                        || symbol.is_proto_package(false))
+                {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        &symbol.token.to_string(),
+                        "proto module, proto interface or proto package",
+                        &symbol.kind.to_kind_name(),
+                        &arg.identifier().token.into(),
+                    ));
+                }
+                if self.in_generic_inst_parameter && !symbol.is_proto_interface(false, true) {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        &symbol.token.to_string(),
+                        "proto module, proto interface or non generic interface",
+                        &symbol.kind.to_kind_name(),
+                        &arg.identifier().token.into(),
                     ));
                 }
 
@@ -231,27 +266,27 @@ impl VerylGrammarTrait for CheckType {
                 if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
                     if self.in_modport {
                         if !matches!(
-                            symbol.found.kind,
+                            symbol.kind,
                             SymbolKind::Modport(_) | SymbolKind::SystemVerilog
                         ) {
                             self.errors.push(AnalyzerError::mismatch_type(
-                                &symbol.found.token.to_string(),
+                                &symbol.token.to_string(),
                                 "modport",
-                                &symbol.found.kind.to_kind_name(),
+                                &symbol.kind.to_kind_name(),
                                 &arg.identifier().token.into(),
                             ));
                         }
                     } else {
                         let type_error = if !self.in_casting_type.is_empty() {
-                            !is_casting_type(&symbol.found)
+                            !is_casting_type(&symbol)
                         } else {
-                            !is_variable_type(&symbol.found)
+                            !is_variable_type(&symbol)
                         };
                         if type_error {
                             self.errors.push(AnalyzerError::mismatch_type(
-                                &symbol.found.token.to_string(),
+                                &symbol.token.to_string(),
                                 "enum or union or struct",
-                                &symbol.found.kind.to_kind_name(),
+                                &symbol.kind.to_kind_name(),
                                 &arg.identifier().token.into(),
                             ));
                         }
@@ -260,26 +295,28 @@ impl VerylGrammarTrait for CheckType {
 
                 // Check targe of alias
                 if self.in_generic_argument.is_empty() {
-                    let expected = if self.in_alias_module && !symbol.found.is_module(false) {
+                    let expected = if self.in_alias_module && !symbol.is_module(false) {
                         Some("module")
-                    } else if self.in_proto_alias_module && !symbol.found.is_proto_module() {
+                    } else if self.in_proto_alias_module && !symbol.is_proto_module(true) {
                         Some("proto module")
-                    } else if self.in_alias_interface && !symbol.found.is_interface(false) {
+                    } else if self.in_alias_interface && !symbol.is_interface(false) {
                         Some("interface")
-                    } else if self.in_proto_alias_interface && !symbol.found.is_proto_interface() {
+                    } else if self.in_proto_alias_interface
+                        && !symbol.is_proto_interface(true, false)
+                    {
                         Some("proto interface")
-                    } else if self.in_alias_package && !symbol.found.is_package(false) {
+                    } else if self.in_alias_package && !symbol.is_package(false) {
                         Some("package")
-                    } else if self.in_proto_alias_package && !symbol.found.is_proto_package() {
+                    } else if self.in_proto_alias_package && !symbol.is_proto_package(true) {
                         Some("proto package")
                     } else {
                         None
                     };
                     if let Some(expected) = expected {
                         self.errors.push(AnalyzerError::mismatch_type(
-                            &symbol.found.token.to_string(),
+                            &symbol.token.to_string(),
                             expected,
-                            &symbol.found.kind.to_kind_name(),
+                            &symbol.kind.to_kind_name(),
                             &arg.identifier().token.into(),
                         ));
                     }
@@ -328,7 +365,7 @@ impl VerylGrammarTrait for CheckType {
                                         symbol_table::resolve((proto, &defined_namespace));
                                     let proto_match =
                                         if let (Some(actual), Ok(required)) = (actual, required) {
-                                            actual.id == required.found.id
+                                            actual == required.found.id
                                         } else {
                                             false
                                         };
@@ -348,7 +385,7 @@ impl VerylGrammarTrait for CheckType {
                                         symbol_table::resolve((proto, &defined_namespace));
                                     let proto_match =
                                         if let (Some(actual), Ok(required)) = (actual, required) {
-                                            actual.id == required.found.id
+                                            actual == required.found.id
                                         } else {
                                             false
                                         };

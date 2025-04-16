@@ -405,10 +405,8 @@ fn check_alias_compat(
         else {
             return ret;
         };
-        if let Some(ref proto) = symbol.found.proto() {
-            symbol_table::resolve((proto, &symbol.found.namespace))
-                .ok()
-                .map(|x| x.found)
+        if let Some(proto) = symbol.found.proto() {
+            symbol_table::get(proto)
         } else {
             None
         }
