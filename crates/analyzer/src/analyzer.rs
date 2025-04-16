@@ -21,7 +21,7 @@ use crate::var_ref::{
 };
 use itertools::Itertools;
 use std::path::Path;
-use veryl_metadata::{Build, Lint, Metadata};
+use veryl_metadata::{Build, EnvVar, Lint, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -33,15 +33,15 @@ pub struct AnalyzerPass1 {
 }
 
 impl AnalyzerPass1 {
-    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
+    pub fn new(build_opt: &Build, lint_opt: &Lint, env_var: &EnvVar) -> Self {
         AnalyzerPass1 {
-            handlers: Pass1Handlers::new(build_opt, lint_opt),
+            handlers: Pass1Handlers::new(build_opt, lint_opt, env_var),
         }
     }
 }
 
 impl VerylWalker for AnalyzerPass1 {
-    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+    fn get_handlers(&mut self) -> Option<Vec<(bool, &mut dyn Handler)>> {
         Some(self.handlers.get_handlers())
     }
 }
@@ -51,15 +51,15 @@ pub struct AnalyzerPass2 {
 }
 
 impl AnalyzerPass2 {
-    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
+    pub fn new(build_opt: &Build, lint_opt: &Lint, env_var: &EnvVar) -> Self {
         AnalyzerPass2 {
-            handlers: Pass2Handlers::new(build_opt, lint_opt),
+            handlers: Pass2Handlers::new(build_opt, lint_opt, env_var),
         }
     }
 }
 
 impl VerylWalker for AnalyzerPass2 {
-    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+    fn get_handlers(&mut self) -> Option<Vec<(bool, &mut dyn Handler)>> {
         Some(self.handlers.get_handlers())
     }
 }
@@ -81,8 +81,8 @@ impl AnalyzerPass2Expression {
 }
 
 impl VerylWalker for AnalyzerPass2Expression {
-    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
-        Some(vec![&mut self.check_expression as &mut dyn Handler])
+    fn get_handlers(&mut self) -> Option<Vec<(bool, &mut dyn Handler)>> {
+        Some(vec![(true, &mut self.check_expression as &mut dyn Handler)])
     }
 }
 
@@ -236,6 +236,7 @@ impl AnalyzerPass3 {
 pub struct Analyzer {
     build_opt: Build,
     lint_opt: Lint,
+    env_var: EnvVar,
 }
 
 pub struct AnalyzerPass3Info {
@@ -282,6 +283,7 @@ impl Analyzer {
         Analyzer {
             build_opt: metadata.build.clone(),
             lint_opt: metadata.lint.clone(),
+            env_var: metadata.env_var.clone(),
         }
     }
 
@@ -294,7 +296,7 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt);
+        let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt, &self.env_var);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 
@@ -323,7 +325,7 @@ impl Analyzer {
         instance_history::clear();
         instance_history::set_depth_limit(self.build_opt.instance_depth_limit);
         instance_history::set_total_limit(self.build_opt.instance_total_limit);
-        let mut pass2 = AnalyzerPass2::new(&self.build_opt, &self.lint_opt);
+        let mut pass2 = AnalyzerPass2::new(&self.build_opt, &self.lint_opt, &self.env_var);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
 
@@ -347,9 +349,16 @@ impl Analyzer {
 
         namespace_table::set_default(&[project_name.into()]);
         let pass3 = AnalyzerPass3::new(path.as_ref());
-        ret.append(&mut pass3.check_variables(&info.symbols));
-        ret.append(&mut pass3.check_assignment(&info.symbols));
-        ret.append(&mut pass3.check_unassigned(&info.var_refs));
+        let enables = &self.env_var.analyzer_pass3_enables;
+        if enables[0] {
+            ret.append(&mut pass3.check_variables(&info.symbols));
+        }
+        if enables[1] {
+            ret.append(&mut pass3.check_assignment(&info.symbols));
+        }
+        if enables[2] {
+            ret.append(&mut pass3.check_unassigned(&info.var_refs));
+        }
 
         ret
     }

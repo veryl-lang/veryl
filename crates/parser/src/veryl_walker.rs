@@ -4,9 +4,11 @@ use crate::veryl_token::VerylToken;
 macro_rules! before {
     ($x:ident, $y:ident, $z:ident) => {
         if let Some(mut handlers) = $x.get_handlers() {
-            for handler in handlers.iter_mut() {
-                handler.set_point(HandlerPoint::Before);
-                let _ = handler.$y($z);
+            for (enable, handler) in handlers.iter_mut() {
+                if *enable {
+                    handler.set_point(HandlerPoint::Before);
+                    let _ = handler.$y($z);
+                }
             }
         }
     };
@@ -15,9 +17,11 @@ macro_rules! before {
 macro_rules! after {
     ($x:ident, $y:ident, $z:ident) => {
         if let Some(mut handlers) = $x.get_handlers() {
-            for handler in handlers.iter_mut() {
-                handler.set_point(HandlerPoint::After);
-                let _ = handler.$y($z);
+            for (enable, handler) in handlers.iter_mut() {
+                if *enable {
+                    handler.set_point(HandlerPoint::After);
+                    let _ = handler.$y($z);
+                }
             }
         }
     };
@@ -3323,7 +3327,7 @@ pub trait VerylWalker {
         after!(self, veryl, arg);
     }
 
-    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+    fn get_handlers(&mut self) -> Option<Vec<(bool, &mut dyn Handler)>> {
         None
     }
 }
