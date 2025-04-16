@@ -42,7 +42,7 @@ use create_symbol_table::*;
 use create_type_dag::*;
 
 use crate::analyzer_error::AnalyzerError;
-use veryl_metadata::{Build, Lint};
+use veryl_metadata::{Build, EnvVar, Lint};
 use veryl_parser::veryl_walker::Handler;
 
 pub struct Pass1Handlers {
@@ -54,10 +54,11 @@ pub struct Pass1Handlers {
     check_statement: CheckStatement,
     check_unsafe: CheckUnsafe,
     create_symbol_table: CreateSymbolTable,
+    enables: [bool; 8],
 }
 
 impl Pass1Handlers {
-    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
+    pub fn new(build_opt: &Build, lint_opt: &Lint, env_var: &EnvVar) -> Self {
         Self {
             check_attribute: CheckAttribute::new(),
             check_port: CheckPort::new(),
@@ -67,19 +68,21 @@ impl Pass1Handlers {
             check_statement: CheckStatement::new(),
             check_unsafe: CheckUnsafe::new(),
             create_symbol_table: CreateSymbolTable::new(build_opt),
+            enables: env_var.analyzer_pass1_enables,
         }
     }
 
-    pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
+    pub fn get_handlers(&mut self) -> Vec<(bool, &mut dyn Handler)> {
+        let en = &self.enables;
         vec![
-            &mut self.check_attribute as &mut dyn Handler,
-            &mut self.check_port as &mut dyn Handler,
-            &mut self.check_embed_include as &mut dyn Handler,
-            &mut self.check_identifier as &mut dyn Handler,
-            &mut self.check_number as &mut dyn Handler,
-            &mut self.check_statement as &mut dyn Handler,
-            &mut self.check_unsafe as &mut dyn Handler,
-            &mut self.create_symbol_table as &mut dyn Handler,
+            (en[0], &mut self.check_attribute as &mut dyn Handler),
+            (en[1], &mut self.check_port as &mut dyn Handler),
+            (en[2], &mut self.check_embed_include as &mut dyn Handler),
+            (en[3], &mut self.check_identifier as &mut dyn Handler),
+            (en[4], &mut self.check_number as &mut dyn Handler),
+            (en[5], &mut self.check_statement as &mut dyn Handler),
+            (en[6], &mut self.check_unsafe as &mut dyn Handler),
+            (en[7], &mut self.create_symbol_table as &mut dyn Handler),
         ]
     }
 
@@ -111,10 +114,11 @@ pub struct Pass2Handlers {
     check_clock_domain: CheckClockDomain,
     check_proto: CheckProto,
     check_type: CheckType,
+    enables: [bool; 13],
 }
 
 impl Pass2Handlers {
-    pub fn new(_build_opt: &Build, _lint_opt: &Lint) -> Self {
+    pub fn new(_build_opt: &Build, _lint_opt: &Lint, env_var: &EnvVar) -> Self {
         Self {
             check_separator: CheckSeparator::new(),
             check_enum: CheckEnum::new(),
@@ -129,24 +133,26 @@ impl Pass2Handlers {
             check_clock_domain: CheckClockDomain::new(),
             check_proto: CheckProto::new(),
             check_type: CheckType::new(),
+            enables: env_var.analyzer_pass2_enables,
         }
     }
 
-    pub fn get_handlers(&mut self) -> Vec<&mut dyn Handler> {
+    pub fn get_handlers(&mut self) -> Vec<(bool, &mut dyn Handler)> {
+        let en = &self.enables;
         vec![
-            &mut self.check_separator as &mut dyn Handler,
-            &mut self.check_enum as &mut dyn Handler,
-            &mut self.check_modport as &mut dyn Handler,
-            &mut self.check_function as &mut dyn Handler,
-            &mut self.check_msb_lsb as &mut dyn Handler,
-            &mut self.check_connect_operation as &mut dyn Handler,
-            &mut self.check_var_ref as &mut dyn Handler,
-            &mut self.check_clock_reset as &mut dyn Handler,
-            &mut self.create_type_dag as &mut dyn Handler,
-            &mut self.check_expression as &mut dyn Handler,
-            &mut self.check_clock_domain as &mut dyn Handler,
-            &mut self.check_proto as &mut dyn Handler,
-            &mut self.check_type as &mut dyn Handler,
+            (en[0], &mut self.check_separator as &mut dyn Handler),
+            (en[1], &mut self.check_enum as &mut dyn Handler),
+            (en[2], &mut self.check_modport as &mut dyn Handler),
+            (en[3], &mut self.check_function as &mut dyn Handler),
+            (en[4], &mut self.check_msb_lsb as &mut dyn Handler),
+            (en[5], &mut self.check_connect_operation as &mut dyn Handler),
+            (en[6], &mut self.check_var_ref as &mut dyn Handler),
+            (en[7], &mut self.check_clock_reset as &mut dyn Handler),
+            (en[8], &mut self.create_type_dag as &mut dyn Handler),
+            (en[9], &mut self.check_expression as &mut dyn Handler),
+            (en[10], &mut self.check_clock_domain as &mut dyn Handler),
+            (en[11], &mut self.check_proto as &mut dyn Handler),
+            (en[12], &mut self.check_type as &mut dyn Handler),
         ]
     }
 
