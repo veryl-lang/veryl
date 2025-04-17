@@ -1288,8 +1288,39 @@ impl_token_range!(AliasDeclaration, alias, semicolon);
 // Proto
 // ----------------------------------------------------------------------------
 
-impl_token_range!(ProtoModuleDeclaration, proto, semicolon);
-impl_token_range!(ProtoPackageDeclaration, proto, r_brace);
+impl From<&ProtoDeclaration> for TokenRange {
+    fn from(value: &ProtoDeclaration) -> Self {
+        let beg: TokenRange = value.proto.as_ref().into();
+        let end: TokenRange = match &*value.proto_declaration_group {
+            ProtoDeclarationGroup::ProtoModuleDeclaration(x) => {
+                x.proto_module_declaration.as_ref().into()
+            }
+            ProtoDeclarationGroup::ProtoInterfaceDeclaration(x) => {
+                x.proto_interface_declaration.as_ref().into()
+            }
+            ProtoDeclarationGroup::ProtoPackageDeclaration(x) => {
+                x.proto_package_declaration.as_ref().into()
+            }
+        };
+        TokenRange {
+            beg: beg.beg,
+            end: end.end,
+        }
+    }
+}
+impl_token_range!(ProtoModuleDeclaration, module, semicolon);
+impl_token_range!(ProtoInterfaceDeclaration, interface, r_brace);
+impl_token_range_enum!(
+    ProtoInterfaceItem,
+    var_declaration,
+    proto_const_declaration,
+    proto_function_declaration,
+    proto_type_def_declaration,
+    proto_alias_declaration,
+    modport_declaration,
+    import_declaration
+);
+impl_token_range!(ProtoPackageDeclaration, package, r_brace);
 impl_token_range_enum!(
     ProtoPacakgeItem,
     proto_const_declaration,
@@ -1347,8 +1378,7 @@ impl_token_range_enum!(
     interface_declaration,
     package_declaration,
     alias_declaration,
-    proto_module_declaration,
-    proto_package_declaration
+    proto_declaration
 );
 
 // ----------------------------------------------------------------------------

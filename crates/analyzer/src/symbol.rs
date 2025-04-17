@@ -391,7 +391,9 @@ impl Symbol {
                 return symbol.found.proto();
             }
             SymbolKind::Interface(x) => {
-                if x.generic_parameters.is_empty() {
+                if x.proto.is_some() {
+                    return x.proto;
+                } else if x.generic_parameters.is_empty() {
                     return Some(self.id);
                 }
             }
@@ -463,9 +465,10 @@ impl Symbol {
         false
     }
 
-    pub fn is_interface(&self, _include_proto: bool) -> bool {
+    pub fn is_interface(&self, include_proto: bool) -> bool {
         match &self.kind {
             SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => return true,
+            SymbolKind::ProtoInterface(_) => return include_proto,
             SymbolKind::GenericInstance(x) => {
                 let symbol = symbol_table::get(x.base).unwrap();
                 return symbol.is_interface(false);
@@ -491,6 +494,7 @@ impl Symbol {
             SymbolKind::Interface(x) => {
                 return include_non_generic_interface && x.generic_parameters.is_empty();
             }
+            SymbolKind::ProtoInterface(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
                     if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
@@ -576,6 +580,7 @@ pub enum SymbolKind {
     AliasModule(AliasModuleProperty),
     ProtoAliasModule(AliasModuleProperty),
     Interface(InterfaceProperty),
+    ProtoInterface(ProtoInterfaceProperty),
     AliasInterface(AliasInterfaceProperty),
     ProtoAliasInterface(AliasInterfaceProperty),
     Function(FunctionProperty),
@@ -624,6 +629,7 @@ impl SymbolKind {
             SymbolKind::AliasModule(_) => "alias module".to_string(),
             SymbolKind::ProtoAliasModule(_) => "proto alias module".to_string(),
             SymbolKind::Interface(_) => "interface".to_string(),
+            SymbolKind::ProtoInterface(_) => "proto interface".to_string(),
             SymbolKind::AliasInterface(_) => "alias interface".to_string(),
             SymbolKind::ProtoAliasInterface(_) => "proto alias interface".to_string(),
             SymbolKind::Function(_) => "function".to_string(),
@@ -812,6 +818,9 @@ impl fmt::Display for SymbolKind {
                     x.generic_parameters.len(),
                     x.parameters.len()
                 )
+            }
+            SymbolKind::ProtoInterface(x) => {
+                format!("proto interface ({} params)", x.parameters.len())
             }
             SymbolKind::AliasInterface(x) => {
                 format!("alias interface (target {})", x.target)
@@ -1492,7 +1501,7 @@ pub struct VariableProperty {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VariableAffiliation {
     Module,
-    Intarface,
+    Interface,
     Package,
     StatementBlock,
     Function,
@@ -1541,10 +1550,16 @@ impl Port {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ParameterKind {
     Param,
     Const,
+}
+
+impl ParameterKind {
+    pub fn is_const(&self) -> bool {
+        matches!(self, ParameterKind::Const)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1612,10 +1627,19 @@ pub struct AliasModuleProperty {
 #[derive(Debug, Clone)]
 pub struct InterfaceProperty {
     pub range: TokenRange,
+    pub proto: Option<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
+    pub members: Vec<SymbolId>,
     pub definition: DefinitionId,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtoInterfaceProperty {
+    pub range: TokenRange,
+    pub parameters: Vec<Parameter>,
+    pub members: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone)]

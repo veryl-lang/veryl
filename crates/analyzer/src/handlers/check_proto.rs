@@ -2,9 +2,10 @@ use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::symbol::{
-    EnumProperty, FunctionProperty, ModuleProperty, PackageProperty, Parameter, ParameterProperty,
-    Port, ProtoConstProperty, ProtoModuleProperty, ProtoPackageProperty, StructProperty, SymbolId,
-    SymbolKind, Type, TypeKind, UnionProperty,
+    Direction, EnumProperty, FunctionProperty, InterfaceProperty, ModportProperty, ModuleProperty,
+    PackageProperty, Parameter, ParameterProperty, Port, ProtoConstProperty,
+    ProtoInterfaceProperty, ProtoModuleProperty, ProtoPackageProperty, StructProperty, SymbolId,
+    SymbolKind, Type, TypeKind, UnionProperty, VariableProperty,
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
@@ -17,11 +18,13 @@ pub enum ProtoIncompatible {
     MissingParam(StrId),
     MissingPort(StrId),
     MissingGenericParam(StrId),
+    MissingVar(StrId),
     MissingConst(StrId),
     MissingTypedef(StrId),
     MissignMember(StrId),
     MissingFunction(StrId),
     MissingAlias(StrId),
+    MissingModport(StrId),
     MissingType,
     UnnecessaryParam(StrId),
     UnnecessaryPort(StrId),
@@ -31,10 +34,12 @@ pub enum ProtoIncompatible {
     IncompatibleParam(StrId),
     IncompatiblePort(StrId),
     IncompatibleGenericParam(StrId),
+    IncompatibleVar(StrId),
     IncompatibleTypedef(StrId),
     IncompatibleMember(StrId),
     IncompatibleFunction(StrId),
     IncompatibleAlias(StrId),
+    IncompatibleModport(StrId),
     IncompatibleType,
 }
 
@@ -50,6 +55,9 @@ impl ProtoIncompatible {
             ProtoIncompatible::MissingGenericParam(x) => {
                 format!("generic parameter {x} is missing")
             }
+            ProtoIncompatible::MissingVar(x) => {
+                format!("variable {x} is missing")
+            }
             ProtoIncompatible::MissingConst(x) => {
                 format!("const {x} is missing")
             }
@@ -64,6 +72,9 @@ impl ProtoIncompatible {
             }
             ProtoIncompatible::MissingAlias(x) => {
                 format!("alias {x} is missing")
+            }
+            ProtoIncompatible::MissingModport(x) => {
+                format!("modport {x} is missing")
             }
             ProtoIncompatible::MissingType => "type specification is missing".to_string(),
             ProtoIncompatible::UnnecessaryParam(x) => {
@@ -88,6 +99,9 @@ impl ProtoIncompatible {
             ProtoIncompatible::IncompatibleGenericParam(x) => {
                 format!("generic parameter {x} is incompatible")
             }
+            ProtoIncompatible::IncompatibleVar(x) => {
+                format!("variable {x} is incompatible")
+            }
             ProtoIncompatible::IncompatibleTypedef(x) => {
                 format!("type definition {x} is incompatible")
             }
@@ -99,6 +113,9 @@ impl ProtoIncompatible {
             }
             ProtoIncompatible::IncompatibleAlias(x) => {
                 format!("alias {x} is incompatible")
+            }
+            ProtoIncompatible::IncompatibleModport(x) => {
+                format!("modport {x} is incompatible")
             }
             ProtoIncompatible::IncompatibleType => "type specification is incompatible".to_string(),
         }
@@ -115,6 +132,140 @@ fn check_module_compat(
         &proto.parameters,
     ));
     ret.append(&mut check_ports_compat(&actual.ports, &proto.ports));
+    ret
+}
+
+fn check_interface_compat(
+    actual: &InterfaceProperty,
+    proto: &ProtoInterfaceProperty,
+) -> Vec<ProtoIncompatible> {
+    let mut ret = Vec::new();
+
+    ret.append(&mut check_params_compat(
+        &actual.parameters,
+        &proto.parameters,
+    ));
+
+    let actual_members: Vec<_> = actual
+        .members
+        .iter()
+        .map(|x| symbol_table::get(*x).unwrap())
+        .collect();
+    let proto_members: Vec<_> = proto
+        .members
+        .iter()
+        .map(|x| symbol_table::get(*x).unwrap())
+        .collect();
+    for proto in proto_members {
+        let text = proto.token.text;
+        if let Some(actual) = actual_members.iter().find(|x| x.token.text == text) {
+            let actual_symbol = actual;
+            let proto_symbol = proto;
+            match (&actual_symbol.kind, &proto_symbol.kind) {
+                (SymbolKind::Parameter(actual), SymbolKind::ProtoConst(proto)) => {
+                    if !check_const_compat(actual, proto).is_empty() {
+                        ret.push(ProtoIncompatible::IncompatibleParam(text));
+                    }
+                }
+                (_, SymbolKind::ProtoConst(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleParam(text));
+                }
+                (SymbolKind::Variable(actual), SymbolKind::Variable(proto)) => {
+                    if !check_variable_compat(actual, proto).is_empty() {
+                        ret.push(ProtoIncompatible::IncompatibleVar(text));
+                    }
+                }
+                (_, SymbolKind::Variable(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleVar(text));
+                }
+                (SymbolKind::TypeDef(_), SymbolKind::ProtoTypeDef) => {
+                    // nothing to check
+                }
+                (_, SymbolKind::ProtoTypeDef) => {
+                    ret.push(ProtoIncompatible::IncompatibleTypedef(text));
+                }
+                (SymbolKind::Function(actual), SymbolKind::ProtoFunction(proto)) => {
+                    if !check_function_compat(actual, proto).is_empty() {
+                        ret.push(ProtoIncompatible::IncompatibleFunction(text));
+                    }
+                }
+                (_, SymbolKind::ProtoFunction(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleFunction(text));
+                }
+                (SymbolKind::AliasModule(actual), SymbolKind::ProtoAliasModule(proto)) => {
+                    if !check_alias_compat(
+                        &actual.target,
+                        &actual_symbol.namespace,
+                        &proto.target,
+                        &proto_symbol.namespace,
+                    )
+                    .is_empty()
+                    {
+                        ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                    }
+                }
+                (_, SymbolKind::ProtoAliasModule(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                }
+                (SymbolKind::AliasInterface(actual), SymbolKind::ProtoAliasInterface(proto)) => {
+                    if !check_alias_compat(
+                        &actual.target,
+                        &actual_symbol.namespace,
+                        &proto.target,
+                        &proto_symbol.namespace,
+                    )
+                    .is_empty()
+                    {
+                        ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                    }
+                }
+                (_, SymbolKind::ProtoAliasInterface(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                }
+                (SymbolKind::AliasPackage(actual), SymbolKind::ProtoAliasPackage(proto)) => {
+                    if !check_alias_compat(
+                        &actual.target,
+                        &actual_symbol.namespace,
+                        &proto.target,
+                        &proto_symbol.namespace,
+                    )
+                    .is_empty()
+                    {
+                        ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                    }
+                }
+                (_, SymbolKind::ProtoAliasPackage(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleAlias(text));
+                }
+                (SymbolKind::Modport(actual), SymbolKind::Modport(proto)) => {
+                    if !check_modport_comat(actual, proto).is_empty() {
+                        ret.push(ProtoIncompatible::IncompatibleModport(text));
+                    }
+                }
+                (_, SymbolKind::Modport(_)) => {
+                    ret.push(ProtoIncompatible::IncompatibleModport(text));
+                }
+                _ => {}
+            }
+        } else {
+            match proto.kind {
+                SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) => {
+                    ret.push(ProtoIncompatible::MissingParam(text))
+                }
+                SymbolKind::Variable(_) => ret.push(ProtoIncompatible::MissingVar(text)),
+                SymbolKind::ProtoTypeDef => ret.push(ProtoIncompatible::MissingTypedef(text)),
+                SymbolKind::ProtoFunction(_) => ret.push(ProtoIncompatible::MissingFunction(text)),
+                SymbolKind::ProtoAliasModule(_)
+                | SymbolKind::ProtoAliasInterface(_)
+                | SymbolKind::ProtoAliasPackage(_) => {
+                    ret.push(ProtoIncompatible::MissingAlias(text))
+                }
+                SymbolKind::Modport(_) => ret.push(ProtoIncompatible::MissingModport(text)),
+                _ => {}
+            }
+        }
+    }
+
     ret
 }
 
@@ -306,7 +457,7 @@ fn check_params_compat(actual: &[Parameter], proto: &[Parameter]) -> Vec<ProtoIn
 
     for (name, actual) in actual_params {
         if let Some(proto) = proto_params.remove(&name) {
-            if !actual.r#type.is_compatible(&proto.r#type) {
+            if !check_param_compat(&actual, &proto).is_empty() {
                 ret.push(ProtoIncompatible::IncompatibleParam(name));
             }
         } else {
@@ -344,11 +495,33 @@ fn check_ports_compat(actual: &[Port], proto: &[Port]) -> Vec<ProtoIncompatible>
     ret
 }
 
+fn check_param_compat(
+    actual: &ParameterProperty,
+    proto: &ParameterProperty,
+) -> Vec<ProtoIncompatible> {
+    let mut ret = Vec::new();
+    if !(actual.kind == proto.kind && actual.r#type.is_compatible(&proto.r#type)) {
+        ret.push(ProtoIncompatible::IncompatibleType)
+    }
+    ret
+}
+
+fn check_variable_compat(
+    actual: &VariableProperty,
+    proto: &VariableProperty,
+) -> Vec<ProtoIncompatible> {
+    check_type_compat(&Some(actual.r#type.clone()), &Some(proto.r#type.clone()))
+}
+
 fn check_const_compat(
     actual: &ParameterProperty,
     proto: &ProtoConstProperty,
 ) -> Vec<ProtoIncompatible> {
-    check_type_compat(&Some(actual.r#type.clone()), &Some(proto.r#type.clone()))
+    let mut ret = Vec::new();
+    if !(actual.kind.is_const() && actual.r#type.is_compatible(&proto.r#type)) {
+        ret.push(ProtoIncompatible::IncompatibleType)
+    }
+    ret
 }
 
 fn check_struct_compat(actual: &StructProperty, proto: &StructProperty) -> Vec<ProtoIncompatible> {
@@ -424,6 +597,60 @@ fn check_alias_compat(
 
     if !proto_match {
         ret.push(ProtoIncompatible::IncompatibleType);
+    }
+
+    ret
+}
+
+fn check_modport_comat(
+    actual: &ModportProperty,
+    proto: &ModportProperty,
+) -> Vec<ProtoIncompatible> {
+    let mut ret = Vec::new();
+
+    let actual_members: HashMap<_, _> = actual
+        .members
+        .iter()
+        .map(|x| {
+            let symbol = symbol_table::get(*x).unwrap();
+            let direction = match symbol.kind {
+                SymbolKind::ModportVariableMember(x) => x.direction,
+                SymbolKind::ModportFunctionMember(_) => Direction::Modport,
+                _ => {
+                    unreachable!()
+                }
+            };
+            (symbol.token.text, direction)
+        })
+        .collect();
+    let mut proto_members: HashMap<_, _> = proto
+        .members
+        .iter()
+        .map(|x| {
+            let symbol = symbol_table::get(*x).unwrap();
+            let direction = match symbol.kind {
+                SymbolKind::ModportVariableMember(x) => x.direction,
+                SymbolKind::ModportFunctionMember(_) => Direction::Modport,
+                _ => {
+                    unreachable!()
+                }
+            };
+            (symbol.token.text, direction)
+        })
+        .collect();
+
+    for (name, actual) in actual_members {
+        if let Some(proto) = proto_members.remove(&name) {
+            if actual != proto {
+                ret.push(ProtoIncompatible::IncompatibleMember(name));
+            }
+        } else {
+            ret.push(ProtoIncompatible::UnnecessaryMember(name));
+        }
+    }
+
+    for (name, _) in proto_members {
+        ret.push(ProtoIncompatible::MissignMember(name));
     }
 
     ret
@@ -527,7 +754,18 @@ impl CheckProto {
             (SymbolKind::Module(_), _) => {
                 self.errors.push(AnalyzerError::mismatch_type(
                     &proto_symbol.token.to_string(),
-                    "module prototype",
+                    "proto module",
+                    &proto_symbol.kind.to_kind_name(),
+                    &proto.identifier().token.into(),
+                ));
+            }
+            (SymbolKind::Interface(actual), SymbolKind::ProtoInterface(proto)) => {
+                errors.append(&mut check_interface_compat(actual, proto));
+            }
+            (SymbolKind::Interface(_), _) => {
+                self.errors.push(AnalyzerError::mismatch_type(
+                    &proto_symbol.token.to_string(),
+                    "proto interface",
                     &proto_symbol.kind.to_kind_name(),
                     &proto.identifier().token.into(),
                 ));
@@ -538,7 +776,7 @@ impl CheckProto {
             (SymbolKind::Package(_), _) => {
                 self.errors.push(AnalyzerError::mismatch_type(
                     &proto_symbol.token.to_string(),
-                    "package prototype",
+                    "proto package",
                     &proto_symbol.kind.to_kind_name(),
                     &proto.identifier().token.into(),
                 ));
@@ -567,6 +805,15 @@ impl VerylGrammarTrait for CheckProto {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Some(ref x) = arg.module_declaration_opt0 {
+                self.check_proto(&arg.identifier, &x.scoped_identifier);
+            }
+        }
+        Ok(())
+    }
+
+    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if let Some(ref x) = arg.interface_declaration_opt0 {
                 self.check_proto(&arg.identifier, &x.scoped_identifier);
             }
         }

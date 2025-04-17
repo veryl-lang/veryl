@@ -17,10 +17,10 @@ use crate::symbol::{
     FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
     InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
     ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
-    ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoModuleProperty,
-    ProtoPackageProperty, StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind,
-    TestProperty, TestType, TypeDefProperty, TypeKind, TypeModifierKind, UnionMemberProperty,
-    UnionProperty, VariableAffiliation, VariableProperty,
+    ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoInterfaceProperty,
+    ProtoModuleProperty, ProtoPackageProperty, StructMemberProperty, StructProperty, Symbol,
+    SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, TypeModifierKind,
+    UnionMemberProperty, UnionProperty, VariableAffiliation, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -82,7 +82,7 @@ pub struct CreateSymbolTable {
     enum_member_value: Option<EnumMemberValue>,
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
-    package_members: Vec<SymbolId>,
+    declaration_items: Vec<SymbolId>,
     affiliation: Vec<VariableAffiliation>,
     connect_target_identifiers: Vec<ConnectTargetIdentifier>,
     connects: HashMap<Token, ConnectTarget>,
@@ -402,6 +402,66 @@ impl CreateSymbolTable {
         }
     }
 
+    fn link_modport_members(&self) {
+        for id in &self.modport_member_ids {
+            let mut mp_member = symbol_table::get(*id).unwrap();
+            match mp_member.kind {
+                SymbolKind::ModportFunctionMember(_) => {
+                    if let Some(id) = self.function_ids.get(&mp_member.token.text) {
+                        let property = ModportFunctionMemberProperty { function: *id };
+                        let kind = SymbolKind::ModportFunctionMember(property);
+                        mp_member.kind = kind;
+                        symbol_table::update(mp_member);
+                    }
+                }
+                SymbolKind::ModportVariableMember(x) => {
+                    if let Some(id) = self.variable_ids.get(&mp_member.token.text) {
+                        let mut property = x;
+                        property.variable = *id;
+                        let kind = SymbolKind::ModportVariableMember(property);
+                        mp_member.kind = kind;
+                        symbol_table::update(mp_member);
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+
+    fn expand_modport_default_member(&mut self, interface_id: SymbolId) {
+        // collect all members in modport for default member
+        let mut directions = HashMap::new();
+        for id in &self.modport_ids {
+            let mp = symbol_table::get(*id).unwrap();
+            if let SymbolKind::Modport(ref x) = mp.kind {
+                for x in &x.members {
+                    let member = symbol_table::get(*x).unwrap();
+                    if let SymbolKind::ModportVariableMember(x) = &member.kind {
+                        directions.insert((mp.token.text, member.token.text), x.direction);
+                    }
+                }
+            }
+        }
+
+        for id in &self.modport_ids.clone() {
+            let mut mp = symbol_table::get(*id).unwrap();
+            if let SymbolKind::Modport(ref x) = mp.kind {
+                // add default members
+                let mut members = x.members.clone();
+                members.append(&mut self.get_modport_default_members(&mp, &directions));
+
+                let property = ModportProperty {
+                    interface: interface_id,
+                    members,
+                    default: x.default.clone(),
+                };
+                let kind = SymbolKind::Modport(property);
+                mp.kind = kind;
+                symbol_table::update(mp);
+            }
+        }
+    }
+
     fn get_modport_default_members(
         &mut self,
         mp: &Symbol,
@@ -459,9 +519,12 @@ impl CreateSymbolTable {
         ret
     }
 
-    fn push_package_member(&mut self, id: SymbolId) {
-        if let Some(&VariableAffiliation::Package) = self.affiliation.last() {
-            self.package_members.push(id);
+    fn push_declaration_item(&mut self, id: SymbolId) {
+        if matches!(
+            self.affiliation.last(),
+            Some(&VariableAffiliation::Interface) | Some(&VariableAffiliation::Package)
+        ) {
+            self.declaration_items.push(id);
         }
     }
 }
@@ -745,6 +808,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
+                self.push_declaration_item(id);
                 self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
             }
         }
@@ -781,6 +845,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind.clone(), false)
             {
+                self.push_declaration_item(id);
                 self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
                 let text = arg.identifier.identifier_token.token.text;
                 self.variable_ids.insert(text, id);
@@ -826,7 +891,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             };
             let kind = SymbolKind::Parameter(property);
             if let Some(id) = self.insert_symbol(&token, kind, false) {
-                self.push_package_member(id);
+                self.push_declaration_item(id);
             }
         }
         Ok(())
@@ -909,6 +974,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 if let Some(id) =
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
                 {
+                    self.push_declaration_item(id);
                     self.modport_ids.push(id);
                 }
             }
@@ -983,7 +1049,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 if let Some(id) =
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
                 {
-                    self.push_package_member(id);
+                    self.push_declaration_item(id);
                 }
             }
         }
@@ -1064,7 +1130,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 if let Some(id) =
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
                 {
-                    self.push_package_member(id);
+                    self.push_declaration_item(id);
                 }
             }
         }
@@ -1083,7 +1149,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
             {
-                self.push_package_member(id);
+                self.push_declaration_item(id);
             }
         }
         Ok(())
@@ -1435,7 +1501,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 ) {
                     self.function_ids
                         .insert(arg.identifier.identifier_token.token.text, id);
-                    self.push_package_member(id);
+                    self.push_declaration_item(id);
                 }
             }
         }
@@ -1514,7 +1580,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.default_reset = None;
                 self.defualt_reset_candidates.clear();
 
-                let range = TokenRange::new(&arg.module.module_token, &arg.r_brace.r_brace_token);
                 let proto = if let Some(x) = arg.module_declaration_opt0.as_ref() {
                     let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
                     if !self.check_identifer_with_type_path(&arg.identifier, &path) {
@@ -1531,7 +1596,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let definition = definition_table::insert(Definition::Module(arg.clone()));
                 let property = ModuleProperty {
-                    range,
+                    range: arg.into(),
                     proto,
                     generic_parameters,
                     generic_references,
@@ -1623,7 +1688,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.push(name);
                 self.generic_context.push();
                 self.parameters.push(Vec::new());
-                self.affiliation.push(VariableAffiliation::Intarface);
+                self.affiliation.push(VariableAffiliation::Interface);
                 self.variable_ids.clear();
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
@@ -1638,81 +1703,38 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (generic_parameters, generic_references) = self.generic_context.pop();
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
 
-                let range =
-                    TokenRange::new(&arg.interface.interface_token, &arg.r_brace.r_brace_token);
+                let proto = if let Some(x) = arg.interface_declaration_opt0.as_ref() {
+                    let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
+                    if !self.check_identifer_with_type_path(&arg.identifier, &path) {
+                        return Ok(());
+                    }
+
+                    // existance of protptype will be checked at 'analyze_post_pass1' phase
+                    symbol_table::resolve((&path.generic_path(), &self.namespace))
+                        .ok()
+                        .map(|x| x.found.id)
+                } else {
+                    None
+                };
 
                 let definition = definition_table::insert(Definition::Interface(arg.clone()));
                 let property = InterfaceProperty {
-                    range,
+                    range: arg.into(),
+                    proto,
                     generic_parameters,
                     generic_references,
                     parameters,
+                    members: self.declaration_items.drain(..).collect(),
                     definition,
                 };
-                let interface_id = self.insert_symbol(
+                if let Some(interface_id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Interface(property),
                     self.is_public,
-                );
-
-                //  link modport members to actual definition
-                for id in &self.modport_member_ids {
-                    let mut mp_member = symbol_table::get(*id).unwrap();
-                    match mp_member.kind {
-                        SymbolKind::ModportFunctionMember(_) => {
-                            if let Some(id) = self.function_ids.get(&mp_member.token.text) {
-                                let property = ModportFunctionMemberProperty { function: *id };
-                                let kind = SymbolKind::ModportFunctionMember(property);
-                                mp_member.kind = kind;
-                                symbol_table::update(mp_member);
-                            }
-                        }
-                        SymbolKind::ModportVariableMember(x) => {
-                            if let Some(id) = self.variable_ids.get(&mp_member.token.text) {
-                                let mut property = x;
-                                property.variable = *id;
-                                let kind = SymbolKind::ModportVariableMember(property);
-                                mp_member.kind = kind;
-                                symbol_table::update(mp_member);
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-
-                // collect all members in modport for default member
-                let mut directions = HashMap::new();
-                for id in &self.modport_ids {
-                    let mp = symbol_table::get(*id).unwrap();
-                    if let SymbolKind::Modport(ref x) = mp.kind {
-                        for x in &x.members {
-                            let member = symbol_table::get(*x).unwrap();
-                            if let SymbolKind::ModportVariableMember(x) = &member.kind {
-                                directions.insert((mp.token.text, member.token.text), x.direction);
-                            }
-                        }
-                    }
-                }
-
-                for id in &self.modport_ids.clone() {
-                    let mut mp = symbol_table::get(*id).unwrap();
-                    if let SymbolKind::Modport(ref x) = mp.kind {
-                        if let Some(interface) = interface_id {
-                            // add default members
-                            let mut members = x.members.clone();
-                            members.append(&mut self.get_modport_default_members(&mp, &directions));
-
-                            let property = ModportProperty {
-                                interface,
-                                members,
-                                default: x.default.clone(),
-                            };
-                            let kind = SymbolKind::Modport(property);
-                            mp.kind = kind;
-                            symbol_table::update(mp);
-                        }
-                    }
-                }
+                ) {
+                    self.link_modport_members();
+                    self.expand_modport_default_member(interface_id);
+                };
             }
         }
         Ok(())
@@ -1754,7 +1776,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     proto,
                     generic_parameters,
                     generic_references,
-                    members: self.package_members.drain(..).collect(),
+                    members: self.declaration_items.drain(..).collect(),
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
@@ -1791,21 +1813,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, self.is_public)
             {
-                self.push_package_member(id);
+                self.push_declaration_item(id);
             }
         }
         Ok(())
     }
 
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
-                self.parameters.push(Vec::new());
-                self.ports.push(Vec::new());
+                self.namespace
+                    .push(arg.identifier.identifier_token.token.text);
                 self.affiliation.push(VariableAffiliation::Module);
                 self.in_proto = true;
+                self.parameters.push(Vec::new());
+                self.ports.push(Vec::new());
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1815,11 +1837,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
                 let ports: Vec<_> = self.ports.pop().unwrap();
 
-                let range =
-                    TokenRange::new(&arg.module.module_token, &arg.semicolon.semicolon_token);
-
                 let property = ProtoModuleProperty {
-                    range,
+                    range: arg.into(),
                     parameters,
                     ports,
                 };
@@ -1833,14 +1852,50 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn proto_interface_declaration(
+        &mut self,
+        arg: &ProtoInterfaceDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.namespace
+                    .push(arg.identifier.identifier_token.token.text);
+                self.affiliation.push(VariableAffiliation::Interface);
+                self.parameters.push(Vec::new());
+                self.function_ids.clear();
+                self.apply_file_scope_import();
+            }
+            HandlerPoint::After => {
+                self.namespace.pop();
+                self.affiliation.pop();
+
+                let parameters: Vec<_> = self.parameters.pop().unwrap();
+                let property = ProtoInterfaceProperty {
+                    range: arg.into(),
+                    parameters,
+                    members: self.declaration_items.drain(..).collect(),
+                };
+                if let Some(interface_id) = self.insert_symbol(
+                    &arg.identifier.identifier_token.token,
+                    SymbolKind::ProtoInterface(property),
+                    self.is_public,
+                ) {
+                    self.link_modport_members();
+                    self.expand_modport_default_member(interface_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn proto_package_declaration(
         &mut self,
         arg: &ProtoPackageDeclaration,
     ) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
+                self.namespace
+                    .push(arg.identifier.identifier_token.token.text);
                 self.affiliation.push(VariableAffiliation::Package);
                 self.function_ids.clear();
                 self.apply_file_scope_import();
@@ -1849,10 +1904,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.pop();
                 self.affiliation.pop();
 
-                let range = TokenRange::new(&arg.proto.proto_token, &arg.r_brace.r_brace_token);
                 let property = ProtoPackageProperty {
-                    range,
-                    members: self.package_members.drain(..).collect(),
+                    range: arg.into(),
+                    members: self.declaration_items.drain(..).collect(),
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
@@ -1886,7 +1940,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = ProtoConstProperty { token, r#type };
             let kind = SymbolKind::ProtoConst(property);
             if let Some(id) = self.insert_symbol(&token, kind, false) {
-                self.push_package_member(id);
+                self.push_declaration_item(id);
             }
         }
         Ok(())
@@ -1900,7 +1954,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let token = arg.identifier.identifier_token.token;
             let kind = SymbolKind::ProtoTypeDef;
             if let Some(id) = self.insert_symbol(&token, kind, false) {
-                self.push_package_member(id);
+                self.push_declaration_item(id);
             }
         }
         Ok(())
@@ -1953,7 +2007,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 ) {
                     self.function_ids
                         .insert(arg.identifier.identifier_token.token.text, id);
-                    self.push_package_member(id);
+                    self.push_declaration_item(id);
                 }
             }
         }
@@ -1984,7 +2038,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(id) =
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
             {
-                self.push_package_member(id);
+                self.push_declaration_item(id);
             }
         }
         Ok(())

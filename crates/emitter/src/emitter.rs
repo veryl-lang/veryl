@@ -4602,7 +4602,7 @@ impl VerylWalker for Emitter {
             if !file_scope_import.is_empty() {
                 self.newline_pop();
             }
-            if let Some(ref x) = arg.interface_declaration_opt0 {
+            if let Some(ref x) = arg.interface_declaration_opt1 {
                 self.space(1);
                 self.with_parameter(&x.with_parameter);
             }
@@ -4918,8 +4918,7 @@ impl VerylWalker for Emitter {
             }
             // alias and proto are not emitted at SystemVerilog
             PublicDescriptionItem::AliasDeclaration(_)
-            | PublicDescriptionItem::ProtoModuleDeclaration(_)
-            | PublicDescriptionItem::ProtoPackageDeclaration(_) => (),
+            | PublicDescriptionItem::ProtoDeclaration(_) => (),
         };
     }
 
@@ -5121,6 +5120,7 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
         }
         SymbolKind::GenericParameter(_)
         | SymbolKind::ProtoModule(_)
+        | SymbolKind::ProtoInterface(_)
         | SymbolKind::ProtoPackage(_) => (),
         SymbolKind::Port(x) => {
             if let Some(ref x) = x.prefix {

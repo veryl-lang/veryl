@@ -74,10 +74,7 @@ fn is_casting_type(symbol: &Symbol) -> bool {
     }
 }
 
-fn resolve_inst_generic_arg_type(
-    arg: &GenericSymbolPath,
-    namespace: &Namespace,
-) -> Option<SymbolId> {
+fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
     if !arg.is_resolvable() {
         return None;
     }
@@ -89,7 +86,10 @@ fn resolve_inst_generic_arg_type(
         return None;
     };
 
-    inst_symbol.found.proto()
+    inst_symbol
+        .found
+        .proto()
+        .map(|x| symbol_table::get(x).unwrap())
 }
 
 fn resolve_proto_generic_arg_type(
@@ -363,18 +363,27 @@ impl VerylGrammarTrait for CheckType {
                                     let actual = resolve_inst_generic_arg_type(arg, &namespace);
                                     let required =
                                         symbol_table::resolve((proto, &defined_namespace));
-                                    let proto_match =
-                                        if let (Some(actual), Ok(required)) = (actual, required) {
-                                            actual == required.found.id
-                                        } else {
-                                            false
-                                        };
+                                    let proto_match = if let (Some(actual), Ok(required)) =
+                                        (&actual, &required)
+                                    {
+                                        actual.id == required.found.id
+                                    } else {
+                                        false
+                                    };
 
                                     if !proto_match {
+                                        let (name, kind) = if let Some(x) = actual {
+                                            (x.token.to_string(), x.kind.to_kind_name())
+                                        } else {
+                                            (
+                                                symbol.found.token.to_string(),
+                                                symbol.found.kind.to_kind_name(),
+                                            )
+                                        };
                                         self.errors.push(AnalyzerError::mismatch_type(
-                                            &symbol.found.token.to_string(),
+                                            &name,
                                             &format!("inst {proto}"),
-                                            &symbol.found.kind.to_kind_name(),
+                                            &kind,
                                             &arg.range,
                                         ));
                                     }
@@ -517,7 +526,17 @@ impl VerylGrammarTrait for CheckType {
                         check_port_connection = true;
                         None
                     }
-                    SymbolKind::Interface(_) | SymbolKind::SystemVerilog => None,
+                    SymbolKind::Interface(ref x) => {
+                        params.append(&mut x.parameters.clone());
+                        check_port_connection = true;
+                        None
+                    }
+                    SymbolKind::ProtoInterface(ref x) => {
+                        params.append(&mut x.parameters.clone());
+                        check_port_connection = true;
+                        None
+                    }
+                    SymbolKind::SystemVerilog => None,
                     _ => {
                         if self.in_module {
                             Some("module or interface")

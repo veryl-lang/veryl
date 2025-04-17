@@ -198,9 +198,9 @@ async fn diagnostics() {
     assert_eq!(res.method(), "textDocument/publishDiagnostics");
     let diags = res.params().unwrap()["diagnostics"].as_array().unwrap();
     assert_eq!(diags[0]["code"], Value::from("ParserError::SyntaxError"));
-    assert_eq!(diags[0]["range"]["start"]["character"], Value::from(0));
+    assert_eq!(diags[0]["range"]["start"]["character"], Value::from(10));
     assert_eq!(diags[0]["range"]["start"]["line"], Value::from(0));
-    assert_eq!(diags[0]["range"]["end"]["character"], Value::from(6));
+    assert_eq!(diags[0]["range"]["end"]["character"], Value::from(13));
     assert_eq!(diags[0]["range"]["end"]["line"], Value::from(0));
 }
 

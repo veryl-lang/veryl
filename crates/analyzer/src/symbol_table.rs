@@ -229,6 +229,7 @@ impl SymbolTable {
             | SymbolKind::ProtoModule(_)
             | SymbolKind::AliasModule(_)
             | SymbolKind::Interface(_)
+            | SymbolKind::ProtoInterface(_)
             | SymbolKind::AliasInterface(_)
             | SymbolKind::Package(_)
             | SymbolKind::ProtoPackage(_)
@@ -254,7 +255,9 @@ impl SymbolTable {
         let via_interface_instance = match &last_found.kind {
             SymbolKind::Instance(_) => matches!(
                 last_found_type,
-                Some(SymbolKind::Interface(_)) | Some(SymbolKind::AliasInterface(_))
+                Some(SymbolKind::Interface(_))
+                    | Some(SymbolKind::ProtoInterface(_))
+                    | Some(SymbolKind::AliasInterface(_))
             ),
             SymbolKind::GenericParameter(x) => {
                 matches!(&x.bound, GenericBoundKind::Inst(_))
@@ -263,7 +266,9 @@ impl SymbolTable {
             _ => false,
         };
         let via_interface = match &last_found.kind {
-            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => true,
+            SymbolKind::Interface(_)
+            | SymbolKind::ProtoInterface(_)
+            | SymbolKind::AliasInterface(_) => true,
             SymbolKind::GenericInstance(_) => {
                 matches!(last_found_type, Some(SymbolKind::Interface(_)))
             }
@@ -437,6 +442,7 @@ impl SymbolTable {
                         }
                         SymbolKind::Module(_)
                         | SymbolKind::Interface(_)
+                        | SymbolKind::ProtoInterface(_)
                         | SymbolKind::Package(_)
                         | SymbolKind::ProtoPackage(_) => {
                             context.namespace = found.inner_namespace();

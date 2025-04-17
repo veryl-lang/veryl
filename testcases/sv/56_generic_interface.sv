@@ -14,14 +14,15 @@ module veryl_testcase_Module56;
     veryl_testcase___Interface56B__Package56A_X u3 ();
     veryl_testcase___Interface56B__3 u4 ();
     veryl_testcase___Interface56B__Package56A_X u5 ();
-    veryl_testcase___Module56Sub__1 u6 ();
+    veryl_testcase___Module56A__1 u6 ();
+    veryl_testcase___Module56C____Interface56C__2 u7 ();
 
     logic _a; always_comb _a = u0._a;
     logic _b; always_comb _b = u2._b;
     logic _c; always_comb _c = u5._b;
 endmodule
 
-module veryl_testcase___Module56Sub__1;
+module veryl_testcase___Module56A__1;
     veryl_testcase___Interface56A__1 u ();
     function automatic void f() ;
     endfunction
@@ -49,4 +50,15 @@ endinterface
 interface veryl_testcase___Interface56B__3;
     logic [3-1:0] _b;
 endinterface
+
+
+interface veryl_testcase___Interface56C__2;
+    localparam int unsigned C_WIDTH = 2;
+
+    logic [C_WIDTH-1:0] _c;
+endinterface
+
+module veryl_testcase___Module56C____Interface56C__2;
+    veryl_testcase___Interface56C__2 u ();
+endmodule
 //# sourceMappingURL=../map/56_generic_interface.sv.map

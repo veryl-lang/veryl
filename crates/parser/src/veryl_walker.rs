@@ -2848,6 +2848,10 @@ pub trait VerylWalker {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         if let Some(ref x) = arg.interface_declaration_opt0 {
+            self.r#for(&x.r#for);
+            self.scoped_identifier(&x.scoped_identifier);
+        }
+        if let Some(ref x) = arg.interface_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
         }
         self.l_brace(&arg.l_brace);
@@ -3100,10 +3104,27 @@ pub trait VerylWalker {
         after!(self, alias_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'ProtoDeclaration'
+    fn proto_declaration(&mut self, arg: &ProtoDeclaration) {
+        before!(self, proto_declaration, arg);
+        self.proto(&arg.proto);
+        match &*arg.proto_declaration_group {
+            ProtoDeclarationGroup::ProtoModuleDeclaration(x) => {
+                self.proto_module_declaration(&x.proto_module_declaration);
+            }
+            ProtoDeclarationGroup::ProtoInterfaceDeclaration(x) => {
+                self.proto_interface_declaration(&x.proto_interface_declaration);
+            }
+            ProtoDeclarationGroup::ProtoPackageDeclaration(x) => {
+                self.proto_package_declaration(&x.proto_package_declaration);
+            }
+        }
+        after!(self, proto_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'ProtoModuleDeclaration'
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) {
         before!(self, proto_module_declaration, arg);
-        self.proto(&arg.proto);
         self.module(&arg.module);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.proto_module_declaration_opt {
@@ -3116,10 +3137,54 @@ pub trait VerylWalker {
         after!(self, proto_module_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'ProtoInterfaceDeclaration'
+    fn proto_interface_declaration(&mut self, arg: &ProtoInterfaceDeclaration) {
+        before!(self, proto_interface_declaration, arg);
+        self.interface(&arg.interface);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_interface_declaration_opt {
+            self.with_parameter(&x.with_parameter);
+        }
+        self.l_brace(&arg.l_brace);
+        for x in &arg.proto_interface_declaration_list {
+            self.proto_interface_item(&x.proto_interface_item);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, proto_interface_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ProtoInterfaceItem'
+    fn proto_interface_item(&mut self, arg: &ProtoInterfaceItem) {
+        before!(self, proto_interface_item, arg);
+        match arg {
+            ProtoInterfaceItem::VarDeclaration(x) => {
+                self.var_declaration(&x.var_declaration);
+            }
+            ProtoInterfaceItem::ProtoConstDeclaration(x) => {
+                self.proto_const_declaration(&x.proto_const_declaration);
+            }
+            ProtoInterfaceItem::ProtoFunctionDeclaration(x) => {
+                self.proto_function_declaration(&x.proto_function_declaration);
+            }
+            ProtoInterfaceItem::ProtoTypeDefDeclaration(x) => {
+                self.proto_type_def_declaration(&x.proto_type_def_declaration);
+            }
+            ProtoInterfaceItem::ProtoAliasDeclaration(x) => {
+                self.proto_alias_declaration(&x.proto_alias_declaration);
+            }
+            ProtoInterfaceItem::ModportDeclaration(x) => {
+                self.modport_declaration(&x.modport_declaration);
+            }
+            ProtoInterfaceItem::ImportDeclaration(x) => {
+                self.import_declaration(&x.import_declaration);
+            }
+        }
+        after!(self, proto_interface_item, arg);
+    }
+
     /// Semantic action for non-terminal 'ProtoPackageDeclaration'
     fn proto_package_declaration(&mut self, arg: &ProtoPackageDeclaration) {
         before!(self, proto_package_declaration, arg);
-        self.proto(&arg.proto);
         self.package(&arg.package);
         self.identifier(&arg.identifier);
         self.l_brace(&arg.l_brace);
@@ -3307,11 +3372,8 @@ pub trait VerylWalker {
             PublicDescriptionItem::AliasDeclaration(x) => {
                 self.alias_declaration(&x.alias_declaration);
             }
-            PublicDescriptionItem::ProtoModuleDeclaration(x) => {
-                self.proto_module_declaration(&x.proto_module_declaration)
-            }
-            PublicDescriptionItem::ProtoPackageDeclaration(x) => {
-                self.proto_package_declaration(&x.proto_package_declaration);
+            PublicDescriptionItem::ProtoDeclaration(x) => {
+                self.proto_declaration(&x.proto_declaration)
             }
         };
         after!(self, public_description_item, arg);
