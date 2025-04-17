@@ -1513,6 +1513,19 @@ impl Emitter {
             maps.pop();
         }
     }
+
+    fn get_generic_declaration_name<'a>(&self, generic_name: &'a str) -> &'a str {
+        if self.build_opt.omit_project_prefix {
+            let project_name = format!("{}_", self.project_name.unwrap());
+            if let Some(x) = generic_name.strip_prefix(&project_name) {
+                x
+            } else {
+                generic_name
+            }
+        } else {
+            generic_name
+        }
+    }
 }
 
 fn is_var_declaration(arg: &StatementBlockItem) -> bool {
@@ -4501,7 +4514,8 @@ impl VerylWalker for Emitter {
             self.module(&arg.module);
             self.space(1);
             if map.generic() {
-                self.token(&arg.identifier.identifier_token.replace(&map.name));
+                let name = self.get_generic_declaration_name(&map.name);
+                self.token(&arg.identifier.identifier_token.replace(name));
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -4583,7 +4597,8 @@ impl VerylWalker for Emitter {
             self.interface(&arg.interface);
             self.space(1);
             if map.generic() {
-                self.token(&arg.identifier.identifier_token.replace(&map.name));
+                let name = self.get_generic_declaration_name(&map.name);
+                self.token(&arg.identifier.identifier_token.replace(name));
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -4783,7 +4798,8 @@ impl VerylWalker for Emitter {
             self.package(&arg.package);
             self.space(1);
             if map.generic() {
-                self.token(&arg.identifier.identifier_token.replace(&map.name));
+                let name = self.get_generic_declaration_name(&map.name);
+                self.token(&arg.identifier.identifier_token.replace(name));
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));

@@ -184,6 +184,7 @@ endmodule
 #[test]
 fn omit_project_prefix() {
     let code = r#"module ModuleA {
+    inst u: InterfaceB::<10>;
 }
 
 package PackageA {
@@ -191,15 +192,22 @@ package PackageA {
 
 interface InterfaceA {
 }
+
+interface InterfaceB::<N: const> {
+}
 "#;
 
     let expect = r#"module ModuleA;
+    __InterfaceB__10 u ();
 endmodule
 
 package PackageA;
 endpackage
 
 interface InterfaceA;
+endinterface
+
+interface __InterfaceB__10;
 endinterface
 //# sourceMappingURL=test.sv.map
 "#;
