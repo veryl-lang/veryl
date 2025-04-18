@@ -953,6 +953,22 @@ impl Evaluator {
 
     pub fn type_width(&mut self, x: Type) -> Option<Vec<usize>> {
         match x.kind {
+            TypeKind::U8 | TypeKind::I8 => {
+                if x.width.is_empty() {
+                    Some(vec![8])
+                } else {
+                    // TODO error
+                    None
+                }
+            }
+            TypeKind::U16 | TypeKind::I16 => {
+                if x.width.is_empty() {
+                    Some(vec![16])
+                } else {
+                    // TODO error
+                    None
+                }
+            }
             TypeKind::U32 | TypeKind::I32 | TypeKind::F32 => {
                 if x.width.is_empty() {
                     Some(vec![32])

@@ -9,16 +9,16 @@ module veryl_testcase_Module55;
 
 
 
-    veryl_testcase___Module55A__Module55B u0 ();
-    veryl_testcase___Module55A__Module55C u1 ();
-    veryl_testcase___Module55E__Module55C u2 ();
-    veryl_testcase___Module55E__Module55D u3 ();
-    veryl_testcase___Module55F__Module55C u4 ();
-    veryl_testcase___Module55F__Module55B u5 ();
-    veryl_testcase___Module55H__10 u6 ();
-    veryl_testcase___Module55H__10 u7 ();
-    veryl_testcase___Module55I____Package55__8__16 u8 ();
-    veryl_testcase___Module55I____Package55__8__16 u9 ();
+    veryl_testcase___Module55A__Module55B u_a0 ();
+    veryl_testcase___Module55A__Module55C u_a1 ();
+    veryl_testcase___Module55E__Module55C u_e0 ();
+    veryl_testcase___Module55E__Module55D u_e1 ();
+    veryl_testcase___Module55F__Module55C u_f0 ();
+    veryl_testcase___Module55F__Module55B u_f1 ();
+    veryl_testcase___Module55H__10 u_h0 ();
+    veryl_testcase___Module55H__10 u_h1 ();
+    veryl_testcase___Module55I____Package55__8__16 u_i0 ();
+    veryl_testcase___Module55I____Package55__8__16 u_j0 ();
 endmodule
 
 

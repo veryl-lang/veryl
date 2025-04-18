@@ -22,27 +22,27 @@ module veryl_testcase_Module56 (
 );
     import veryl_testcase_Package56A::X;
 
-    veryl_testcase___Interface56A__Package56A_X u0 ();
-    veryl_testcase___Interface56A__Package56B_X u1 ();
-    veryl_testcase___Interface56B__Package56A_X u2 ();
-    veryl_testcase___Interface56B__Package56A_X u3 ();
+    veryl_testcase___Interface56A__Package56A_X u_a0 ();
+    veryl_testcase___Interface56A__Package56B_X u_a1 ();
+    veryl_testcase___Interface56B__Package56A_X u_b0 ();
+    veryl_testcase___Interface56B__Package56A_X u_b1 ();
 
-    veryl_testcase___Interface56B__3 u4 ();
-    veryl_testcase___Interface56B__Package56A_X u5 ();
-    veryl_testcase___Module56A__1 u6 ();
+    veryl_testcase___Interface56B__3 u_b2 ();
+    veryl_testcase___Interface56B__Package56A_X u_b3 ();
+    veryl_testcase___Module56A__1 u_a2 ();
 
-    veryl_testcase___Module56C____Interface56C__2 u7 ();
+    veryl_testcase___Module56C____Interface56C__2 u_c0 ();
 
-    veryl_testcase___Interface56D__Package56C_StructA u8 ();
-    veryl_testcase___Interface56E__Package56C u9 ();
+    veryl_testcase___Interface56D__Package56C_StructA u_d0 ();
+    veryl_testcase___Interface56E__Package56C u_d1 ();
 
-    logic _a; always_comb _a = u0._a;
-    logic _b; always_comb _b = u2._b;
-    logic _c; always_comb _c = u5._b;
+    logic _a; always_comb _a = u_a0._a;
+    logic _b; always_comb _b = u_b0._b;
+    logic _c; always_comb _c = u_b3._b;
     logic _d; always_comb _d = x0._b.a;
     logic _e; always_comb _e = x1._b.a;
-    logic _f; always_comb _f = u8._b.a;
-    logic _g; always_comb _g = u9._b.a;
+    logic _f; always_comb _f = u_d0._b.a;
+    logic _g; always_comb _g = u_d1._b.a;
 endmodule
 
 module veryl_testcase___Module56A__1;

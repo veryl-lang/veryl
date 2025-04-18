@@ -25,27 +25,27 @@ module Module56 (
 ) {
     import Package56A::X;
 
-    inst u0: Interface56A::<Package56A::X>;
-    inst u1: Interface56A::<Package56B::X>;
-    inst u2: Interface56B::<Package56A::X>;
-    inst u3: Interface56B::<Package56A::X>;
+    inst u_a0: Interface56A::<Package56A::X>;
+    inst u_a1: Interface56A::<Package56B::X>;
+    inst u_b0: Interface56B::<Package56A::X>;
+    inst u_b1: Interface56B::<Package56A::X>;
 
-    inst u4: Interface56B::<>;
-    inst u5: Interface56B::<X>;
-    inst u6: Module56A::<1>;
+    inst u_b2: Interface56B::<>;
+    inst u_b3: Interface56B::<X>;
+    inst u_a2: Module56A::<1>;
 
-    inst u7: Module56C::<Interface56C::<2>>;
+    inst u_c0: Module56C::<Interface56C::<2>>;
 
-    inst u8: Interface56D::<Package56C::StructA>;
-    inst u9: Interface56E::<Package56C>;
+    inst u_d0: Interface56D::<Package56C::StructA>;
+    inst u_d1: Interface56E::<Package56C>;
 
-    let _a: logic = u0._a;
-    let _b: logic = u2._b;
-    let _c: logic = u5._b;
+    let _a: logic = u_a0._a;
+    let _b: logic = u_b0._b;
+    let _c: logic = u_b3._b;
     let _d: logic = x0._b.a;
     let _e: logic = x1._b.a;
-    let _f: logic = u8._b.a;
-    let _g: logic = u9._b.a;
+    let _f: logic = u_d0._b.a;
+    let _g: logic = u_d1._b.a;
 }
 
 module Module56A::<T: const> {

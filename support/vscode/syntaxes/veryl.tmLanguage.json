@@ -38,7 +38,7 @@
 			"patterns": [
 				{
 					"name": "storage.type.veryl",
-					"match": "\\b(enum|struct|logic|bit|u32|u64|i32|i64|f32|f64|bool)\\b"
+					"match": "\\b(enum|struct|logic|bit|u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|bool)\\b"
 				},
 				{
 					"name": "storage.modifier.veryl",

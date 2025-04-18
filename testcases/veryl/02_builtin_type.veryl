@@ -1,11 +1,15 @@
 module Module02 {
     // unsigned integer
-    let _a : u32 = 1;
-    let _aa: u64 = 1;
+    let _a   : u8  = 1;
+    let _aa  : u16 = 1;
+    let _aaa : u32 = 1;
+    let _aaaa: u64 = 1;
 
     // signed integer
-    let _b : i32 = 1;
-    let _bb: i64 = 1;
+    let _b   : i8  = 1;
+    let _bb  : i16 = 1;
+    let _bbb : i32 = 1;
+    let _bbbb: i64 = 1;
 
     // floating point
     let _c : f32 = 1;
@@ -26,10 +30,14 @@ module Module02 {
     let _fff: bit<10, 10> = 1;
 
     // array
-    let _g     : u32 [2] = '{1, 1};
-    let _gg    : u64 [2] = '{1, 1};
-    let _ggg   : i32 [2] = '{1, 1};
-    let _gggg  : i64 [2] = '{1, 1};
-    let _ggggg : f32 [2] = '{1, 1};
-    let _gggggg: f64 [2] = '{1, 1};
+    let _g         : u8  [2] = '{1, 1};
+    let _gg        : u16 [2] = '{1, 1};
+    let _ggg       : u32 [2] = '{1, 1};
+    let _gggg      : u64 [2] = '{1, 1};
+    let _ggggg     : i8  [2] = '{1, 1};
+    let _gggggg    : i16 [2] = '{1, 1};
+    let _ggggggg   : i32 [2] = '{1, 1};
+    let _gggggggg  : i64 [2] = '{1, 1};
+    let _ggggggggg : f32 [2] = '{1, 1};
+    let _gggggggggg: f64 [2] = '{1, 1};
 }

@@ -1043,8 +1043,12 @@ pub enum TypeKind {
     ResetSyncLow,
     Bit,
     Logic,
+    U8,
+    U16,
     U32,
     U64,
+    I8,
+    I16,
     I32,
     I64,
     F32,
@@ -1080,8 +1084,12 @@ impl TypeKind {
         matches!(
             self,
             TypeKind::Bit
+                | TypeKind::U8
+                | TypeKind::U16
                 | TypeKind::U32
                 | TypeKind::U64
+                | TypeKind::I8
+                | TypeKind::I16
                 | TypeKind::I32
                 | TypeKind::I64
                 | TypeKind::F32
@@ -1164,8 +1172,12 @@ impl fmt::Display for Type {
             TypeKind::ResetSyncLow => text.push_str("reset sync low"),
             TypeKind::Bit => text.push_str("bit"),
             TypeKind::Logic => text.push_str("logic"),
+            TypeKind::U8 => text.push_str("u8"),
+            TypeKind::U16 => text.push_str("u16"),
             TypeKind::U32 => text.push_str("u32"),
             TypeKind::U64 => text.push_str("u64"),
+            TypeKind::I8 => text.push_str("i8"),
+            TypeKind::I16 => text.push_str("i16"),
             TypeKind::I32 => text.push_str("i32"),
             TypeKind::I64 => text.push_str("i64"),
             TypeKind::F32 => text.push_str("f32"),
@@ -1371,8 +1383,12 @@ impl From<&syntax_tree::FactorType> for Type {
             }
             syntax_tree::FactorTypeGroup::FixedType(x) => {
                 let kind = match x.fixed_type.as_ref() {
+                    syntax_tree::FixedType::U8(_) => TypeKind::U8,
+                    syntax_tree::FixedType::U16(_) => TypeKind::U16,
                     syntax_tree::FixedType::U32(_) => TypeKind::U32,
                     syntax_tree::FixedType::U64(_) => TypeKind::U64,
+                    syntax_tree::FixedType::I8(_) => TypeKind::I8,
+                    syntax_tree::FixedType::I16(_) => TypeKind::I16,
                     syntax_tree::FixedType::I32(_) => TypeKind::I32,
                     syntax_tree::FixedType::I64(_) => TypeKind::I64,
                     syntax_tree::FixedType::F32(_) => TypeKind::F32,

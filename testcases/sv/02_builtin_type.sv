@@ -1,11 +1,15 @@
 module veryl_testcase_Module02;
     // unsigned integer
-    int unsigned     _a ; always_comb _a  = 1;
-    longint unsigned _aa; always_comb _aa = 1;
+    byte unsigned     _a   ; always_comb _a    = 1;
+    shortint unsigned _aa  ; always_comb _aa   = 1;
+    int unsigned      _aaa ; always_comb _aaa  = 1;
+    longint unsigned  _aaaa; always_comb _aaaa = 1;
 
     // signed integer
-    int signed     _b ; always_comb _b  = 1;
-    longint signed _bb; always_comb _bb = 1;
+    byte signed     _b   ; always_comb _b    = 1;
+    shortint signed _bb  ; always_comb _bb   = 1;
+    int signed      _bbb ; always_comb _bbb  = 1;
+    longint signed  _bbbb; always_comb _bbbb = 1;
 
     // floating point
     shortreal _c ; always_comb _c  = 1;
@@ -26,11 +30,15 @@ module veryl_testcase_Module02;
     bit [10-1:0][10-1:0] _fff; always_comb _fff = 1;
 
     // array
-    int unsigned     _g      [0:2-1]; always_comb _g      = '{1, 1};
-    longint unsigned _gg     [0:2-1]; always_comb _gg     = '{1, 1};
-    int signed       _ggg    [0:2-1]; always_comb _ggg    = '{1, 1};
-    longint signed   _gggg   [0:2-1]; always_comb _gggg   = '{1, 1};
-    shortreal        _ggggg  [0:2-1]; always_comb _ggggg  = '{1, 1};
-    real             _gggggg [0:2-1]; always_comb _gggggg = '{1, 1};
+    byte unsigned     _g          [0:2-1]; always_comb _g          = '{1, 1};
+    shortint unsigned _gg         [0:2-1]; always_comb _gg         = '{1, 1};
+    int unsigned      _ggg        [0:2-1]; always_comb _ggg        = '{1, 1};
+    longint unsigned  _gggg       [0:2-1]; always_comb _gggg       = '{1, 1};
+    byte signed       _ggggg      [0:2-1]; always_comb _ggggg      = '{1, 1};
+    shortint signed   _gggggg     [0:2-1]; always_comb _gggggg     = '{1, 1};
+    int signed        _ggggggg    [0:2-1]; always_comb _ggggggg    = '{1, 1};
+    longint signed    _gggggggg   [0:2-1]; always_comb _gggggggg   = '{1, 1};
+    shortreal         _ggggggggg  [0:2-1]; always_comb _ggggggggg  = '{1, 1};
+    real              _gggggggggg [0:2-1]; always_comb _gggggggggg = '{1, 1};
 endmodule
 //# sourceMappingURL=../map/02_builtin_type.sv.map
