@@ -30,7 +30,9 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let level = if opt.verbose {
+    let level = if opt.trace {
+        LevelFilter::Trace
+    } else if opt.verbose {
         LevelFilter::Debug
     } else if opt.quiet {
         LevelFilter::Warn
@@ -63,7 +65,9 @@ fn main() -> Result<ExitCode> {
             ))
         })
         .level(level)
+        .level_for("veryl_parser", LevelFilter::Warn)
         .level_for("parol_runtime", LevelFilter::Warn)
+        .level_for("scnr", LevelFilter::Warn)
         .chain(std::io::stderr())
         .apply()
         .into_diagnostic()?;

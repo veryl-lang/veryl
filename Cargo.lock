@@ -5290,6 +5290,7 @@ dependencies = [
  "daggy",
  "fxhash",
  "itertools 0.14.0",
+ "log",
  "miette",
  "smallvec",
  "strnum_bitwidth",
