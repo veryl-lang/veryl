@@ -1681,6 +1681,16 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.false_token.replace("1'b0"));
     }
 
+    /// Semantic action for non-terminal 'I8'
+    fn i8(&mut self, arg: &I8) {
+        self.veryl_token(&arg.i8_token.replace("byte signed"));
+    }
+
+    /// Semantic action for non-terminal 'I16'
+    fn i16(&mut self, arg: &I16) {
+        self.veryl_token(&arg.i16_token.replace("shortint signed"));
+    }
+
     /// Semantic action for non-terminal 'I32'
     fn i32(&mut self, arg: &I32) {
         self.veryl_token(&arg.i32_token.replace("int signed"));
@@ -1722,6 +1732,16 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'True'
     fn r#true(&mut self, arg: &True) {
         self.veryl_token(&arg.true_token.replace("1'b1"));
+    }
+
+    /// Semantic action for non-terminal 'U8'
+    fn u8(&mut self, arg: &U8) {
+        self.veryl_token(&arg.u8_token.replace("byte unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'U16'
+    fn u16(&mut self, arg: &U16) {
+        self.veryl_token(&arg.u16_token.replace("shortint unsigned"));
     }
 
     /// Semantic action for non-terminal 'U32'
@@ -2069,8 +2089,12 @@ impl VerylWalker for Emitter {
     fn expression12(&mut self, arg: &Expression12) {
         if let Some(x) = &arg.expression12_opt {
             match x.casting_type.as_ref() {
+                CastingType::U8(_) => self.str("unsigned'(byte'("),
+                CastingType::U16(_) => self.str("unsigned'(shortint'("),
                 CastingType::U32(_) => self.str("unsigned'(int'("),
                 CastingType::U64(_) => self.str("unsigned'(longint'("),
+                CastingType::I8(_) => self.str("signed'(byte'("),
+                CastingType::I16(_) => self.str("signed'(shortint'("),
                 CastingType::I32(_) => self.str("signed'(int'("),
                 CastingType::I64(_) => self.str("signed'(longint'("),
                 CastingType::F32(x) => {
@@ -2156,8 +2180,12 @@ impl VerylWalker for Emitter {
         self.expression13(&arg.expression13);
         if let Some(x) = &arg.expression12_opt {
             match x.casting_type.as_ref() {
-                CastingType::U32(_)
+                CastingType::U8(_)
+                | CastingType::U16(_)
+                | CastingType::U32(_)
                 | CastingType::U64(_)
+                | CastingType::I8(_)
+                | CastingType::I16(_)
                 | CastingType::I32(_)
                 | CastingType::I64(_) => self.str("))"),
                 CastingType::F32(_)

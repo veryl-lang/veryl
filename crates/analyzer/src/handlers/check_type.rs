@@ -65,10 +65,10 @@ fn is_variable_type(symbol: &Symbol) -> bool {
 
 fn is_casting_type(symbol: &Symbol) -> bool {
     match &symbol.kind {
-        // U32/U64 can be used as casting type
+        // U8/U16/U32/U64 can be used as casting type
         SymbolKind::Parameter(x) => matches!(
             x.r#type.kind,
-            TypeKind::Type | TypeKind::U32 | TypeKind::U64
+            TypeKind::Type | TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64
         ),
         _ => is_variable_type(symbol),
     }

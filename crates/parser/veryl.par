@@ -97,6 +97,8 @@ FalseTerm             : <INITIAL, Generic,              ClockDomain>/(?-u:\b)fal
 FinalTerm             : <INITIAL, Generic,              ClockDomain>/(?-u:\b)final(?-u:\b)/                                                               : Token;
 ForTerm               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)for(?-u:\b)/                                                                 : Token;
 FunctionTerm          : <INITIAL, Generic,              ClockDomain>/(?-u:\b)function(?-u:\b)/                                                            : Token;
+I8Term                : <INITIAL, Generic,              ClockDomain>/(?-u:\b)i8(?-u:\b)/                                                                  : Token;
+I16Term               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)i16(?-u:\b)/                                                                 : Token;
 I32Term               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)i32(?-u:\b)/                                                                 : Token;
 I64Term               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)i64(?-u:\b)/                                                                 : Token;
 IfResetTerm           : <INITIAL, Generic,              ClockDomain>/(?-u:\b)if_reset(?-u:\b)/                                                            : Token;
@@ -139,6 +141,8 @@ SwitchTerm            : <INITIAL, Generic,              ClockDomain>/(?-u:\b)swi
 TriTerm               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)tri(?-u:\b)/                                                                 : Token;
 TrueTerm              : <INITIAL, Generic,              ClockDomain>/(?-u:\b)true(?-u:\b)/                                                                : Token;
 TypeTerm              : <INITIAL, Generic,              ClockDomain>/(?-u:\b)type(?-u:\b)/                                                                : Token;
+U8Term                : <INITIAL, Generic,              ClockDomain>/(?-u:\b)u8(?-u:\b)/                                                                  : Token;
+U16Term               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)u16(?-u:\b)/                                                                 : Token;
 U32Term               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)u32(?-u:\b)/                                                                 : Token;
 U64Term               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)u64(?-u:\b)/                                                                 : Token;
 UnionTerm             : <INITIAL, Generic,              ClockDomain>/(?-u:\b)union(?-u:\b)/                                                               : Token;
@@ -229,6 +233,8 @@ FalseToken         : FalseTerm         : Token Comments;
 FinalToken         : FinalTerm         : Token Comments;
 ForToken           : ForTerm           : Token Comments;
 FunctionToken      : FunctionTerm      : Token Comments;
+I8Token            : I8Term            : Token Comments;
+I16Token           : I16Term           : Token Comments;
 I32Token           : I32Term           : Token Comments;
 I64Token           : I64Term           : Token Comments;
 IfResetToken       : IfResetTerm       : Token Comments;
@@ -271,6 +277,8 @@ SwitchToken        : SwitchTerm        : Token Comments;
 TriToken           : TriTerm           : Token Comments;
 TrueToken          : TrueTerm          : Token Comments;
 TypeToken          : TypeTerm          : Token Comments;
+U8Token            : U8Term            : Token Comments;
+U16Token           : U16Term           : Token Comments;
 U32Token           : U32Term           : Token Comments;
 U64Token           : U64Term           : Token Comments;
 UnionToken         : UnionTerm         : Token Comments;
@@ -366,6 +374,8 @@ False         : FalseToken         : VerylToken;
 Final         : FinalToken         : VerylToken;
 For           : ForToken           : VerylToken;
 Function      : FunctionToken      : VerylToken;
+I8            : I8Token            : VerylToken;
+I16           : I16Token           : VerylToken;
 I32           : I32Token           : VerylToken;
 I64           : I64Token           : VerylToken;
 If            : IfToken            : VerylToken;
@@ -407,6 +417,8 @@ Switch        : SwitchToken        : VerylToken;
 Tri           : TriToken           : VerylToken;
 True          : TrueToken          : VerylToken;
 Type          : TypeToken          : VerylToken;
+U8            : U8Token            : VerylToken;
+U16           : U16Token           : VerylToken;
 U32           : U32Token           : VerylToken;
 U64           : U64Token           : VerylToken;
 Union         : UnionToken         : VerylToken;
@@ -546,7 +558,7 @@ RangeOperator: DotDot
 // ScalarType / ArrayType / CastingType
 // ----------------------------------------------------------------------------
 
-FixedType: U32 | U64 | I32 | I64 | F32 | F64 | Bool | Strin;
+FixedType: U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | Bool | Strin;
 
 VariableType: Clock
             | ClockPosedge
@@ -569,8 +581,12 @@ ScalarType: { TypeModifier } ( UserDefinedType [ Width ] | FactorType );
 
 ArrayType: ScalarType [ Array ];
 
-CastingType: U32
+CastingType: U8
+           | U16
+           | U32
            | U64
+           | I8
+           | I16
            | I32
            | I64
            | F32

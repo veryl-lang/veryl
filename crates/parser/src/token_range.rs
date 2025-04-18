@@ -345,6 +345,8 @@ impl_token_range_singular!(False);
 impl_token_range_singular!(Final);
 impl_token_range_singular!(For);
 impl_token_range_singular!(Function);
+impl_token_range_singular!(I8);
+impl_token_range_singular!(I16);
 impl_token_range_singular!(I32);
 impl_token_range_singular!(I64);
 impl_token_range_singular!(If);
@@ -395,6 +397,8 @@ impl_token_range_singular!(Switch);
 impl_token_range_singular!(Tri);
 impl_token_range_singular!(True);
 impl_token_range_singular!(Type);
+impl_token_range_singular!(U8);
+impl_token_range_singular!(U16);
 impl_token_range_singular!(U32);
 impl_token_range_singular!(U64);
 impl_token_range_singular!(Union);
@@ -697,7 +701,9 @@ impl_token_range_enum!(RangeOperator, dot_dot, dot_dot_equ);
 // ScalarType / ArrayType / CastingType
 // ----------------------------------------------------------------------------
 
-impl_token_range_enum!(FixedType, u32, u64, i32, i64, f32, f64, bool, strin);
+impl_token_range_enum!(
+    FixedType, u8, u16, u32, u64, i32, i8, i16, i64, f32, f64, bool, strin
+);
 impl_token_range_enum!(
     VariableType,
     clock,
@@ -765,8 +771,12 @@ impl_token_ext!(ArrayType);
 
 impl_token_range_enum!(
     CastingType,
+    u8,
+    u16,
     u32,
     u64,
+    i8,
+    i16,
     i32,
     i64,
     f32,

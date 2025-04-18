@@ -521,6 +521,20 @@ pub trait VerylWalker {
         after!(self, function, arg);
     }
 
+    /// Semantic action for non-terminal 'I8'
+    fn i8(&mut self, arg: &I8) {
+        before!(self, i8, arg);
+        self.veryl_token(&arg.i8_token);
+        after!(self, i8, arg);
+    }
+
+    /// Semantic action for non-terminal 'I16'
+    fn i16(&mut self, arg: &I16) {
+        before!(self, i16, arg);
+        self.veryl_token(&arg.i16_token);
+        after!(self, i16, arg);
+    }
+
     /// Semantic action for non-terminal 'I32'
     fn i32(&mut self, arg: &I32) {
         before!(self, i32, arg);
@@ -827,6 +841,20 @@ pub trait VerylWalker {
         before!(self, r#type, arg);
         self.veryl_token(&arg.type_token);
         after!(self, r#type, arg);
+    }
+
+    /// Semantic action for non-terminal 'U8'
+    fn u8(&mut self, arg: &U8) {
+        before!(self, u8, arg);
+        self.veryl_token(&arg.u8_token);
+        after!(self, u8, arg);
+    }
+
+    /// Semantic action for non-terminal 'U16'
+    fn u16(&mut self, arg: &U16) {
+        before!(self, u16, arg);
+        self.veryl_token(&arg.u16_token);
+        after!(self, u16, arg);
     }
 
     /// Semantic action for non-terminal 'U32'
@@ -1537,8 +1565,12 @@ pub trait VerylWalker {
     fn fixed_type(&mut self, arg: &FixedType) {
         before!(self, fixed_type, arg);
         match arg {
+            FixedType::U8(x) => self.u8(&x.u8),
+            FixedType::U16(x) => self.u16(&x.u16),
             FixedType::U32(x) => self.u32(&x.u32),
             FixedType::U64(x) => self.u64(&x.u64),
+            FixedType::I8(x) => self.i8(&x.i8),
+            FixedType::I16(x) => self.i16(&x.i16),
             FixedType::I32(x) => self.i32(&x.i32),
             FixedType::I64(x) => self.i64(&x.i64),
             FixedType::F32(x) => self.f32(&x.f32),
@@ -1634,8 +1666,12 @@ pub trait VerylWalker {
     fn casting_type(&mut self, arg: &CastingType) {
         before!(self, casting_type, arg);
         match arg {
+            CastingType::U8(x) => self.u8(&x.u8),
+            CastingType::U16(x) => self.u16(&x.u16),
             CastingType::U32(x) => self.u32(&x.u32),
             CastingType::U64(x) => self.u64(&x.u64),
+            CastingType::I8(x) => self.i8(&x.i8),
+            CastingType::I16(x) => self.i16(&x.i16),
             CastingType::I32(x) => self.i32(&x.i32),
             CastingType::I64(x) => self.i64(&x.i64),
             CastingType::F32(x) => self.f32(&x.f32),
