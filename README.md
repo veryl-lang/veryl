@@ -29,7 +29,7 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 * [Example](#example)
 * [FAQ](#faq)
 * [Installation & Usage](#installation--usage)
-* [Publications](#plublications)
+* [Publications](#publications)
 * [Related Projects](#related-projects)
 * [License](#license)
 * [Contribution](#contribution)
