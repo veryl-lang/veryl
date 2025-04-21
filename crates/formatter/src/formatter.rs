@@ -1865,14 +1865,16 @@ impl VerylWalker for Formatter {
             self.inst_parameter(&x.inst_parameter);
         }
         if let Some(ref x) = arg.inst_declaration_opt2 {
-            self.space(1);
-            self.token_will_push(&x.l_paren.l_paren_token);
-            self.newline_push();
-            if let Some(ref x) = x.inst_declaration_opt3 {
-                self.inst_port_list(&x.inst_port_list);
+            if let Some(ref y) = x.inst_declaration_opt3 {
+                self.space(1);
+                self.token_will_push(&x.l_paren.l_paren_token);
+                self.newline_push();
+                self.inst_port_list(&y.inst_port_list);
+                self.newline_pop();
+                self.r_paren(&x.r_paren);
+            } else {
+                // Remove empty `()`
             }
-            self.newline_pop();
-            self.r_paren(&x.r_paren);
         }
         self.semicolon(&arg.semicolon);
         if single_line {
