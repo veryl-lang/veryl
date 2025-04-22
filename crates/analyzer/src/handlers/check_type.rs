@@ -4,7 +4,7 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind};
+use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use veryl_parser::resource_table;
@@ -45,35 +45,6 @@ impl Handler for CheckType {
     }
 }
 
-fn is_variable_type(symbol: &Symbol) -> bool {
-    match &symbol.kind {
-        SymbolKind::Enum(_)
-        | SymbolKind::Union(_)
-        | SymbolKind::Struct(_)
-        | SymbolKind::TypeDef(_)
-        | SymbolKind::ProtoTypeDef
-        | SymbolKind::SystemVerilog => true,
-        SymbolKind::Parameter(x) => x.r#type.kind == TypeKind::Type,
-        SymbolKind::GenericParameter(x) => x.bound == GenericBoundKind::Type,
-        SymbolKind::GenericInstance(x) => {
-            let base = symbol_table::get(x.base).unwrap();
-            is_variable_type(&base)
-        }
-        _ => false,
-    }
-}
-
-fn is_casting_type(symbol: &Symbol) -> bool {
-    match &symbol.kind {
-        // U8/U16/U32/U64 can be used as casting type
-        SymbolKind::Parameter(x) => matches!(
-            x.r#type.kind,
-            TypeKind::Type | TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64
-        ),
-        _ => is_variable_type(symbol),
-    }
-}
-
 fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
     if !arg.is_resolvable() {
         return None;
@@ -92,16 +63,21 @@ fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace)
         .map(|x| symbol_table::get(x).unwrap())
 }
 
-fn resolve_proto_generic_arg_type(
+fn resolve_actual_generic_arg_type(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
-) -> Option<SymbolId> {
+) -> Option<Symbol> {
     if !arg.is_resolvable() {
         return None;
     }
 
     let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
-    arg_symbol.found.proto()
+    let proto_symbol = arg_symbol.found.proto_symbol();
+    if proto_symbol.is_some() {
+        proto_symbol
+    } else {
+        Some(arg_symbol.found)
+    }
 }
 
 enum InstTypeSource {
@@ -128,9 +104,9 @@ fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
             return resolve_inst_type(&InstTypeSource::Id(x.base));
         }
         SymbolKind::GenericParameter(x) => {
-            if let GenericBoundKind::Proto(proto) = &x.bound {
-                let path: SymbolPathNamespace = (proto, &symbol.namespace).into();
-                return resolve_inst_type(&InstTypeSource::Path(path));
+            let proto = x.bound.resolve_proto_bound(&symbol.namespace)?;
+            if let Some(symbol) = proto.get_symbol() {
+                return resolve_inst_type(&InstTypeSource::Id(symbol.id));
             }
         }
         _ => {}
@@ -168,7 +144,7 @@ impl VerylGrammarTrait for CheckType {
         match self.point {
             HandlerPoint::Before => match arg {
                 GenericBound::InstScopedIdentifier(_) => self.in_generic_inst_parameter = true,
-                GenericBound::ScopedIdentifier(_) => self.in_generic_parameter = true,
+                GenericBound::GenericProtoBound(_) => self.in_generic_parameter = true,
                 _ => {}
             },
             HandlerPoint::After => {
@@ -241,17 +217,20 @@ impl VerylGrammarTrait for CheckType {
                 }
 
                 // Check generic parameter
-                if self.in_generic_parameter
-                    && !(symbol.is_proto_module(false)
+                if self.in_generic_parameter {
+                    let is_valid = (symbol.is_proto_module(false)
                         || symbol.is_proto_interface(false, false)
-                        || symbol.is_proto_package(false))
-                {
-                    self.errors.push(AnalyzerError::mismatch_type(
-                        &symbol.token.to_string(),
-                        "proto module, proto interface or proto package",
-                        &symbol.kind.to_kind_name(),
-                        &arg.identifier().token.into(),
-                    ));
+                        || symbol.is_proto_package(false)
+                        || symbol.is_variable_type())
+                        && !(symbol.is_struct() || symbol.is_union());
+                    if !is_valid {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            &symbol.token.to_string(),
+                            "proto module, proto interface, proto package or variable type except for struct and union",
+                            &symbol.kind.to_kind_name(),
+                            &arg.identifier().token.into(),
+                        ));
+                    }
                 }
                 if self.in_generic_inst_parameter && !symbol.is_proto_interface(false, true) {
                     self.errors.push(AnalyzerError::mismatch_type(
@@ -263,7 +242,10 @@ impl VerylGrammarTrait for CheckType {
                 }
 
                 // Check variable type
-                if !self.in_user_defined_type.is_empty() && self.in_generic_argument.is_empty() {
+                if !self.in_user_defined_type.is_empty()
+                    && !self.in_generic_parameter
+                    && self.in_generic_argument.is_empty()
+                {
                     if self.in_modport {
                         if !matches!(
                             symbol.kind,
@@ -278,9 +260,9 @@ impl VerylGrammarTrait for CheckType {
                         }
                     } else {
                         let type_error = if !self.in_casting_type.is_empty() {
-                            !is_casting_type(&symbol)
+                            !symbol.is_casting_type()
                         } else {
-                            !is_variable_type(&symbol)
+                            !symbol.is_variable_type()
                         };
                         if type_error {
                             self.errors.push(AnalyzerError::mismatch_type(
@@ -335,14 +317,15 @@ impl VerylGrammarTrait for CheckType {
 
                     for (i, arg) in args.iter().enumerate() {
                         if let Some(param) = params.get(i) {
-                            match &param.1.bound {
+                            let bound = &param.1.bound;
+                            match bound {
                                 GenericBoundKind::Const => (),
                                 GenericBoundKind::Type => {
                                     let is_type = if arg.is_resolvable() {
                                         if let Ok(symbol) =
                                             symbol_table::resolve((&arg.generic_path(), &namespace))
                                         {
-                                            is_variable_type(&symbol.found)
+                                            symbol.found.is_variable_type()
                                         } else {
                                             false
                                         }
@@ -359,19 +342,19 @@ impl VerylGrammarTrait for CheckType {
                                         ));
                                     }
                                 }
-                                GenericBoundKind::Inst(proto) => {
+                                GenericBoundKind::Inst(_) => {
                                     let actual = resolve_inst_generic_arg_type(arg, &namespace);
-                                    let required =
-                                        symbol_table::resolve((proto, &defined_namespace));
-                                    let proto_match = if let (Some(actual), Ok(required)) =
-                                        (&actual, &required)
-                                    {
-                                        actual.id == required.found.id
-                                    } else {
-                                        false
+                                    let Some(required) =
+                                        bound.resolve_inst_bound(&defined_namespace)
+                                    else {
+                                        return Ok(());
                                     };
 
-                                    if !proto_match {
+                                    let match_type = actual
+                                        .as_ref()
+                                        .map(|x| x.id == required.id)
+                                        .unwrap_or(false);
+                                    if !match_type {
                                         let (name, kind) = if let Some(x) = actual {
                                             (x.token.to_string(), x.kind.to_kind_name())
                                         } else {
@@ -382,29 +365,65 @@ impl VerylGrammarTrait for CheckType {
                                         };
                                         self.errors.push(AnalyzerError::mismatch_type(
                                             &name,
-                                            &format!("inst {proto}"),
+                                            &format!("inst {}", required.token),
                                             &kind,
                                             &arg.range,
                                         ));
                                     }
                                 }
-                                GenericBoundKind::Proto(proto) => {
-                                    let actual = resolve_proto_generic_arg_type(arg, &namespace);
-                                    let required =
-                                        symbol_table::resolve((proto, &defined_namespace));
-                                    let proto_match =
-                                        if let (Some(actual), Ok(required)) = (actual, required) {
-                                            actual == required.found.id
-                                        } else {
-                                            false
-                                        };
+                                GenericBoundKind::Proto(_) => {
+                                    let actual = resolve_actual_generic_arg_type(arg, &namespace);
+                                    let Some(required) =
+                                        bound.resolve_proto_bound(&defined_namespace)
+                                    else {
+                                        return Ok(());
+                                    };
 
-                                    if !proto_match {
+                                    let mut expected = None;
+                                    match required {
+                                        ProtoBound::ProtoModule(x)
+                                        | ProtoBound::ProtoInterface(x)
+                                        | ProtoBound::ProtoPackage(x) => {
+                                            if actual
+                                                .as_ref()
+                                                .map(|actual| actual.id != x.id)
+                                                .unwrap_or(true)
+                                            {
+                                                expected = Some(format!("proto {}", x.token))
+                                            }
+                                        }
+                                        ProtoBound::Enum((x, _)) => {
+                                            let actual = if let Some(x) = actual.as_ref() {
+                                                x.get_parent()
+                                            } else {
+                                                None
+                                            };
+
+                                            if actual.is_none() || actual.unwrap().id != x.id {
+                                                expected =
+                                                    Some(format!("enum variant of {}", x.token))
+                                            }
+                                        }
+                                        ProtoBound::FactorType(x)
+                                        | ProtoBound::Struct((_, x))
+                                        | ProtoBound::Union((_, x)) => {
+                                            if actual.is_some() {
+                                                expected = Some(format!("{}", x))
+                                            }
+                                        }
+                                    }
+
+                                    if let Some(expected) = expected {
+                                        let (name, kind) = if let Some(x) = actual {
+                                            (x.token.to_string(), x.kind.to_kind_name())
+                                        } else {
+                                            (
+                                                symbol.found.token.to_string(),
+                                                symbol.found.kind.to_kind_name(),
+                                            )
+                                        };
                                         self.errors.push(AnalyzerError::mismatch_type(
-                                            &symbol.found.token.to_string(),
-                                            &format!("proto {proto}"),
-                                            &symbol.found.kind.to_kind_name(),
-                                            &arg.range,
+                                            &name, &expected, &kind, &arg.range,
                                         ));
                                     }
                                 }

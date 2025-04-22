@@ -778,13 +778,15 @@ WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) Equ E
 GenericBound: Const
             | Type
             | Inst ScopedIdentifier
-            | ScopedIdentifier;
+            | GenericProtoBound;
 
 WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;
 
 WithGenericParameterList: WithGenericParameterItem { Comma WithGenericParameterItem } [ Comma ];
 
 WithGenericParameterItem: Identifier Colon GenericBound [ Equ WithGenericArgumentItem ];
+
+GenericProtoBound: ScopedIdentifier | FixedType;
 
 // ----------------------------------------------------------------------------
 // WithGenericArgument
@@ -795,7 +797,9 @@ WithGenericArgument: ColonColonLAngle %push(Generic) [ WithGenericArgumentList ]
 WithGenericArgumentList: WithGenericArgumentItem { Comma WithGenericArgumentItem } [ Comma ];
 
 WithGenericArgumentItem: ScopedIdentifier
+                       | FixedType
                        | Number
+                       | BooleanLiteral
                        ;
 
 // ----------------------------------------------------------------------------

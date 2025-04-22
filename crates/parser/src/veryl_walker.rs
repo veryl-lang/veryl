@@ -2584,7 +2584,7 @@ pub trait VerylWalker {
                 self.inst(&x.inst);
                 self.scoped_identifier(&x.scoped_identifier);
             }
-            GenericBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            GenericBound::GenericProtoBound(x) => self.generic_proto_bound(&x.generic_proto_bound),
         }
         after!(self, generic_bound, arg);
     }
@@ -2625,6 +2625,16 @@ pub trait VerylWalker {
         after!(self, with_generic_parameter_item, arg);
     }
 
+    /// Semantic action for non-terminal 'GenericProtoBound'
+    fn generic_proto_bound(&mut self, arg: &GenericProtoBound) {
+        before!(self, generic_proto_bound, arg);
+        match arg {
+            GenericProtoBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            GenericProtoBound::FixedType(x) => self.fixed_type(&x.fixed_type),
+        }
+        after!(self, generic_proto_bound, arg);
+    }
+
     /// Semantic action for non-terminal 'WithGenericArgument'
     fn with_generic_argument(&mut self, arg: &WithGenericArgument) {
         before!(self, with_generic_argument, arg);
@@ -2657,8 +2667,14 @@ pub trait VerylWalker {
             WithGenericArgumentItem::ScopedIdentifier(x) => {
                 self.scoped_identifier(&x.scoped_identifier);
             }
+            WithGenericArgumentItem::FixedType(x) => {
+                self.fixed_type(&x.fixed_type);
+            }
             WithGenericArgumentItem::Number(x) => {
                 self.number(&x.number);
+            }
+            WithGenericArgumentItem::BooleanLiteral(x) => {
+                self.boolean_literal(&x.boolean_literal);
             }
         }
         after!(self, with_generic_argument_item, arg);

@@ -2622,6 +2622,76 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        struct Foo {
+            foo: logic,
+        }
+        function Func::<foo: Foo> {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        union Foo {
+            foo: logic,
+        }
+        function Func::<foo: Foo> {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        enum Foo {
+            FOO
+        }
+
+        enum Bar {
+            BAR
+        }
+
+        function Func::<foo: Foo> {}
+        always_comb {
+            Func::<Bar::BAR>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    module ModuleB::<M: ProtoModuleA> {
+        inst u: M;
+    }
+    module ModuleC {
+        inst u: ModuleB::<1>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA::<W: u32> {
+        let _a: logic<W> = 0;
+    }
+    module ModuleB {}
+    module ModuleC {
+        inst u: ModuleA::<ModuleB>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]

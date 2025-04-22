@@ -208,22 +208,26 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]
 pub enum GenericSymbolPathKind {
     Identifier,
+    FixedType,
     IntegerBased,
     IntegerBaseLess,
     IntegerAllBit,
     RealExponent,
     RealFixedPoint,
+    Boolean,
 }
 
 impl fmt::Display for GenericSymbolPathKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
             GenericSymbolPathKind::Identifier => "identifier".to_string(),
+            GenericSymbolPathKind::FixedType => "fixed type".to_string(),
             GenericSymbolPathKind::IntegerBased => "integer based".to_string(),
             GenericSymbolPathKind::IntegerBaseLess => "integer base less".to_string(),
             GenericSymbolPathKind::IntegerAllBit => "integer all bit".to_string(),
             GenericSymbolPathKind::RealExponent => "real exponent".to_string(),
             GenericSymbolPathKind::RealFixedPoint => "read fixed point".to_string(),
+            GenericSymbolPathKind::Boolean => "boolean".to_string(),
         };
         text.fmt(f)
     }
@@ -481,6 +485,34 @@ impl From<&Token> for GenericSymbolPath {
     }
 }
 
+impl From<&syntax_tree::FixedType> for GenericSymbolPath {
+    fn from(value: &syntax_tree::FixedType) -> Self {
+        let token = match value {
+            syntax_tree::FixedType::U8(x) => x.u8.u8_token.token,
+            syntax_tree::FixedType::U16(x) => x.u16.u16_token.token,
+            syntax_tree::FixedType::U32(x) => x.u32.u32_token.token,
+            syntax_tree::FixedType::U64(x) => x.u64.u64_token.token,
+            syntax_tree::FixedType::I8(x) => x.i8.i8_token.token,
+            syntax_tree::FixedType::I16(x) => x.i16.i16_token.token,
+            syntax_tree::FixedType::I32(x) => x.i32.i32_token.token,
+            syntax_tree::FixedType::I64(x) => x.i64.i64_token.token,
+            syntax_tree::FixedType::F32(x) => x.f32.f32_token.token,
+            syntax_tree::FixedType::F64(x) => x.f64.f64_token.token,
+            syntax_tree::FixedType::Bool(x) => x.bool.bool_token.token,
+            syntax_tree::FixedType::Strin(x) => x.strin.string_token.token,
+        };
+
+        GenericSymbolPath {
+            paths: vec![GenericSymbol {
+                base: token,
+                arguments: Vec::new(),
+            }],
+            kind: GenericSymbolPathKind::FixedType,
+            range: token.into(),
+        }
+    }
+}
+
 impl From<&syntax_tree::Number> for GenericSymbolPath {
     fn from(value: &syntax_tree::Number) -> Self {
         let (token, kind) = match value {
@@ -521,6 +553,38 @@ impl From<&syntax_tree::Number> for GenericSymbolPath {
     }
 }
 
+impl From<&syntax_tree::BooleanLiteral> for GenericSymbolPath {
+    fn from(value: &syntax_tree::BooleanLiteral) -> Self {
+        let token = match value {
+            syntax_tree::BooleanLiteral::True(x) => x.r#true.true_token.token,
+            syntax_tree::BooleanLiteral::False(x) => x.r#false.false_token.token,
+        };
+        GenericSymbolPath {
+            paths: vec![GenericSymbol {
+                base: token,
+                arguments: Vec::new(),
+            }],
+            kind: GenericSymbolPathKind::Boolean,
+            range: token.into(),
+        }
+    }
+}
+
+impl From<&syntax_tree::WithGenericArgumentItem> for GenericSymbolPath {
+    fn from(value: &syntax_tree::WithGenericArgumentItem) -> Self {
+        match value {
+            syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
+                x.scoped_identifier.as_ref().into()
+            }
+            syntax_tree::WithGenericArgumentItem::FixedType(x) => x.fixed_type.as_ref().into(),
+            syntax_tree::WithGenericArgumentItem::Number(x) => x.number.as_ref().into(),
+            syntax_tree::WithGenericArgumentItem::BooleanLiteral(x) => {
+                x.boolean_literal.as_ref().into()
+            }
+        }
+    }
+}
+
 impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
         let mut paths = Vec::new();
@@ -541,14 +605,8 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                         let list: Vec<syntax_tree::WithGenericArgumentItem> =
                             x.with_generic_argument_list.as_ref().into();
                         for x in &list {
-                            match x {
-                                syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
-                                    arguments.push(x.scoped_identifier.as_ref().into());
-                                }
-                                syntax_tree::WithGenericArgumentItem::Number(x) => {
-                                    arguments.push(x.number.as_ref().into());
-                                }
-                            }
+                            let arg: GenericSymbolPath = x.into();
+                            arguments.push(arg);
                         }
                     }
                 }
@@ -566,14 +624,8 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                     let list: Vec<syntax_tree::WithGenericArgumentItem> =
                         x.with_generic_argument_list.as_ref().into();
                     for x in &list {
-                        match x {
-                            syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
-                                arguments.push(x.scoped_identifier.as_ref().into());
-                            }
-                            syntax_tree::WithGenericArgumentItem::Number(x) => {
-                                arguments.push(x.number.as_ref().into());
-                            }
-                        }
+                        let arg: GenericSymbolPath = x.into();
+                        arguments.push(arg);
                     }
                 }
             }

@@ -1,6 +1,6 @@
 use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
-use crate::symbol::{ClockDomain, GenericBoundKind, Port, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{ClockDomain, Port, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use crate::r#unsafe::Unsafe;
 use crate::unsafe_table;
@@ -324,13 +324,9 @@ fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
                     let base = symbol_table::get(x.base).unwrap();
                     return Some(base.kind);
                 }
-                SymbolKind::GenericParameter(ref x) => {
-                    if let GenericBoundKind::Proto(ref x) = x.bound {
-                        if let Ok(proto_symbol) =
-                            symbol_table::resolve((x, &type_symbol.found.namespace))
-                        {
-                            return Some(proto_symbol.found.kind);
-                        }
+                SymbolKind::GenericParameter(x) => {
+                    if let Some(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace) {
+                        return proto.get_symbol().map(|x| x.kind);
                     }
                 }
                 _ => {}
