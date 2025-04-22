@@ -25,6 +25,7 @@ use crate::symbol::{
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::Import as SymImport;
+use crate::type_dag::{self, Context, TypeDagCandidate};
 use std::collections::{HashMap, HashSet};
 use veryl_metadata::ClockType;
 use veryl_metadata::{Build, ResetType};
@@ -106,6 +107,7 @@ pub struct CreateSymbolTable {
     identifier_factor_names: Vec<ExpressionIdentifier>,
     in_named_argument: Vec<bool>,
     in_argument_expression: Vec<()>,
+    type_dag_candidates: Vec<Vec<TypeDagCandidate>>,
 }
 
 #[derive(Clone)]
@@ -527,6 +529,41 @@ impl CreateSymbolTable {
             self.declaration_items.push(id);
         }
     }
+
+    fn push_type_dag_cand(&mut self) {
+        self.type_dag_candidates.push(Vec::new());
+    }
+
+    fn pop_type_dag_cand(&mut self, symbol: Option<(SymbolId, Context, bool)>) {
+        if let Some(candidates) = self.type_dag_candidates.pop() {
+            for mut cand in candidates {
+                if let Some(symbol) = &symbol {
+                    cand.set_parent((symbol.0, symbol.1));
+                }
+
+                type_dag::add(cand);
+            }
+        }
+
+        if let Some(x) = self.type_dag_candidates.last_mut() {
+            if let Some(symbol) = &symbol {
+                let import = if symbol.2 {
+                    let mut import = self.file_scope_import_item.clone();
+                    import.extend(self.file_scope_import_wildcard.clone());
+                    import
+                } else {
+                    Vec::new()
+                };
+                let cand = TypeDagCandidate::Symbol {
+                    id: symbol.0,
+                    context: symbol.1,
+                    parent: None,
+                    import,
+                };
+                x.push(cand);
+            }
+        }
+    }
 }
 
 impl Handler for CreateSymbolTable {
@@ -609,6 +646,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             }
                             namespace.push(token.text);
                         }
+                    }
+                }
+
+                let ident = arg.identifier().token;
+                if ident.to_string() != "_" {
+                    let path: GenericSymbolPath = arg.into();
+                    let namespace = self.get_namespace(&ident);
+                    let cand = TypeDagCandidate::Path {
+                        path,
+                        namespace,
+                        parent: None,
+                    };
+
+                    if let Some(x) = self.type_dag_candidates.last_mut() {
+                        x.push(cand);
                     }
                 }
             }
@@ -855,43 +907,52 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn const_declaration(&mut self, arg: &ConstDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let token = arg.identifier.identifier_token.token;
-            let value = *arg.expression.clone();
-            let property = match &*arg.const_declaration_group {
-                ConstDeclarationGroup::ArrayType(x) => {
-                    let r#type: SymType = x.array_type.as_ref().into();
-                    if !self.check_identifer_with_type(&arg.identifier, &r#type) {
-                        return Ok(());
-                    }
+        match self.point {
+            HandlerPoint::Before => {
+                self.push_type_dag_cand();
+            }
+            HandlerPoint::After => {
+                let token = arg.identifier.identifier_token.token;
+                let value = *arg.expression.clone();
+                let property = match &*arg.const_declaration_group {
+                    ConstDeclarationGroup::ArrayType(x) => {
+                        let r#type: SymType = x.array_type.as_ref().into();
+                        if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                            self.pop_type_dag_cand(None);
+                            return Ok(());
+                        }
 
-                    ParameterProperty {
-                        token,
-                        r#type,
-                        kind: ParameterKind::Const,
-                        value,
+                        ParameterProperty {
+                            token,
+                            r#type,
+                            kind: ParameterKind::Const,
+                            value,
+                        }
                     }
-                }
-                ConstDeclarationGroup::Type(_) => {
-                    let r#type: SymType = SymType {
-                        modifier: vec![],
-                        kind: TypeKind::Type,
-                        width: vec![],
-                        array: vec![],
-                        array_type: None,
-                        is_const: false,
-                    };
-                    ParameterProperty {
-                        token,
-                        r#type,
-                        kind: ParameterKind::Const,
-                        value,
+                    ConstDeclarationGroup::Type(_) => {
+                        let r#type: SymType = SymType {
+                            modifier: vec![],
+                            kind: TypeKind::Type,
+                            width: vec![],
+                            array: vec![],
+                            array_type: None,
+                            is_const: false,
+                        };
+                        ParameterProperty {
+                            token,
+                            r#type,
+                            kind: ParameterKind::Const,
+                            value,
+                        }
                     }
+                };
+                let kind = SymbolKind::Parameter(property);
+                if let Some(id) = self.insert_symbol(&token, kind, false) {
+                    self.push_declaration_item(id);
+                    self.pop_type_dag_cand(Some((id, Context::Const, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 }
-            };
-            let kind = SymbolKind::Parameter(property);
-            if let Some(id) = self.insert_symbol(&token, kind, false) {
-                self.push_declaration_item(id);
             }
         }
         Ok(())
@@ -902,6 +963,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::Before => {
                 self.namespace
                     .push(arg.identifier.identifier_token.token.text);
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 let mut members = Vec::new();
@@ -976,6 +1038,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 {
                     self.push_declaration_item(id);
                     self.modport_ids.push(id);
+                    self.pop_type_dag_cand(Some((id, Context::Modport, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 }
             }
         }
@@ -1013,6 +1078,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         self.enum_encoding = x;
                     }
                 }
+
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1025,6 +1092,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .map(|x| x.scalar_type.as_ref().into());
                 if let Some(r#type) = &r#type {
                     if !self.check_identifer_with_type(&arg.identifier, r#type) {
+                        self.pop_type_dag_cand(None);
                         return Ok(());
                     }
                 }
@@ -1050,6 +1118,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
                 {
                     self.push_declaration_item(id);
+                    self.pop_type_dag_cand(Some((id, Context::Enum, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 }
             }
         }
@@ -1101,6 +1172,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 self.generic_context.push();
                 self.namespace.push(name);
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.struct_or_union = None;
@@ -1109,14 +1181,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (generic_parameters, generic_references) = self.generic_context.pop();
 
                 let members: Vec<_> = self.struct_union_members.drain(0..).flatten().collect();
-                let kind = match &*arg.struct_union {
+                let (context, kind) = match &*arg.struct_union {
                     StructUnion::Struct(_) => {
                         let property = StructProperty {
                             members,
                             generic_parameters,
                             generic_references,
                         };
-                        SymbolKind::Struct(property)
+                        (Context::Struct, SymbolKind::Struct(property))
                     }
                     StructUnion::Union(_) => {
                         let property = UnionProperty {
@@ -1124,13 +1196,16 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             generic_parameters,
                             generic_references,
                         };
-                        SymbolKind::Union(property)
+                        (Context::Union, SymbolKind::Union(property))
                     }
                 };
                 if let Some(id) =
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
                 {
                     self.push_declaration_item(id);
+                    self.pop_type_dag_cand(Some((id, context, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 }
             }
         }
@@ -1138,18 +1213,27 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let r#type = arg.array_type.as_ref().into();
-            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
-                return Ok(());
+        match self.point {
+            HandlerPoint::Before => {
+                self.push_type_dag_cand();
             }
+            HandlerPoint::After => {
+                let r#type = arg.array_type.as_ref().into();
+                if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                    self.pop_type_dag_cand(None);
+                    return Ok(());
+                }
 
-            let property = TypeDefProperty { r#type };
-            let kind = SymbolKind::TypeDef(property);
-            if let Some(id) =
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
-            {
-                self.push_declaration_item(id);
+                let property = TypeDefProperty { r#type };
+                let kind = SymbolKind::TypeDef(property);
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
+                {
+                    self.push_declaration_item(id);
+                    self.pop_type_dag_cand(Some((id, Context::TypeDef, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
+                }
             }
         }
         Ok(())
@@ -1463,6 +1547,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.generic_context.push();
                 self.ports.push(Vec::new());
                 self.affiliation.push(VariableAffiliation::Function);
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1477,6 +1562,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .map(|x| (&*x.scalar_type).into());
                 if let Some(ret) = &ret {
                     if !self.check_identifer_with_type(&arg.identifier, ret) {
+                        self.pop_type_dag_cand(None);
                         return Ok(());
                     }
                 }
@@ -1502,6 +1588,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.function_ids
                         .insert(arg.identifier.identifier_token.token.text, id);
                     self.push_declaration_item(id);
+                    self.pop_type_dag_cand(Some((id, Context::Function, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 }
             }
         }
@@ -1550,6 +1639,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.exist_clock_without_domain = false;
 
                 self.apply_file_scope_import();
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1583,6 +1673,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let proto = if let Some(x) = arg.module_declaration_opt0.as_ref() {
                     let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
                     if !self.check_identifer_with_type_path(&arg.identifier, &path) {
+                        self.pop_type_dag_cand(None);
                         return Ok(());
                     }
 
@@ -1606,11 +1697,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     default_reset,
                     definition,
                 };
-                self.insert_symbol(
+                if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Module(property),
                     self.is_public,
-                );
+                ) {
+                    self.pop_type_dag_cand(Some((id, Context::Module, true)));
+                } else {
+                    self.pop_type_dag_cand(None);
+                }
             }
         }
         Ok(())
@@ -1695,6 +1790,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.modport_ids.clear();
 
                 self.apply_file_scope_import();
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1727,13 +1823,16 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     members: self.declaration_items.drain(..).collect(),
                     definition,
                 };
-                if let Some(interface_id) = self.insert_symbol(
+                if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Interface(property),
                     self.is_public,
                 ) {
                     self.link_modport_members();
-                    self.expand_modport_default_member(interface_id);
+                    self.expand_modport_default_member(id);
+                    self.pop_type_dag_cand(Some((id, Context::Interface, true)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 };
             }
         }
@@ -1749,6 +1848,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.affiliation.push(VariableAffiliation::Package);
                 self.function_ids.clear();
                 self.apply_file_scope_import();
+                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -1760,6 +1860,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let proto = if let Some(x) = arg.package_declaration_opt0.as_ref() {
                     let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
                     if !self.check_identifer_with_type_path(&arg.identifier, &path) {
+                        self.pop_type_dag_cand(None);
                         return Ok(());
                     }
 
@@ -1778,11 +1879,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_references,
                     members: self.declaration_items.drain(..).collect(),
                 };
-                self.insert_symbol(
+                if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Package(property),
                     self.is_public,
-                );
+                ) {
+                    self.pop_type_dag_cand(Some((id, Context::Package, true)));
+                } else {
+                    self.pop_type_dag_cand(None);
+                }
             }
         }
         Ok(())
@@ -2129,6 +2234,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
             HandlerPoint::After => {
                 self.is_public = false;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn veryl(&mut self, _arg: &Veryl) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.push_type_dag_cand();
+            }
+            HandlerPoint::After => {
+                self.pop_type_dag_cand(None);
             }
         }
 
