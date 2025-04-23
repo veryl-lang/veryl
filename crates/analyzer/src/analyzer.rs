@@ -309,6 +309,7 @@ impl Analyzer {
         symbol_table::apply_import();
         symbol_table::resolve_user_defined();
         ret.append(&mut reference_table::apply());
+        ret.append(&mut type_dag::apply());
 
         ret
     }

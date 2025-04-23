@@ -1,3 +1,4 @@
+pub mod check_anonymous;
 pub mod check_attribute;
 pub mod check_clock_domain;
 pub mod check_clock_reset;
@@ -18,7 +19,7 @@ pub mod check_type;
 pub mod check_unsafe;
 pub mod check_var_ref;
 pub mod create_symbol_table;
-pub mod create_type_dag;
+use check_anonymous::*;
 use check_attribute::*;
 use check_clock_domain::*;
 use check_clock_reset::*;
@@ -39,7 +40,6 @@ use check_type::*;
 use check_unsafe::*;
 use check_var_ref::*;
 use create_symbol_table::*;
-use create_type_dag::*;
 
 use crate::analyzer_error::AnalyzerError;
 use veryl_metadata::{Build, EnvVar, Lint};
@@ -101,7 +101,6 @@ impl Pass1Handlers {
 }
 
 pub struct Pass2Handlers {
-    create_type_dag: CreateTypeDag,
     check_separator: CheckSeparator,
     check_enum: CheckEnum,
     check_modport: CheckModport,
@@ -110,6 +109,7 @@ pub struct Pass2Handlers {
     check_connect_operation: CheckConnectOperation,
     check_var_ref: CheckVarRef,
     check_clock_reset: CheckClockReset,
+    check_anonymous: CheckAnonymous,
     check_expression: CheckExpression,
     check_clock_domain: CheckClockDomain,
     check_proto: CheckProto,
@@ -128,7 +128,7 @@ impl Pass2Handlers {
             check_connect_operation: CheckConnectOperation::new(),
             check_var_ref: CheckVarRef::new(),
             check_clock_reset: CheckClockReset::new(),
-            create_type_dag: CreateTypeDag::new(),
+            check_anonymous: CheckAnonymous::new(),
             check_expression: CheckExpression::new(vec![]),
             check_clock_domain: CheckClockDomain::new(),
             check_proto: CheckProto::new(),
@@ -148,7 +148,7 @@ impl Pass2Handlers {
             (en[5], &mut self.check_connect_operation as &mut dyn Handler),
             (en[6], &mut self.check_var_ref as &mut dyn Handler),
             (en[7], &mut self.check_clock_reset as &mut dyn Handler),
-            (en[8], &mut self.create_type_dag as &mut dyn Handler),
+            (en[8], &mut self.check_anonymous as &mut dyn Handler),
             (en[9], &mut self.check_expression as &mut dyn Handler),
             (en[10], &mut self.check_clock_domain as &mut dyn Handler),
             (en[11], &mut self.check_proto as &mut dyn Handler),
@@ -166,7 +166,7 @@ impl Pass2Handlers {
         ret.append(&mut self.check_connect_operation.errors);
         ret.append(&mut self.check_var_ref.errors);
         ret.append(&mut self.check_clock_reset.errors);
-        ret.append(&mut self.create_type_dag.errors);
+        ret.append(&mut self.check_anonymous.errors);
         ret.append(&mut self.check_expression.errors);
         ret.append(&mut self.check_clock_domain.errors);
         ret.append(&mut self.check_proto.errors);

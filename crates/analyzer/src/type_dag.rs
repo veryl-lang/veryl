@@ -1,4 +1,7 @@
-use crate::symbol::{Symbol, SymbolId};
+use crate::AnalyzerError;
+use crate::namespace::Namespace;
+use crate::symbol::{ParameterKind, Symbol, SymbolId, SymbolKind};
+use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
@@ -6,6 +9,34 @@ use daggy::petgraph::visit::Dfs;
 use daggy::{Dag, Walker, petgraph::algo};
 use std::cell::RefCell;
 use veryl_parser::veryl_token::Token;
+
+#[derive(Clone, Debug)]
+pub enum TypeDagCandidate {
+    Path {
+        path: GenericSymbolPath,
+        namespace: Namespace,
+        parent: Option<(SymbolId, Context)>,
+    },
+    Symbol {
+        id: SymbolId,
+        context: Context,
+        parent: Option<(SymbolId, Context)>,
+        import: Vec<SymbolPathNamespace>,
+    },
+}
+
+impl TypeDagCandidate {
+    pub fn set_parent(&mut self, x: (SymbolId, Context)) {
+        match self {
+            TypeDagCandidate::Path { parent, .. } => {
+                *parent = Some(x);
+            }
+            TypeDagCandidate::Symbol { parent, .. } => {
+                *parent = Some(x);
+            }
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct TypeDag {
@@ -16,6 +47,9 @@ pub struct TypeDag {
     paths: HashMap<u32, TypeResolveInfo>,
     symbols: HashMap<u32, Symbol>,
     source: u32,
+    candidates: Vec<TypeDagCandidate>,
+    errors: Vec<DagError>,
+    dag_owned: HashMap<u32, Vec<u32>>,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +81,17 @@ pub enum DagError {
     Cyclic(Symbol, Symbol),
 }
 
+impl From<DagError> for AnalyzerError {
+    fn from(value: DagError) -> Self {
+        let DagError::Cyclic(s, e) = value;
+        AnalyzerError::cyclic_type_dependency(
+            &s.token.to_string(),
+            &e.token.to_string(),
+            &e.token.into(),
+        )
+    }
+}
+
 impl TypeDag {
     #[allow(dead_code)]
     fn new() -> Self {
@@ -58,6 +103,178 @@ impl TypeDag {
             paths: HashMap::default(),
             symbols: HashMap::default(),
             source,
+            candidates: Vec::new(),
+            errors: Vec::new(),
+            dag_owned: HashMap::default(),
+        }
+    }
+
+    fn add(&mut self, cand: TypeDagCandidate) {
+        self.candidates.push(cand);
+    }
+
+    fn apply(&mut self) -> Vec<AnalyzerError> {
+        let candidates: Vec<_> = self.candidates.drain(..).collect();
+
+        // Process symbol declarations at first to construct dag_owned
+        for cand in &candidates {
+            if let TypeDagCandidate::Symbol {
+                id,
+                context,
+                parent,
+                import,
+            } = cand
+            {
+                if let Some(symbol) = symbol_table::get(*id) {
+                    if let Some(child) = self.insert_declaration_symbol(&symbol, parent) {
+                        for x in import {
+                            if let Ok(import) = symbol_table::resolve(x) {
+                                if let Some(import) = self.insert_symbol(&import.found) {
+                                    self.insert_dag_edge(child, import, *context);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Process symbol references using dag_owned
+        for cand in &candidates {
+            if let TypeDagCandidate::Path {
+                path,
+                namespace,
+                parent,
+            } = cand
+            {
+                self.insert_path(path, namespace, parent);
+            }
+        }
+
+        self.errors.drain(..).map(|x| x.into()).collect()
+    }
+
+    fn insert_path(
+        &mut self,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+        parent: &Option<(SymbolId, Context)>,
+    ) {
+        if path.is_generic_reference() {
+            return;
+        }
+
+        let mut path = path.clone();
+        path.resolve_imported(namespace);
+
+        for i in 0..path.len() {
+            let base_path = path.base_path(i);
+
+            if let Ok(symbol) = symbol_table::resolve((&base_path, namespace)) {
+                let base = &symbol.found;
+                let generic_args: Vec<_> = path.paths[i]
+                    .arguments
+                    .iter()
+                    .filter_map(|x| {
+                        symbol_table::resolve((&x.mangled_path(), namespace))
+                            .map(|x| x.found)
+                            .ok()
+                    })
+                    .collect();
+
+                if let Some(base) = self.insert_symbol(base) {
+                    if let Some(parent) = parent {
+                        let parent_symbol = symbol_table::get(parent.0).unwrap();
+                        let parent_context = parent.1;
+                        if let Some(parent) = self.insert_symbol(&parent_symbol) {
+                            if !self.is_dag_owned(parent, base) {
+                                self.insert_dag_edge(parent, base, parent_context);
+                            }
+                        }
+                    }
+
+                    for arg in generic_args {
+                        if let Some(arg) = self.insert_symbol(&arg) {
+                            self.insert_dag_edge(base, arg, Context::GenericInstance);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn insert_symbol(&mut self, symbol: &Symbol) -> Option<u32> {
+        let is_dag_symbol = match symbol.kind {
+            SymbolKind::Module(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::Modport(_)
+            | SymbolKind::Package(_)
+            | SymbolKind::Enum(_)
+            | SymbolKind::TypeDef(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::Function(_) => true,
+            SymbolKind::Parameter(ref x) => matches!(x.kind, ParameterKind::Const),
+            _ => false,
+        };
+        if !is_dag_symbol {
+            return None;
+        }
+
+        let name = symbol.token.to_string();
+        match self.insert_node(symbol.id, &name) {
+            Ok(n) => Some(n),
+            Err(x) => {
+                self.errors.push(x);
+                None
+            }
+        }
+    }
+
+    fn insert_declaration_symbol(
+        &mut self,
+        symbol: &Symbol,
+        parent: &Option<(SymbolId, Context)>,
+    ) -> Option<u32> {
+        if let Some(child) = self.insert_symbol(symbol) {
+            if let Some(parent) = parent {
+                let parent_symbol = symbol_table::get(parent.0).unwrap();
+                let parent_context = parent.1;
+                if let Some(parent) = self.insert_symbol(&parent_symbol) {
+                    self.insert_dag_owned(parent, child);
+                    self.insert_dag_edge(child, parent, parent_context);
+                }
+            }
+            Some(child)
+        } else {
+            None
+        }
+    }
+
+    fn insert_dag_edge(&mut self, parent: u32, child: u32, context: Context) {
+        // Reversing this order to make traversal work
+        if let Err(x) = self.insert_edge(child, parent, context) {
+            self.errors.push(x);
+        }
+    }
+
+    fn insert_dag_owned(&mut self, parent: u32, child: u32) {
+        // If there is already edge to owned type, remove it.
+        // Argument order should be the same as insert_edge.
+        if self.exist_edge(child, parent) {
+            self.remove_edge(child, parent);
+        }
+        self.dag_owned
+            .entry(parent)
+            .and_modify(|x| x.push(child))
+            .or_insert(vec![child]);
+    }
+
+    fn is_dag_owned(&self, parent: u32, child: u32) -> bool {
+        if let Some(owned) = self.dag_owned.get(&parent) {
+            owned.contains(&child)
+        } else {
+            false
         }
     }
 
@@ -158,8 +375,17 @@ impl TypeDag {
     }
 
     fn dump(&self) -> String {
-        let nodes = algo::toposort(self.dag.graph(), None).unwrap();
+        let mut nodes = algo::toposort(self.dag.graph(), None).unwrap();
         let mut ret = "".to_string();
+
+        nodes.sort_by_key(|x| {
+            let idx = x.index() as u32;
+            if let Some(path) = self.paths.get(&idx) {
+                path.name.clone()
+            } else {
+                "".to_string()
+            }
+        });
 
         let mut max_width = 0;
         for node in &nodes {
@@ -213,24 +439,12 @@ impl TypeDag {
 
 thread_local!(static TYPE_DAG: RefCell<TypeDag> = RefCell::new(TypeDag::new()));
 
-pub fn insert_edge(start: u32, end: u32, context: Context) -> Result<(), DagError> {
-    TYPE_DAG.with(|f| f.borrow_mut().insert_edge(start, end, context))
+pub fn add(cand: TypeDagCandidate) {
+    TYPE_DAG.with(|f| f.borrow_mut().add(cand))
 }
 
-pub fn exist_edge(start: u32, end: u32) -> bool {
-    TYPE_DAG.with(|f| f.borrow().exist_edge(start, end))
-}
-
-pub fn remove_edge(start: u32, end: u32) {
-    TYPE_DAG.with(|f| f.borrow_mut().remove_edge(start, end))
-}
-
-pub fn insert_node(symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
-    TYPE_DAG.with(|f| f.borrow_mut().insert_node(symbol_id, name))
-}
-
-pub fn get_symbol(node: u32) -> Symbol {
-    TYPE_DAG.with(|f| f.borrow().get_symbol(node))
+pub fn apply() -> Vec<AnalyzerError> {
+    TYPE_DAG.with(|f| f.borrow_mut().apply())
 }
 
 pub fn toposort() -> Vec<Symbol> {
