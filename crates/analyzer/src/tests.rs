@@ -3659,6 +3659,28 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+
+    let code = r#"
+    package Pkg {
+        struct FooBar {
+            foo: logic,
+            bar: logic,
+        }
+    }
+    module ModuleA #(
+        const FooBar: type = Pkg::FooBar,
+    )(
+        i_a: input  FooBar,
+        i_b: input  FooBar,
+        o_c: output FooBar,
+    ) {
+        assign o_c.foo = i_a.foo + i_b.foo;
+        assign o_c.bar = i_a.bar + i_b.bar;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

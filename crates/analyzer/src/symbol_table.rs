@@ -11,6 +11,7 @@ use log::trace;
 use std::cell::RefCell;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
+use veryl_parser::veryl_grammar_trait::Expression;
 use veryl_parser::veryl_token::{Token, TokenSource};
 
 #[derive(Clone, Debug)]
@@ -145,26 +146,21 @@ impl SymbolTable {
             )?;
             match symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
+                SymbolKind::Parameter(ref x) => {
+                    if matches!(x.r#type.kind, TypeKind::Type) {
+                        return self.trace_type_parameter(context, &x.value, &symbol.found);
+                    }
+                }
                 SymbolKind::TypeDef(x) => {
                     context.namespace = symbol.found.namespace;
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
                 SymbolKind::GenericParameter(ref x) => {
                     if x.bound == GenericBoundKind::Type {
-                        if let Some(generic_table) =
-                            context.generic_tables.get(&symbol.found.namespace)
+                        if let Some(x) =
+                            self.resolve_generic_parameter(context.clone(), &symbol.found)
                         {
-                            if let Some(path) = generic_table.get(&symbol.found.token.text) {
-                                let symbol = self.resolve(
-                                    &path.generic_path(),
-                                    &path.generic_arguments(),
-                                    context.push(),
-                                )?;
-                                context.namespace = symbol.found.inner_namespace();
-                                context.last_found_type = Some(symbol.found.id);
-                                context.inner = true;
-                                return Ok(context);
-                            }
+                            return x;
                         }
                     }
                 }
@@ -241,19 +237,10 @@ impl SymbolTable {
         found: &Symbol,
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let SymbolKind::GenericParameter(x) = &found.kind {
-            if let Some(generic_table) = context.generic_tables.get(&found.namespace) {
-                if let Some(path) = generic_table.get(&found.token.text) {
-                    let symbol = self.resolve(
-                        &path.generic_path(),
-                        &path.generic_arguments(),
-                        context.push(),
-                    )?;
-                    context.namespace = symbol.found.inner_namespace();
-                    context.last_found_type = Some(symbol.found.id);
-                    context.inner = true;
-                    return Ok(context);
-                }
+            if let Some(x) = self.resolve_generic_parameter(context.clone(), found) {
+                return x;
             }
+
             let symbol = match &x.bound {
                 GenericBoundKind::Inst(proto) => {
                     let mut ctxt = ResolveContext::new(&found.namespace);
@@ -272,6 +259,75 @@ impl SymbolTable {
             context.last_found_type = Some(symbol.id);
             context.inner = true;
         }
+        Ok(context)
+    }
+
+    fn resolve_generic_parameter<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        found: &Symbol,
+    ) -> Option<Result<ResolveContext<'a>, ResolveError>> {
+        if let SymbolKind::GenericParameter(_) = &found.kind {
+            if let Some(generic_table) = context.generic_tables.get(&found.namespace) {
+                if let Some(path) = generic_table.get(&found.token.text) {
+                    let result = self.resolve(
+                        &path.generic_path(),
+                        &path.generic_arguments(),
+                        context.push(),
+                    );
+                    if let Ok(symbol) = result {
+                        context.namespace = symbol.found.inner_namespace();
+                        context.last_found_type = Some(symbol.found.id);
+                        context.inner = true;
+                        return Some(Ok(context));
+                    } else {
+                        return result.err().map(Err);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn trace_type_parameter<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        expression: &Expression,
+        found: &Symbol,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        if let Some(identifier) = expression.unwrap_identifier() {
+            let mut ctxt = ResolveContext::new(&found.namespace);
+            ctxt.depth = context.depth + 1;
+
+            let symbol = self.resolve(&identifier.into(), &[], ctxt)?;
+            match &symbol.found.kind {
+                SymbolKind::Parameter(x) => {
+                    if matches!(x.r#type.kind, TypeKind::Type) {
+                        return self.trace_type_parameter(context, &x.value, &symbol.found);
+                    }
+                }
+                SymbolKind::TypeDef(x) => {
+                    return self.trace_type_kind(context, &x.r#type.kind);
+                }
+                SymbolKind::GenericParameter(x) => {
+                    if x.bound == GenericBoundKind::Type {
+                        if let Some(x) =
+                            self.resolve_generic_parameter(context.clone(), &symbol.found)
+                        {
+                            return x;
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            context.namespace = symbol.found.inner_namespace();
+            context.last_found_type = Some(symbol.found.id);
+            context.inner = true;
+            context.generic_tables = symbol.generic_tables;
+        }
+
         Ok(context)
     }
 
@@ -500,7 +556,11 @@ impl SymbolTable {
                             context = self.trace_type_kind(context, &x.r#type.kind)?;
                         }
                         SymbolKind::Parameter(x) => {
-                            context = self.trace_type_kind(context, &x.r#type.kind)?;
+                            if matches!(x.r#type.kind, TypeKind::Type) {
+                                context = self.trace_type_parameter(context, &x.value, found)?;
+                            } else {
+                                context = self.trace_type_kind(context, &x.r#type.kind)?;
+                            }
                         }
                         SymbolKind::TypeDef(x) => {
                             context = self.trace_type_kind(context, &x.r#type.kind)?;
