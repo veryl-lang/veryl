@@ -2,7 +2,6 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::ExpandItem;
 use crate::attribute_table;
 use crate::namespace::Namespace;
-use crate::namespace_table;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::{Symbol, SymbolKind, TypeKind};
 use crate::symbol_path::SymbolPathNamespace;
@@ -24,8 +23,11 @@ impl CheckModport {
     }
 
     fn is_function_defined_in_interface(&self, symbol: &Symbol) -> bool {
-        let namespace = self.interface_namespace.as_ref().unwrap();
-        matches!(symbol.kind, SymbolKind::Function(_)) && symbol.namespace.matched(namespace)
+        if let Some(namespace) = self.interface_namespace.as_ref() {
+            matches!(symbol.kind, SymbolKind::Function(_)) && symbol.namespace.matched(namespace)
+        } else {
+            false
+        }
     }
 }
 
@@ -89,8 +91,9 @@ impl VerylGrammarTrait for CheckModport {
 
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.interface_namespace =
-                namespace_table::get(arg.identifier.identifier_token.token.id);
+            self.interface_namespace = symbol_table::resolve(arg.identifier.as_ref())
+                .ok()
+                .map(|x| x.found.inner_namespace());
         }
         Ok(())
     }

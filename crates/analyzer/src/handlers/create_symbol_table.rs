@@ -128,6 +128,13 @@ impl CreateSymbolTable {
         }
     }
 
+    fn insert_namespace(&self, token: &Token) {
+        if let TokenSource::File { path, .. } = token.source {
+            let namespace = self.get_namespace(token);
+            namespace_table::insert(token.id, path, &namespace);
+        }
+    }
+
     fn check_identifer_with_type_path(
         &mut self,
         identifier: &Identifier,
@@ -194,7 +201,13 @@ impl CreateSymbolTable {
         }
 
         let id = symbol_table::insert(token, symbol);
-        if id.is_none() {
+        if id.is_some() {
+            // Some symbols (e.g. module declaration) are inserted at Hander::After phase.
+            // For such symbols, namespace assosiated with the symbol and namespace included in
+            // namespace_table are different.
+            // Need to insert the namespace again to resolve this namespace mismatch.
+            self.insert_namespace(token);
+        } else {
             self.errors.push(AnalyzerError::duplicated_identifier(
                 &token.to_string(),
                 &token.into(),
@@ -584,20 +597,14 @@ fn scoped_identifier_tokens(arg: &ScopedIdentifier) -> Vec<Token> {
 impl VerylGrammarTrait for CreateSymbolTable {
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let token = arg.identifier_token.token;
-            if let TokenSource::File { path, .. } = token.source {
-                namespace_table::insert(token.id, path, &self.get_namespace(&token));
-            }
+            self.insert_namespace(&arg.identifier_token.token);
         }
         Ok(())
     }
 
     fn dollar_identifier(&mut self, arg: &DollarIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let token = arg.dollar_identifier_token.token;
-            if let TokenSource::File { path, .. } = token.source {
-                namespace_table::insert(token.id, path, &self.get_namespace(&token));
-            }
+            self.insert_namespace(&arg.dollar_identifier_token.token);
         }
         Ok(())
     }
