@@ -1963,7 +1963,6 @@ pub struct ModportFunctionMemberProperty {
 
 #[derive(Debug, Clone)]
 pub enum GenericBoundKind {
-    Const,
     Type,
     Inst(SymbolPath),
     Proto(Type),
@@ -1991,6 +1990,16 @@ impl ProtoBound {
             | ProtoBound::Union((x, _)) => Some(x.clone()),
             _ => None,
         }
+    }
+
+    pub fn is_variable_type(&self) -> bool {
+        matches!(
+            self,
+            ProtoBound::FactorType(_)
+                | ProtoBound::Enum(_)
+                | ProtoBound::Struct(_)
+                | ProtoBound::Union(_)
+        )
     }
 }
 
@@ -2035,7 +2044,6 @@ impl GenericBoundKind {
 impl fmt::Display for GenericBoundKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            GenericBoundKind::Const => "const".to_string(),
             GenericBoundKind::Type => "type".to_string(),
             GenericBoundKind::Inst(x) => x.to_string(),
             GenericBoundKind::Proto(x) => x.to_string(),

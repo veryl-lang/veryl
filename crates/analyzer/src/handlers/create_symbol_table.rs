@@ -1407,7 +1407,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
 
             let bound = match arg.generic_bound.as_ref() {
-                GenericBound::Const(_) => GenericBoundKind::Const,
                 GenericBound::Type(_) => GenericBoundKind::Type,
                 GenericBound::InstScopedIdentifier(x) => {
                     let type_path: GenericSymbolPath = x.scoped_identifier.as_ref().into();

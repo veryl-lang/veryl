@@ -4,9 +4,7 @@ use crate::connect_operation_table::{self, ConnectOperand};
 use crate::definition_table::{self, Definition};
 use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, Evaluator};
 use crate::instance_history::{self, InstanceHistoryError, InstanceSignature};
-use crate::symbol::{
-    Direction, GenericBoundKind, ModuleProperty, Symbol, SymbolId, SymbolKind, TypeKind,
-};
+use crate::symbol::{Direction, ModuleProperty, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
 use std::collections::{HashMap, HashSet};
 use veryl_parser::ParolError;
@@ -278,9 +276,11 @@ impl VerylGrammarTrait for CheckExpression {
                     if self.in_input_port_default_value {
                         let port_default_available = match &rr.found.kind {
                             SymbolKind::SystemFunction(_) => true,
-                            SymbolKind::GenericParameter(x) => {
-                                matches!(x.bound, GenericBoundKind::Const)
-                            }
+                            SymbolKind::GenericParameter(x) => x
+                                .bound
+                                .resolve_proto_bound(&rr.found.namespace)
+                                .map(|x| x.is_variable_type())
+                                .unwrap_or(false),
                             _ => is_defined_in_package(&rr.full_path),
                         };
 

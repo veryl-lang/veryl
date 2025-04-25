@@ -115,6 +115,30 @@ fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
     Some(symbol)
 }
 
+fn is_literal_or_referable_number(arg: &Option<Symbol>) -> bool {
+    let Some(symbol) = arg else {
+        return true;
+    };
+
+    match &symbol.kind {
+        SymbolKind::Parameter(_) => {
+            if let Some(parent) = symbol.get_parent() {
+                return matches!(parent.kind, SymbolKind::Package(_));
+            }
+        }
+        SymbolKind::GenericParameter(x) => {
+            return x
+                .bound
+                .resolve_proto_bound(&symbol.namespace)
+                .map(|x| x.is_variable_type())
+                .unwrap_or(false);
+        }
+        _ => {}
+    }
+
+    false
+}
+
 impl VerylGrammarTrait for CheckType {
     fn user_defined_type(&mut self, _arg: &UserDefinedType) -> Result<(), ParolError> {
         match self.point {
@@ -319,7 +343,6 @@ impl VerylGrammarTrait for CheckType {
                         if let Some(param) = params.get(i) {
                             let bound = &param.1.bound;
                             match bound {
-                                GenericBoundKind::Const => (),
                                 GenericBoundKind::Type => {
                                     let is_type = if arg.is_resolvable() {
                                         if let Ok(symbol) =
@@ -407,7 +430,7 @@ impl VerylGrammarTrait for CheckType {
                                         ProtoBound::FactorType(x)
                                         | ProtoBound::Struct((_, x))
                                         | ProtoBound::Union((_, x)) => {
-                                            if actual.is_some() {
+                                            if !is_literal_or_referable_number(&actual) {
                                                 expected = Some(format!("{}", x))
                                             }
                                         }

@@ -193,7 +193,7 @@ package PackageA {
 interface InterfaceA {
 }
 
-interface InterfaceB::<N: const> {
+interface InterfaceB::<N: u32> {
 }
 "#;
 
@@ -643,8 +643,8 @@ endmodule
 
 #[test]
 fn emit_nested_generic_instances() {
-    let code = r#"package Pkg::<A: const> {
-    function Func::<B: const> -> i32 {
+    let code = r#"package Pkg::<A: u32> {
+    function Func::<B: u32> -> i32 {
         return A + B;
     }
     struct Struct::<W: cosnt> {
@@ -887,7 +887,7 @@ endmodule
         READ,
     }
 }
-package Pkg::<W: const> {
+package Pkg::<W: u32> {
     const COMMAND_WIDTH: u32 = W;
 
     enum Command: logic<COMMAND_WIDTH> {
@@ -1035,7 +1035,7 @@ interface InterfaceA::<PKG: ProtoPkgA> {
     }
 }
 #[expand(modport)]
-module ModuleA::<X: const, Y: const> (
+module ModuleA::<X: u32, Y: u32> (
     a_if: modport InterfaceA::<PkgA>::master[X, Y],
     b_if: modport InterfaceA::<PkgA>::slave [X, Y],
 ) {

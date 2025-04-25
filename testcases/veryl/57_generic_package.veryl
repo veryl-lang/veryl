@@ -1,21 +1,21 @@
 /// Generic package test for doc comment
-pub package Package57A::<T: const> {
+pub package Package57A::<T: u32> {
     const X: u32 = T;
 }
 
 /// Generic package test for doc comment
-pub package Package57B::<T: const = 4> {
+pub package Package57B::<T: u32 = 4> {
     const X: u32 = T;
 }
 
-package Package57C::<W: const> {
+package Package57C::<W: u32> {
     struct StructC {
         c: logic<W>,
     }
 }
 
-package Package57D::<A: const> {
-    struct StructD::<B: const> {
+package Package57D::<A: u32> {
+    struct StructD::<B: u32> {
         d0: logic<A>,
         d1: logic<B>,
     }

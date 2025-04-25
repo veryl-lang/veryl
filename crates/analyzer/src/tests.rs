@@ -1026,22 +1026,22 @@ fn mismatch_function_arity() {
 fn missing_default_generic_argument() {
     let code = r#"
     module ModuleA {
-        function FuncA::<A: const> () -> logic<A> {}
+        function FuncA::<A: u32> () -> logic<A> {}
         let _a: logic = FuncA::<1>();
 
-        function FuncB::<A: const, B: const, C: const> () -> logic<A + B + C> {}
+        function FuncB::<A: u32, B: u32, C: u32> () -> logic<A + B + C> {}
         let _b: logic = FuncB::<1, 2, 3>();
 
-        function FuncC::<A: const = 1> () -> logic<A> {}
+        function FuncC::<A: u32 = 1> () -> logic<A> {}
         let _c: logic = FuncC::<>();
 
-        function FuncD::<A: const = 1, B: const = 2, C: const = 3> () -> logic<A + B + C> {}
+        function FuncD::<A: u32 = 1, B: u32 = 2, C: u32 = 3> () -> logic<A + B + C> {}
         let _d: logic = FuncD::<>();
 
-        function FuncE::<A: const, B: const = 2, C: const = 3> () -> logic<A + B + C> {}
+        function FuncE::<A: u32, B: u32 = 2, C: u32 = 3> () -> logic<A + B + C> {}
         let _e: logic = FuncE::<1>();
 
-        function FuncF::<A: const, B: const, C: const = 3> () -> logic<A + B + C> {}
+        function FuncF::<A: u32, B: u32, C: u32 = 3> () -> logic<A + B + C> {}
         let _f: logic = FuncF::<1, 2>();
     }
     "#;
@@ -1051,7 +1051,7 @@ fn missing_default_generic_argument() {
 
     let code = r#"
         module ModuleB {
-            function FuncA::<A: const = 1, B: const, C: const = 3> () -> logic<A + B + C> {}
+            function FuncA::<A: u32 = 1, B: u32, C: u32 = 3> () -> logic<A + B + C> {}
             let _a: logic = FuncA::<1, 2, 3> ();
         }
     "#;
@@ -1064,7 +1064,7 @@ fn missing_default_generic_argument() {
 
     let code = r#"
         module ModuleC {
-            function FuncA::<A: const = 1, B: const = 2, C: const> () -> logic<A + B + C> {}
+            function FuncA::<A: u32 = 1, B: u32 = 2, C: u32> () -> logic<A + B + C> {}
             let _a: logic = FuncA::<1, 2, 3>();
         }
     "#;
@@ -1080,7 +1080,7 @@ fn missing_default_generic_argument() {
 fn mismatch_generics_arity() {
     let code = r#"
     module ModuleA {
-        function FuncA::<T: const> (
+        function FuncA::<T: u32> (
             a: input logic<T>,
         ) -> logic<T> {}
 
@@ -1096,7 +1096,7 @@ fn mismatch_generics_arity() {
 
     let code = r#"
     module ModuleB {
-        function FuncA::<T: const, U: const> (
+        function FuncA::<T: u32, U: u32> (
             a: input logic<T>,
         ) -> logic<T> {}
 
@@ -1111,7 +1111,7 @@ fn mismatch_generics_arity() {
     ));
 
     let code = r#"
-    package PackageC::<W: const> {
+    package PackageC::<W: u32> {
         struct StructC {
             c: logic<W>,
         }
@@ -1127,11 +1127,11 @@ fn mismatch_generics_arity() {
 
     let code = r#"
     package PackageD {
-        function FuncD::<W: const> -> logic<W> {
+        function FuncD::<W: u32> -> logic<W> {
             return 0;
         }
     }
-    module SubD::<W: const> {
+    module SubD::<W: u32> {
         let _d: logic<W> = PackageD::FuncD::<W>();
     }
     module TopD {
@@ -2360,7 +2360,7 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceA::<W: const> {
+    interface InterfaceA::<W: u32> {
         var a: logic<W>;
         modport mp {
             a: input,
@@ -2387,7 +2387,7 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceA::<W: const> {
+    interface InterfaceA::<W: u32> {
         var a: logic<W>;
     }
     module ModuleA (
@@ -2411,7 +2411,7 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
-    interface InterfaceA::<W: const> {
+    interface InterfaceA::<W: u32> {
         var a: logic<W>;
     }
     module ModuleA (
@@ -2492,7 +2492,7 @@ fn mismatch_type() {
 
     let code = r#"
     module ModuleA {}
-    module ModuleB::<B0: const, B1: const> {}
+    module ModuleB::<B0: u32, B1: u32> {}
 
     alias module Foo = ModuleA;
     alias module Bar = ModuleB::<1, 2>;
@@ -2519,7 +2519,7 @@ fn mismatch_type() {
 
     let code = r#"
     interface InterfaceA {}
-    interface InterfaceB::<B0: const, B1: const> {}
+    interface InterfaceB::<B0: u32, B1: u32> {}
 
     alias interface Foo = InterfaceA;
     alias interface Bar = InterfaceB::<1, 2>;
@@ -2546,7 +2546,7 @@ fn mismatch_type() {
 
     let code = r#"
     package PkgA {}
-    package PkgB::<B0: const, B1: const> {}
+    package PkgB::<B0: u32, B1: u32> {}
 
     alias package FooPkg = PkgA;
     alias package BarPkg = PkgB::<1, 2>;
@@ -3316,7 +3316,7 @@ fn invalid_enum_variant() {
 #[test]
 fn invisible_identifier() {
     let code = r#"
-    package Pkg::<A: const> {}
+    package Pkg::<A: u32> {}
     module ModuleA {
         const A: u32 = Pkg::<1>::A;
     }
@@ -3409,7 +3409,7 @@ fn undefined_identifier() {
     ));
 
     let code = r#"
-    package PkgBase::<AW: const, DW: const> {
+    package PkgBase::<AW: u32, DW: u32> {
         type address_t = logic<AW>;
         type data_t    = logic<DW>;
     }
@@ -3429,7 +3429,7 @@ fn undefined_identifier() {
         type address_t;
         type data_t   ;
     }
-    package PkgBase::<AW: const, DW: const> for ProtoPkg {
+    package PkgBase::<AW: u32, DW: u32> for ProtoPkg {
         type address_t = logic<AW>;
         type data_t    = logic<DW>;
     }
@@ -3654,7 +3654,7 @@ fn unknown_member() {
     assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
 
     let code = r#"
-    interface InterfaceA::<W: const> {
+    interface InterfaceA::<W: u32> {
         var a: logic<W>;
     }
     module ModuleA {
@@ -3667,7 +3667,7 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
-    interface InterfaceA::<W: const> {
+    interface InterfaceA::<W: u32> {
         var a: logic<W>;
         modport mp {
             a: input,
@@ -3684,7 +3684,7 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
-    interface InterfaceA::<W: const> {
+    interface InterfaceA::<W: u32> {
         var a: logic<W>;
         modport mp {
             a: input,
@@ -3753,14 +3753,14 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
-    package Pkg::<W: const> {
+    package Pkg::<W: u32> {
         const WIDTH: u32 = W;
         struct FooBar {
             foo: logic<WIDTH>,
             bar: logic<WIDTH>,
         }
     }
-    module ModuleA::<W: const = 2, T: type = Pkg::<W>::FooBar> (
+    module ModuleA::<W: u32 = 2, T: type = Pkg::<W>::FooBar> (
         i_a: input  T,
         i_b: input  T,
         o_c: output T,
@@ -3820,7 +3820,7 @@ fn unknown_msb() {
     assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
 
     let code = r#"
-    package PackageA::<W: const> {
+    package PackageA::<W: u32> {
         struct StructA {
             a: logic<W>,
         }
@@ -4244,7 +4244,7 @@ fn unassign_variable() {
     assert!(errors.is_empty());
 
     let code = r#"
-    module ModuleA::<A: const>(
+    module ModuleA::<A: u32>(
         o_a: output logic,
     ) {
         assign o_a = 0;
@@ -5461,7 +5461,7 @@ fn unresolvable_generic_argument() {
         const Y: u32 = PackageA::<X>::W;
     }
 
-    package PackageA::<T: const> {
+    package PackageA::<T: u32> {
         const W: u32 = T;
     }
     "#;

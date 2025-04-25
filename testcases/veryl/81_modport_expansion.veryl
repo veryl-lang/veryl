@@ -8,7 +8,7 @@ proto package ProtoPkg81 {
     type Data   ;
 }
 
-package BasePkg81::<AW: const, DW: const> for ProtoPkg81 {
+package BasePkg81::<AW: u32, DW: u32> for ProtoPkg81 {
     enum Command {
         WRITE,
         READ,

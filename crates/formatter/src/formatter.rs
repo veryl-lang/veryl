@@ -2081,7 +2081,6 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'GenericBound'
     fn generic_bound(&mut self, arg: &GenericBound) {
         match arg {
-            GenericBound::Const(x) => self.r#const(&x.r#const),
             GenericBound::Type(x) => self.r#type(&x.r#type),
             GenericBound::InstScopedIdentifier(x) => {
                 self.inst(&x.inst);

@@ -58,8 +58,8 @@ module Module55G::<T: Proto55> {
     inst u: T;
 }
 
-module Module55H::<W: const> {
-    struct StructH::<W: const> {
+module Module55H::<W: u32> {
+    struct StructH::<W: u32> {
         value: logic<W>,
     }
 

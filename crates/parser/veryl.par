@@ -775,8 +775,7 @@ WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) Equ E
 // WithGenericParameter
 // ----------------------------------------------------------------------------
 
-GenericBound: Const
-            | Type
+GenericBound: Type
             | Inst ScopedIdentifier
             | GenericProtoBound;
 

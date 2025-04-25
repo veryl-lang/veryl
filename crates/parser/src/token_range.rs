@@ -1088,7 +1088,6 @@ impl_token_ext!(WithParameterItem);
 impl From<&GenericBound> for TokenRange {
     fn from(value: &GenericBound) -> Self {
         match value {
-            GenericBound::Const(x) => x.r#const.as_ref().into(),
             GenericBound::Type(x) => x.r#type.as_ref().into(),
             GenericBound::InstScopedIdentifier(x) => {
                 let mut ret: TokenRange = x.inst.as_ref().into();
