@@ -15,11 +15,54 @@ pub struct CheckModport {
     pub errors: Vec<AnalyzerError>,
     point: HandlerPoint,
     interface_namespace: Option<Namespace>,
+    in_function: bool,
 }
 
 impl CheckModport {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn is_target_modport(&self, identifier: &Identifier) -> bool {
+        self.in_function
+            || attribute_table::is_expand(&identifier.identifier_token.token, ExpandItem::Modport)
+    }
+
+    fn is_unexpandable_modport(&self, symbol: &Symbol) -> bool {
+        if let SymbolKind::Port(x) = &symbol.kind {
+            if !matches!(x.direction, SymDirection::Modport) {
+                return false;
+            }
+
+            let port_type = &x.r#type;
+            match &x.r#type.kind {
+                TypeKind::UserDefined(x) => {
+                    let Ok(symbol) =
+                        symbol_table::resolve((&x.path.generic_path(), &symbol.namespace))
+                    else {
+                        return false;
+                    };
+
+                    if let SymbolKind::Modport(modport) = &symbol.found.kind {
+                        if let Some(symbol) = symbol_table::get(modport.interface) {
+                            let SymbolKind::Interface(x) = symbol.kind else {
+                                unreachable!()
+                            };
+
+                            let is_expandable = x.parameters.is_empty()
+                                && (!self.in_function || port_type.array.is_empty());
+                            if !is_expandable {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                TypeKind::AbstractInterface(_) => return true,
+                _ => {}
+            }
+        }
+
+        false
     }
 
     fn is_function_defined_in_interface(&self, symbol: &Symbol) -> bool {
@@ -37,54 +80,25 @@ impl Handler for CheckModport {
     }
 }
 
-fn is_unexpandable_modport(symbol: &Symbol) -> bool {
-    if let SymbolKind::Port(x) = &symbol.kind {
-        if !matches!(x.direction, SymDirection::Modport) {
-            return false;
-        }
-
-        match &x.r#type.kind {
-            TypeKind::UserDefined(x) => {
-                let Ok(symbol) = symbol_table::resolve((&x.path.generic_path(), &symbol.namespace))
-                else {
-                    return false;
-                };
-
-                if let SymbolKind::Modport(modport) = &symbol.found.kind {
-                    if let Some(symbol) = symbol_table::get(modport.interface) {
-                        let SymbolKind::Interface(x) = symbol.kind else {
-                            unreachable!()
-                        };
-                        if !x.parameters.is_empty() {
-                            return true;
-                        }
-                    }
-                }
-            }
-            TypeKind::AbstractInterface(_) => return true,
-            _ => {}
-        }
-    }
-
-    false
-}
-
 impl VerylGrammarTrait for CheckModport {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
-        if matches!(self.point, HandlerPoint::Before)
-            && attribute_table::is_expand(
-                &arg.identifier.identifier_token.token,
-                ExpandItem::Modport,
-            )
-        {
+        if matches!(self.point, HandlerPoint::Before) && self.is_target_modport(&arg.identifier) {
             if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                if is_unexpandable_modport(&symbol.found) {
+                if self.is_unexpandable_modport(&symbol.found) {
                     self.errors.push(AnalyzerError::unexpandable_modport(
                         &arg.identifier.identifier_token.token.to_string(),
                         &arg.identifier.as_ref().into(),
                     ));
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn function_declaration(&mut self, _arg: &FunctionDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_function = true,
+            HandlerPoint::After => self.in_function = false,
         }
         Ok(())
     }

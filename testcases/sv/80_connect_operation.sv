@@ -101,9 +101,9 @@ module veryl_testcase_Module80B (
         bus_if.command           = command_if.command;
     end
     always_comb begin
-        bus_if.status_ready      = status_if.status_ready;
-        status_if.status_valid   = bus_if.status_valid;
-        status_if.status         = veryl_testcase_Package80::Status'(bus_if.status);
+        bus_if.status_ready    = status_if.status_ready;
+        status_if.status_valid = bus_if.status_valid;
+        status_if.status       = veryl_testcase_Package80::Status'(bus_if.status);
     end
 
     always_comb begin

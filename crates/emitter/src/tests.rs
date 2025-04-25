@@ -1096,18 +1096,18 @@ interface prj___InterfaceA__PkgA;
 endinterface
 
 module prj___ModuleA__1__2 (
-    input  logic             __a_if_0_0_ready  ,
-    output logic             __a_if_0_0_valid  ,
-    output prj_PkgA::Command __a_if_0_0_command,
-    input  logic             __a_if_0_1_ready  ,
-    output logic             __a_if_0_1_valid  ,
-    output prj_PkgA::Command __a_if_0_1_command,
-    output logic             __b_if_0_0_ready  ,
-    input  logic             __b_if_0_0_valid  ,
-    input  prj_PkgA::Command __b_if_0_0_command,
-    output logic             __b_if_0_1_ready  ,
-    input  logic             __b_if_0_1_valid  ,
-    input  prj_PkgA::Command __b_if_0_1_command
+    input  var logic             __a_if_0_0_ready  ,
+    output var logic             __a_if_0_0_valid  ,
+    output var prj_PkgA::Command __a_if_0_0_command,
+    input  var logic             __a_if_0_1_ready  ,
+    output var logic             __a_if_0_1_valid  ,
+    output var prj_PkgA::Command __a_if_0_1_command,
+    output var logic             __b_if_0_0_ready  ,
+    input  var logic             __b_if_0_0_valid  ,
+    input  var prj_PkgA::Command __b_if_0_0_command,
+    output var logic             __b_if_0_1_ready  ,
+    input  var logic             __b_if_0_1_valid  ,
+    input  var prj_PkgA::Command __b_if_0_1_command
 );
     prj___InterfaceA__PkgA a_if [0:1-1][0:2-1] ();
     always_comb begin
@@ -1172,6 +1172,109 @@ module prj_ModuleB;
         .__b_if_0_1_valid   (b_if[0][1].valid  ),
         .__b_if_0_1_command (b_if[0][1].command)
     );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn expand_modport_in_function() {
+    let code = r#"
+interface InterfaceA::<W: u32> {
+    var ready  : logic;
+    var valid  : logic;
+    var command: logic<W>;
+
+    modport master {
+        ready  : input ,
+        valid  : output,
+        command: output,
+    }
+
+    modport slave {
+        ready  : output,
+        valid  : input ,
+        command: input ,
+    }
+}
+package PkgA::<W: u32> {
+    function FuncA (
+        a_if: modport InterfaceA::<W>::master,
+        b_if: modport InterfaceA::<W>::slave ,
+    ) {
+        a_if <> b_if;
+    }
+}
+module ModuleA {
+    inst a_if: InterfaceA::<8>;
+    inst b_if: InterfaceA::<8>;
+
+    connect a_if.slave  <> 0;
+    connect b_if.master <> 0;
+
+    always_comb {
+        PkgA::<8>::FuncA(a_if, b_if);
+    }
+}
+"#;
+
+    let expect = r#"interface prj___InterfaceA__8;
+    logic         ready  ;
+    logic         valid  ;
+    logic [8-1:0] command;
+
+    modport master (
+        input  ready  ,
+        output valid  ,
+        output command
+    );
+
+    modport slave (
+        output ready  ,
+        input  valid  ,
+        input  command
+    );
+endinterface
+package prj___PkgA__8;
+    function automatic void FuncA(
+        input  var logic         __a_if_ready  ,
+        output var logic         __a_if_valid  ,
+        output var logic [8-1:0] __a_if_command,
+        output var logic         __b_if_ready  ,
+        input  var logic         __b_if_valid  ,
+        input  var logic [8-1:0] __b_if_command
+    ) ;
+        __b_if_ready   = __a_if_ready;
+        __a_if_valid   = __b_if_valid;
+        __a_if_command = __b_if_command;
+    endfunction
+endpackage
+module prj_ModuleA;
+    prj___InterfaceA__8 a_if ();
+    prj___InterfaceA__8 b_if ();
+
+    always_comb begin
+        a_if.ready = 0;
+    end
+    always_comb begin
+        b_if.valid   = 0;
+        b_if.command = 0;
+    end
+
+    always_comb begin
+        prj___PkgA__8::FuncA(a_if.ready, a_if.valid, a_if.command, b_if.ready, b_if.valid, b_if.command);
+    end
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;

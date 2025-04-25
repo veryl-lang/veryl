@@ -77,7 +77,7 @@ impl VerylGrammarTrait for CheckPort {
         if let HandlerPoint::Before = self.point {
             match arg {
                 Direction::Modport(x) => {
-                    if !self.in_module || self.in_function {
+                    if !(self.in_module || self.in_function) {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "modport",
                             &x.modport.modport_token.token.into(),
