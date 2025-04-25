@@ -3681,6 +3681,27 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package Pkg::<W: const> {
+        const WIDTH: u32 = W;
+        struct FooBar {
+            foo: logic<WIDTH>,
+            bar: logic<WIDTH>,
+        }
+    }
+    module ModuleA::<W: const = 2, T: type = Pkg::<W>::FooBar> (
+        i_a: input  T,
+        i_b: input  T,
+        o_c: output T,
+    ) {
+        assign o_c.foo = i_a.foo + i_b.foo;
+        assign o_c.bar = i_a.bar + i_b.bar;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

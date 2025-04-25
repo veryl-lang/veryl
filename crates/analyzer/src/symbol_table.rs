@@ -157,11 +157,7 @@ impl SymbolTable {
                 }
                 SymbolKind::GenericParameter(ref x) => {
                     if x.bound == GenericBoundKind::Type {
-                        if let Some(x) =
-                            self.resolve_generic_parameter(context.clone(), &symbol.found)
-                        {
-                            return x;
-                        }
+                        return self.trace_generic_parameter(context.clone(), &symbol.found);
                     }
                 }
                 _ => (),
@@ -242,6 +238,12 @@ impl SymbolTable {
             }
 
             let symbol = match &x.bound {
+                GenericBoundKind::Type if x.default_value.is_some() => {
+                    let path = x.default_value.as_ref().unwrap().generic_path();
+                    let mut ctxt = ResolveContext::new(&found.namespace);
+                    ctxt.depth = context.depth + 1;
+                    &self.resolve(&path, &[], ctxt)?.found
+                }
                 GenericBoundKind::Inst(proto) => {
                     let mut ctxt = ResolveContext::new(&found.namespace);
                     ctxt.depth = context.depth + 1;
