@@ -5328,6 +5328,7 @@ dependencies = [
 name = "veryl-formatter"
 version = "0.15.0"
 dependencies = [
+ "toml 0.8.21",
  "veryl-aligner",
  "veryl-analyzer",
  "veryl-metadata",

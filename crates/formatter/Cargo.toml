@@ -17,3 +17,6 @@ veryl-aligner  = {version = "0.15.0", path = "../aligner"}
 veryl-analyzer = {version = "0.15.0", path = "../analyzer"}
 veryl-metadata = {version = "0.15.0", path = "../metadata"}
 veryl-parser   = {version = "0.15.0", path = "../parser"}
+
+[dev-dependencies]
+toml = {workspace = true}
