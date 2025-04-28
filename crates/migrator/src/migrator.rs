@@ -91,4 +91,19 @@ impl VerylWalker for Migrator {
     fn back_quote(&mut self, arg: &BackQuote) {
         self.token(&arg.back_quote_token.replace("'"));
     }
+
+    /// Semantic action for non-terminal 'GenericBound'
+    fn generic_bound(&mut self, arg: &GenericBound) {
+        match arg {
+            GenericBound::Const(x) => self.token(&x.r#const.const_token.replace("u32")),
+            GenericBound::Type(x) => self.r#type(&x.r#type),
+            GenericBound::InstScopedIdentifier(x) => {
+                self.inst(&x.inst);
+                self.scoped_identifier(&x.scoped_identifier);
+            }
+            GenericBound::ScopedIdentifier(x) => {
+                self.scoped_identifier(&x.scoped_identifier);
+            }
+        }
+    }
 }
