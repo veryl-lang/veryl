@@ -3262,6 +3262,21 @@ fn unevaluatable_enum_variant() {
         errors[0],
         AnalyzerError::UnevaluatableEnumVariant { .. }
     ));
+
+    let code = r#"
+    package Pkg {
+        enum Foo {
+            FOO
+        }
+
+        enum Bar {
+            BAR = Foo::FOO,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
