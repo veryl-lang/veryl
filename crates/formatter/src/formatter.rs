@@ -206,9 +206,16 @@ impl Formatter {
         }
     }
 
-    fn newline_list_post(&mut self, is_empty: bool) {
+    fn newline_list_post(&mut self, is_empty: bool, start_token: &VerylToken) {
         if !is_empty {
             self.newline_pop();
+        } else if let Some(last_commant) = start_token.comments.last() {
+            if resource_table::get_str_value(last_commant.text)
+                .map(|x| !x.ends_with("\n"))
+                .unwrap()
+            {
+                self.newline();
+            }
         }
     }
 
@@ -1194,7 +1201,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.statement_block_group(&x.statement_block_group);
         }
-        self.newline_list_post(arg.statement_block_list.is_empty());
+        self.newline_list_post(
+            arg.statement_block_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -1211,7 +1221,10 @@ impl VerylWalker for Formatter {
                     self.newline_list(i);
                     self.statement_block_group(&x.statement_block_group);
                 }
-                self.newline_list_post(x.statement_block_group_group_list.is_empty());
+                self.newline_list_post(
+                    x.statement_block_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
                 self.r_brace(&x.r_brace);
             }
             StatementBlockGroupGroup::StatementBlockItem(x) => {
@@ -1311,7 +1324,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.case_item(&x.case_item);
         }
-        self.newline_list_post(arg.case_statement_list.is_empty());
+        self.newline_list_post(
+            arg.case_statement_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -1361,7 +1377,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.switch_item(&x.switch_item);
         }
-        self.newline_list_post(arg.switch_statement_list.is_empty());
+        self.newline_list_post(
+            arg.switch_statement_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2321,7 +2340,7 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.generate_group(&x.generate_group);
         }
-        self.newline_list_post(arg.unsafe_block_list.is_empty());
+        self.newline_list_post(arg.unsafe_block_list.is_empty(), &arg.l_brace.l_brace_token);
         self.r_brace(&arg.r_brace);
     }
 
@@ -2353,7 +2372,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.module_group(&x.module_group);
         }
-        self.newline_list_post(arg.module_declaration_list.is_empty());
+        self.newline_list_post(
+            arg.module_declaration_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2370,7 +2392,10 @@ impl VerylWalker for Formatter {
                     self.newline_list(i);
                     self.module_group(&x.module_group);
                 }
-                self.newline_list_post(x.module_group_group_list.is_empty());
+                self.newline_list_post(
+                    x.module_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
                 self.r_brace(&x.r_brace);
             }
             ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
@@ -2401,7 +2426,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.interface_group(&x.interface_group);
         }
-        self.newline_list_post(arg.interface_declaration_list.is_empty());
+        self.newline_list_post(
+            arg.interface_declaration_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2418,7 +2446,10 @@ impl VerylWalker for Formatter {
                     self.newline_list(i);
                     self.interface_group(&x.interface_group);
                 }
-                self.newline_list_post(x.interface_group_group_list.is_empty());
+                self.newline_list_post(
+                    x.interface_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
                 self.r_brace(&x.r_brace);
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
@@ -2481,7 +2512,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.generate_group(&x.generate_group);
         }
-        self.newline_list_post(arg.generate_named_block_list.is_empty());
+        self.newline_list_post(
+            arg.generate_named_block_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2497,7 +2531,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.generate_group(&x.generate_group);
         }
-        self.newline_list_post(arg.generate_optional_named_block_list.is_empty());
+        self.newline_list_post(
+            arg.generate_optional_named_block_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2514,7 +2551,10 @@ impl VerylWalker for Formatter {
                     self.newline_list(i);
                     self.generate_group(&x.generate_group);
                 }
-                self.newline_list_post(x.generate_group_group_list.is_empty());
+                self.newline_list_post(
+                    x.generate_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
                 self.r_brace(&x.r_brace);
             }
             GenerateGroupGroup::GenerateItem(x) => self.generate_item(&x.generate_item),
@@ -2541,7 +2581,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.package_group(&x.package_group);
         }
-        self.newline_list_post(arg.package_declaration_list.is_empty());
+        self.newline_list_post(
+            arg.package_declaration_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2558,7 +2601,10 @@ impl VerylWalker for Formatter {
                     self.newline_list(i);
                     self.package_group(&x.package_group);
                 }
-                self.newline_list_post(x.package_group_group_list.is_empty());
+                self.newline_list_post(
+                    x.package_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
                 self.r_brace(&x.r_brace);
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
@@ -2631,7 +2677,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.proto_interface_item(&x.proto_interface_item);
         }
-        self.newline_list_post(arg.proto_interface_declaration_list.is_empty());
+        self.newline_list_post(
+            arg.proto_interface_declaration_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2646,7 +2695,10 @@ impl VerylWalker for Formatter {
             self.newline_list(i);
             self.proto_pacakge_item(&x.proto_pacakge_item);
         }
-        self.newline_list_post(arg.proto_package_declaration_list.is_empty());
+        self.newline_list_post(
+            arg.proto_package_declaration_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
         self.r_brace(&arg.r_brace);
     }
 
@@ -2759,7 +2811,10 @@ impl VerylWalker for Formatter {
                     self.newline_list(i);
                     self.description_group(&x.description_group);
                 }
-                self.newline_list_post(x.description_group_group_list.is_empty());
+                self.newline_list_post(
+                    x.description_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
                 self.r_brace(&x.r_brace);
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
