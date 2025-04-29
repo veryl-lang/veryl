@@ -254,11 +254,12 @@ checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "base64-simd"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "781dd20c3aff0bd194fe7d2a977dd92f21c173891f3a03b677359e5fa457e5d5"
+checksum = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195"
 dependencies = [
- "simd-abstraction",
+ "outref",
+ "vsimd",
 ]
 
 [[package]]
@@ -2937,7 +2938,7 @@ dependencies = [
  "mdbook",
  "pulldown-cmark 0.12.2",
  "regex",
- "semver 1.0.26",
+ "semver",
  "serde_json",
  "similar",
  "toml 0.8.22",
@@ -3327,9 +3328,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "outref"
-version = "0.1.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f222829ae9293e33a9f5e9f440c6760a3d450a64affe1846486b140db81c1f4"
+checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "owo-colors"
@@ -3392,7 +3393,7 @@ dependencies = [
  "rayon",
  "regex",
  "regex-syntax",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "serde",
  "serde_json",
  "syn 2.0.100",
@@ -4130,24 +4131,9 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
-name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
-
-[[package]]
-name = "rustc_version"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
-dependencies = [
- "semver 0.9.0",
-]
 
 [[package]]
 name = "rustix"
@@ -4237,7 +4223,7 @@ dependencies = [
  "log",
  "regex-automata",
  "regex-syntax",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "serde",
  "serde_json",
  "seshat-unicode",
@@ -4268,27 +4254,12 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
-dependencies = [
- "semver-parser",
-]
-
-[[package]]
-name = "semver"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "semver-parser"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
@@ -4427,15 +4398,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "simd-abstraction"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cadb29c57caadc51ff8346233b5cec1d240b68ce55cf1afc764818791876987"
-dependencies = [
- "outref",
-]
-
-[[package]]
 name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4474,17 +4436,16 @@ dependencies = [
 
 [[package]]
 name = "sourcemap"
-version = "9.1.2"
+version = "9.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27c4ea7042fd1a155ad95335b5d505ab00d5124ea0332a06c8390d200bb1a76a"
+checksum = "dd430118acc9fdd838557649b9b43fd0a78e3834d84a283b466f8e84720d6101"
 dependencies = [
  "base64-simd",
  "bitvec",
  "data-encoding",
  "debugid",
  "if_chain",
- "rustc-hash 1.1.0",
- "rustc_version",
+ "rustc-hash",
  "serde",
  "serde_json",
  "unicode-id-start",
@@ -5365,7 +5326,7 @@ dependencies = [
  "miette",
  "once_cell",
  "regex",
- "semver 1.0.26",
+ "semver",
  "serde",
  "serde_regex",
  "spdx",
@@ -5472,6 +5433,12 @@ dependencies = [
  "veryl-path",
  "walkdir",
 ]
+
+[[package]]
+name = "vsimd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
 
 [[package]]
 name = "wait-timeout"
