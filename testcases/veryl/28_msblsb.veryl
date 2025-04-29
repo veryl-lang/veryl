@@ -12,7 +12,7 @@ module Module28A (
     let _z: logic = c[msb][msb];
 }
 
-package Package28A::<W: const> {
+package Package28A::<W: u32> {
     struct StructA {
         a: logic<W>,
     }

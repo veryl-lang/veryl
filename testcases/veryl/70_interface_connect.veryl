@@ -6,7 +6,7 @@ interface Interface70A {
     }
 }
 
-interface Interface70B::<WIDTH: const> {
+interface Interface70B::<WIDTH: u32> {
     var value: logic<WIDTH>;
 
     modport port {

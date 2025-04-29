@@ -2,7 +2,7 @@ package Package73 {
     const A: bit = 0;
 }
 
-module Module73A::<B: const> (
+module Module73A::<B: u32> (
     i_a: input  logic = Package73::A,
     i_b: input  logic = B           ,
     i_c: input  logic = 0           ,

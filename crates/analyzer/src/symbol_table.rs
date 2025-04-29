@@ -156,7 +156,7 @@ impl SymbolTable {
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
                 SymbolKind::GenericParameter(ref x) => {
-                    if x.bound == GenericBoundKind::Type {
+                    if matches!(x.bound, GenericBoundKind::Type) {
                         return self.trace_generic_parameter(context.clone(), &symbol.found);
                     }
                 }
@@ -250,9 +250,13 @@ impl SymbolTable {
                     &self.resolve(proto, &[], ctxt)?.found
                 }
                 GenericBoundKind::Proto(proto) => {
-                    let mut ctxt = ResolveContext::new(&found.namespace);
-                    ctxt.depth = context.depth + 1;
-                    &self.resolve(proto, &[], ctxt)?.found
+                    if let Some(x) = proto.get_user_defined() {
+                        let mut ctxt = ResolveContext::new(&found.namespace);
+                        ctxt.depth = context.depth + 1;
+                        &self.resolve(&x.path.generic_path(), &[], ctxt)?.found
+                    } else {
+                        found
+                    }
                 }
                 _ => found,
             };
@@ -313,7 +317,7 @@ impl SymbolTable {
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
                 SymbolKind::GenericParameter(x) => {
-                    if x.bound == GenericBoundKind::Type {
+                    if matches!(x.bound, GenericBoundKind::Type) {
                         if let Some(x) =
                             self.resolve_generic_parameter(context.clone(), &symbol.found)
                         {
@@ -838,9 +842,11 @@ impl SymbolTable {
             }
             SymbolKind::GenericParameter(x) => {
                 if let GenericBoundKind::Proto(proto) = &x.bound {
-                    let context = ResolveContext::new(&symbol.namespace);
-                    if let Ok(symbol) = self.resolve(proto, &[], context) {
-                        return self.get_package(&symbol.found, true);
+                    if let Some(x) = proto.get_user_defined() {
+                        let context = ResolveContext::new(&symbol.namespace);
+                        if let Ok(symbol) = self.resolve(&x.path.generic_path(), &[], context) {
+                            return self.get_package(&symbol.found, true);
+                        }
                     }
                 }
             }

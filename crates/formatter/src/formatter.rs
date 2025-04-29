@@ -1768,6 +1768,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.struct_union_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
         }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
@@ -1775,6 +1776,7 @@ impl VerylWalker for Formatter {
         self.struct_union_list(&arg.struct_union_list);
         self.newline_pop();
         self.r_brace(&arg.r_brace);
+        self.align_reset();
     }
 
     /// Semantic action for non-terminal 'StructUnionList'
@@ -2079,14 +2081,18 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'GenericBound'
     fn generic_bound(&mut self, arg: &GenericBound) {
         match arg {
-            GenericBound::Const(x) => self.r#const(&x.r#const),
             GenericBound::Type(x) => self.r#type(&x.r#type),
             GenericBound::InstScopedIdentifier(x) => {
                 self.inst(&x.inst);
                 self.space(1);
                 self.scoped_identifier(&x.scoped_identifier);
             }
-            GenericBound::ScopedIdentifier(x) => self.scoped_identifier(&x.scoped_identifier),
+            GenericBound::GenericProtoBound(x) => match &*x.generic_proto_bound {
+                GenericProtoBound::ScopedIdentifier(x) => {
+                    self.scoped_identifier(&x.scoped_identifier)
+                }
+                GenericProtoBound::FixedType(x) => self.fixed_type(&x.fixed_type),
+            },
         }
     }
 
@@ -2298,14 +2304,15 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.function_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
         }
         self.space(1);
         if let Some(ref x) = arg.function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
+            self.align_reset();
         }
         if let Some(ref x) = arg.function_declaration_opt1 {
-            self.align_reset();
             self.minus_g_t(&x.minus_g_t);
             self.space(1);
             self.scalar_type(&x.scalar_type);
@@ -2313,6 +2320,7 @@ impl VerylWalker for Formatter {
             self.align_reset();
         }
         self.statement_block(&arg.statement_block);
+        self.align_reset();
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'
@@ -2351,6 +2359,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.module_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
         }
         self.space(1);
         if let Some(ref x) = arg.module_declaration_opt0 {
@@ -2362,10 +2371,12 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.module_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
             self.space(1);
+            self.align_reset();
         }
         if let Some(ref x) = arg.module_declaration_opt2 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
+            self.align_reset();
         }
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.module_declaration_list.iter().enumerate() {
@@ -2377,6 +2388,7 @@ impl VerylWalker for Formatter {
             &arg.l_brace.l_brace_token,
         );
         self.r_brace(&arg.r_brace);
+        self.align_reset();
     }
 
     /// Semantic action for non-terminal 'ModuleGroup'
@@ -2409,6 +2421,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.interface_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
         }
         self.space(1);
         if let Some(ref x) = arg.interface_declaration_opt0 {
@@ -2431,6 +2444,7 @@ impl VerylWalker for Formatter {
             &arg.l_brace.l_brace_token,
         );
         self.r_brace(&arg.r_brace);
+        self.align_reset();
     }
 
     /// Semantic action for non-terminal 'InterfaceGroup'
@@ -2568,6 +2582,7 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.package_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
         }
         self.space(1);
         if let Some(ref x) = arg.package_declaration_opt0 {
@@ -2586,6 +2601,7 @@ impl VerylWalker for Formatter {
             &arg.l_brace.l_brace_token,
         );
         self.r_brace(&arg.r_brace);
+        self.align_reset();
     }
 
     /// Semantic action for non-terminal 'PackageGroup'
@@ -2739,13 +2755,14 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.proto_function_declaration_opt {
             self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
         }
         if let Some(ref x) = arg.proto_function_declaration_opt0 {
             self.port_declaration(&x.port_declaration);
             self.space(1);
+            self.align_reset();
         }
         if let Some(ref x) = arg.proto_function_declaration_opt1 {
-            self.align_reset();
             self.minus_g_t(&x.minus_g_t);
             self.space(1);
             self.scalar_type(&x.scalar_type);

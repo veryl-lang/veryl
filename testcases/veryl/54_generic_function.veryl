@@ -1,5 +1,5 @@
 module Module54 {
-    function FuncA::<T: const> (
+    function FuncA::<T: u32> (
         a: input logic<T>,
     ) -> logic<T> {
         return a + 1;
@@ -10,7 +10,7 @@ module Module54 {
     let _c: logic<20> = FuncA::<20>(1);
     let _d: logic<20> = FuncA::<20>(1);
 
-    function FuncB::<A: const, B: const = 2> (
+    function FuncB::<A: u32, B: u32 = 2> (
         a: input logic<A + B>,
     ) -> logic<A + B> {
         return a + 1;

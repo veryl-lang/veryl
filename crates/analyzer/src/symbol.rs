@@ -409,16 +409,17 @@ impl Symbol {
                 return symbol.found.proto();
             }
             SymbolKind::GenericParameter(x) => {
-                if let GenericBoundKind::Proto(ref x) = x.bound {
-                    return symbol_table::resolve((x, &self.namespace))
-                        .ok()
-                        .map(|x| x.found.id);
-                }
+                let proto = x.bound.resolve_proto_bound(&self.namespace)?;
+                return proto.get_symbol().map(|x| x.id);
             }
             _ => {}
         }
 
         None
+    }
+
+    pub fn proto_symbol(&self) -> Option<Symbol> {
+        self.proto().map(|x| symbol_table::get(x).unwrap())
     }
 
     pub fn alias_target(&self) -> Option<GenericSymbolPath> {
@@ -439,10 +440,10 @@ impl Symbol {
                 return symbol.is_module(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_module(true);
-                    }
+                if let Some(ProtoBound::ProtoModule(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_module(true);
                 }
             }
             _ => {}
@@ -454,10 +455,10 @@ impl Symbol {
         match &self.kind {
             SymbolKind::ProtoModule(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_proto_module(trace_generic_param);
-                    }
+                if let Some(ProtoBound::ProtoModule(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_proto_module(trace_generic_param);
                 }
             }
             _ => {}
@@ -474,10 +475,10 @@ impl Symbol {
                 return symbol.is_interface(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_interface(true);
-                    }
+                if let Some(ProtoBound::ProtoInterface(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_interface(true);
                 }
             }
             _ => {}
@@ -496,13 +497,11 @@ impl Symbol {
             }
             SymbolKind::ProtoInterface(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_proto_interface(
-                            trace_generic_param,
-                            include_non_generic_interface,
-                        );
-                    }
+                if let Some(ProtoBound::ProtoInterface(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x
+                        .is_proto_interface(trace_generic_param, include_non_generic_interface);
                 }
             }
             _ => {}
@@ -519,10 +518,10 @@ impl Symbol {
                 return symbol.is_package(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_package(true);
-                    }
+                if let Some(ProtoBound::ProtoPackage(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_package(true);
                 }
             }
             _ => {}
@@ -534,10 +533,10 @@ impl Symbol {
         match &self.kind {
             SymbolKind::ProtoPackage(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Ok(symbol) = symbol_table::resolve((proto, &self.namespace)) {
-                        return symbol.found.is_proto_package(trace_generic_param);
-                    }
+                if let Some(ProtoBound::ProtoPackage(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_proto_package(trace_generic_param);
                 }
             }
             _ => {}
@@ -568,6 +567,62 @@ impl Symbol {
             _ => {}
         }
         false
+    }
+
+    pub fn is_variable_type(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Enum(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::TypeDef(_)
+            | SymbolKind::ProtoTypeDef
+            | SymbolKind::SystemVerilog => true,
+            SymbolKind::Parameter(x) => matches!(x.r#type.kind, TypeKind::Type),
+            SymbolKind::GenericParameter(x) => matches!(x.bound, GenericBoundKind::Type),
+            SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
+                .map(|x| x.is_variable_type())
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    pub fn is_casting_type(&self) -> bool {
+        if let SymbolKind::Parameter(x) = &self.kind {
+            matches!(
+                x.r#type.kind,
+                TypeKind::Type | TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64
+            )
+        } else {
+            self.is_variable_type()
+        }
+    }
+
+    pub fn is_struct(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Struct(_) => true,
+            SymbolKind::TypeDef(x) => {
+                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(&self.namespace) {
+                    symbol.is_struct()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_union(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Union(_) => true,
+            SymbolKind::TypeDef(x) => {
+                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(&self.namespace) {
+                    symbol.is_union()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1017,7 +1072,13 @@ impl Type {
                 SymbolKind::TypeDef(x) => {
                     return x.r#type.trace_user_defined(&symbol.found.namespace);
                 }
-                SymbolKind::Enum(_)
+                SymbolKind::Module(_)
+                | SymbolKind::ProtoModule(_)
+                | SymbolKind::Interface(_)
+                | SymbolKind::ProtoInterface(_)
+                | SymbolKind::Package(_)
+                | SymbolKind::ProtoPackage(_)
+                | SymbolKind::Enum(_)
                 | SymbolKind::Struct(_)
                 | SymbolKind::Union(_)
                 | SymbolKind::Modport(_) => {
@@ -1351,6 +1412,33 @@ impl TryFrom<&syntax_tree::Expression> for Type {
     }
 }
 
+impl From<&syntax_tree::FixedType> for Type {
+    fn from(value: &syntax_tree::FixedType) -> Self {
+        let kind = match value {
+            syntax_tree::FixedType::U8(_) => TypeKind::U8,
+            syntax_tree::FixedType::U16(_) => TypeKind::U16,
+            syntax_tree::FixedType::U32(_) => TypeKind::U32,
+            syntax_tree::FixedType::U64(_) => TypeKind::U64,
+            syntax_tree::FixedType::I8(_) => TypeKind::I8,
+            syntax_tree::FixedType::I16(_) => TypeKind::I16,
+            syntax_tree::FixedType::I32(_) => TypeKind::I32,
+            syntax_tree::FixedType::I64(_) => TypeKind::I64,
+            syntax_tree::FixedType::F32(_) => TypeKind::F32,
+            syntax_tree::FixedType::F64(_) => TypeKind::F64,
+            syntax_tree::FixedType::Bool(_) => TypeKind::Bool,
+            syntax_tree::FixedType::Strin(_) => TypeKind::String,
+        };
+        Type {
+            kind,
+            modifier: vec![],
+            width: vec![],
+            array: vec![],
+            array_type: None,
+            is_const: false,
+        }
+    }
+}
+
 impl From<&syntax_tree::FactorType> for Type {
     fn from(value: &syntax_tree::FactorType) -> Self {
         match value.factor_type_group.as_ref() {
@@ -1472,6 +1560,32 @@ impl From<&syntax_tree::ArrayType> for Type {
             array,
             array_type: Some(array_type),
             is_const: false,
+        }
+    }
+}
+
+impl From<&syntax_tree::ScopedIdentifier> for Type {
+    fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
+        let r#type = UserDefinedType::new(value.into());
+        let kind = TypeKind::UserDefined(r#type);
+        Type {
+            kind,
+            modifier: vec![],
+            width: vec![],
+            array: vec![],
+            array_type: None,
+            is_const: false,
+        }
+    }
+}
+
+impl From<&syntax_tree::GenericProtoBound> for Type {
+    fn from(value: &syntax_tree::GenericProtoBound) -> Self {
+        match value {
+            syntax_tree::GenericProtoBound::ScopedIdentifier(x) => {
+                x.scoped_identifier.as_ref().into()
+            }
+            syntax_tree::GenericProtoBound::FixedType(x) => x.fixed_type.as_ref().into(),
         }
     }
 }
@@ -1847,24 +1961,89 @@ pub struct ModportFunctionMemberProperty {
     pub function: SymbolId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum GenericBoundKind {
-    Const,
     Type,
     Inst(SymbolPath),
-    Proto(SymbolPath),
+    Proto(Type),
+}
+
+#[derive(Debug, Clone)]
+pub enum ProtoBound {
+    ProtoModule(Symbol),
+    ProtoInterface(Symbol),
+    ProtoPackage(Symbol),
+    FactorType(Type),
+    Enum((Symbol, Type)),
+    Struct((Symbol, Type)),
+    Union((Symbol, Type)),
+}
+
+impl ProtoBound {
+    pub fn get_symbol(&self) -> Option<Symbol> {
+        match self {
+            ProtoBound::ProtoModule(x)
+            | ProtoBound::ProtoInterface(x)
+            | ProtoBound::ProtoPackage(x)
+            | ProtoBound::Enum((x, _))
+            | ProtoBound::Struct((x, _))
+            | ProtoBound::Union((x, _)) => Some(x.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn is_variable_type(&self) -> bool {
+        matches!(
+            self,
+            ProtoBound::FactorType(_)
+                | ProtoBound::Enum(_)
+                | ProtoBound::Struct(_)
+                | ProtoBound::Union(_)
+        )
+    }
 }
 
 impl GenericBoundKind {
     pub fn is_compatible(&self, other: &GenericBoundKind) -> bool {
         self.to_string() == other.to_string()
     }
+
+    pub fn resolve_inst_bound(&self, namespace: &Namespace) -> Option<Symbol> {
+        let GenericBoundKind::Inst(path) = self else {
+            return None;
+        };
+
+        symbol_table::resolve((path, namespace))
+            .ok()
+            .map(|x| x.found)
+    }
+
+    pub fn resolve_proto_bound(&self, namespace: &Namespace) -> Option<ProtoBound> {
+        let GenericBoundKind::Proto(proto) = self else {
+            return None;
+        };
+
+        let (r#type, symbol) = proto.trace_user_defined(namespace)?;
+        if symbol.is_none() {
+            return Some(ProtoBound::FactorType(r#type));
+        }
+
+        let symbol = symbol.unwrap();
+        match &symbol.kind {
+            SymbolKind::ProtoModule(_) => Some(ProtoBound::ProtoModule(symbol)),
+            SymbolKind::ProtoInterface(_) => Some(ProtoBound::ProtoInterface(symbol)),
+            SymbolKind::ProtoPackage(_) => Some(ProtoBound::ProtoPackage(symbol)),
+            SymbolKind::Enum(_) => Some(ProtoBound::Enum((symbol, r#type))),
+            SymbolKind::Struct(_) => Some(ProtoBound::Struct((symbol, r#type))),
+            SymbolKind::Union(_) => Some(ProtoBound::Union((symbol, r#type))),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for GenericBoundKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            GenericBoundKind::Const => "const".to_string(),
             GenericBoundKind::Type => "type".to_string(),
             GenericBoundKind::Inst(x) => x.to_string(),
             GenericBoundKind::Proto(x) => x.to_string(),

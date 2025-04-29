@@ -48,18 +48,18 @@ module Module56 (
     let _g: logic = u_d1._b.a;
 }
 
-module Module56A::<T: const> {
+module Module56A::<T: u32> {
     inst u: Interface56A::<T>;
     function f () {}
 }
 
 /// Generic interface test for doc comment
-pub interface Interface56A::<T: const> {
+pub interface Interface56A::<T: u32> {
     var _a: logic<T>;
 }
 
 /// Generic interface test for doc comment
-pub interface Interface56B::<T: const = 3> {
+pub interface Interface56B::<T: u32 = 3> {
     var _b: logic<T>;
 }
 
@@ -69,7 +69,7 @@ proto interface ProtoInterface56C {
     var _c: logic<C_WIDTH>;
 }
 
-interface Interface56C::<W: const> for ProtoInterface56C {
+interface Interface56C::<W: u32> for ProtoInterface56C {
 
     const C_WIDTH: u32 = W;
 

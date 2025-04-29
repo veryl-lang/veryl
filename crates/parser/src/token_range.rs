@@ -1088,14 +1088,13 @@ impl_token_ext!(WithParameterItem);
 impl From<&GenericBound> for TokenRange {
     fn from(value: &GenericBound) -> Self {
         match value {
-            GenericBound::Const(x) => x.r#const.as_ref().into(),
             GenericBound::Type(x) => x.r#type.as_ref().into(),
             GenericBound::InstScopedIdentifier(x) => {
                 let mut ret: TokenRange = x.inst.as_ref().into();
                 ret.set_end(x.scoped_identifier.as_ref().into());
                 ret
             }
-            GenericBound::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
+            GenericBound::GenericProtoBound(x) => x.generic_proto_bound.as_ref().into(),
         }
     }
 }
@@ -1116,13 +1115,21 @@ impl From<&WithGenericParameterItem> for TokenRange {
 }
 impl_token_ext!(WithGenericParameterItem);
 
+impl_token_range_enum!(GenericProtoBound, scoped_identifier, fixed_type);
+
 // ----------------------------------------------------------------------------
 // WithGenericArgument
 // ----------------------------------------------------------------------------
 
 impl_token_range!(WithGenericArgument, colon_colon_l_angle, r_angle);
 impl_token_range_list!(WithGenericArgumentList, WithGenericArgumentItem);
-impl_token_range_enum!(WithGenericArgumentItem, scoped_identifier, number);
+impl_token_range_enum!(
+    WithGenericArgumentItem,
+    scoped_identifier,
+    fixed_type,
+    number,
+    boolean_literal
+);
 
 // ----------------------------------------------------------------------------
 // PortDeclaration

@@ -1,5 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::symbol::{Direction, GenericBoundKind, Port, SymbolKind};
+use crate::symbol::{Direction, Port, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use veryl_parser::ParolError;
@@ -51,14 +51,13 @@ impl VerylGrammarTrait for CheckAnonymous {
                     match symbol.found.kind {
                         SymbolKind::Module(x) => self.inst_ports.extend(x.ports),
                         SymbolKind::GenericParameter(x) => {
-                            if let GenericBoundKind::Proto(ref prot) = x.bound {
-                                if let SymbolKind::ProtoModule(prot) =
-                                    symbol_table::resolve((prot, &symbol.found.namespace))
-                                        .unwrap()
-                                        .found
-                                        .kind
+                            if let Some(proto) =
+                                x.bound.resolve_proto_bound(&symbol.found.namespace)
+                            {
+                                if let Some(SymbolKind::ProtoModule(x)) =
+                                    proto.get_symbol().map(|x| x.kind)
                                 {
-                                    self.inst_ports.extend(prot.ports);
+                                    self.inst_ports.extend(x.ports);
                                 }
                             }
                         }

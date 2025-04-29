@@ -1401,18 +1401,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let default_value: Option<GenericSymbolPath> =
                 if let Some(ref x) = arg.with_generic_parameter_item_opt {
                     self.needs_default_generic_argument = true;
-                    match &*x.with_generic_argument_item {
-                        WithGenericArgumentItem::ScopedIdentifier(x) => {
-                            Some(x.scoped_identifier.as_ref().into())
-                        }
-                        WithGenericArgumentItem::Number(x) => Some(x.number.as_ref().into()),
-                    }
+                    Some(x.with_generic_argument_item.as_ref().into())
                 } else {
                     None
                 };
 
             let bound = match arg.generic_bound.as_ref() {
-                GenericBound::Const(_) => GenericBoundKind::Const,
                 GenericBound::Type(_) => GenericBoundKind::Type,
                 GenericBound::InstScopedIdentifier(x) => {
                     let type_path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
@@ -1421,12 +1415,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     }
                     GenericBoundKind::Inst(type_path.mangled_path())
                 }
-                GenericBound::ScopedIdentifier(x) => {
-                    let type_path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
-                    if !self.check_identifer_with_type_path(&arg.identifier, &type_path) {
+                GenericBound::GenericProtoBound(x) => {
+                    let r#type: SymType = x.generic_proto_bound.as_ref().into();
+                    if !self.check_identifer_with_type(&arg.identifier, &r#type) {
                         return Ok(());
                     }
-                    GenericBoundKind::Proto(type_path.mangled_path())
+                    GenericBoundKind::Proto(r#type)
                 }
             };
 

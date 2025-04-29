@@ -5,7 +5,7 @@ use crate::attribute::{AllowItem, CondTypeItem};
 use crate::attribute_table;
 use crate::connect_operation_table;
 use crate::evaluator::Evaluator;
-use crate::symbol::{Direction, GenericBoundKind, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use crate::var_ref::{
     AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
@@ -664,15 +664,15 @@ impl VerylGrammarTrait for CheckVarRef {
                                     }
                                 }
                             }
-                            SymbolKind::GenericParameter(ref x) => {
-                                if let GenericBoundKind::Proto(ref x) = x.bound {
-                                    if let Ok(symbol) =
-                                        symbol_table::resolve((x, &symbol.found.namespace))
+                            SymbolKind::GenericParameter(x) => {
+                                if let Some(proto) =
+                                    x.bound.resolve_proto_bound(&symbol.found.namespace)
+                                {
+                                    if let Some(SymbolKind::ProtoModule(x)) =
+                                        proto.get_symbol().map(|x| x.kind)
                                     {
-                                        if let SymbolKind::ProtoModule(x) = symbol.found.kind {
-                                            for port in &x.ports {
-                                                ports.insert(port.name(), port.property());
-                                            }
+                                        for port in &x.ports {
+                                            ports.insert(port.name(), port.property());
                                         }
                                     }
                                 }

@@ -3,9 +3,16 @@ proto package ProtoPackage55 {
     type data_b;
 }
 
-package Package55::<A: const, B: const> for ProtoPackage55 {
+package Package55::<A: u32, B: u32> for ProtoPackage55 {
     type data_a = logic<A>;
     type data_b = logic<B>;
+}
+
+package Package55K {
+    enum FooBar {
+        FOO,
+        BAR,
+    }
 }
 
 module Module55 {
@@ -22,6 +29,8 @@ module Module55 {
     inst u_h1: Module55H::<10>;
     inst u_i0: Module55I::<Package55::<8, 16>>;
     inst u_j0: Module55J;
+    inst u_k0: Module55K::<Package55K::FooBar::FOO>;
+    inst u_k1: Module55K::<Package55K::FooBar::BAR>;
 }
 
 pub proto module Proto55;
@@ -49,8 +58,8 @@ module Module55G::<T: Proto55> {
     inst u: T;
 }
 
-module Module55H::<W: const> {
-    struct StructH::<W: const> {
+module Module55H::<W: u32> {
+    struct StructH::<W: u32> {
         value: logic<W>,
     }
 
@@ -60,4 +69,8 @@ module Module55H::<W: const> {
 module Module55I::<PKG: ProtoPackage55> {
     let _a: PKG::data_a = 0;
     let _b: PKG::data_b = 0;
+}
+
+module Module55K::<V: Package55K::FooBar> {
+    let _foobar: Package55K::FooBar = V;
 }
