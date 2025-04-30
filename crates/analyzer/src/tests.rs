@@ -3256,11 +3256,14 @@ fn unevaluatable_enum_variant() {
     let code = r#"
     package Pkg {
         enum Foo {
-            FOO
+            FOO_0 = 2'b01,
+            FOO_1 = 2'b10,
         }
 
+        #[enum_encoding(onehot)]
         enum Bar {
-            BAR = Foo::FOO,
+            BAR_0 = Foo::FOO_0,
+            BAR_1 = Foo::FOO_1,
         }
     }
     "#;

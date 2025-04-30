@@ -200,9 +200,21 @@ impl Symbol {
                     }
                     evaluator.expression(&x.value)
                 }
-                SymbolKind::EnumMember(_) => {
-                    // TODO: Actually Evaluate its Width
-                    Evaluated::create_unknown_static()
+                SymbolKind::EnumMember(x) => {
+                    let value = x.value.value();
+                    let SymbolKind::Enum(r#enum) = self.get_parent().unwrap().kind else {
+                        unreachable!()
+                    };
+
+                    match value {
+                        Some(value) if r#enum.width > 0 => Evaluated::create_fixed(
+                            value as isize,
+                            false,
+                            vec![r#enum.width],
+                            vec![],
+                        ),
+                        _ => Evaluated::create_unknown_static(),
+                    }
                 }
                 SymbolKind::Genvar => Evaluated::create_unknown_static(),
                 SymbolKind::Module(_)
