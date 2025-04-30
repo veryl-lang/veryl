@@ -40,6 +40,8 @@ pub struct Build {
     pub instance_depth_limit: usize,
     #[serde(default = "default_instance_total_limit")]
     pub instance_total_limit: usize,
+    #[serde(default)]
+    pub flatten_array_interface: bool,
 }
 
 fn default_source() -> PathBuf {

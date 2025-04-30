@@ -1060,6 +1060,152 @@ impl Emitter {
         }
     }
 
+    fn get_inst_modport_array_size(&self, path: &GenericSymbolPath) -> Vec<Expression> {
+        let (Ok(symbol), _) = self.resolve_generic_path(path, None) else {
+            return vec![];
+        };
+
+        match &symbol.found.kind {
+            SymbolKind::Port(x) => {
+                if matches!(x.direction, SymDirection::Modport) {
+                    return x.r#type.array.clone();
+                }
+            }
+            SymbolKind::Instance(x) => {
+                return x.array.clone();
+            }
+            _ => {}
+        }
+
+        vec![]
+    }
+
+    fn emit_flattened_select(&mut self, select: &[Box<Select>], array_size: &[Expression]) {
+        let last_select = select.last().unwrap();
+
+        for (i, x) in select.iter().enumerate() {
+            if i == 0 {
+                self.l_bracket(&x.l_bracket);
+            } else {
+                self.token(&x.l_bracket.l_bracket_token.replace("+"));
+            }
+
+            self.str("(");
+            self.expression(&x.expression);
+            self.str(")");
+
+            if (i + 1) < array_size.len() {
+                self.force_duplicated = true;
+                for x in array_size.iter().skip(i + 1) {
+                    self.str("*(");
+                    self.expression(x);
+                    self.str(")");
+                }
+                self.force_duplicated = false;
+            } else if let Some(ref y) = x.select_opt {
+                if matches!(&*y.select_operator, SelectOperator::Step(_)) {
+                    self.str("*(");
+                    self.expression(&y.expression);
+                    self.str(")");
+                }
+            }
+        }
+
+        if select.len() == array_size.len() && last_select.select_opt.is_none() {
+            self.r_bracket(&last_select.r_bracket);
+            return;
+        }
+
+        self.force_duplicated = true;
+        for (i, x) in select.iter().enumerate() {
+            if i == 0 {
+                self.token(&x.l_bracket.l_bracket_token.replace(":"));
+            } else {
+                self.token(&x.l_bracket.l_bracket_token.replace("+"));
+            }
+
+            if (i + 1) < select.len() || x.select_opt.is_none() {
+                if (i + 1) < select.len() {
+                    self.str("(");
+                    self.expression(&x.expression);
+                    self.str(")");
+                } else {
+                    self.str("((");
+                    self.expression(&x.expression);
+                    self.str(")+1)");
+                }
+
+                for x in array_size.iter().skip(i + 1) {
+                    self.str("*(");
+                    self.expression(x);
+                    self.str(")");
+                }
+
+                if (i + 1) == select.len() {
+                    self.str("-1");
+                }
+            } else if let Some(ref y) = x.select_opt {
+                match &*y.select_operator {
+                    SelectOperator::Colon(_) => {
+                        self.str("(");
+                        self.expression(&y.expression);
+                        self.str(")");
+                    }
+                    SelectOperator::PlusColon(_) => {
+                        self.str("(");
+                        self.expression(&x.expression);
+                        self.str(")+(");
+                        self.expression(&y.expression);
+                        self.str(")-1");
+                    }
+                    SelectOperator::MinusColon(_) => {
+                        self.str("(");
+                        self.expression(&x.expression);
+                        self.str(")-(");
+                        self.expression(&y.expression);
+                        self.str(")+1");
+                    }
+                    SelectOperator::Step(_) => {
+                        self.str("((");
+                        self.expression(&x.expression);
+                        self.str(")+1)*(");
+                        self.expression(&y.expression);
+                        self.str(")-1");
+                    }
+                }
+            }
+        }
+        self.force_duplicated = false;
+        self.r_bracket(&last_select.r_bracket);
+    }
+
+    fn emit_array(&mut self, array: &Array, flatten: bool) {
+        self.l_bracket(&array.l_bracket);
+        if flatten && !array.array_list.is_empty() {
+            self.str("0:");
+            self.str("(");
+            self.expression(&array.expression);
+            self.str(")");
+            for x in &array.array_list {
+                self.token(&x.comma.comma_token.replace("*("));
+                self.expression(&x.expression);
+                self.str(")");
+            }
+            self.str("-1");
+        } else {
+            self.str("0:");
+            self.expression(&array.expression);
+            self.str("-1");
+            for x in &array.array_list {
+                self.token(&x.comma.comma_token.replace("]["));
+                self.str("0:");
+                self.expression(&x.expression);
+                self.str("-1");
+            }
+        }
+        self.r_bracket(&array.r_bracket);
+    }
+
     fn emit_expanded_modport_connections(&mut self) {
         let src_line = self.src_line;
         self.force_duplicated = true;
@@ -1301,7 +1447,9 @@ impl Emitter {
         match &symbol.kind {
             SymbolKind::Port(x) => {
                 if let Some(x) = x.r#type.get_user_defined() {
-                    if let (Ok(symbol), _) = self.resolve_generic_path(&x.path, &symbol.namespace) {
+                    if let (Ok(symbol), _) =
+                        self.resolve_generic_path(&x.path, Some(&symbol.namespace))
+                    {
                         // symbol for interface is parent symbol because
                         // resolved symbol is for modport
                         let parent = symbol.found.get_parent().unwrap();
@@ -1310,7 +1458,8 @@ impl Emitter {
                 }
             }
             SymbolKind::Instance(x) => {
-                if let (Ok(symbol), _) = self.resolve_generic_path(&x.type_name, &symbol.namespace)
+                if let (Ok(symbol), _) =
+                    self.resolve_generic_path(&x.type_name, Some(&symbol.namespace))
                 {
                     return symbol.found.generic_maps();
                 }
@@ -1533,18 +1682,22 @@ impl Emitter {
         &self,
         arg: &ScopedIdentifier,
     ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
-        let namespace = namespace_table::get(arg.identifier().token.id).unwrap();
         let path: GenericSymbolPath = arg.into();
-        self.resolve_generic_path(&path, &namespace)
+        self.resolve_generic_path(&path, None)
     }
 
     fn resolve_generic_path(
         &self,
         path: &GenericSymbolPath,
-        namespace: &Namespace,
+        namespace: Option<&Namespace>,
     ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
         let generic_map = self.generic_map.last();
-        resolve_generic_path(path, namespace, generic_map)
+        if let Some(namespace) = namespace {
+            resolve_generic_path(path, namespace, generic_map)
+        } else {
+            let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
+            resolve_generic_path(path, &namespace, generic_map)
+        }
     }
 
     fn push_resolved_identifier(&mut self, x: &str) {
@@ -1919,6 +2072,13 @@ impl VerylWalker for Emitter {
         } else {
             unreachable!()
         };
+        let array_size = if self.build_opt.flatten_array_interface
+            && !arg.hierarchical_identifier_list.is_empty()
+        {
+            self.get_inst_modport_array_size(&arg.identifier.as_ref().into())
+        } else {
+            vec![]
+        };
 
         if *list_len == 0 {
             self.identifier(&identifier_with_prefix_suffix(
@@ -1930,8 +2090,17 @@ impl VerylWalker for Emitter {
             self.identifier(&arg.identifier);
         }
 
-        for x in &arg.hierarchical_identifier_list {
-            self.select(&x.select);
+        if array_size.len() > 1 {
+            let select: Vec<_> = arg
+                .hierarchical_identifier_list
+                .iter()
+                .map(|x| x.select.clone())
+                .collect();
+            self.emit_flattened_select(&select, &array_size);
+        } else {
+            for x in &arg.hierarchical_identifier_list {
+                self.select(&x.select);
+            }
         }
 
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
@@ -2001,11 +2170,29 @@ impl VerylWalker for Emitter {
             }
         }
 
+        let array_size = if self.build_opt.flatten_array_interface
+            && !arg.expression_identifier_list.is_empty()
+            && expanded_modport.is_none()
+        {
+            self.get_inst_modport_array_size(&arg.scoped_identifier.as_ref().into())
+        } else {
+            vec![]
+        };
+
         self.resolved_identifier.push("".to_string());
         if let Some((token, modport_member)) = expanded_modport.as_ref() {
             let text = modport_member.identifier.to_string();
             self.veryl_token(&token.replace(&text));
             self.push_resolved_identifier(&text);
+        } else if array_size.len() > 1 {
+            let select: Vec<_> = arg
+                .expression_identifier_list
+                .iter()
+                .map(|x| x.select.clone())
+                .collect();
+            self.scoped_identifier(&arg.scoped_identifier);
+            self.emit_flattened_select(&select, &array_size);
+            self.push_resolved_identifier("[0]");
         } else {
             self.scoped_identifier(&arg.scoped_identifier);
             for x in &arg.expression_identifier_list {
@@ -2811,17 +2998,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Array'
     fn array(&mut self, arg: &Array) {
-        self.l_bracket(&arg.l_bracket);
-        self.str("0:");
-        self.expression(&arg.expression);
-        self.str("-1");
-        for x in &arg.array_list {
-            self.token(&x.comma.comma_token.replace("]["));
-            self.str("0:");
-            self.expression(&x.expression);
-            self.str("-1");
-        }
-        self.r_bracket(&arg.r_bracket);
+        let flatten = self.in_direction_modport && self.build_opt.flatten_array_interface;
+        self.emit_array(arg, flatten);
     }
 
     /// Semantic action for non-terminal 'Range'
@@ -4119,7 +4297,7 @@ impl VerylWalker for Emitter {
         }
         if let Some(ref x) = arg.inst_declaration_opt0 {
             self.space(1);
-            self.array(&x.array);
+            self.emit_array(&x.array, self.build_opt.flatten_array_interface);
         }
         self.space(1);
 

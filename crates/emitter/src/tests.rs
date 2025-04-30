@@ -1290,3 +1290,127 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn serialize_array_interface() {
+    let code = r#"
+interface InterfaceA {
+    var a: logic;
+    modport mp {
+        a: input,
+    }
+}
+module ModuleA (
+    if_a: modport InterfaceA::mp
+) {}
+module ModuleB (
+    if_a: modport InterfaceA::mp[4]
+) {}
+module ModuleC (
+    if_a: modport InterfaceA::mp[3, 4]
+) {}
+module ModuleD (
+    if_a: modport InterfaceA::mp[2, 3, 4]
+) {}
+module ModuleE (
+    if_a: modport InterfaceA::mp[2]
+) {}
+module ModuleF {
+    inst if_a: InterfaceA[2, 3, 4];
+
+    inst u_a: ModuleA (
+        if_a: if_a[1][2][3]
+    );
+    inst u_b: ModuleB (
+        if_a: if_a[1][2]
+    );
+    inst u_c: ModuleC (
+        if_a: if_a[1]
+    );
+    inst u_d: ModuleD (
+        if_a: if_a
+    );
+    inst u_e0: ModuleE (
+        if_a: if_a[1][2][2:3]
+    );
+    inst u_e1: ModuleE (
+        if_a: if_a[1][2][2+:2]
+    );
+    inst u_e2: ModuleE (
+        if_a: if_a[1][2][3-:2]
+    );
+    inst u_e3: ModuleE (
+        if_a: if_a[1][2][1 step 2]
+    );
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceA;
+    logic a;
+    modport mp (
+        input a
+    );
+endinterface
+module prj_ModuleA (
+    prj_InterfaceA.mp if_a
+);
+endmodule
+module prj_ModuleB (
+    prj_InterfaceA.mp if_a [0:4-1]
+);
+endmodule
+module prj_ModuleC (
+    prj_InterfaceA.mp if_a [0:(3)*(4)-1]
+);
+endmodule
+module prj_ModuleD (
+    prj_InterfaceA.mp if_a [0:(2)*(3)*(4)-1]
+);
+endmodule
+module prj_ModuleE (
+    prj_InterfaceA.mp if_a [0:2-1]
+);
+endmodule
+module prj_ModuleF;
+    prj_InterfaceA if_a [0:(2)*(3)*(4)-1] ();
+
+    prj_ModuleA u_a (
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3)])
+    );
+    prj_ModuleB u_b (
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4):(1)*(3)*(4)+((2)+1)*(4)-1])
+    );
+    prj_ModuleC u_c (
+        .if_a (if_a[(1)*(3)*(4):((1)+1)*(3)*(4)-1])
+    );
+    prj_ModuleD u_d (
+        .if_a (if_a)
+    );
+    prj_ModuleE u_e0 (
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(2):(1)*(3)*(4)+(2)*(4)+(3)])
+    );
+    prj_ModuleE u_e1 (
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(2):(1)*(3)*(4)+(2)*(4)+(2)+(2)-1])
+    );
+    prj_ModuleE u_e2 (
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3):(1)*(3)*(4)+(2)*(4)+(3)-(2)+1])
+    );
+    prj_ModuleE u_e3 (
+        .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(1)*(2):(1)*(3)*(4)+(2)*(4)+((1)+1)*(2)-1])
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.build.flatten_array_interface = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    assert_eq!(ret, expect);
+}

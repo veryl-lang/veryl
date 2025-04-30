@@ -585,6 +585,19 @@ impl From<&syntax_tree::WithGenericArgumentItem> for GenericSymbolPath {
     }
 }
 
+impl From<&syntax_tree::Identifier> for GenericSymbolPath {
+    fn from(value: &syntax_tree::Identifier) -> Self {
+        GenericSymbolPath {
+            paths: vec![GenericSymbol {
+                base: value.identifier_token.token,
+                arguments: Vec::new(),
+            }],
+            kind: GenericSymbolPathKind::Identifier,
+            range: value.into(),
+        }
+    }
+}
+
 impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
         let mut paths = Vec::new();
