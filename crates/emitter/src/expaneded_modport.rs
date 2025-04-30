@@ -1,4 +1,5 @@
 use crate::emitter::{SymbolContext, resolve_generic_path, symbol_string};
+use std::collections::HashMap;
 use veryl_analyzer::attribute::ExpandItem;
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::evaluator::Evaluator;
@@ -69,39 +70,91 @@ impl ExpandModportConnectionsTable {
         }
     }
 
-    pub fn create(
+    pub fn create_from_inst_ports(
         defined_ports: &[Port],
-        connected_ports: &[InstPortItem],
+        inst_ports: &[InstPortItem],
         generic_map: &[GenericMap],
         namespace: &Namespace,
     ) -> Self {
+        let connected_ports: HashMap<StrId, Option<&VerylToken>> = inst_ports
+            .iter()
+            .map(|x| {
+                let token = if let Some(ref x) = x.inst_port_item_opt {
+                    x.expression.unwrap_identifier().map(|x| x.identifier())
+                } else {
+                    None
+                };
+                (x.identifier.identifier_token.token.text, token)
+            })
+            .collect();
+
         let mut ret = ExpandModportConnectionsTable::new();
-        ret.expand(defined_ports, connected_ports, generic_map, namespace);
+        ret.expand(
+            defined_ports,
+            &connected_ports,
+            generic_map,
+            namespace,
+            false,
+        );
+        ret
+    }
+
+    pub fn create_from_argument_list(
+        defined_ports: &[Port],
+        argument_list: &ArgumentList,
+        generic_map: &[GenericMap],
+        namespace: &Namespace,
+    ) -> Self {
+        let mut list: Vec<_> = argument_list
+            .argument_list_list
+            .iter()
+            .map(|x| x.argument_item.clone())
+            .collect();
+        list.insert(0, argument_list.argument_item.clone());
+
+        let connected_ports: HashMap<StrId, Option<&VerylToken>> = list
+            .iter()
+            .map(|x| {
+                let lhs_token = x.argument_expression.expression.unwrap_identifier();
+                let rhs_token = if let Some(ref x) = x.argument_item_opt {
+                    x.expression.unwrap_identifier().map(|x| x.identifier())
+                } else {
+                    None
+                };
+                (lhs_token, rhs_token)
+            })
+            .filter(|(lhs, _)| lhs.is_some())
+            .map(|(lhs, rhs)| (lhs.unwrap().identifier().token.text, rhs))
+            .collect();
+
+        let mut ret = ExpandModportConnectionsTable::new();
+        ret.expand(
+            defined_ports,
+            &connected_ports,
+            generic_map,
+            namespace,
+            true,
+        );
         ret
     }
 
     fn expand(
         &mut self,
         defined_ports: &[Port],
-        connected_ports: &[InstPortItem],
+        connected_ports: &HashMap<StrId, Option<&VerylToken>>,
         generic_map: &[GenericMap],
         namespace: &Namespace,
+        in_function: bool,
     ) {
         for (modport, port) in collect_modports(defined_ports, namespace) {
-            if !attribute_table::is_expand(&port.token.token, ExpandItem::Modport) {
+            if !(in_function || attribute_table::is_expand(&port.token.token, ExpandItem::Modport))
+            {
                 continue;
             }
 
             let connected_interface = connected_ports
-                .iter()
-                .find(|x| x.identifier.identifier_token.token.text == port.name())
-                .map(|x| {
-                    if let Some(ref x) = x.inst_port_item_opt {
-                        x.expression.unwrap_identifier().unwrap().identifier()
-                    } else {
-                        &port.token
-                    }
-                })
+                .get(&port.name())
+                .map(|x| x.unwrap_or(&port.token))
                 .unwrap();
             let property = port.property();
             let array_size = evaluate_array_size(&property.r#type.array, generic_map);
@@ -142,6 +195,8 @@ impl ExpandModportConnectionsTable {
 
 #[derive(Clone, Debug)]
 pub struct ExpandedModportPort {
+    pub id: StrId,
+    pub array_index: Vec<isize>,
     pub identifier: VerylToken,
     pub r#type: SymType,
     pub interface_target: VerylToken,
@@ -178,6 +233,8 @@ impl ExpandedModportPorts {
                     port.token.replace("output")
                 };
                 ExpandedModportPort {
+                    id: variable_token.text,
+                    array_index: array_index.to_vec(),
                     identifier: port.token.replace(&port_name),
                     r#type: variable.r#type.clone(),
                     interface_target: port.token.replace(&interface_target),
@@ -216,6 +273,7 @@ impl ExpandedModportPortTable {
         generic_map: &[GenericMap],
         namespace_token: &VerylToken,
         namespace: &Namespace,
+        in_function: bool,
         context: &SymbolContext,
     ) -> Self {
         let mut ret = ExpandedModportPortTable::new();
@@ -224,6 +282,7 @@ impl ExpandedModportPortTable {
             generic_map,
             namespace_token,
             namespace,
+            in_function,
             context,
         );
         ret
@@ -235,10 +294,12 @@ impl ExpandedModportPortTable {
         generic_map: &[GenericMap],
         namespace_token: &VerylToken,
         namespace: &Namespace,
+        in_function: bool,
         context: &SymbolContext,
     ) {
         for (modport, port) in collect_modports(defined_ports, namespace) {
-            if !attribute_table::is_expand(&port.token.token, ExpandItem::Modport) {
+            if !(in_function || attribute_table::is_expand(&port.token.token, ExpandItem::Modport))
+            {
                 continue;
             }
 
@@ -275,10 +336,22 @@ impl ExpandedModportPortTable {
         }
     }
 
-    pub fn get(&self, token: &VerylToken) -> Option<ExpandedModportPortTableEntry> {
-        self.entries
+    pub fn get(&self, token: &Token) -> Option<ExpandedModportPortTableEntry> {
+        self.entries.iter().find(|x| x.id == token.text).cloned()
+    }
+
+    pub fn get_modport_member(
+        &self,
+        modport_token: &Token,
+        member_token: &Token,
+        array_index: &[isize],
+    ) -> Option<ExpandedModportPort> {
+        let entry = self.entries.iter().find(|x| x.id == modport_token.text)?;
+        entry
+            .ports
             .iter()
-            .find(|x| x.id == token.token.text)
+            .flat_map(|x| x.ports.iter())
+            .find(|x| x.id == member_token.text && x.array_index == array_index)
             .cloned()
     }
 

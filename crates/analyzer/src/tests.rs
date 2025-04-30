@@ -1,12 +1,13 @@
 use crate::namespace::Namespace;
 use crate::symbol_path::SymbolPath;
-use crate::{Analyzer, AnalyzerError, symbol_table};
+use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
+    attribute_table::clear();
 
     let metadata: Metadata =
         toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
@@ -695,17 +696,6 @@ fn invalid_direction() {
     module ModuleC {
         function FuncC (
             c: import logic,
-        ) {}
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidDirection { .. }));
-
-    let code = r#"
-    module ModuleD {
-        function FuncD (
-            D: modport logic,
         ) {}
     }
     "#;
@@ -6135,4 +6125,46 @@ fn unexpandable_modport() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA #(
+        param WIDTH: u32 = 1
+    ) {
+        var a: logic<WIDTH>;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA {
+        function Func(
+            if_a: modport InterfaceA::mp,
+        ) {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnexpandableModport { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA {
+        function Func(
+            if_a: modport InterfaceA::mp [2],
+        ) {}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnexpandableModport { .. }
+    ));
 }

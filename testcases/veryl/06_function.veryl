@@ -1,3 +1,13 @@
+interface Interface06 {
+    var a: logic;
+    var b: logic;
+
+    modport mp {
+        a: input,
+        b: input,
+    }
+}
+
 module Module06 {
     const ParamX: u32 = 1;
 
@@ -19,12 +29,20 @@ module Module06 {
         b = a / 1;
     }
 
+    // function with interface modport args
+    function FuncD (
+        ab_if: modport Interface06::mp,
+    ) -> logic<2> {
+        return {ab_if.a, ab_if.b};
+    }
+
     let a: logic<ParamX> = 1;
     var b: logic<ParamX>;
     var c: logic<ParamX>;
     var d: logic<ParamX>;
     var e: logic<ParamX>;
     var f: logic<ParamX>;
+    var g: logic<2>     ;
 
     // function call
     assign c = FuncA(a, b);
@@ -49,4 +67,8 @@ module Module06 {
         aaa: a + 11,
         bb : b + 2 ,
     );
+
+    inst ab_if: Interface06;
+
+    assign g = FuncD(ab_if);
 }

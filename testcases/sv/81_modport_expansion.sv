@@ -36,26 +36,26 @@ interface veryl_testcase___Interface81____BasePkg81__8__32;
 endinterface
 
 module veryl_testcase_Module81A (
-    input  logic                                      __m_if_0_0_ready  ,
-    output logic                                      __m_if_0_0_valid  ,
-    output veryl_testcase___BasePkg81__8__32::Command __m_if_0_0_command,
-    output veryl_testcase___BasePkg81__8__32::Address __m_if_0_0_address,
-    output veryl_testcase___BasePkg81__8__32::Data    __m_if_0_0_data   ,
-    input  logic                                      __m_if_0_1_ready  ,
-    output logic                                      __m_if_0_1_valid  ,
-    output veryl_testcase___BasePkg81__8__32::Command __m_if_0_1_command,
-    output veryl_testcase___BasePkg81__8__32::Address __m_if_0_1_address,
-    output veryl_testcase___BasePkg81__8__32::Data    __m_if_0_1_data   ,
-    output logic                                      __s_if_0_0_ready  ,
-    input  logic                                      __s_if_0_0_valid  ,
-    input  veryl_testcase___BasePkg81__8__32::Command __s_if_0_0_command,
-    input  veryl_testcase___BasePkg81__8__32::Address __s_if_0_0_address,
-    input  veryl_testcase___BasePkg81__8__32::Data    __s_if_0_0_data   ,
-    output logic                                      __s_if_0_1_ready  ,
-    input  logic                                      __s_if_0_1_valid  ,
-    input  veryl_testcase___BasePkg81__8__32::Command __s_if_0_1_command,
-    input  veryl_testcase___BasePkg81__8__32::Address __s_if_0_1_address,
-    input  veryl_testcase___BasePkg81__8__32::Data    __s_if_0_1_data   
+    input  var logic                                      __m_if_0_0_ready  ,
+    output var logic                                      __m_if_0_0_valid  ,
+    output var veryl_testcase___BasePkg81__8__32::Command __m_if_0_0_command,
+    output var veryl_testcase___BasePkg81__8__32::Address __m_if_0_0_address,
+    output var veryl_testcase___BasePkg81__8__32::Data    __m_if_0_0_data   ,
+    input  var logic                                      __m_if_0_1_ready  ,
+    output var logic                                      __m_if_0_1_valid  ,
+    output var veryl_testcase___BasePkg81__8__32::Command __m_if_0_1_command,
+    output var veryl_testcase___BasePkg81__8__32::Address __m_if_0_1_address,
+    output var veryl_testcase___BasePkg81__8__32::Data    __m_if_0_1_data   ,
+    output var logic                                      __s_if_0_0_ready  ,
+    input  var logic                                      __s_if_0_0_valid  ,
+    input  var veryl_testcase___BasePkg81__8__32::Command __s_if_0_0_command,
+    input  var veryl_testcase___BasePkg81__8__32::Address __s_if_0_0_address,
+    input  var veryl_testcase___BasePkg81__8__32::Data    __s_if_0_0_data   ,
+    output var logic                                      __s_if_0_1_ready  ,
+    input  var logic                                      __s_if_0_1_valid  ,
+    input  var veryl_testcase___BasePkg81__8__32::Command __s_if_0_1_command,
+    input  var veryl_testcase___BasePkg81__8__32::Address __s_if_0_1_address,
+    input  var veryl_testcase___BasePkg81__8__32::Data    __s_if_0_1_data   
 );
     veryl_testcase___Interface81____BasePkg81__8__32 m_if [0:1-1][0:2-1] ();
     always_comb begin
@@ -107,7 +107,7 @@ module veryl_testcase_Module81B;
     for (genvar i = 0; i < 1; i++) begin :g
         for (genvar j = 0; j < 2; j++) begin :g
             always_comb begin
-                a_if[i][j].ready   = 0;
+                a_if[i][j].ready = 0;
             end
             always_comb begin
                 b_if[i][j].valid   = 0;
