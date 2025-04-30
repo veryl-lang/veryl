@@ -1135,7 +1135,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
+        // Namespaces of identifiers on RHS of enum item need
+        // to be inserted before resolving symbols of the identifiers.
+        // Therefore, the symbol of enum item needs to be created at Hander::After phase
+        // because namespaces have been created at Hander::Before phase.
+        if let HandlerPoint::After = self.point {
+            let token = arg.identifier.identifier_token.token;
+
             let value = self.evaluate_enum_value(arg);
             let prefix = self.enum_member_prefix.clone().unwrap();
             let property = EnumMemberProperty {
@@ -1143,18 +1149,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 prefix,
             };
             let kind = SymbolKind::EnumMember(property);
-            let id = self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+            let id = self.insert_symbol(&token, kind, false);
             self.enum_members.push(id);
 
             // add EnumMemberMangled to detect identifier conflict in generated SV
-            let mut token = arg.identifier.identifier_token.token;
             let prefix = self.enum_member_prefix.clone().unwrap();
-            token.text = resource_table::insert_str(&format!("{prefix}_{}", token.text));
+            let path = token.source.get_path().unwrap();
+            let text = resource_table::insert_str(&format!("{prefix}_{}", token.text));
+            let mangled_token = Token::generate(text, path);
             let kind = SymbolKind::EnumMemberMangled;
 
             // namespace of EnumMemberMangled is outside of enum
             let namespace = self.namespace.pop();
-            self.insert_symbol(&token, kind, false);
+            self.insert_symbol(&mangled_token, kind, false);
             if let Some(namespace) = namespace {
                 self.namespace.push(namespace);
             }
