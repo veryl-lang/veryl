@@ -375,7 +375,10 @@ impl SymbolTable {
             ),
             SymbolKind::GenericParameter(x) => {
                 matches!(&x.bound, GenericBoundKind::Inst(_))
-                    && matches!(last_found_type, Some(SymbolKind::Interface(_)))
+                    && matches!(
+                        last_found_type,
+                        Some(SymbolKind::Interface(_)) | Some(SymbolKind::ProtoInterface(_))
+                    )
             }
             _ => false,
         };
@@ -388,7 +391,7 @@ impl SymbolTable {
             }
             SymbolKind::GenericParameter(x) => {
                 matches!(&x.bound, GenericBoundKind::Proto(_))
-                    && matches!(last_found_type, Some(SymbolKind::Interface(_)))
+                    && matches!(last_found_type, Some(SymbolKind::ProtoInterface(_)))
             }
             _ => false,
         };

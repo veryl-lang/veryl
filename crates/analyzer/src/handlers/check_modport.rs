@@ -67,7 +67,10 @@ impl CheckModport {
 
     fn is_function_defined_in_interface(&self, symbol: &Symbol) -> bool {
         if let Some(namespace) = self.interface_namespace.as_ref() {
-            matches!(symbol.kind, SymbolKind::Function(_)) && symbol.namespace.matched(namespace)
+            matches!(
+                symbol.kind,
+                SymbolKind::Function(_) | SymbolKind::ProtoFunction(_)
+            ) && symbol.namespace.matched(namespace)
         } else {
             false
         }
@@ -104,6 +107,18 @@ impl VerylGrammarTrait for CheckModport {
     }
 
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.interface_namespace = symbol_table::resolve(arg.identifier.as_ref())
+                .ok()
+                .map(|x| x.found.inner_namespace());
+        }
+        Ok(())
+    }
+
+    fn proto_interface_declaration(
+        &mut self,
+        arg: &ProtoInterfaceDeclaration,
+    ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.interface_namespace = symbol_table::resolve(arg.identifier.as_ref())
                 .ok()
