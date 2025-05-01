@@ -1280,6 +1280,24 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(last_item_with_define),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#last_item_with_define"
+        )
+    )]
+    #[error(
+        "ifdef/ifndef/elsif/else attribute can't be used with the last item in comma-separated list"
+    )]
+    LastItemWithDefine {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 fn source(token: &TokenRange) -> MultiSources {
@@ -2025,6 +2043,13 @@ impl AnalyzerError {
     pub fn ambiguous_elsif(cause: &str, token: &TokenRange) -> Self {
         AnalyzerError::AmbiguousElsif {
             cause: cause.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn last_item_with_define(token: &TokenRange) -> Self {
+        AnalyzerError::LastItemWithDefine {
             input: source(token),
             error_location: token.into(),
         }
