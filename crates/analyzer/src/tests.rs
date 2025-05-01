@@ -890,6 +890,18 @@ fn invalid_modport_item() {
         errors[0],
         AnalyzerError::InvalidModportFunctionItem { .. }
     ));
+
+    let code = r#"
+    proto interface ProtoA {
+        function f() -> logic;
+        modport mp {
+            f: import,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -3383,6 +3395,23 @@ fn invisible_identifier() {
         errors[0],
         AnalyzerError::InvisibleIndentifier { .. }
     ));
+
+    let code = r#"
+    proto interface ProtoA {
+        var foo: logic;
+        modport mp {
+            foo: output,
+        }
+    }
+    module ModuleA::<IF: ProtoA> (
+        foo_if: modport IF::mp,
+    ) {
+        connect foo_if <> 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
