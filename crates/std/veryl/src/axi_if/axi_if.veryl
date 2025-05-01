@@ -1,0 +1,851 @@
+///AXI4 bus package prototype
+pub proto package axi4_prototype {
+    const ADDRESS_WIDTH   : u32;
+    const DATA_WIDTH_BYTES: u32;
+    const NUM_BURSTS_LEN  : u32;
+    const LOCK_LEN        : u32;
+    const ID_LENGTH       : u32;
+    const AWUSER_LENGTH   : u32;
+    const WUSER_LENGTH    : u32;
+    const BUSER_LENGTH    : u32;
+    const ARUSER_LENGTH   : u32;
+    const RUSER_LENGTH    : u32;
+
+    type addr_t      ;
+    type data_t      ;
+    type strb_t      ;
+    type num_bursts_t;
+    type lock_t      ;
+    type id_t        ;
+    type awuser_t    ;
+    type wuser_t     ;
+    type buser_t     ;
+    type aruser_t    ;
+    type ruser_t     ;
+
+}
+
+///AXI3 bus package prototype
+pub proto package axi3_prototype {
+    const ADDRESS_WIDTH   : u32;
+    const DATA_WIDTH_BYTES: u32;
+    const NUM_BURSTS_LEN  : u32;
+    const LOCK_LEN        : u32;
+    const ID_LENGTH       : u32;
+
+    type addr_t      ;
+    type data_t      ;
+    type strb_t      ;
+    type num_bursts_t;
+    type lock_t      ;
+    type id_t        ;
+}
+
+///AXI4-Lite bus package prototype
+pub proto package axi4_lite_prototype {
+    const ADDRESS_WIDTH   : u32;
+    const DATA_WIDTH_BYTES: u32;
+    type addr_t          ;
+    type data_t          ;
+    type strb_t          ;
+}
+
+///AXI4 bus package
+pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32, WUSER_W: u32, BUSER_W: u32, ARUSER_W: u32, RUSER_W: u32> for axi4_prototype {
+    const ADDRESS_WIDTH   : u32 = ADDR_W;
+    const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+    const NUM_BURSTS_LEN  : u32 = 8;
+    const LOCK_LEN        : u32 = 1;
+    const ID_LENGTH       : u32 = ID_W;
+    const AWUSER_LENGTH   : u32 = AWUSER_W;
+    const WUSER_LENGTH    : u32 = WUSER_W;
+    const BUSER_LENGTH    : u32 = BUSER_W;
+    const ARUSER_LENGTH   : u32 = ARUSER_W;
+    const RUSER_LENGTH    : u32 = RUSER_W;
+
+    type addr_t       = logic<ADDRESS_WIDTH>         ;
+    type data_t       = logic<(DATA_WIDTH_BYTES * 8)>;
+    type strb_t       = logic<DATA_WIDTH_BYTES>      ;
+    type num_bursts_t = logic<NUM_BURSTS_LEN>        ;
+    type lock_t       = logic<LOCK_LEN>              ;
+    type id_t         = logic<ID_LENGTH>             ;
+    type awuser_t     = logic<AWUSER_LENGTH>         ;
+    type wuser_t      = logic<WUSER_LENGTH>          ;
+    type buser_t      = logic<BUSER_LENGTH>          ;
+    type aruser_t     = logic<ARUSER_LENGTH>         ;
+    type ruser_t      = logic<RUSER_LENGTH>          ;
+}
+
+///AXI3 bus package
+pub package axi3_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi3_prototype {
+    const ADDRESS_WIDTH   : u32 = ADDR_W;
+    const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+    const NUM_BURSTS_LEN  : u32 = 4;
+    const LOCK_LEN        : u32 = 2;
+    const ID_LENGTH       : u32 = ID_W;
+
+    type addr_t       = logic<ADDRESS_WIDTH>         ;
+    type data_t       = logic<(DATA_WIDTH_BYTES * 8)>;
+    type strb_t       = logic<DATA_WIDTH_BYTES>      ;
+    type num_bursts_t = logic<NUM_BURSTS_LEN>        ;
+    type lock_t       = logic<LOCK_LEN>              ;
+    type id_t         = logic<ID_LENGTH>             ;
+}
+
+///AXI4-Lite bus package
+pub package axi4_lite_pkg::<ADDR_W: u32, DATA_W_BYTES: u32> for axi4_lite_prototype {
+    const ADDRESS_WIDTH   : u32 = ADDR_W;
+    const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+
+    type addr_t = logic<ADDRESS_WIDTH>         ;
+    type data_t = logic<(DATA_WIDTH_BYTES * 8)>;
+    type strb_t = logic<DATA_WIDTH_BYTES>      ;
+}
+
+///### AXI4 bus interface
+///
+///#### Modports:
+///* master - AXI Master IP
+///
+///* slave - AXI slave IP
+///
+///* monitor - Debugging - All signals are declared as input
+///
+///* write_master - Reduced signal count for master IP that only writes to slave
+///
+///* read_master - Reduced signal count for master IP that only reads from slave
+///
+///* write_slave - Reduced signal count for slave IP that only receives writes from master
+///
+///* read_slave - Reduced signal count for slave IP that only replies to read requests from master
+///
+///#### Convenience functions:
+///* awaddr_ack() = awready && awvalid
+///
+///* wdata_ack() = wready && wvalid
+///
+///* bresp_ack() = bready && bvalid
+///
+///* araddr_ack() = arready && arvalid
+///
+///* rdata_ack() = rready && rvalid
+///
+///#### Instantiation:
+///```
+///inst a: axi4_if::< axi4_pkg::< ADDR_W, DATA_W_BYTES, ID_W,
+///                               AWUSER_W, WUSER_W, BUSER_W,
+///                               ARUSER_W, RUSER_W > >;
+///```
+///#### Usage in module definition with modport:
+///```
+///module my_axi4_slave ( aclk: input clock_posedge,
+///                       aresetn: input reset_sync_low,
+///                       axi: modport axi4_if::<axi4_pkg::<32, 4, 8,
+///                                                         8, 8, 8,
+///                                                         8, 8>>::slave ) {
+///
+///}
+///```
+pub interface axi4_if::<PKG: axi4_prototype> {
+
+    import PKG::*;
+
+    //Write address channel
+    var awvalid : logic          ;
+    var awready : logic          ;
+    var awaddr  : addr_t         ;
+    var awsize  : logic       <3>;
+    var awburst : logic       <2>;
+    var awcache : logic       <4>;
+    var awprot  : logic       <3>;
+    var awid    : id_t           ;
+    var awlen   : num_bursts_t   ; //AXI3: 4 bits, AXI4: 8 bits
+    var awlock  : lock_t         ; //AXI3: 2 bits, AXI4: 1 bit
+    var awqos   : logic       <4>; //Only AXI4
+    var awregion: logic       <4>; //Only AXI4
+    var awuser  : awuser_t       ; //Only AXI4
+
+    //Write data channel
+    var wvalid: logic  ;
+    var wready: logic  ;
+    var wlast : logic  ;
+    var wdata : data_t ;
+    var wstrb : strb_t ;
+    var wuser : wuser_t; //Only AXI4
+
+    //Write response channel
+    var bvalid: logic     ;
+    var bready: logic     ;
+    var bresp : logic  <2>;
+    var bid   : id_t      ;
+    var buser : buser_t   ; //Only AXI4
+
+    //Read address channel
+    var arvalid : logic          ;
+    var arready : logic          ;
+    var araddr  : addr_t         ;
+    var arsize  : logic       <3>;
+    var arburst : logic       <2>;
+    var arcache : logic       <4>;
+    var arprot  : logic       <3>;
+    var arid    : id_t           ;
+    var arlen   : num_bursts_t   ; //AXI3: 4 bits, AXI4: 8 bits
+    var arlock  : lock_t         ; //AXI3: 2 bits, AXI4: 1 bit
+    var arqos   : logic       <4>; //Only AXI4
+    var arregion: logic       <4>; //Only AXI4
+    var aruser  : aruser_t       ; //Only AXI4
+
+    //Read data channel
+    var rvalid: logic     ;
+    var rready: logic     ;
+    var rlast : logic     ;
+    var rdata : data_t    ;
+    var rresp : logic  <2>;
+    var rid   : id_t      ;
+    var ruser : ruser_t   ; //Only AXI4
+
+    function awaddr_ack () -> logic {
+        return awready && awvalid;
+    }
+
+    function wdata_ack () -> logic {
+        return wready && wvalid;
+    }
+
+    function bresp_ack () -> logic {
+        return bready && bvalid;
+    }
+
+    function araddr_ack () -> logic {
+        return arready && arvalid;
+    }
+
+    function rdata_ack () -> logic {
+        return rready && rvalid;
+    }
+
+    modport master {
+
+        awvalid : output,
+        awready : input ,
+        awaddr  : output,
+        awsize  : output,
+        awburst : output,
+        awcache : output,
+        awprot  : output,
+        awid    : output,
+        awlen   : output,
+        awlock  : output,
+        awqos   : output,
+        awregion: output,
+        awuser  : output,
+
+        wvalid: output,
+        wready: input ,
+        wlast : output,
+        wdata : output,
+        wstrb : output,
+        wuser : output,
+
+        bvalid: input ,
+        bready: output,
+        bresp : input ,
+        bid   : input ,
+        buser : input ,
+
+        arvalid : output,
+        arready : input ,
+        araddr  : output,
+        arsize  : output,
+        arburst : output,
+        arcache : output,
+        arprot  : output,
+        arid    : output,
+        arlen   : output,
+        arlock  : output,
+        arqos   : output,
+        arregion: output,
+        aruser  : output,
+
+        rvalid: input ,
+        rready: output,
+        rlast : input ,
+        rdata : input ,
+        rresp : input ,
+        rid   : input ,
+        ruser : input ,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+    }
+
+    modport slave {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..converse(master)
+    }
+
+    modport monitor {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..input
+    }
+
+    modport write_master {
+        awvalid : output,
+        awready : input ,
+        awaddr  : output,
+        awsize  : output,
+        awburst : output,
+        awcache : output,
+        awprot  : output,
+        awid    : output,
+        awlen   : output,
+        awlock  : output,
+        awqos   : output,
+        awregion: output,
+        awuser  : output,
+
+        wvalid: output,
+        wready: input ,
+        wlast : output,
+        wdata : output,
+        wstrb : output,
+        wuser : output,
+
+        bvalid: input ,
+        bready: output,
+        bresp : input ,
+        bid   : input ,
+        buser : input ,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+    }
+
+    modport read_master {
+
+        arvalid : output,
+        arready : input ,
+        araddr  : output,
+        arsize  : output,
+        arburst : output,
+        arcache : output,
+        arprot  : output,
+        arid    : output,
+        arlen   : output,
+        arlock  : output,
+        arqos   : output,
+        arregion: output,
+        aruser  : output,
+
+        rvalid: input ,
+        rready: output,
+        rlast : input ,
+        rdata : input ,
+        rresp : input ,
+        rid   : input ,
+        ruser : input ,
+
+        araddr_ack: import,
+        rdata_ack : import,
+
+    }
+
+    modport write_slave {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+
+        ..converse(write_master)
+    }
+
+    modport read_slave {
+
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..converse(read_master)
+    }
+}
+
+///### AXI3 bus interface
+///
+///#### Modports:
+///* master - AXI Master IP
+///
+///* slave - AXI slave IP
+///
+///* monitor - Debugging - All signals are declared as input
+///
+///* write_master - Reduced signal count for master IP that only writes to slave
+///
+///* read_master - Reduced signal count for master IP that only reads from slave
+///
+///* write_slave - Reduced signal count for slave IP that only receives writes from master
+///
+///* read_slave - Reduced signal count for slave IP that only replies to read requests from master
+///
+///#### Convenience functions:
+///* awaddr_ack() = awready && awvalid
+///
+///* wdata_ack() = wready && wvalid
+///
+///* bresp_ack() = bready && bvalid
+///
+///* araddr_ack() = arready && arvalid
+///
+///* rdata_ack() = rready && rvalid
+///
+///#### Instantiation:
+///```
+///inst b: axi3_if::< axi3_pkg::< ADDR_W, DATA_W_BYTES, ID_W > >;
+///```
+///#### Usage in module definition with modport:
+///```
+///module my_axi3_slave ( aclk: input clock_posedge,
+///                       aresetn: input reset_sync_low,
+///                       axi: modport axi3_if::<axi3_pkg::<32, 4, 8>>::slave ) {
+///
+///}
+///```
+pub interface axi3_if::<PKG: axi3_prototype> {
+
+    import PKG::*;
+
+    //Write address channel
+    var awvalid: logic          ;
+    var awready: logic          ;
+    var awaddr : addr_t         ;
+    var awsize : logic       <3>;
+    var awburst: logic       <2>;
+    var awcache: logic       <4>;
+    var awprot : logic       <3>;
+    var awid   : id_t           ;
+    var awlen  : num_bursts_t   ; //AXI3: 4 bits, AXI4: 8 bits
+    var awlock : lock_t         ; //AXI3: 2 bits, AXI4: 1 bit
+
+    //Write data channel
+    var wvalid: logic ;
+    var wready: logic ;
+    var wlast : logic ;
+    var wdata : data_t;
+    var wstrb : strb_t;
+    var wid   : id_t  ; //Only AXI3
+
+    //Write response channel
+    var bvalid: logic   ;
+    var bready: logic   ;
+    var bresp : logic<2>;
+    var bid   : id_t    ;
+
+    //Read address channel
+    var arvalid: logic          ;
+    var arready: logic          ;
+    var araddr : addr_t         ;
+    var arsize : logic       <3>;
+    var arburst: logic       <2>;
+    var arcache: logic       <4>;
+    var arprot : logic       <3>;
+    var arid   : id_t           ;
+    var arlen  : num_bursts_t   ; //AXI3: 4 bits, AXI4: 8 bits
+    var arlock : lock_t         ; //AXI3: 2 bits, AXI4: 1 bit
+
+    //Read data channel
+    var rvalid: logic    ;
+    var rready: logic    ;
+    var rlast : logic    ;
+    var rdata : data_t   ;
+    var rresp : logic <2>;
+    var rid   : id_t     ;
+
+    function awaddr_ack () -> logic {
+        return awready && awvalid;
+    }
+
+    function wdata_ack () -> logic {
+        return wready && wvalid;
+    }
+
+    function bresp_ack () -> logic {
+        return bready && bvalid;
+    }
+
+    function araddr_ack () -> logic {
+        return arready && arvalid;
+    }
+
+    function rdata_ack () -> logic {
+        return rready && rvalid;
+    }
+
+    modport master {
+
+        awvalid: output,
+        awready: input ,
+        awaddr : output,
+        awsize : output,
+        awburst: output,
+        awcache: output,
+        awprot : output,
+        awid   : output,
+        awlen  : output,
+        awlock : output,
+
+        wvalid: output,
+        wready: input ,
+        wlast : output,
+        wdata : output,
+        wstrb : output,
+        wid   : output,
+
+        bvalid: input ,
+        bready: output,
+        bresp : input ,
+        bid   : input ,
+
+        arvalid: output,
+        arready: input ,
+        araddr : output,
+        arsize : output,
+        arburst: output,
+        arcache: output,
+        arprot : output,
+        arid   : output,
+        arlen  : output,
+        arlock : output,
+
+        rvalid: input ,
+        rready: output,
+        rlast : input ,
+        rdata : input ,
+        rresp : input ,
+        rid   : input ,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+    }
+
+    modport slave {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..converse(master)
+    }
+
+    modport monitor {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..input
+    }
+
+    modport write_master {
+
+        awvalid: output,
+        awready: input ,
+        awaddr : output,
+        awsize : output,
+        awburst: output,
+        awcache: output,
+        awprot : output,
+        awid   : output,
+        awlen  : output,
+        awlock : output,
+
+        wvalid: output,
+        wready: input ,
+        wlast : output,
+        wdata : output,
+        wstrb : output,
+        wid   : output,
+
+        bvalid: input ,
+        bready: output,
+        bresp : input ,
+        bid   : input ,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+
+    }
+
+    modport read_master {
+
+        arvalid: output,
+        arready: input ,
+        araddr : output,
+        arsize : output,
+        arburst: output,
+        arcache: output,
+        arprot : output,
+        arid   : output,
+        arlen  : output,
+        arlock : output,
+
+        rvalid: input ,
+        rready: output,
+        rlast : input ,
+        rdata : input ,
+        rresp : input ,
+        rid   : input ,
+
+        araddr_ack: import,
+        rdata_ack : import,
+
+    }
+
+    modport write_slave {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+
+        ..converse(write_master)
+    }
+
+    modport read_slave {
+
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..converse(read_master)
+    }
+
+}
+
+///### AXI4-Lite bus interface
+///
+///#### Modports:
+///* master - AXI Master IP
+///
+///* slave - AXI slave IP
+///
+///* monitor - Debugging - All signals are declared as input
+///
+///* write_master - Reduced signal count for master IP that only writes to slave
+///
+///* read_master - Reduced signal count for master IP that only reads from slave
+///
+///* write_slave - Reduced signal count for slave IP that only receives writes from master
+///
+///* read_slave - Reduced signal count for slave IP that only replies to read requests from master
+///
+///#### Convenience functions:
+///* awaddr_ack() = awready && awvalid
+///
+///* wdata_ack() = wready && wvalid
+///
+///* bresp_ack() = bready && bvalid
+///
+///* araddr_ack() = arready && arvalid
+///
+///* rdata_ack() = rready && rvalid
+///
+///#### Instantiation:
+///```
+///inst c: axi4_lite_if::< axi4_lite_pkg::< ADDR_W, DATA_W_BYTES > >;
+///```
+///#### Usage in module definition with modport:
+///```
+///module my_axi4_lite_slave ( aclk: input clock_posedge,
+///                            aresetn: input reset_sync_low,
+///                            axi: modport axi4_lite_if::<axi4_lite_pkg::<32, 4>>::slave )
+///{
+///
+///}
+///```
+pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
+
+    import PKG::*;
+
+    //Write address channel
+    var awvalid: logic    ;
+    var awready: logic    ;
+    var awaddr : addr_t   ;
+    var awprot : logic <3>;
+
+    //Write data channel
+    var wvalid: logic ;
+    var wready: logic ;
+    var wdata : data_t;
+    var wstrb : strb_t;
+
+    //Write response channel
+    var bvalid: logic   ;
+    var bready: logic   ;
+    var bresp : logic<2>;
+
+    //Read address channel
+    var arvalid: logic    ;
+    var arready: logic    ;
+    var araddr : addr_t   ;
+    var arprot : logic <3>;
+
+    //Read data channel
+    var rvalid: logic    ;
+    var rready: logic    ;
+    var rdata : data_t   ;
+    var rresp : logic <2>;
+
+    function awaddr_ack () -> logic {
+        return awready && awvalid;
+    }
+
+    function wdata_ack () -> logic {
+        return wready && wvalid;
+    }
+
+    function bresp_ack () -> logic {
+        return bready && bvalid;
+    }
+
+    function araddr_ack () -> logic {
+        return arready && arvalid;
+    }
+
+    function rdata_ack () -> logic {
+        return rready && rvalid;
+    }
+
+    modport master {
+
+        awvalid: output,
+        awready: input ,
+        awaddr : output,
+        awprot : output,
+
+        wvalid: output,
+        wready: input ,
+        wdata : output,
+        wstrb : output,
+
+        bvalid: input ,
+        bready: output,
+        bresp : input ,
+
+        arvalid: output,
+        arready: input ,
+        araddr : output,
+        arprot : output,
+
+        rvalid: input ,
+        rready: output,
+        rdata : input ,
+        rresp : input ,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+    }
+
+    modport slave {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..converse(master)
+    }
+
+    modport monitor {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..input
+    }
+
+    modport write_master {
+
+        awvalid: output,
+        awready: input ,
+        awaddr : output,
+        awprot : output,
+
+        wvalid: output,
+        wready: input ,
+        wdata : output,
+        wstrb : output,
+
+        bvalid: input ,
+        bready: output,
+        bresp : input ,
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+
+    }
+
+    modport read_master {
+
+        arvalid: output,
+        arready: input ,
+        araddr : output,
+        arprot : output,
+
+        rvalid: input ,
+        rready: output,
+        rdata : input ,
+        rresp : input ,
+
+        araddr_ack: import,
+        rdata_ack : import,
+
+    }
+
+    modport write_slave {
+
+        awaddr_ack: import,
+        wdata_ack : import,
+        bresp_ack : import,
+
+        ..converse(write_master)
+    }
+
+    modport read_slave {
+
+        araddr_ack: import,
+        rdata_ack : import,
+
+        ..converse(read_master)
+    }
+}
