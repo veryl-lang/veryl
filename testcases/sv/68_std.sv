@@ -6,7 +6,7 @@ module veryl_testcase_Module68 (
     input  var logic         i_pop  ,
     output var logic [8-1:0] o_data 
 );
-    std_fifo u (
+    __std_fifo u (
         .i_clk         (i_clk  ),
         .i_rst_n       (i_rst_n),
         .i_clear       ('0     ),

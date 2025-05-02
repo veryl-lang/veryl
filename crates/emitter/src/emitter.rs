@@ -5199,12 +5199,6 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
             // top level namespace is always `_`
             let text = format!("{}_", path);
 
-            let text = if text == "$std_" {
-                "std_".to_string()
-            } else {
-                text
-            };
-
             // "$sv" namespace should be removed
             if text == "$sv_" {
                 in_sv_namespace = true;
@@ -5244,7 +5238,8 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
 
         resolve_namespace.push(*path);
     }
-    ret
+
+    ret.replace("$std_", "__std_")
 }
 
 pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContext) -> String {
@@ -5357,7 +5352,8 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             unreachable!()
         }
     }
-    ret
+
+    ret.replace("$std_", "__std_")
 }
 
 pub fn identifier_with_prefix_suffix(
