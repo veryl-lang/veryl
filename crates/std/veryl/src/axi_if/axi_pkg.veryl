@@ -88,19 +88,19 @@ pub package axi4_config {
         WRAPPNG_BURST = 2'b10,
     }
 
-    const awcache_bufferable    : logic<4> = 4'b0001;
-    const awcache_modifiable    : logic<4> = 4'b0010;
-    const awcache_other_allocate: logic<4> = 4'b0100;
-    const awcache_allocate      : logic<4> = 4'b1000;
+    const AWCACHE_BUFFERABLE    : logic<4> = 4'b0001;
+    const AWCACHE_MODIFIABLE    : logic<4> = 4'b0010;
+    const AWCACHE_OTHER_ALLOCATE: logic<4> = 4'b0100;
+    const AWCACHE_ALLOCATE      : logic<4> = 4'b1000;
 
-    const arcache_bufferable    : logic<4> = 4'b0001;
-    const arcache_modifiable    : logic<4> = 4'b0010;
-    const arcache_allocate      : logic<4> = 4'b0100;
-    const arcache_other_allocate: logic<4> = 4'b1000;
+    const ARCACHE_BUFFERABLE    : logic<4> = 4'b0001;
+    const ARCACHE_MODIFIABLE    : logic<4> = 4'b0010;
+    const ARCACHE_ALLOCATE      : logic<4> = 4'b0100;
+    const ARCACHE_OTHER_ALLOCATE: logic<4> = 4'b1000;
 
-    const axprot_privileged        : logic<3> = 3'b001;
-    const axprot_non_secure        : logic<3> = 3'b010;
-    const axprot_instruction_access: logic<3> = 3'b100;
+    const AXPROT_PRIVILEGED        : logic<3> = 3'b001;
+    const AXPROT_NON_SECURE        : logic<3> = 3'b010;
+    const AXPROT_INSTRUCTION_ACCESS: logic<3> = 3'b100;
 
     enum bresp_variants: logic<2> {
         OKAY = 2'b00,
@@ -172,14 +172,14 @@ pub package axi3_config {
         WRAPPNG_BURST = 2'b10,
     }
 
-    const axcache_bufferable    : logic<4> = 4'b0001;
-    const axcache_cacheable     : logic<4> = 4'b0010;
-    const axcache_read_allocate : logic<4> = 4'b0100;
-    const axcache_write_allocate: logic<4> = 4'b1000;
+    const AXCACHE_BUFFERABLE    : logic<4> = 4'b0001;
+    const AXCACHE_CACHEABLE     : logic<4> = 4'b0010;
+    const AXCACHE_READ_ALLOCATE : logic<4> = 4'b0100;
+    const AXCACHE_WRITE_ALLOCATE: logic<4> = 4'b1000;
 
-    const axprot_privileged        : logic<3> = 3'b001;
-    const axprot_non_secure        : logic<3> = 3'b010;
-    const axprot_instruction_access: logic<3> = 3'b100;
+    const AXPROT_PRIVILEGED        : logic<3> = 3'b001;
+    const AXPROT_NON_SECURE        : logic<3> = 3'b010;
+    const AXPROT_INSTRUCTION_ACCESS: logic<3> = 3'b100;
 
     enum bresp_variants: logic<2> {
         OKAY = 2'b00,
@@ -223,9 +223,9 @@ pub package axi3_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi3_proto
 ///### AXI4-Lite configuration definitions
 pub package axi4_lite_config {
 
-    const axprot_privileged        : logic<3> = 3'b001;
-    const axprot_non_secure        : logic<3> = 3'b010;
-    const axprot_instruction_access: logic<3> = 3'b100;
+    const AXPROT_PRIVILEGED        : logic<3> = 3'b001;
+    const AXPROT_NON_SECURE        : logic<3> = 3'b010;
+    const AXPROT_INSTRUCTION_ACCESS: logic<3> = 3'b100;
 
     enum bresp_variants: logic<2> {
         OKAY = 2'b00,
