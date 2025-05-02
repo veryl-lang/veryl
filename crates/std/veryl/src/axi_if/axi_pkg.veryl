@@ -72,20 +72,20 @@ pub proto package axi4_lite_prototype {
 pub package axi4_config {
 
     enum axsize_variants: logic<3> {
-        bytes_per_transfer_1 = 3'b000,
-        bytes_per_transfer_2 = 3'b001,
-        bytes_per_transfer_4 = 3'b010,
-        bytes_per_transfer_8 = 3'b011,
-        bytes_per_transfer_16 = 3'b100,
-        bytes_per_transfer_32 = 3'b101,
-        bytes_per_transfer_64 = 3'b110,
-        bytes_per_transfer_128 = 3'b111,
+        BYTES_PER_TRANSFER_1 = 3'b000,
+        BYTES_PER_TRANSFER_2 = 3'b001,
+        BYTES_PER_TRANSFER_4 = 3'b010,
+        BYTES_PER_TRANSFER_8 = 3'b011,
+        BYTES_PER_TRANSFER_16 = 3'b100,
+        BYTES_PER_TRANSFER_32 = 3'b101,
+        BYTES_PER_TRANSFER_64 = 3'b110,
+        BYTES_PER_TRANSFER_128 = 3'b111,
     }
 
     enum axburst_variants: logic<2> {
-        fixed_burst = 2'b00,
-        incrementing_burst = 2'b01,
-        wrapping_burst = 2'b10,
+        FIXED_BURST = 2'b00,
+        INCREMENTING_BURST = 2'b01,
+        WRAPPNG_BURST = 2'b10,
     }
 
     const awcache_bufferable    : logic<4> = 4'b0001;
@@ -103,17 +103,17 @@ pub package axi4_config {
     const axprot_instruction_access: logic<3> = 3'b100;
 
     enum bresp_variants: logic<2> {
-        okay = 2'b00,
-        exokay = 2'b01,
-        slverr = 2'b10,
-        decerr = 2'b11,
+        OKAY = 2'b00,
+        EXOKAY = 2'b01,
+        SLVERR = 2'b10,
+        DECERR = 2'b11,
     }
 
     enum rresp_variants: logic<2> {
-        okay = 2'b00,
-        exokay = 2'b01,
-        slverr = 2'b10,
-        decerr = 2'b11,
+        OKAY = 2'b00,
+        EXOKAY = 2'b01,
+        SLVERR = 2'b10,
+        DECERR = 2'b11,
     }
 
 }
@@ -156,20 +156,20 @@ pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32,
 pub package axi3_config {
 
     enum axsize_variants: logic<3> {
-        bytes_per_transfer_1 = 3'b000,
-        bytes_per_transfer_2 = 3'b001,
-        bytes_per_transfer_4 = 3'b010,
-        bytes_per_transfer_8 = 3'b011,
-        bytes_per_transfer_16 = 3'b100,
-        bytes_per_transfer_32 = 3'b101,
-        bytes_per_transfer_64 = 3'b110,
-        bytes_per_transfer_128 = 3'b111,
+        BYTES_PER_TRANSFER_1 = 3'b000,
+        BYTES_PER_TRANSFER_2 = 3'b001,
+        BYTES_PER_TRANSFER_4 = 3'b010,
+        BYTES_PER_TRANSFER_8 = 3'b011,
+        BYTES_PER_TRANSFER_16 = 3'b100,
+        BYTES_PER_TRANSFER_32 = 3'b101,
+        BYTES_PER_TRANSFER_64 = 3'b110,
+        BYTES_PER_TRANSFER_128 = 3'b111,
     }
 
     enum axburst_variants: logic<2> {
-        fixed_burst = 2'b00,
-        incrementing_burst = 2'b01,
-        wrapping_burst = 2'b10,
+        FIXED_BURST = 2'b00,
+        INCREMENTING_BURST = 2'b01,
+        WRAPPNG_BURST = 2'b10,
     }
 
     const axcache_bufferable    : logic<4> = 4'b0001;
@@ -182,17 +182,17 @@ pub package axi3_config {
     const axprot_instruction_access: logic<3> = 3'b100;
 
     enum bresp_variants: logic<2> {
-        okay = 2'b00,
-        exokay = 2'b01,
-        slverr = 2'b10,
-        decerr = 2'b11,
+        OKAY = 2'b00,
+        EXOKAY = 2'b01,
+        SLVERR = 2'b10,
+        DECERR = 2'b11,
     }
 
     enum rresp_variants: logic<2> {
-        okay = 2'b00,
-        exokay = 2'b01,
-        slverr = 2'b10,
-        decerr = 2'b11,
+        OKAY = 2'b00,
+        EXOKAY = 2'b01,
+        SLVERR = 2'b10,
+        DECERR = 2'b11,
     }
 
 }
@@ -228,17 +228,17 @@ pub package axi4_lite_config {
     const axprot_instruction_access: logic<3> = 3'b100;
 
     enum bresp_variants: logic<2> {
-        okay = 2'b00,
-        exokay = 2'b01,
-        slverr = 2'b10,
-        decerr = 2'b11,
+        OKAY = 2'b00,
+        EXOKAY = 2'b01,
+        SLVERR = 2'b10,
+        DECERR = 2'b11,
     }
 
     enum rresp_variants: logic<2> {
-        okay = 2'b00,
-        exokay = 2'b01,
-        slverr = 2'b10,
-        decerr = 2'b11,
+        OKAY = 2'b00,
+        EXOKAY = 2'b01,
+        SLVERR = 2'b10,
+        DECERR = 2'b11,
     }
 
 }
