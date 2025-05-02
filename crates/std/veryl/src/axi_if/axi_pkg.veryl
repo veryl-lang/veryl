@@ -1,0 +1,262 @@
+///### AXI4 bus package prototype
+pub proto package axi4_prototype {
+    const ADDRESS_WIDTH   : u32;
+    const DATA_WIDTH_BYTES: u32;
+    const NUM_BURSTS_LEN  : u32;
+    const LOCK_LEN        : u32;
+    const ID_LENGTH       : u32;
+    const AWUSER_LENGTH   : u32;
+    const WUSER_LENGTH    : u32;
+    const BUSER_LENGTH    : u32;
+    const ARUSER_LENGTH   : u32;
+    const RUSER_LENGTH    : u32;
+
+    type addr_t      ;
+    type data_t      ;
+    type strb_t      ;
+    type num_bursts_t;
+    type lock_t      ;
+    type id_t        ;
+    type awuser_t    ;
+    type wuser_t     ;
+    type buser_t     ;
+    type aruser_t    ;
+    type ruser_t     ;
+
+    type size_t ;
+    type burst_t;
+    type cache_t;
+    type prot_t ;
+    type bresp_t;
+    type rresp_t;
+}
+
+///### AXI3 bus package prototype
+pub proto package axi3_prototype {
+    const ADDRESS_WIDTH   : u32;
+    const DATA_WIDTH_BYTES: u32;
+    const NUM_BURSTS_LEN  : u32;
+    const LOCK_LEN        : u32;
+    const ID_LENGTH       : u32;
+
+    type addr_t      ;
+    type data_t      ;
+    type strb_t      ;
+    type num_bursts_t;
+    type lock_t      ;
+    type id_t        ;
+
+    type size_t ;
+    type burst_t;
+    type cache_t;
+    type prot_t ;
+    type bresp_t;
+    type rresp_t;
+}
+
+///### AXI4-Lite bus package prototype
+pub proto package axi4_lite_prototype {
+    const ADDRESS_WIDTH   : u32;
+    const DATA_WIDTH_BYTES: u32;
+    type addr_t          ;
+    type data_t          ;
+    type strb_t          ;
+    type prot_t          ;
+    type id_t            ;
+
+    type bresp_t;
+    type rresp_t;
+}
+
+///### AXI4 configuration definitions
+pub package axi4_config {
+
+    enum axsize_variants: logic<3> {
+        bytes_per_transfer_1 = 3'b000,
+        bytes_per_transfer_2 = 3'b001,
+        bytes_per_transfer_4 = 3'b010,
+        bytes_per_transfer_8 = 3'b011,
+        bytes_per_transfer_16 = 3'b100,
+        bytes_per_transfer_32 = 3'b101,
+        bytes_per_transfer_64 = 3'b110,
+        bytes_per_transfer_128 = 3'b111,
+    }
+
+    enum axburst_variants: logic<2> {
+        fixed_burst = 2'b00,
+        incrementing_burst = 2'b01,
+        wrapping_burst = 2'b10,
+    }
+
+    const awcache_bufferable    : logic<4> = 4'b0001;
+    const awcache_modifiable    : logic<4> = 4'b0010;
+    const awcache_other_allocate: logic<4> = 4'b0100;
+    const awcache_allocate      : logic<4> = 4'b1000;
+
+    const arcache_bufferable    : logic<4> = 4'b0001;
+    const arcache_modifiable    : logic<4> = 4'b0010;
+    const arcache_allocate      : logic<4> = 4'b0100;
+    const arcache_other_allocate: logic<4> = 4'b1000;
+
+    const axprot_privileged        : logic<3> = 3'b001;
+    const axprot_non_secure        : logic<3> = 3'b010;
+    const axprot_instruction_access: logic<3> = 3'b100;
+
+    enum bresp_variants: logic<2> {
+        okay = 2'b00,
+        exokay = 2'b01,
+        slverr = 2'b10,
+        decerr = 2'b11,
+    }
+
+    enum rresp_variants: logic<2> {
+        okay = 2'b00,
+        exokay = 2'b01,
+        slverr = 2'b10,
+        decerr = 2'b11,
+    }
+
+}
+
+///### AXI4 bus package
+pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32, WUSER_W: u32, BUSER_W: u32, ARUSER_W: u32, RUSER_W: u32> for axi4_prototype {
+    const ADDRESS_WIDTH   : u32 = ADDR_W;
+    const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+    const NUM_BURSTS_LEN  : u32 = 8;
+    const LOCK_LEN        : u32 = 1;
+    const ID_LENGTH       : u32 = ID_W;
+    const AWUSER_LENGTH   : u32 = AWUSER_W;
+    const WUSER_LENGTH    : u32 = WUSER_W;
+    const BUSER_LENGTH    : u32 = BUSER_W;
+    const ARUSER_LENGTH   : u32 = ARUSER_W;
+    const RUSER_LENGTH    : u32 = RUSER_W;
+
+    type addr_t       = logic<ADDRESS_WIDTH>         ;
+    type data_t       = logic<(DATA_WIDTH_BYTES * 8)>;
+    type strb_t       = logic<DATA_WIDTH_BYTES>      ;
+    type num_bursts_t = logic<NUM_BURSTS_LEN>        ;
+    type lock_t       = logic<LOCK_LEN>              ;
+    type id_t         = logic<ID_LENGTH>             ;
+    type awuser_t     = logic<AWUSER_LENGTH>         ;
+    type wuser_t      = logic<WUSER_LENGTH>          ;
+    type buser_t      = logic<BUSER_LENGTH>          ;
+    type aruser_t     = logic<ARUSER_LENGTH>         ;
+    type ruser_t      = logic<RUSER_LENGTH>          ;
+
+    type size_t  = axi4_config::axsize_variants    ;
+    type burst_t = axi4_config::axburst_variants   ;
+    type cache_t = logic                        <4>;
+    type prot_t  = logic                        <3>;
+    type bresp_t = axi4_config::bresp_variants     ;
+    type rresp_t = axi4_config::rresp_variants     ;
+
+}
+
+///### AXI3 configuration definitions
+pub package axi3_config {
+
+    enum axsize_variants: logic<3> {
+        bytes_per_transfer_1 = 3'b000,
+        bytes_per_transfer_2 = 3'b001,
+        bytes_per_transfer_4 = 3'b010,
+        bytes_per_transfer_8 = 3'b011,
+        bytes_per_transfer_16 = 3'b100,
+        bytes_per_transfer_32 = 3'b101,
+        bytes_per_transfer_64 = 3'b110,
+        bytes_per_transfer_128 = 3'b111,
+    }
+
+    enum axburst_variants: logic<2> {
+        fixed_burst = 2'b00,
+        incrementing_burst = 2'b01,
+        wrapping_burst = 2'b10,
+    }
+
+    const axcache_bufferable    : logic<4> = 4'b0001;
+    const axcache_cacheable     : logic<4> = 4'b0010;
+    const axcache_read_allocate : logic<4> = 4'b0100;
+    const axcache_write_allocate: logic<4> = 4'b1000;
+
+    const axprot_privileged        : logic<3> = 3'b001;
+    const axprot_non_secure        : logic<3> = 3'b010;
+    const axprot_instruction_access: logic<3> = 3'b100;
+
+    enum bresp_variants: logic<2> {
+        okay = 2'b00,
+        exokay = 2'b01,
+        slverr = 2'b10,
+        decerr = 2'b11,
+    }
+
+    enum rresp_variants: logic<2> {
+        okay = 2'b00,
+        exokay = 2'b01,
+        slverr = 2'b10,
+        decerr = 2'b11,
+    }
+
+}
+
+///### AXI3 bus package
+pub package axi3_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi3_prototype {
+    const ADDRESS_WIDTH   : u32 = ADDR_W;
+    const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+    const NUM_BURSTS_LEN  : u32 = 4;
+    const LOCK_LEN        : u32 = 2;
+    const ID_LENGTH       : u32 = ID_W;
+
+    type addr_t       = logic<ADDRESS_WIDTH>         ;
+    type data_t       = logic<(DATA_WIDTH_BYTES * 8)>;
+    type strb_t       = logic<DATA_WIDTH_BYTES>      ;
+    type num_bursts_t = logic<NUM_BURSTS_LEN>        ;
+    type lock_t       = logic<LOCK_LEN>              ;
+    type id_t         = logic<ID_LENGTH>             ;
+
+    type size_t  = axi3_config::axsize_variants    ;
+    type burst_t = axi3_config::axburst_variants   ;
+    type cache_t = logic                        <4>;
+    type prot_t  = logic                        <3>;
+    type bresp_t = axi3_config::bresp_variants     ;
+    type rresp_t = axi3_config::rresp_variants     ;
+}
+
+///### AXI4-Lite configuration definitions
+pub package axi4_lite_config {
+
+    const axprot_privileged        : logic<3> = 3'b001;
+    const axprot_non_secure        : logic<3> = 3'b010;
+    const axprot_instruction_access: logic<3> = 3'b100;
+
+    enum bresp_variants: logic<2> {
+        okay = 2'b00,
+        exokay = 2'b01,
+        slverr = 2'b10,
+        decerr = 2'b11,
+    }
+
+    enum rresp_variants: logic<2> {
+        okay = 2'b00,
+        exokay = 2'b01,
+        slverr = 2'b10,
+        decerr = 2'b11,
+    }
+
+}
+
+///### AXI4-Lite bus package
+pub package axi4_lite_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi4_lite_prototype {
+    const ADDRESS_WIDTH   : u32 = ADDR_W;
+    const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+    const ID_LENGTH       : u32 = ID_W;
+
+    type addr_t = logic<ADDRESS_WIDTH>         ;
+    type data_t = logic<(DATA_WIDTH_BYTES * 8)>;
+    type strb_t = logic<DATA_WIDTH_BYTES>      ;
+
+    type id_t = logic<ID_LENGTH>;
+
+    type prot_t  = logic                           <3>;
+    type bresp_t = axi4_lite_config::bresp_variants   ;
+    type rresp_t = axi4_lite_config::rresp_variants   ;
+
+}
