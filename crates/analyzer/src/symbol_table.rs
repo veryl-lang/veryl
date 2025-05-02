@@ -415,6 +415,7 @@ impl SymbolTable {
             SymbolKind::TypeDef(_) => matches!(last_found_type, Some(SymbolKind::Enum(_))),
             _ => false,
         };
+        let via_namespace = matches!(last_found.kind, SymbolKind::Namespace);
 
         match &found.kind {
             SymbolKind::Variable(_)
@@ -449,10 +450,10 @@ impl SymbolTable {
             SymbolKind::Modport(_) => via_interface || via_interface_instance,
             SymbolKind::GenericInstance(_) => {
                 // A generic instance in this context is for generic type or function
-                // defined in a packge
-                via_pacakge
+                // defined in a packge or for generic component defined in other project
+                via_pacakge || via_namespace
             }
-            _ => matches!(last_found.kind, SymbolKind::Namespace),
+            _ => via_namespace,
         }
     }
 
