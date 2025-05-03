@@ -76,11 +76,18 @@ impl CheckAttribute {
         }
     }
 
-    fn check_ifdef(&mut self, attrs: &mut [Option<(Attr, TokenRange)>]) {
+    fn check_ifdef(&mut self, attrs: &mut [Option<(Attr, TokenRange)>], last: bool) {
         let mut attrs: Vec<_> = attrs
             .iter_mut()
             .filter_map(|x| x.as_mut().filter(|x| x.0.is_ifdef()))
             .collect();
+
+        // Last item can't have ifdef
+        if last && !attrs.is_empty() {
+            let (_, range) = &attrs[0];
+            self.errors
+                .push(AnalyzerError::last_item_with_define(range));
+        }
 
         #[allow(clippy::comparison_chain)]
         if attrs.len() > 1 {
@@ -153,9 +160,9 @@ impl CheckAttribute {
         }
     }
 
-    fn attrs(&mut self, args: &[&Attribute], range: TokenRange) {
+    fn attrs(&mut self, args: &[&Attribute], range: TokenRange, last: bool) {
         let mut attrs = self.gen_attrs(args);
-        self.check_ifdef(&mut attrs);
+        self.check_ifdef(&mut attrs, last);
         self.set_attrs(attrs, range);
     }
 }
@@ -176,7 +183,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())
@@ -190,13 +197,15 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.modport_group.as_ref()),
             );
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .modport_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -206,13 +215,15 @@ impl VerylGrammarTrait for CheckAttribute {
         if let HandlerPoint::Before = self.point {
             let mut groups = vec![arg.enum_group.as_ref()];
             groups.extend(arg.enum_list_list.iter().map(|x| x.enum_group.as_ref()));
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .enum_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -226,13 +237,15 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.struct_union_group.as_ref()),
             );
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .struct_union_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -246,13 +259,15 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.inst_parameter_group.as_ref()),
             );
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .inst_parameter_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -266,13 +281,15 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.inst_port_group.as_ref()),
             );
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .inst_port_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -286,13 +303,15 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.with_parameter_group.as_ref()),
             );
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .with_parameter_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -306,13 +325,15 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.port_declaration_group.as_ref()),
             );
-            for x in &groups {
+            let len = groups.len();
+            for (i, x) in groups.iter().enumerate() {
                 let attrs: Vec<_> = x
                     .port_declaration_group_list
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                let last = i == len - 1;
+                self.attrs(&attrs, x.range(), last);
             }
         }
         Ok(())
@@ -327,7 +348,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())
@@ -342,7 +363,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())
@@ -357,7 +378,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())
@@ -375,7 +396,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())
@@ -390,7 +411,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())
@@ -405,7 +426,7 @@ impl VerylGrammarTrait for CheckAttribute {
                     .iter()
                     .map(|x| x.attribute.as_ref())
                     .collect();
-                self.attrs(&attrs, x.range());
+                self.attrs(&attrs, x.range(), false);
             }
         }
         Ok(())

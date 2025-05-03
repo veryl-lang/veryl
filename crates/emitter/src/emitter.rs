@@ -1701,7 +1701,9 @@ impl VerylWalker for Emitter {
                 additional_endif += 1;
             }
 
+            self.truncate(self.string.trim_end().len());
             self.veryl_token(&arg.comma_token);
+            self.newline();
             self.str("`endif");
             for _ in 0..additional_endif {
                 self.newline();
@@ -3199,23 +3201,8 @@ impl VerylWalker for Emitter {
         let identifier = arg.identifier.identifier_token.to_string();
         match identifier.as_str() {
             "ifdef" | "ifndef" | "elsif" | "else" => {
-                let comma = if self.string.trim_end().ends_with(',') {
-                    self.unindent();
-                    self.truncate(self.string.len() - format!(",{}", NEWLINE).len());
-                    self.newline();
-                    true
-                } else if self.string.trim_end().ends_with(",`endif") {
-                    self.unindent();
-                    self.truncate(self.string.len() - format!(",`endif{}", NEWLINE).len());
-                    self.str("`endif");
-                    self.newline();
-                    true
-                } else {
-                    false
-                };
-
-                let remove_endif = matches!(identifier.as_str(), "elsif" | "else")
-                    && self.string.trim_end().ends_with("`endif");
+                let elsif_else = matches!(identifier.as_str(), "elsif" | "else");
+                let remove_endif = elsif_else && self.string.trim_end().ends_with("`endif");
                 if remove_endif {
                     self.unindent();
                     self.truncate(self.string.len() - format!("`endif{}", NEWLINE).len());
@@ -3234,11 +3221,6 @@ impl VerylWalker for Emitter {
 
                 self.newline();
                 self.attribute.push(AttributeType::Ifdef);
-
-                if comma {
-                    self.str(",");
-                    self.newline();
-                }
 
                 self.clear_adjust_line();
             }
