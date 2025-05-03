@@ -25,8 +25,6 @@ pub proto package axi4_prototype {
 
     type size_t ;
     type burst_t;
-    type cache_t;
-    type prot_t ;
     type bresp_t;
     type rresp_t;
 }
@@ -48,8 +46,6 @@ pub proto package axi3_prototype {
 
     type size_t ;
     type burst_t;
-    type cache_t;
-    type prot_t ;
     type bresp_t;
     type rresp_t;
 }
@@ -61,7 +57,6 @@ pub proto package axi4_lite_prototype {
     type addr_t          ;
     type data_t          ;
     type strb_t          ;
-    type prot_t          ;
     type id_t            ;
 
     type bresp_t;
@@ -85,22 +80,28 @@ pub package axi4_config {
     enum axburst_variants: logic<2> {
         FIXED_BURST = 2'b00,
         INCREMENTING_BURST = 2'b01,
-        WRAPPNG_BURST = 2'b10,
+        WRAPPING_BURST = 2'b10,
     }
 
-    const AWCACHE_BUFFERABLE    : logic<4> = 4'b0001;
-    const AWCACHE_MODIFIABLE    : logic<4> = 4'b0010;
-    const AWCACHE_OTHER_ALLOCATE: logic<4> = 4'b0100;
-    const AWCACHE_ALLOCATE      : logic<4> = 4'b1000;
+    struct awcache_bits {
+        AWCACHE_ALLOCATE      : logic,
+        AWCACHE_OTHER_ALLOCATE: logic,
+        AWCACHE_MODIFIABLE    : logic,
+        AWCACHE_BUFFERABLE    : logic,
+    }
 
-    const ARCACHE_BUFFERABLE    : logic<4> = 4'b0001;
-    const ARCACHE_MODIFIABLE    : logic<4> = 4'b0010;
-    const ARCACHE_ALLOCATE      : logic<4> = 4'b0100;
-    const ARCACHE_OTHER_ALLOCATE: logic<4> = 4'b1000;
+    struct arcache_bits {
+        ARCACHE_OTHER_ALLOCATE: logic,
+        ARCACHE_ALLOCATE      : logic,
+        ARCACHE_MODIFIABLE    : logic,
+        ARCACHE_BUFFERABLE    : logic,
+    }
 
-    const AXPROT_PRIVILEGED        : logic<3> = 3'b001;
-    const AXPROT_NON_SECURE        : logic<3> = 3'b010;
-    const AXPROT_INSTRUCTION_ACCESS: logic<3> = 3'b100;
+    struct axprot_bits {
+        AXPROT_INSTRUCTION_ACCESS: logic,
+        AXPROT_NON_SECURE        : logic,
+        AXPROT_PRIVILEGED        : logic,
+    }
 
     enum bresp_variants: logic<2> {
         OKAY = 2'b00,
@@ -143,12 +144,10 @@ pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32,
     type aruser_t     = logic<ARUSER_LENGTH>         ;
     type ruser_t      = logic<RUSER_LENGTH>          ;
 
-    type size_t  = axi4_config::axsize_variants    ;
-    type burst_t = axi4_config::axburst_variants   ;
-    type cache_t = logic                        <4>;
-    type prot_t  = logic                        <3>;
-    type bresp_t = axi4_config::bresp_variants     ;
-    type rresp_t = axi4_config::rresp_variants     ;
+    type size_t  = axi4_config::axsize_variants ;
+    type burst_t = axi4_config::axburst_variants;
+    type bresp_t = axi4_config::bresp_variants  ;
+    type rresp_t = axi4_config::rresp_variants  ;
 
 }
 
@@ -169,17 +168,21 @@ pub package axi3_config {
     enum axburst_variants: logic<2> {
         FIXED_BURST = 2'b00,
         INCREMENTING_BURST = 2'b01,
-        WRAPPNG_BURST = 2'b10,
+        WRAPPING_BURST = 2'b10,
     }
 
-    const AXCACHE_BUFFERABLE    : logic<4> = 4'b0001;
-    const AXCACHE_CACHEABLE     : logic<4> = 4'b0010;
-    const AXCACHE_READ_ALLOCATE : logic<4> = 4'b0100;
-    const AXCACHE_WRITE_ALLOCATE: logic<4> = 4'b1000;
+    struct axcache_bits {
+        AXCACHE_WRITE_ALLOCATE: logic,
+        AXCACHE_READ_ALLOCATE : logic,
+        AXCACHE_CACHEABLE     : logic,
+        AXCACHE_BUFFERABLE    : logic,
+    }
 
-    const AXPROT_PRIVILEGED        : logic<3> = 3'b001;
-    const AXPROT_NON_SECURE        : logic<3> = 3'b010;
-    const AXPROT_INSTRUCTION_ACCESS: logic<3> = 3'b100;
+    struct axprot_bits {
+        AXPROT_INSTRUCTION_ACCESS: logic,
+        AXPROT_NON_SECURE        : logic,
+        AXPROT_PRIVILEGED        : logic,
+    }
 
     enum bresp_variants: logic<2> {
         OKAY = 2'b00,
@@ -212,20 +215,20 @@ pub package axi3_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi3_proto
     type lock_t       = logic<LOCK_LEN>              ;
     type id_t         = logic<ID_LENGTH>             ;
 
-    type size_t  = axi3_config::axsize_variants    ;
-    type burst_t = axi3_config::axburst_variants   ;
-    type cache_t = logic                        <4>;
-    type prot_t  = logic                        <3>;
-    type bresp_t = axi3_config::bresp_variants     ;
-    type rresp_t = axi3_config::rresp_variants     ;
+    type size_t  = axi3_config::axsize_variants ;
+    type burst_t = axi3_config::axburst_variants;
+    type bresp_t = axi3_config::bresp_variants  ;
+    type rresp_t = axi3_config::rresp_variants  ;
 }
 
 ///### AXI4-Lite configuration definitions
 pub package axi4_lite_config {
 
-    const AXPROT_PRIVILEGED        : logic<3> = 3'b001;
-    const AXPROT_NON_SECURE        : logic<3> = 3'b010;
-    const AXPROT_INSTRUCTION_ACCESS: logic<3> = 3'b100;
+    struct axprot_bits {
+        AXPROT_INSTRUCTION_ACCESS: logic,
+        AXPROT_NON_SECURE        : logic,
+        AXPROT_PRIVILEGED        : logic,
+    }
 
     enum bresp_variants: logic<2> {
         OKAY = 2'b00,
@@ -255,8 +258,7 @@ pub package axi4_lite_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi4_
 
     type id_t = logic<ID_LENGTH>;
 
-    type prot_t  = logic                           <3>;
-    type bresp_t = axi4_lite_config::bresp_variants   ;
-    type rresp_t = axi4_lite_config::rresp_variants   ;
+    type bresp_t = axi4_lite_config::bresp_variants;
+    type rresp_t = axi4_lite_config::rresp_variants;
 
 }

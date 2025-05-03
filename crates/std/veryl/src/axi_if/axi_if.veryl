@@ -47,19 +47,19 @@ pub interface axi4_if::<PKG: axi4_prototype> {
     import PKG::*;
 
     //Write address channel
-    var awvalid : logic          ;
-    var awready : logic          ;
-    var awaddr  : addr_t         ;
-    var awsize  : size_t         ;
-    var awburst : burst_t        ;
-    var awcache : cache_t        ;
-    var awprot  : prot_t         ;
-    var awid    : id_t           ;
-    var awlen   : num_bursts_t   ; //AXI3: 4 bits, AXI4: 8 bits
-    var awlock  : lock_t         ; //AXI3: 2 bits, AXI4: 1 bit
-    var awqos   : logic       <4>; //Only AXI4
-    var awregion: logic       <4>; //Only AXI4
-    var awuser  : awuser_t       ; //Only AXI4
+    var awvalid : logic                       ;
+    var awready : logic                       ;
+    var awaddr  : addr_t                      ;
+    var awsize  : size_t                      ;
+    var awburst : burst_t                     ;
+    var awcache : axi4_config::awcache_bits   ;
+    var awprot  : axi4_config::axprot_bits    ;
+    var awid    : id_t                        ;
+    var awlen   : num_bursts_t                ; //AXI3: 4 bits, AXI4: 8 bits
+    var awlock  : lock_t                      ; //AXI3: 2 bits, AXI4: 1 bit
+    var awqos   : logic                    <4>; //Only AXI4
+    var awregion: logic                    <4>; //Only AXI4
+    var awuser  : awuser_t                    ; //Only AXI4
 
     //Write data channel
     var wvalid: logic  ;
@@ -77,19 +77,19 @@ pub interface axi4_if::<PKG: axi4_prototype> {
     var buser : buser_t; //Only AXI4
 
     //Read address channel
-    var arvalid : logic          ;
-    var arready : logic          ;
-    var araddr  : addr_t         ;
-    var arsize  : size_t         ;
-    var arburst : burst_t        ;
-    var arcache : cache_t        ;
-    var arprot  : prot_t         ;
-    var arid    : id_t           ;
-    var arlen   : num_bursts_t   ; //AXI3: 4 bits, AXI4: 8 bits
-    var arlock  : lock_t         ; //AXI3: 2 bits, AXI4: 1 bit
-    var arqos   : logic       <4>; //Only AXI4
-    var arregion: logic       <4>; //Only AXI4
-    var aruser  : aruser_t       ; //Only AXI4
+    var arvalid : logic                       ;
+    var arready : logic                       ;
+    var araddr  : addr_t                      ;
+    var arsize  : size_t                      ;
+    var arburst : burst_t                     ;
+    var arcache : axi4_config::arcache_bits   ;
+    var arprot  : axi4_config::axprot_bits    ;
+    var arid    : id_t                        ;
+    var arlen   : num_bursts_t                ; //AXI3: 4 bits, AXI4: 8 bits
+    var arlock  : lock_t                      ; //AXI3: 2 bits, AXI4: 1 bit
+    var arqos   : logic                    <4>; //Only AXI4
+    var arregion: logic                    <4>; //Only AXI4
+    var aruser  : aruser_t                    ; //Only AXI4
 
     //Read data channel
     var rvalid: logic  ;
@@ -326,16 +326,16 @@ pub interface axi3_if::<PKG: axi3_prototype> {
     import PKG::*;
 
     //Write address channel
-    var awvalid: logic       ;
-    var awready: logic       ;
-    var awaddr : addr_t      ;
-    var awsize : size_t      ;
-    var awburst: burst_t     ;
-    var awcache: cache_t     ;
-    var awprot : prot_t      ;
-    var awid   : id_t        ;
-    var awlen  : num_bursts_t; //AXI3: 4 bits, AXI4: 8 bits
-    var awlock : lock_t      ; //AXI3: 2 bits, AXI4: 1 bit
+    var awvalid: logic                    ;
+    var awready: logic                    ;
+    var awaddr : addr_t                   ;
+    var awsize : size_t                   ;
+    var awburst: burst_t                  ;
+    var awcache: axi3_config::axcache_bits;
+    var awprot : axi3_config::axprot_bits ;
+    var awid   : id_t                     ;
+    var awlen  : num_bursts_t             ; //AXI3: 4 bits, AXI4: 8 bits
+    var awlock : lock_t                   ; //AXI3: 2 bits, AXI4: 1 bit
 
     //Write data channel
     var wvalid: logic ;
@@ -352,16 +352,16 @@ pub interface axi3_if::<PKG: axi3_prototype> {
     var bid   : id_t   ;
 
     //Read address channel
-    var arvalid: logic       ;
-    var arready: logic       ;
-    var araddr : addr_t      ;
-    var arsize : size_t      ;
-    var arburst: burst_t     ;
-    var arcache: cache_t     ;
-    var arprot : prot_t      ;
-    var arid   : id_t        ;
-    var arlen  : num_bursts_t; //AXI3: 4 bits, AXI4: 8 bits
-    var arlock : lock_t      ; //AXI3: 2 bits, AXI4: 1 bit
+    var arvalid: logic                    ;
+    var arready: logic                    ;
+    var araddr : addr_t                   ;
+    var arsize : size_t                   ;
+    var arburst: burst_t                  ;
+    var arcache: axi3_config::axcache_bits;
+    var arprot : axi3_config::axprot_bits ;
+    var arid   : id_t                     ;
+    var arlen  : num_bursts_t             ; //AXI3: 4 bits, AXI4: 8 bits
+    var arlock : lock_t                   ; //AXI3: 2 bits, AXI4: 1 bit
 
     //Read data channel
     var rvalid: logic  ;
@@ -588,11 +588,11 @@ pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
     import PKG::*;
 
     //Write address channel
-    var awvalid: logic ;
-    var awready: logic ;
-    var awaddr : addr_t;
-    var awprot : prot_t;
-    var awid   : id_t  ;
+    var awvalid: logic                        ;
+    var awready: logic                        ;
+    var awaddr : addr_t                       ;
+    var awprot : axi4_lite_config::axprot_bits;
+    var awid   : id_t                         ;
 
     //Write data channel
     var wvalid: logic ;
@@ -607,11 +607,11 @@ pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
     var bid   : id_t   ;
 
     //Read address channel
-    var arvalid: logic ;
-    var arready: logic ;
-    var araddr : addr_t;
-    var arprot : prot_t;
-    var arid   : id_t  ;
+    var arvalid: logic                        ;
+    var arready: logic                        ;
+    var araddr : addr_t                       ;
+    var arprot : axi4_lite_config::axprot_bits;
+    var arid   : id_t                         ;
 
     //Read data channel
     var rvalid: logic  ;
