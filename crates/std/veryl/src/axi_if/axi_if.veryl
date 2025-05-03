@@ -72,7 +72,7 @@ pub interface axi4_if::<PKG: axi4_prototype> {
     //Write response channel
     var bvalid: logic  ;
     var bready: logic  ;
-    var bresp : bresp_t;
+    var bresp : resp_t ;
     var bid   : id_t   ;
     var buser : buser_t; //Only AXI4
 
@@ -96,7 +96,7 @@ pub interface axi4_if::<PKG: axi4_prototype> {
     var rready: logic  ;
     var rlast : logic  ;
     var rdata : data_t ;
-    var rresp : rresp_t;
+    var rresp : resp_t ;
     var rid   : id_t   ;
     var ruser : ruser_t; //Only AXI4
 
@@ -346,10 +346,10 @@ pub interface axi3_if::<PKG: axi3_prototype> {
     var wid   : id_t  ; //Only AXI3
 
     //Write response channel
-    var bvalid: logic  ;
-    var bready: logic  ;
-    var bresp : bresp_t;
-    var bid   : id_t   ;
+    var bvalid: logic ;
+    var bready: logic ;
+    var bresp : resp_t;
+    var bid   : id_t  ;
 
     //Read address channel
     var arvalid: logic                    ;
@@ -364,12 +364,12 @@ pub interface axi3_if::<PKG: axi3_prototype> {
     var arlock : lock_t                   ; //AXI3: 2 bits, AXI4: 1 bit
 
     //Read data channel
-    var rvalid: logic  ;
-    var rready: logic  ;
-    var rlast : logic  ;
-    var rdata : data_t ;
-    var rresp : rresp_t;
-    var rid   : id_t   ;
+    var rvalid: logic ;
+    var rready: logic ;
+    var rlast : logic ;
+    var rdata : data_t;
+    var rresp : resp_t;
+    var rid   : id_t  ;
 
     function awaddr_ack () -> logic {
         return awready && awvalid;
@@ -601,10 +601,10 @@ pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
     var wstrb : strb_t;
 
     //Write response channel
-    var bvalid: logic  ;
-    var bready: logic  ;
-    var bresp : bresp_t;
-    var bid   : id_t   ;
+    var bvalid: logic ;
+    var bready: logic ;
+    var bresp : resp_t;
+    var bid   : id_t  ;
 
     //Read address channel
     var arvalid: logic                        ;
@@ -614,11 +614,11 @@ pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
     var arid   : id_t                         ;
 
     //Read data channel
-    var rvalid: logic  ;
-    var rready: logic  ;
-    var rdata : data_t ;
-    var rresp : rresp_t;
-    var rid   : id_t   ;
+    var rvalid: logic ;
+    var rready: logic ;
+    var rdata : data_t;
+    var rresp : resp_t;
+    var rid   : id_t  ;
 
     function awaddr_ack () -> logic {
         return awready && awvalid;
