@@ -3,31 +3,46 @@ module veryl_testcase_Module23 #(
     `ifdef DEFINE_B
     `ifdef DEFINE_C
     `ifdef DEFINE_D
-    parameter int unsigned ParamA = 1
-    ,`endif
+    parameter int unsigned ParamA = 1,
     `endif
     `endif
     `endif
-    parameter int unsigned ParamB = 1
+    `endif
     `ifdef DEFINE_A
-    ,
-    parameter int unsigned ParamC = 1
+    parameter int unsigned ParamB = 1,
     `endif
+    parameter int unsigned ParamC = 1
 ) (
     `ifdef DEFINE_A
-    input var logic port_a
-    ,`endif
-    input var logic port_b
+    input var logic port_x,
+    `elsif DEFINE_B
+    input var logic port_y,
+    `else
+    input var logic port_z,
+    `endif
 
     `ifndef DEFINE_A
-    ,
-    input var logic port_a
+    input var logic port_p,
+    `elsif DEFINE_B
+    input var logic port_q,
+    `else
+    input var logic port_r,
     `endif
 
     `ifdef DEFINE_A
-    ,
-    input var logic port_c
+    input var logic port_a,
     `endif
+    input var logic port_b,
+
+    `ifndef DEFINE_A
+    input var logic port_a,
+    `endif
+
+    `ifdef DEFINE_A
+    input var logic port_c,
+    `endif
+
+    input var logic port_d
 );
     `ifdef DEFINE_A
     `ifdef DEFINE_B
