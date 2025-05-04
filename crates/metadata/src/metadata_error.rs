@@ -36,6 +36,13 @@ pub enum MetadataError {
     InvalidProjectName(String),
 
     #[diagnostic(
+        code(MetadataError::InvalidProjectName),
+        help("an project name starting with `__` is reserved")
+    )]
+    #[error("project name \"{0}\" is reserved by system")]
+    ReservedProjectName(String),
+
+    #[diagnostic(
         code(MetadataError::InvalidLicense),
         help("license text should follow SPDX expression")
     )]

@@ -89,6 +89,16 @@ impl fmt::Display for UrlPath {
 static VALID_PROJECT_NAME: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
 
+fn check_project_name(name: &str) -> Result<(), MetadataError> {
+    if !VALID_PROJECT_NAME.is_match(name) {
+        return Err(MetadataError::InvalidProjectName(name.to_string()));
+    }
+    if name.starts_with("__") {
+        return Err(MetadataError::ReservedProjectName(name.to_string()));
+    }
+    Ok(())
+}
+
 impl Metadata {
     pub fn search_from_current() -> Result<PathBuf, MetadataError> {
         Metadata::search_from(env::current_dir()?)
@@ -175,9 +185,7 @@ impl Metadata {
     }
 
     pub fn check(&self) -> Result<(), MetadataError> {
-        if !VALID_PROJECT_NAME.is_match(&self.project.name) {
-            return Err(MetadataError::InvalidProjectName(self.project.name.clone()));
-        }
+        check_project_name(&self.project.name)?;
 
         if let Some(ref license) = self.project.license {
             let _ = Expression::parse(license)?;
@@ -328,9 +336,7 @@ impl Metadata {
     }
 
     pub fn create_default_toml(name: &str) -> Result<String, MetadataError> {
-        if !VALID_PROJECT_NAME.is_match(name) {
-            return Err(MetadataError::InvalidProjectName(name.to_string()));
-        }
+        check_project_name(name)?;
 
         Ok(format!(
             r###"[project]
