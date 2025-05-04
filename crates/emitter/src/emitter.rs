@@ -1610,8 +1610,8 @@ impl Emitter {
         }
     }
 
-    fn get_generic_declaration_name<'a>(&self, generic_name: &'a str) -> &'a str {
-        if self.build_opt.omit_project_prefix {
+    fn get_generic_declaration_name(&self, generic_name: &str) -> String {
+        let ret = if self.build_opt.omit_project_prefix {
             let project_name = format!("{}_", self.project_name.unwrap());
             if let Some(x) = generic_name.strip_prefix(&project_name) {
                 x
@@ -1620,7 +1620,9 @@ impl Emitter {
             }
         } else {
             generic_name
-        }
+        };
+
+        ret.replace("$std_", "__std_")
     }
 }
 
@@ -4674,7 +4676,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             if map.generic() {
                 let name = self.get_generic_declaration_name(&map.name);
-                self.token(&arg.identifier.identifier_token.replace(name));
+                self.token(&arg.identifier.identifier_token.replace(&name));
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -4757,7 +4759,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             if map.generic() {
                 let name = self.get_generic_declaration_name(&map.name);
-                self.token(&arg.identifier.identifier_token.replace(name));
+                self.token(&arg.identifier.identifier_token.replace(&name));
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -4958,7 +4960,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             if map.generic() {
                 let name = self.get_generic_declaration_name(&map.name);
-                self.token(&arg.identifier.identifier_token.replace(name));
+                self.token(&arg.identifier.identifier_token.replace(&name));
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
