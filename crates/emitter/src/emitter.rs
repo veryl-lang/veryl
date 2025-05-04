@@ -1634,6 +1634,30 @@ fn is_let_statement(arg: &StatementBlockItem) -> bool {
     matches!(arg, StatementBlockItem::LetStatement(_))
 }
 
+fn calc_emitted_width(number: &str, base: u32) -> Option<usize> {
+    let width = strnum_bitwidth::bitwidth(number, base)?;
+
+    let width_by_digits = if number.starts_with("0") {
+        // replace the 1st char with '1'
+        let number: String = number
+            .chars()
+            .enumerate()
+            .map(|(i, s)| if i == 0 { '1' } else { s })
+            .collect();
+        strnum_bitwidth::bitwidth(&number, base)?
+    } else {
+        width
+    };
+
+    let width = if width_by_digits > width {
+        width_by_digits
+    } else {
+        width
+    };
+
+    if width >= 1 { Some(width) } else { Some(0) }
+}
+
 impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'VerylToken'
     fn veryl_token(&mut self, arg: &VerylToken) {
@@ -1645,10 +1669,9 @@ impl VerylWalker for Emitter {
         let token = &arg.based_token;
         let text = token.to_string();
         let (width, tail) = text.split_once('\'').unwrap();
-        let base = &tail[0..1];
-        let number = &tail[1..];
 
         if width.is_empty() {
+            let base = &tail[0..1];
             let base_num = match base {
                 "b" => 2,
                 "o" => 8,
@@ -1656,13 +1679,10 @@ impl VerylWalker for Emitter {
                 "h" => 16,
                 _ => unreachable!(),
             };
+            let number = &tail[1..];
 
-            let text = if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base_num) {
-                if actual_width == 0 {
-                    format!("1'{base}{number}")
-                } else {
-                    format!("{actual_width}'{base}{number}")
-                }
+            let text = if let Some(actual_width) = calc_emitted_width(number, base_num) {
+                format!("{actual_width}'{base}{number}")
             } else {
                 // If width can't be calculated, emit it as is (e.g. `'h0`)
                 format!("'{base}{number}")
