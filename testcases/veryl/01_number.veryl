@@ -39,7 +39,10 @@ module Module01 {
     const ggggg: u32 = 0123456789.0123456789E-0123456789;
 
     // width-less based
-    const h  : logic<32> = 'b0;
-    const hh : logic<32> = 'o0;
-    const hhh: logic<32> = 'h0;
+    const h     : logic<32> = 'b0;
+    const hh    : logic<32> = 'b0_0;
+    const hhh   : logic<32> = 'o0;
+    const hhhh  : logic<32> = 'o0_0;
+    const hhhhh : logic<32> = 'h0;
+    const hhhhhh: logic<32> = 'h0_0;
 }

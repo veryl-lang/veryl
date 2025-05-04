@@ -34,8 +34,8 @@ module veryl_testcase_Module16;
                         b = 1;
                     end //
             z == 3, z == 4                                 : b = 1;
-            z == 3'd05, z == 3'd06, z == 3'd07, z == 4'd08,
-            z == 4'd09, z == 4'd10, z == 4'd11, z == 4'd12,
+            z == 4'd05, z == 5'd06, z == 5'd07, z == 5'd08,
+            z == 5'd09, z == 4'd10, z == 4'd11, z == 4'd12,
             z == 4'd13, z == 4'd14, z == 4'd15, z == 5'd16 : b = 1;
             default                                        : b = 1;
         endcase
