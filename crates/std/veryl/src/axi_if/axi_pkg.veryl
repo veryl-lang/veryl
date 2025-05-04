@@ -4,6 +4,8 @@ pub proto package axi4_prototype {
     const DATA_WIDTH_BYTES: u32;
     const NUM_BURSTS_LEN  : u32;
     const LOCK_LEN        : u32;
+    const QOS_LEN         : u32;
+    const REGION_LEN      : u32;
     const ID_LENGTH       : u32;
     const AWUSER_LENGTH   : u32;
     const WUSER_LENGTH    : u32;
@@ -16,6 +18,8 @@ pub proto package axi4_prototype {
     type strb_t      ;
     type num_bursts_t;
     type lock_t      ;
+    type qos_t       ;
+    type region_t    ;
     type id_t        ;
     type awuser_t    ;
     type wuser_t     ;
@@ -23,9 +27,12 @@ pub proto package axi4_prototype {
     type aruser_t    ;
     type ruser_t     ;
 
-    type size_t ;
-    type burst_t;
-    type resp_t ;
+    type size_t  ;
+    type burst_t ;
+    type wcache_t;
+    type rcache_t;
+    type proto_t ;
+    type resp_t  ;
 }
 
 ///### AXI3 bus package prototype
@@ -45,6 +52,8 @@ pub proto package axi3_prototype {
 
     type size_t ;
     type burst_t;
+    type cache_t;
+    type proto_t;
     type resp_t ;
 }
 
@@ -56,6 +65,7 @@ pub proto package axi4_lite_prototype {
     type data_t          ;
     type strb_t          ;
     type id_t            ;
+    type proto_t         ;
     type resp_t          ;
 }
 
@@ -80,23 +90,23 @@ pub package axi4_config {
     }
 
     struct awcache_bits {
-        AWCACHE_ALLOCATE      : logic,
-        AWCACHE_OTHER_ALLOCATE: logic,
-        AWCACHE_MODIFIABLE    : logic,
-        AWCACHE_BUFFERABLE    : logic,
+        allocate      : logic,
+        other_allocate: logic,
+        modifiable    : logic,
+        bufferable    : logic,
     }
 
     struct arcache_bits {
-        ARCACHE_OTHER_ALLOCATE: logic,
-        ARCACHE_ALLOCATE      : logic,
-        ARCACHE_MODIFIABLE    : logic,
-        ARCACHE_BUFFERABLE    : logic,
+        other_allocate: logic,
+        allocate      : logic,
+        modifiable    : logic,
+        bufferable    : logic,
     }
 
     struct axprot_bits {
-        AXPROT_INSTRUCTION_ACCESS: logic,
-        AXPROT_NON_SECURE        : logic,
-        AXPROT_PRIVILEGED        : logic,
+        instruction_access: logic,
+        non_secure        : logic,
+        privileged        : logic,
     }
 
     enum resp_variants: logic<2> {
@@ -114,6 +124,8 @@ pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32,
     const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
     const NUM_BURSTS_LEN  : u32 = 8;
     const LOCK_LEN        : u32 = 1;
+    const QOS_LEN         : u32 = 4;
+    const REGION_LEN      : u32 = 4;
     const ID_LENGTH       : u32 = ID_W;
     const AWUSER_LENGTH   : u32 = AWUSER_W;
     const WUSER_LENGTH    : u32 = WUSER_W;
@@ -126,6 +138,8 @@ pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32,
     type strb_t       = logic<DATA_WIDTH_BYTES>      ;
     type num_bursts_t = logic<NUM_BURSTS_LEN>        ;
     type lock_t       = logic<LOCK_LEN>              ;
+    type qos_t        = logic<QOS_LEN>               ;
+    type region_t     = logic<REGION_LEN>            ;
     type id_t         = logic<ID_LENGTH>             ;
     type awuser_t     = logic<AWUSER_LENGTH>         ;
     type wuser_t      = logic<WUSER_LENGTH>          ;
@@ -133,9 +147,12 @@ pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32,
     type aruser_t     = logic<ARUSER_LENGTH>         ;
     type ruser_t      = logic<RUSER_LENGTH>          ;
 
-    type size_t  = axi4_config::axsize_variants ;
-    type burst_t = axi4_config::axburst_variants;
-    type resp_t  = axi4_config::resp_variants   ;
+    type size_t   = axi4_config::axsize_variants ;
+    type burst_t  = axi4_config::axburst_variants;
+    type wcache_t = axi4_config::awcache_bits    ;
+    type rcache_t = axi4_config::arcache_bits    ;
+    type proto_t  = axi4_config::axprot_bits     ;
+    type resp_t   = axi4_config::resp_variants   ;
 
 }
 
@@ -160,16 +177,16 @@ pub package axi3_config {
     }
 
     struct axcache_bits {
-        AXCACHE_WRITE_ALLOCATE: logic,
-        AXCACHE_READ_ALLOCATE : logic,
-        AXCACHE_CACHEABLE     : logic,
-        AXCACHE_BUFFERABLE    : logic,
+        write_allocate: logic,
+        read_allocate : logic,
+        cacheable     : logic,
+        bufferable    : logic,
     }
 
     struct axprot_bits {
-        AXPROT_INSTRUCTION_ACCESS: logic,
-        AXPROT_NON_SECURE        : logic,
-        AXPROT_PRIVILEGED        : logic,
+        instruction_access: logic,
+        non_secure        : logic,
+        privileged        : logic,
     }
 
     enum resp_variants: logic<2> {
@@ -198,6 +215,8 @@ pub package axi3_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi3_proto
 
     type size_t  = axi3_config::axsize_variants ;
     type burst_t = axi3_config::axburst_variants;
+    type cache_t = axi3_config::axcache_bits    ;
+    type proto_t = axi3_config::axprot_bits     ;
     type resp_t  = axi3_config::resp_variants   ;
 }
 
@@ -205,9 +224,9 @@ pub package axi3_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi3_proto
 pub package axi4_lite_config {
 
     struct axprot_bits {
-        AXPROT_INSTRUCTION_ACCESS: logic,
-        AXPROT_NON_SECURE        : logic,
-        AXPROT_PRIVILEGED        : logic,
+        instruction_access: logic,
+        non_secure        : logic,
+        privileged        : logic,
     }
 
     enum resp_variants: logic<2> {
@@ -231,6 +250,7 @@ pub package axi4_lite_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi4_
 
     type id_t = logic<ID_LENGTH>;
 
-    type resp_t = axi4_lite_config::resp_variants;
+    type proto_t = axi4_lite_config::axprot_bits  ;
+    type resp_t  = axi4_lite_config::resp_variants;
 
 }
