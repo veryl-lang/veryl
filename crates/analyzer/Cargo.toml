@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-analyzer"
-version               = "0.15.0"
+version               = "0.16.0"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -19,8 +19,8 @@ log             = {workspace = true}
 smallvec        = {workspace = true}
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
-veryl-metadata  = {version = "0.15.0", path = "../metadata"}
-veryl-parser    = {version = "0.15.0", path = "../parser"}
+veryl-metadata  = {version = "0.16.0", path = "../metadata"}
+veryl-parser    = {version = "0.16.0", path = "../parser"}
 daggy           = "0.9.0"
 bimap           = "0.6.3"
 
