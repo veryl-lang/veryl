@@ -66,6 +66,11 @@ opt-level = 3
 
 [profile.release]
 lto = true
+strip = "debuginfo"
 
 [profile.bench]
 debug = true
+
+[profile.release-verylup]
+inherits = "release"
+lto = false
