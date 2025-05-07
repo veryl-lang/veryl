@@ -20,9 +20,9 @@ pub enum MetadataError {
     #[error("toml load failed")]
     Deserialize(#[from] toml::de::Error),
 
-    #[diagnostic(code(MetadataError::StripPrefix), help(""))]
-    #[error("strip prefix error")]
-    StripPrefix(#[from] std::path::StripPrefixError),
+    #[diagnostic(code(MetadataError::InvalidSourceLocation), help(""))]
+    #[error("source file \"{0}\" is outside the project")]
+    InvalidSourceLocation(PathBuf),
 
     #[diagnostic(code(MetadataError::Git), help(""))]
     #[error("git operation failure: {0}")]

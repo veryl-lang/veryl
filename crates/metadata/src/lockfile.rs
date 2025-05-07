@@ -245,7 +245,9 @@ impl Lockfile {
                 let path = metadata.project_path();
 
                 for src in &veryl_path::gather_files_with_extension(&path, "veryl", false)? {
-                    let rel = src.strip_prefix(&path)?;
+                    let Ok(rel) = src.strip_prefix(&path) else {
+                        return Err(MetadataError::InvalidSourceLocation(src.clone()));
+                    };
                     let mut dst = base_dst.join(&lock.name);
                     dst.push(rel);
                     dst.set_extension("sv");
