@@ -126,6 +126,11 @@ fn is_literal_or_referable_number(arg: &Option<Symbol>) -> bool {
                 return matches!(parent.kind, SymbolKind::Package(_));
             }
         }
+        SymbolKind::ProtoConst(_) => {
+            if let Some(parent) = symbol.get_parent() {
+                return matches!(parent.kind, SymbolKind::ProtoPackage(_));
+            }
+        }
         SymbolKind::GenericParameter(x) => {
             return x
                 .bound

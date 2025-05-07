@@ -2705,6 +2705,28 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        const W: u32;
+        type  T;
+    }
+    module ModuleA::<PKG: ProtoPkg, WIDTH: u32, TYPE: type> {
+        function FuncA::<W: u32>() -> logic<W> {
+            return 0;
+        }
+        function FuncB::<T: type>() -> T {
+            return 0 as T;
+        }
+        let _a_0: u32 = FuncA::<PKG::W>();
+        let _a_1: u32 = FuncA::<WIDTH>();
+        let _b_0: u32 = FuncB::<PKG::T>();
+        let _b_1: u32 = FuncB::<TYPE>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
