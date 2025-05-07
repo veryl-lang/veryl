@@ -284,7 +284,9 @@ impl Metadata {
 
         let mut ret = Vec::new();
         for src in src_files {
-            let src_relative = src.strip_prefix(&src_base)?;
+            let Ok(src_relative) = src.strip_prefix(&src_base) else {
+                return Err(MetadataError::InvalidSourceLocation(src));
+            };
             let dst = match self.build.target {
                 Target::Source => src.with_extension("sv"),
                 Target::Directory { ref path } => {
