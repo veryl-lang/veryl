@@ -812,6 +812,17 @@ fn invalid_statement() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA() {
+            return 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
 }
 
 #[test]
