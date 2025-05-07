@@ -2727,6 +2727,21 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        function FuncA::<T: type>() -> T {
+            return 0 as T;
+        }
+
+        function FuncB() -> u32 {
+            return FuncA::<u32>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
