@@ -5,7 +5,7 @@ use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPathNamespace};
 use crate::symbol_table;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
@@ -43,6 +43,22 @@ impl Handler for CheckType {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
+}
+
+fn check_generic_type_arg(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<String> {
+    if matches!(arg.kind, GenericSymbolPathKind::FixedType) {
+        return None;
+    } else if arg.is_resolvable() {
+        let Ok(symbol) = symbol_table::resolve((&arg.generic_path(), namespace)) else {
+            return Some("not found".to_string());
+        };
+
+        if symbol.found.is_variable_type() {
+            return None;
+        }
+    }
+
+    Some(arg.kind.to_string())
 }
 
 fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
@@ -349,23 +365,13 @@ impl VerylGrammarTrait for CheckType {
                             let bound = &param.1.bound;
                             match bound {
                                 GenericBoundKind::Type => {
-                                    let is_type = if arg.is_resolvable() {
-                                        if let Ok(symbol) =
-                                            symbol_table::resolve((&arg.generic_path(), &namespace))
-                                        {
-                                            symbol.found.is_variable_type()
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
-
-                                    if !is_type {
+                                    if let Some(error_kind) =
+                                        check_generic_type_arg(arg, &namespace)
+                                    {
                                         self.errors.push(AnalyzerError::mismatch_type(
-                                            &symbol.found.token.to_string(),
-                                            "enum or union or struct",
-                                            &symbol.found.kind.to_kind_name(),
+                                            &arg.to_string(),
+                                            "enum, union, struct, typedef or fixed type",
+                                            &error_kind,
                                             &arg.range,
                                         ));
                                     }
