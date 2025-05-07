@@ -9,7 +9,7 @@ pub struct CheckStatement {
     point: HandlerPoint,
     in_always_ff: bool,
     in_always_comb: bool,
-    in_function: bool,
+    in_non_void_function: bool,
     in_initial: bool,
     in_final: bool,
     statement_depth_in_always_ff: usize,
@@ -78,7 +78,7 @@ impl VerylGrammarTrait for CheckStatement {
 
     fn return_statement(&mut self, arg: &ReturnStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if !self.in_function {
+            if !self.in_non_void_function {
                 self.errors.push(AnalyzerError::invalid_statement(
                     "return",
                     &arg.r#return.return_token.token.into(),
@@ -143,10 +143,12 @@ impl VerylGrammarTrait for CheckStatement {
         Ok(())
     }
 
-    fn function_declaration(&mut self, _arg: &FunctionDeclaration) -> Result<(), ParolError> {
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => self.in_function = true,
-            HandlerPoint::After => self.in_function = false,
+            HandlerPoint::Before => {
+                self.in_non_void_function = arg.function_declaration_opt1.is_some()
+            }
+            HandlerPoint::After => self.in_non_void_function = false,
         }
         Ok(())
     }
