@@ -5560,16 +5560,16 @@ fn unresolvable_generic_argument() {
     );
 
     let code = r#"
+    module ModuleA::<PKG: ProtoPkg> {
+        function FuncB() -> u32 {
+            return FuncA::<PKG::T>();
+        }
+    }
     proto package ProtoPkg {
         type T;
     }
     package Pkg::<W: u32> for ProtoPkg {
         type T = logic<W>;
-    }
-    module ModuleA::<PKG: ProtoPkg> {
-        function FuncB() -> u32 {
-            return FuncA::<PKG::T>();
-        }
     }
     module ModuleB {
         inst u: ModuleA::<Pkg::<8>>;
