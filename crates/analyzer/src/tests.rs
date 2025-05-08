@@ -5558,6 +5558,29 @@ fn unresolvable_generic_argument() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
     );
+
+    let code = r#"
+    proto package ProtoPkg {
+        type T;
+    }
+    package Pkg::<W: u32> for ProtoPkg {
+        type T = logic<W>;
+    }
+    module ModuleA::<PKG: ProtoPkg> {
+        function FuncB() -> u32 {
+            return FuncA::<PKG::T>();
+        }
+    }
+    module ModuleB {
+        inst u: ModuleA::<Pkg::<8>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericArgument { .. }
+    ));
 }
 
 #[test]
