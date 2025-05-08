@@ -1414,3 +1414,57 @@ endmodule
 
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn generic_function_call_in_function() {
+    let code = r#"
+proto package ProtoPkg {
+    type T;
+}
+package Pkg::<W: u32> for ProtoPkg {
+    type T = logic<W>;
+}
+module ModuleA::<PKG: ProtoPkg> {
+    function FuncA::<T: type>() -> T {
+        return 0 as T;
+    }
+    function FuncB() -> u32 {
+        return FuncA::<PKG::T>();
+    }
+}
+module ModuleB {
+    inst u: ModuleA::<Pkg::<8>>;
+}
+"#;
+
+    let expect = r#"
+
+package prj___Pkg__8;
+    typedef logic [8-1:0] T;
+endpackage
+module prj___ModuleA____Pkg__8;
+    function automatic prj___Pkg__8::T __FuncA____Pkg__8_T() ;
+        return prj___Pkg__8::T'(0);
+    endfunction
+    function automatic int unsigned FuncB() ;
+        return __FuncA____Pkg__8_T();
+    endfunction
+endmodule
+module prj_ModuleB;
+    prj___ModuleA____Pkg__8 u ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
