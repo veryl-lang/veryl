@@ -37,6 +37,14 @@ impl SymbolPath {
     pub fn to_vec(self) -> SVec<StrId> {
         self.0
     }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl fmt::Display for SymbolPath {
@@ -372,7 +380,6 @@ impl GenericSymbolPath {
                 return true;
             }
         }
-
         // path contains generic parameter as generic argument
         for path in &self.paths {
             for arg in &path.arguments {

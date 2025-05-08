@@ -555,92 +555,95 @@ impl SymbolTable {
                         context.namespace,
                     );
 
-                    match &found.kind {
-                        SymbolKind::Variable(x) => {
-                            context = self.trace_type_kind(context, &x.r#type.kind)?;
-                        }
-                        SymbolKind::StructMember(x) => {
-                            context = self.trace_type_kind(context, &x.r#type.kind)?;
-                        }
-                        SymbolKind::UnionMember(x) => {
-                            context = self.trace_type_kind(context, &x.r#type.kind)?;
-                        }
-                        SymbolKind::Parameter(x) => {
-                            if matches!(x.r#type.kind, TypeKind::Type) {
-                                context = self.trace_type_parameter(context, &x.value, found)?;
-                            } else {
+                    if (i + 1) < path.len() {
+                        match &found.kind {
+                            SymbolKind::Variable(x) => {
                                 context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
-                        }
-                        SymbolKind::TypeDef(x) => {
-                            context = self.trace_type_kind(context, &x.r#type.kind)?;
-                        }
-                        SymbolKind::Port(x) => {
-                            context = self.trace_type_kind(context, &x.r#type.kind)?;
-                        }
-                        SymbolKind::ModportVariableMember(_) => {
-                            let path = SymbolPath::new(&[found.token.text]);
-                            context.namespace = found.namespace.clone();
-                            context.namespace.pop();
-                            let symbol = self.resolve(&path, &[], context.push())?;
-                            if let SymbolKind::Variable(x) = &symbol.found.kind {
+                            SymbolKind::StructMember(x) => {
                                 context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
+                            SymbolKind::UnionMember(x) => {
+                                context = self.trace_type_kind(context, &x.r#type.kind)?;
+                            }
+                            SymbolKind::Parameter(x) => {
+                                if matches!(x.r#type.kind, TypeKind::Type) {
+                                    context =
+                                        self.trace_type_parameter(context, &x.value, found)?;
+                                } else {
+                                    context = self.trace_type_kind(context, &x.r#type.kind)?;
+                                }
+                            }
+                            SymbolKind::TypeDef(x) => {
+                                context = self.trace_type_kind(context, &x.r#type.kind)?;
+                            }
+                            SymbolKind::Port(x) => {
+                                context = self.trace_type_kind(context, &x.r#type.kind)?;
+                            }
+                            SymbolKind::ModportVariableMember(_) => {
+                                let path = SymbolPath::new(&[found.token.text]);
+                                context.namespace = found.namespace.clone();
+                                context.namespace.pop();
+                                let symbol = self.resolve(&path, &[], context.push())?;
+                                if let SymbolKind::Variable(x) = &symbol.found.kind {
+                                    context = self.trace_type_kind(context, &x.r#type.kind)?;
+                                }
+                            }
+                            SymbolKind::Module(_)
+                            | SymbolKind::Interface(_)
+                            | SymbolKind::ProtoInterface(_)
+                            | SymbolKind::Package(_)
+                            | SymbolKind::ProtoPackage(_) => {
+                                context.namespace = found.inner_namespace();
+                                context.inner = true;
+                            }
+                            SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
+                                context = self.trace_type_path(context, &x.target)?;
+                            }
+                            SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
+                                context = self.trace_type_path(context, &x.target)?;
+                            }
+                            SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
+                                context = self.trace_type_path(context, &x.target)?;
+                            }
+                            SymbolKind::Enum(_) | SymbolKind::Namespace => {
+                                context.namespace = found.inner_namespace();
+                                context.inner = true;
+                            }
+                            SymbolKind::SystemVerilog => {
+                                context.namespace = found.inner_namespace();
+                                context.inner = true;
+                                context.sv_member = true;
+                            }
+                            SymbolKind::Instance(x) => {
+                                let mut type_name = x.type_name.clone();
+                                type_name.resolve_imported(&context.namespace);
+                                context = self.trace_type_path(context, &type_name)?;
+                            }
+                            SymbolKind::GenericInstance(_) => {
+                                context = self.trace_generic_instance(context, found)?;
+                            }
+                            SymbolKind::GenericParameter(_) => {
+                                context = self.trace_generic_parameter(context, found)?;
+                            }
+                            // don't trace inner item
+                            SymbolKind::Function(_)
+                            | SymbolKind::ProtoFunction(_)
+                            | SymbolKind::ProtoModule(_)
+                            | SymbolKind::Struct(_)
+                            | SymbolKind::Union(_)
+                            | SymbolKind::ProtoConst(_)
+                            | SymbolKind::ProtoTypeDef
+                            | SymbolKind::Modport(_)
+                            | SymbolKind::ModportFunctionMember(_)
+                            | SymbolKind::EnumMember(_)
+                            | SymbolKind::EnumMemberMangled
+                            | SymbolKind::Block
+                            | SymbolKind::SystemFunction(_)
+                            | SymbolKind::Genvar
+                            | SymbolKind::ClockDomain
+                            | SymbolKind::Test(_) => (),
                         }
-                        SymbolKind::Module(_)
-                        | SymbolKind::Interface(_)
-                        | SymbolKind::ProtoInterface(_)
-                        | SymbolKind::Package(_)
-                        | SymbolKind::ProtoPackage(_) => {
-                            context.namespace = found.inner_namespace();
-                            context.inner = true;
-                        }
-                        SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
-                            context = self.trace_type_path(context, &x.target)?;
-                        }
-                        SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
-                            context = self.trace_type_path(context, &x.target)?;
-                        }
-                        SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
-                            context = self.trace_type_path(context, &x.target)?;
-                        }
-                        SymbolKind::Enum(_) | SymbolKind::Namespace => {
-                            context.namespace = found.inner_namespace();
-                            context.inner = true;
-                        }
-                        SymbolKind::SystemVerilog => {
-                            context.namespace = found.inner_namespace();
-                            context.inner = true;
-                            context.sv_member = true;
-                        }
-                        SymbolKind::Instance(x) => {
-                            let mut type_name = x.type_name.clone();
-                            type_name.resolve_imported(&context.namespace);
-                            context = self.trace_type_path(context, &type_name)?;
-                        }
-                        SymbolKind::GenericInstance(_) => {
-                            context = self.trace_generic_instance(context, found)?;
-                        }
-                        SymbolKind::GenericParameter(_) => {
-                            context = self.trace_generic_parameter(context, found)?;
-                        }
-                        // don't trace inner item
-                        SymbolKind::Function(_)
-                        | SymbolKind::ProtoFunction(_)
-                        | SymbolKind::ProtoModule(_)
-                        | SymbolKind::Struct(_)
-                        | SymbolKind::Union(_)
-                        | SymbolKind::ProtoConst(_)
-                        | SymbolKind::ProtoTypeDef
-                        | SymbolKind::Modport(_)
-                        | SymbolKind::ModportFunctionMember(_)
-                        | SymbolKind::EnumMember(_)
-                        | SymbolKind::EnumMemberMangled
-                        | SymbolKind::Block
-                        | SymbolKind::SystemFunction(_)
-                        | SymbolKind::Genvar
-                        | SymbolKind::ClockDomain
-                        | SymbolKind::Test(_) => (),
                     }
                 } else {
                     trace!(
