@@ -12,6 +12,6 @@ edition.workspace     = true
 
 [dependencies]
 miette        = {workspace = true}
-relative-path = "1.9"
+relative-path = "2.0"
 sourcemap     = "9.2"
 thiserror     = {workspace = true}
