@@ -580,8 +580,8 @@ impl From<&syntax_tree::BooleanLiteral> for GenericSymbolPath {
 impl From<&syntax_tree::WithGenericArgumentItem> for GenericSymbolPath {
     fn from(value: &syntax_tree::WithGenericArgumentItem) -> Self {
         match value {
-            syntax_tree::WithGenericArgumentItem::ScopedIdentifier(x) => {
-                x.scoped_identifier.as_ref().into()
+            syntax_tree::WithGenericArgumentItem::ExpressionIdentifier(x) => {
+                x.expression_identifier.as_ref().into()
             }
             syntax_tree::WithGenericArgumentItem::FixedType(x) => x.fixed_type.as_ref().into(),
             syntax_tree::WithGenericArgumentItem::Number(x) => x.number.as_ref().into(),
@@ -658,6 +658,26 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
             kind: GenericSymbolPathKind::Identifier,
             range: value.into(),
         }
+    }
+}
+
+impl From<&syntax_tree::ExpressionIdentifier> for GenericSymbolPath {
+    fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
+        let mut path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
+
+        for base in value
+            .expression_identifier_list0
+            .iter()
+            .map(|x| x.identifier.identifier_token.token)
+        {
+            path.paths.push(GenericSymbol {
+                base,
+                arguments: vec![],
+            });
+        }
+
+        path.range = value.into();
+        path
     }
 }
 

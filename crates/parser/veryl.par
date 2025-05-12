@@ -795,7 +795,7 @@ WithGenericArgument: ColonColonLAngle %push(Generic) [ WithGenericArgumentList ]
 
 WithGenericArgumentList: WithGenericArgumentItem { Comma WithGenericArgumentItem } [ Comma ];
 
-WithGenericArgumentItem: ScopedIdentifier
+WithGenericArgumentItem: ExpressionIdentifier
                        | FixedType
                        | Number
                        | BooleanLiteral

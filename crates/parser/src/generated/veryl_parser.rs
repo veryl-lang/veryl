@@ -22768,7 +22768,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 750] = &[
             Trans(23, 26, 33, -1),
             Trans(23, 27, 33, -1),
             Trans(23, 31, 60, -1),
-            Trans(23, 32, 61, -1),
+            Trans(23, 32, 71, -1),
             Trans(23, 33, 36, -1),
             Trans(23, 34, 36, -1),
             Trans(23, 35, 34, -1),
@@ -22779,7 +22779,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 750] = &[
             Trans(23, 42, 145, -1),
             Trans(23, 43, 36, -1),
             Trans(23, 44, 72, -1),
-            Trans(23, 45, 62, -1),
+            Trans(23, 45, 73, -1),
             Trans(23, 46, 146, -1),
             Trans(23, 47, 64, -1),
             Trans(23, 48, 65, -1),
@@ -31493,11 +31493,17 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 750] = &[
             Trans(4, 5, 3, 858),
             Trans(4, 30, 3, 858),
             Trans(4, 32, 3, 858),
+            Trans(4, 35, 3, 858),
+            Trans(4, 38, 3, 858),
+            Trans(4, 43, 3, 858),
             Trans(4, 45, 3, 858),
             Trans(5, 5, 3, 858),
             Trans(5, 29, 3, 858),
             Trans(5, 30, 3, 858),
             Trans(5, 32, 3, 858),
+            Trans(5, 35, 3, 858),
+            Trans(5, 38, 3, 858),
+            Trans(5, 43, 3, 858),
             Trans(5, 45, 3, 858),
             Trans(6, 7, 3, 858),
             Trans(6, 8, 3, 858),
@@ -37330,10 +37336,10 @@ pub const PRODUCTIONS: &[Production; 1096] = &[
         lhs: 731,
         production: &[],
     },
-    // 862 - WithGenericArgumentItem: ScopedIdentifier;
+    // 862 - WithGenericArgumentItem: ExpressionIdentifier;
     Production {
         lhs: 728,
-        production: &[ParseType::N(613)],
+        production: &[ParseType::N(219)],
     },
     // 863 - WithGenericArgumentItem: FixedType;
     Production {

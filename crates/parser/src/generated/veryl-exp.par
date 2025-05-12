@@ -876,7 +876,7 @@
 /*  859 */ WithGenericArgumentListList /* Vec<T>::New */: ;
 /*  860 */ WithGenericArgumentListOpt /* Option<T>::Some */: Comma;
 /*  861 */ WithGenericArgumentListOpt /* Option<T>::None */: ;
-/*  862 */ WithGenericArgumentItem: ScopedIdentifier;
+/*  862 */ WithGenericArgumentItem: ExpressionIdentifier;
 /*  863 */ WithGenericArgumentItem: FixedType;
 /*  864 */ WithGenericArgumentItem: Number;
 /*  865 */ WithGenericArgumentItem: BooleanLiteral;
