@@ -9,6 +9,7 @@ use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
 use std::cell::RefCell;
 use std::fmt;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -53,7 +54,6 @@ impl DocComment {
 
 #[derive(Clone, Debug, Default)]
 pub struct GenericMap {
-    pub name: String,
     pub id: Option<SymbolId>,
     pub map: HashMap<StrId, GenericSymbolPath>,
 }
@@ -61,6 +61,53 @@ pub struct GenericMap {
 impl GenericMap {
     pub fn generic(&self) -> bool {
         !self.map.is_empty()
+    }
+
+    pub fn name(&self, include_namspace_prefix: bool, shoten_name: bool) -> String {
+        let symbol = symbol_table::get(self.id.unwrap()).unwrap();
+        if let SymbolKind::GenericInstance(x) = symbol.kind {
+            let base = symbol_table::get(x.base).unwrap();
+            if shoten_name {
+                format!(
+                    "{}__{}__{:x}",
+                    self.get_name_prefix(&base, include_namspace_prefix),
+                    base.token,
+                    self.calc_args_hash(&x.arguments),
+                )
+            } else {
+                format!(
+                    "{}{}",
+                    self.get_name_prefix(&base, include_namspace_prefix),
+                    symbol.token
+                )
+            }
+        } else {
+            format!(
+                "{}{}",
+                self.get_name_prefix(&symbol, include_namspace_prefix),
+                symbol.token
+            )
+        }
+    }
+
+    fn get_name_prefix(&self, symbol: &Symbol, include_namspace_prefix: bool) -> String {
+        if include_namspace_prefix
+            && matches!(
+                symbol.kind,
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+            )
+        {
+            format!("{}_", symbol.namespace)
+        } else {
+            "".to_string()
+        }
+    }
+
+    fn calc_args_hash(&self, args: &[GenericSymbolPath]) -> u64 {
+        let string_args: Vec<_> = args.iter().map(|x| x.to_string()).collect();
+        let mut hasher = DefaultHasher::new();
+        string_args.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -277,15 +324,6 @@ impl Symbol {
     pub fn generic_maps(&self) -> Vec<GenericMap> {
         let mut ret = Vec::new();
 
-        let prefix = if matches!(
-            self.kind,
-            SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
-        ) {
-            format!("{}_", self.namespace)
-        } else {
-            "".to_string()
-        };
-
         let generic_instances = if matches!(self.kind, SymbolKind::GenericInstance(_)) {
             &vec![self.id]
         } else {
@@ -298,9 +336,8 @@ impl Symbol {
             } else {
                 HashMap::default()
             };
-            let name = format!("{}{}", prefix, symbol.token.text);
+
             ret.push(GenericMap {
-                name,
                 id: Some(symbol.id),
                 map,
             });

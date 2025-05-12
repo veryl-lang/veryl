@@ -1763,19 +1763,34 @@ impl Emitter {
         }
     }
 
-    fn get_generic_declaration_name(&self, generic_name: &str) -> String {
-        let ret = if self.build_opt.omit_project_prefix {
+    fn emit_generic_instance_name_comment(&mut self, generic_map: &GenericMap) {
+        if generic_map.generic() && self.build_opt.shorten_mangled_name {
+            let name = generic_map.name(false, false);
+            self.str(&format!("// {}", name));
+            self.newline();
+        }
+    }
+
+    fn emit_generic_instance_name(
+        &mut self,
+        token: &VerylToken,
+        generic_map: &GenericMap,
+        omit_project_prefix: bool,
+    ) {
+        let name = generic_map.name(true, self.build_opt.shorten_mangled_name);
+        let name = if self.build_opt.omit_project_prefix || omit_project_prefix {
             let project_name = format!("{}_", self.project_name.unwrap());
-            if let Some(x) = generic_name.strip_prefix(&project_name) {
+            if let Some(x) = name.strip_prefix(&project_name) {
                 x
             } else {
-                generic_name
+                &name
             }
         } else {
-            generic_name
+            &name
         };
+        let name = name.replace("$std_", "__std_");
 
-        ret.replace("$std_", "__std_")
+        self.token(&token.replace(&name));
     }
 }
 
@@ -4139,6 +4154,7 @@ impl VerylWalker for Emitter {
             }
             self.push_generic_map(map.clone());
 
+            self.emit_generic_instance_name_comment(map);
             match &*arg.struct_union {
                 StructUnion::Struct(x) => {
                     let prefix = Some(String::from("typedef "));
@@ -4159,7 +4175,7 @@ impl VerylWalker for Emitter {
             self.str("}");
             self.space(1);
             if map.generic() {
-                self.str(&map.name.clone());
+                self.emit_generic_instance_name(&arg.identifier.identifier_token, map, true);
             } else {
                 self.identifier(&arg.identifier);
             }
@@ -4784,6 +4800,7 @@ impl VerylWalker for Emitter {
                 }
             }
 
+            self.emit_generic_instance_name_comment(map);
             self.function(&arg.function);
             self.space(1);
             self.str("automatic");
@@ -4795,7 +4812,7 @@ impl VerylWalker for Emitter {
             }
             self.space(1);
             if map.generic() {
-                self.str(&map.name.clone());
+                self.emit_generic_instance_name(&arg.identifier.identifier_token, map, true);
             } else {
                 self.identifier(&arg.identifier);
             }
@@ -4870,11 +4887,11 @@ impl VerylWalker for Emitter {
                 self.modport_ports_table = Some(modport_ports_table);
             }
 
+            self.emit_generic_instance_name_comment(map);
             self.module(&arg.module);
             self.space(1);
             if map.generic() {
-                let name = self.get_generic_declaration_name(&map.name);
-                self.token(&arg.identifier.identifier_token.replace(&name));
+                self.emit_generic_instance_name(&arg.identifier.identifier_token, map, false);
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -4953,11 +4970,11 @@ impl VerylWalker for Emitter {
             }
             self.push_generic_map(map.clone());
 
+            self.emit_generic_instance_name_comment(map);
             self.interface(&arg.interface);
             self.space(1);
             if map.generic() {
-                let name = self.get_generic_declaration_name(&map.name);
-                self.token(&arg.identifier.identifier_token.replace(&name));
+                self.emit_generic_instance_name(&arg.identifier.identifier_token, map, false);
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -5154,11 +5171,11 @@ impl VerylWalker for Emitter {
             }
             self.push_generic_map(map.clone());
 
+            self.emit_generic_instance_name_comment(map);
             self.package(&arg.package);
             self.space(1);
             if map.generic() {
-                let name = self.get_generic_declaration_name(&map.name);
-                self.token(&arg.identifier.identifier_token.replace(&name));
+                self.emit_generic_instance_name(&arg.identifier.identifier_token, map, false);
             } else {
                 let context: SymbolContext = self.into();
                 self.str(&namespace_string(&symbol.found.namespace, &context));
@@ -5398,21 +5415,30 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
         } else {
             let symbol_path = SymbolPath::new(&[*path]);
             if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
-                let separator = match symbol.found.kind {
-                    SymbolKind::Package(_) => "::",
-                    SymbolKind::GenericInstance(ref x) => {
-                        let symbol = symbol_table::get(x.base).unwrap();
-                        match symbol.kind {
-                            SymbolKind::Interface(_) => ".",
-                            _ => "::",
-                        }
+                let text = if let SymbolKind::GenericInstance(ref x) = symbol.found.kind {
+                    let base = symbol_table::get(x.base).unwrap();
+                    let separator =
+                        namespace_separator(&base, context.in_direction_modport, in_sv_namespace);
+                    if context.build_opt.shorten_mangled_name {
+                        let name = symbol
+                            .found
+                            .generic_maps()
+                            .first()
+                            .map(|x| x.name(false, true))
+                            .unwrap();
+                        format!("{}{}", name, separator)
+                    } else {
+                        format!("{}{}", path, separator)
                     }
-                    SymbolKind::Interface(_) => ".",
-                    SymbolKind::SystemVerilog if context.in_direction_modport => ".",
-                    _ if in_sv_namespace => "::",
-                    _ => "_",
+                } else {
+                    let separator = namespace_separator(
+                        &symbol.found,
+                        context.in_direction_modport,
+                        in_sv_namespace,
+                    );
+                    format!("{}{}", path, separator)
                 };
-                ret.push_str(&format!("{}{}", path, separator));
+                ret.push_str(&text);
             } else {
                 return format!("{}", namespace);
             }
@@ -5422,6 +5448,21 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
     }
 
     ret.replace("$std_", "__std_")
+}
+
+fn namespace_separator(
+    symbol: &Symbol,
+    in_direction_modport: bool,
+    in_sv_namespace: bool,
+) -> String {
+    let separator = match symbol.kind {
+        SymbolKind::Package(_) => "::",
+        SymbolKind::Interface(_) => ".",
+        SymbolKind::SystemVerilog if in_direction_modport => ".",
+        _ if in_sv_namespace => "::",
+        _ => "_",
+    };
+    separator.to_string()
 }
 
 pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContext) -> String {
@@ -5486,7 +5527,16 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             if !visible | top_level {
                 ret.push_str(&namespace_string(&symbol.namespace, context));
             }
-            ret.push_str(&token_text);
+            if context.build_opt.shorten_mangled_name {
+                let name = symbol
+                    .generic_maps()
+                    .first()
+                    .map(|x| x.name(true, true))
+                    .unwrap();
+                ret.push_str(&name);
+            } else {
+                ret.push_str(&token_text);
+            }
         }
         SymbolKind::GenericParameter(_)
         | SymbolKind::ProtoModule(_)
