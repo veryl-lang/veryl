@@ -45,55 +45,260 @@ impl Handler for CheckType {
     }
 }
 
-fn check_generic_type_arg(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<String> {
-    if matches!(arg.kind, GenericSymbolPathKind::FixedType) {
-        return None;
-    } else if arg.is_resolvable() {
-        let Ok(symbol) = symbol_table::resolve((&arg.generic_path(), namespace)) else {
-            return Some("not found".to_string());
-        };
-
-        if symbol.found.is_variable_type() {
-            return None;
+fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespace) -> bool {
+    match &symbol.kind {
+        SymbolKind::Package(_)
+        | SymbolKind::ProtoPackage(_)
+        | SymbolKind::GenericParameter(_)
+        | SymbolKind::SystemVerilog => {
+            return true;
+        }
+        SymbolKind::GenericInstance(x) => {
+            return symbol_table::get(x.base)
+                .map(|x| is_referable_generic_arg_symbol(&x, defined_namesapce))
+                .unwrap_or(false);
+        }
+        _ => {
+            if symbol.is_variable_type()
+                || matches!(
+                    symbol.kind,
+                    SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) | SymbolKind::Instance(_)
+                )
+            {
+                if symbol.namespace.matched(defined_namesapce) {
+                    return true;
+                } else if let Some(parent) = symbol.get_parent() {
+                    return is_referable_generic_arg_symbol(&parent, defined_namesapce);
+                }
+            }
         }
     }
 
-    Some(arg.kind.to_string())
+    false
 }
 
-fn resolve_inst_generic_arg_type(arg: &GenericSymbolPath, namespace: &Namespace) -> Option<Symbol> {
-    if !arg.is_resolvable() {
-        return None;
-    }
-
-    let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
-    let inst_symbol = if let SymbolKind::Instance(inst) = arg_symbol.found.kind {
-        symbol_table::resolve((&inst.type_name.mangled_path(), namespace)).ok()?
-    } else {
-        return None;
-    };
-
-    inst_symbol
-        .found
-        .proto()
-        .map(|x| symbol_table::get(x).unwrap())
+fn is_referable_generic_arg(full_path: &[SymbolId], defined_namesapce: &Namespace) -> bool {
+    full_path
+        .iter()
+        .map(|x| symbol_table::get(*x).unwrap())
+        .any(|x| is_referable_generic_arg_symbol(&x, defined_namesapce))
 }
 
-fn resolve_actual_generic_arg_type(
+fn check_generic_type_arg(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
-) -> Option<Symbol> {
-    if !arg.is_resolvable() {
-        return None;
+    base: &Symbol,
+) -> Option<AnalyzerError> {
+    if matches!(arg.kind, GenericSymbolPathKind::FixedType) {
+        None
+    } else if arg.is_resolvable() {
+        let Ok(symbol) = symbol_table::resolve((&arg.generic_path(), namespace)) else {
+            // Undefiend identifier has been checked at 'analyze_post_pass1' phase
+            return None;
+        };
+
+        if symbol.found.is_variable_type() {
+            if is_referable_generic_arg_symbol(&symbol.found, &base.namespace) {
+                return None;
+            }
+
+            Some(AnalyzerError::unresolvable_generic_argument(
+                &arg.to_string(),
+                &arg.range,
+                &base.token.into(),
+            ))
+        } else {
+            Some(AnalyzerError::mismatch_type(
+                &arg.to_string(),
+                "variable type",
+                &symbol.found.kind.to_kind_name(),
+                &arg.range,
+            ))
+        }
+    } else {
+        Some(AnalyzerError::mismatch_type(
+            &arg.to_string(),
+            "variable type",
+            &arg.kind.to_string(),
+            &arg.range,
+        ))
+    }
+}
+
+fn check_generic_inst_arg(
+    arg: &GenericSymbolPath,
+    namespace: &Namespace,
+    bound: &GenericBoundKind,
+    base: &Symbol,
+) -> Option<AnalyzerError> {
+    let required = bound.resolve_inst_bound(&base.namespace)?;
+    let actual = if arg.is_resolvable() {
+        'inst: {
+            let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
+            let SymbolKind::Instance(inst) = &arg_symbol.found.kind else {
+                break 'inst arg_symbol.found.kind.to_kind_name();
+            };
+            if !is_referable_generic_arg_symbol(&arg_symbol.found, &base.namespace) {
+                return Some(AnalyzerError::unresolvable_generic_argument(
+                    &arg.to_string(),
+                    &arg.range,
+                    &base.token.into(),
+                ));
+            }
+
+            let Ok(type_symbol) =
+                symbol_table::resolve((&inst.type_name.mangled_path(), namespace))
+            else {
+                return None;
+            };
+
+            let Some(proto_symbol) = type_symbol
+                .found
+                .proto()
+                .map(|x| symbol_table::get(x).unwrap())
+            else {
+                break 'inst type_symbol.found.kind.to_kind_name();
+            };
+
+            if proto_symbol.id == required.id {
+                return None;
+            }
+
+            proto_symbol.kind.to_kind_name()
+        }
+    } else {
+        arg.kind.to_string()
+    };
+
+    Some(AnalyzerError::mismatch_type(
+        &arg.to_string(),
+        &format!("inst {}", required.token),
+        &actual,
+        &arg.range,
+    ))
+}
+
+fn check_generic_proto_arg(
+    arg: &GenericSymbolPath,
+    namespace: &Namespace,
+    bound: &GenericBoundKind,
+    base: &Symbol,
+) -> Option<AnalyzerError> {
+    let required = bound.resolve_proto_bound(&base.namespace)?;
+    let arg_symbol = if arg.is_resolvable() {
+        let symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok();
+        if symbol.is_some() {
+            symbol
+        } else {
+            return None;
+        }
+    } else {
+        None
+    };
+    let type_symbol = if let Some(x) = &arg_symbol {
+        let proto_symbol = x.found.proto_symbol();
+        if proto_symbol.is_some() {
+            proto_symbol
+        } else if let Some(r#type) = x.found.kind.get_type() {
+            r#type
+                .trace_user_defined(&x.found.namespace)
+                .map(|(_, x)| x)
+                .unwrap_or(None)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let expected = match &required {
+        ProtoBound::ProtoModule(r)
+        | ProtoBound::ProtoInterface(r)
+        | ProtoBound::ProtoPackage(r) => {
+            if type_symbol.as_ref().map(|x| x.id == r.id).unwrap_or(false) {
+                None
+            } else {
+                Some(format!("proto {}", r.token))
+            }
+        }
+        ProtoBound::Enum((r, _)) => {
+            let is_matched = if let Some(arg_symbol) = arg_symbol.as_ref() {
+                if let SymbolKind::EnumMember(_) = arg_symbol.found.kind {
+                    arg_symbol
+                        .found
+                        .get_parent()
+                        .map(|x| x.id == r.id)
+                        .unwrap_or(false)
+                } else {
+                    type_symbol.as_ref().map(|x| x.id == r.id).unwrap_or(false)
+                }
+            } else {
+                false
+            };
+            if is_matched {
+                None
+            } else {
+                Some(format!("{}", r.token))
+            }
+        }
+        ProtoBound::Struct((r, _)) | ProtoBound::Union((r, _)) => {
+            if type_symbol.as_ref().map(|x| x.id == r.id).unwrap_or(false) {
+                None
+            } else {
+                Some(format!("{}", r.token))
+            }
+        }
+        ProtoBound::FactorType(x) => {
+            let is_matched = if let Some(arg_symbol) = arg_symbol.as_ref() {
+                match &arg_symbol.found.kind {
+                    SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) => true,
+                    SymbolKind::GenericParameter(x) => x
+                        .bound
+                        .resolve_proto_bound(&arg_symbol.found.namespace)
+                        .map(|x| x.is_variable_type())
+                        .unwrap_or(false),
+                    _ => false,
+                }
+            } else {
+                // if `arg_symbol` is none,
+                // it means that the given generic arg is a literal
+                true
+            };
+            if is_matched {
+                None
+            } else {
+                Some(format!("{}", x))
+            }
+        }
+    };
+
+    if let Some(expected) = expected {
+        let actual = if let Some(type_symbol) = type_symbol {
+            type_symbol.kind.to_kind_name()
+        } else {
+            arg.kind.to_string()
+        };
+        return Some(AnalyzerError::mismatch_type(
+            &arg.to_string(),
+            &expected,
+            &actual,
+            &arg.range,
+        ));
     }
 
-    let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
-    let proto_symbol = arg_symbol.found.proto_symbol();
-    if proto_symbol.is_some() {
-        proto_symbol
-    } else {
-        Some(arg_symbol.found)
+    if required.is_variable_type()
+        && !arg_symbol
+            .map(|x| is_referable_generic_arg(&x.full_path, &base.namespace))
+            .unwrap_or(true)
+    {
+        return Some(AnalyzerError::unresolvable_generic_argument(
+            &arg.to_string(),
+            &arg.range,
+            &base.token.into(),
+        ));
     }
+
+    None
 }
 
 enum InstTypeSource {
@@ -129,35 +334,6 @@ fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
     }
 
     Some(symbol)
-}
-
-fn is_literal_or_referable_number(arg: &Option<Symbol>) -> bool {
-    let Some(symbol) = arg else {
-        return true;
-    };
-
-    match &symbol.kind {
-        SymbolKind::Parameter(_) => {
-            if let Some(parent) = symbol.get_parent() {
-                return matches!(parent.kind, SymbolKind::Package(_));
-            }
-        }
-        SymbolKind::ProtoConst(_) => {
-            if let Some(parent) = symbol.get_parent() {
-                return matches!(parent.kind, SymbolKind::ProtoPackage(_));
-            }
-        }
-        SymbolKind::GenericParameter(x) => {
-            return x
-                .bound
-                .resolve_proto_bound(&symbol.namespace)
-                .map(|x| x.is_variable_type())
-                .unwrap_or(false);
-        }
-        _ => {}
-    }
-
-    false
 }
 
 impl VerylGrammarTrait for CheckType {
@@ -263,15 +439,14 @@ impl VerylGrammarTrait for CheckType {
 
                 // Check generic parameter
                 if self.in_generic_parameter {
-                    let is_valid = (symbol.is_proto_module(false)
+                    let is_valid = symbol.is_proto_module(false)
                         || symbol.is_proto_interface(false, false)
                         || symbol.is_proto_package(false)
-                        || symbol.is_variable_type())
-                        && !(symbol.is_struct() || symbol.is_union());
+                        || symbol.is_variable_type();
                     if !is_valid {
                         self.errors.push(AnalyzerError::mismatch_type(
                             &symbol.token.to_string(),
-                            "proto module, proto interface, proto package or variable type except for struct and union",
+                            "proto module, proto interface, proto package or variable type",
                             &symbol.kind.to_kind_name(),
                             &arg.identifier().token.into(),
                         ));
@@ -358,107 +533,36 @@ impl VerylGrammarTrait for CheckType {
                 if let Ok(symbol) = symbol_table::resolve((&base_path, &namespace)) {
                     let params = symbol.found.generic_parameters();
                     let args = &path.paths[i].arguments;
-                    let defined_namespace = symbol.found.namespace;
 
                     for (i, arg) in args.iter().enumerate() {
                         if let Some(param) = params.get(i) {
                             let bound = &param.1.bound;
                             match bound {
                                 GenericBoundKind::Type => {
-                                    if let Some(error_kind) =
-                                        check_generic_type_arg(arg, &namespace)
+                                    if let Some(err) =
+                                        check_generic_type_arg(arg, &namespace, &symbol.found)
                                     {
-                                        self.errors.push(AnalyzerError::mismatch_type(
-                                            &arg.to_string(),
-                                            "enum, union, struct, typedef or fixed type",
-                                            &error_kind,
-                                            &arg.range,
-                                        ));
+                                        self.errors.push(err);
                                     }
                                 }
                                 GenericBoundKind::Inst(_) => {
-                                    let actual = resolve_inst_generic_arg_type(arg, &namespace);
-                                    let Some(required) =
-                                        bound.resolve_inst_bound(&defined_namespace)
-                                    else {
-                                        return Ok(());
-                                    };
-
-                                    let match_type = actual
-                                        .as_ref()
-                                        .map(|x| x.id == required.id)
-                                        .unwrap_or(false);
-                                    if !match_type {
-                                        let (name, kind) = if let Some(x) = actual {
-                                            (x.token.to_string(), x.kind.to_kind_name())
-                                        } else {
-                                            (
-                                                symbol.found.token.to_string(),
-                                                symbol.found.kind.to_kind_name(),
-                                            )
-                                        };
-                                        self.errors.push(AnalyzerError::mismatch_type(
-                                            &name,
-                                            &format!("inst {}", required.token),
-                                            &kind,
-                                            &arg.range,
-                                        ));
+                                    if let Some(err) = check_generic_inst_arg(
+                                        arg,
+                                        &namespace,
+                                        bound,
+                                        &symbol.found,
+                                    ) {
+                                        self.errors.push(err);
                                     }
                                 }
                                 GenericBoundKind::Proto(_) => {
-                                    let actual = resolve_actual_generic_arg_type(arg, &namespace);
-                                    let Some(required) =
-                                        bound.resolve_proto_bound(&defined_namespace)
-                                    else {
-                                        return Ok(());
-                                    };
-
-                                    let mut expected = None;
-                                    match required {
-                                        ProtoBound::ProtoModule(x)
-                                        | ProtoBound::ProtoInterface(x)
-                                        | ProtoBound::ProtoPackage(x) => {
-                                            if actual
-                                                .as_ref()
-                                                .map(|actual| actual.id != x.id)
-                                                .unwrap_or(true)
-                                            {
-                                                expected = Some(format!("proto {}", x.token))
-                                            }
-                                        }
-                                        ProtoBound::Enum((x, _)) => {
-                                            let actual = if let Some(x) = actual.as_ref() {
-                                                x.get_parent()
-                                            } else {
-                                                None
-                                            };
-
-                                            if actual.is_none() || actual.unwrap().id != x.id {
-                                                expected =
-                                                    Some(format!("enum variant of {}", x.token))
-                                            }
-                                        }
-                                        ProtoBound::FactorType(x)
-                                        | ProtoBound::Struct((_, x))
-                                        | ProtoBound::Union((_, x)) => {
-                                            if !is_literal_or_referable_number(&actual) {
-                                                expected = Some(format!("{}", x))
-                                            }
-                                        }
-                                    }
-
-                                    if let Some(expected) = expected {
-                                        let (name, kind) = if let Some(x) = actual {
-                                            (x.token.to_string(), x.kind.to_kind_name())
-                                        } else {
-                                            (
-                                                symbol.found.token.to_string(),
-                                                symbol.found.kind.to_kind_name(),
-                                            )
-                                        };
-                                        self.errors.push(AnalyzerError::mismatch_type(
-                                            &name, &expected, &kind, &arg.range,
-                                        ));
+                                    if let Some(err) = check_generic_proto_arg(
+                                        arg,
+                                        &namespace,
+                                        bound,
+                                        &symbol.found,
+                                    ) {
+                                        self.errors.push(err);
                                     }
                                 }
                             }

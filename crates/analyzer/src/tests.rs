@@ -2641,7 +2641,15 @@ fn mismatch_type() {
         struct Foo {
             foo: logic,
         }
+        struct Bar {
+            bar: logic,
+        }
+        const BAR: Bar = Bar'{ bar: 0 };
+
         function Func::<foo: Foo> {}
+        always_comb {
+            Func::<BAR>();
+        }
     }
     "#;
 
@@ -2653,7 +2661,15 @@ fn mismatch_type() {
         union Foo {
             foo: logic,
         }
+        union Bar {
+            bar: logic,
+        }
+        const BAR: Bar = Bar'{ bar: 0 };
+
         function Func::<foo: Foo> {}
+        always_comb {
+            Func::<BAR>();
+        }
     }
     "#;
 
@@ -2665,7 +2681,6 @@ fn mismatch_type() {
         enum Foo {
             FOO
         }
-
         enum Bar {
             BAR
         }
@@ -2673,6 +2688,26 @@ fn mismatch_type() {
         function Func::<foo: Foo> {}
         always_comb {
             Func::<Bar::BAR>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        enum Foo {
+            FOO
+        }
+        enum Bar {
+            BAR
+        }
+        const BAR: Bar = Bar::BAR;
+
+        function Func::<foo: Foo> {}
+        always_comb {
+            Func::<BAR>();
         }
     }
     "#;
@@ -5581,6 +5616,91 @@ fn unresolvable_generic_argument() {
         errors[0],
         AnalyzerError::UnresolvableGenericArgument { .. }
     ));
+
+    let code = r#"
+    package Pkg {
+        function Func::<T: type> {}
+    }
+    module ModuleA {
+        type MyType = logic;
+        always_comb {
+            Pkg::Func::<MyType>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    // This pattern also causes CyclicTypeDependency error
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
+    );
+
+    let code = r#"
+    package Pkg {
+        function Func::<V: u32> {}
+    }
+    module ModuleA {
+        const V: u32 = 0;
+        always_comb {
+            Pkg::Func::<V>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    // This pattern also causes CyclicTypeDependency error
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
+    );
+
+    let code = r#"
+    module ModuleA {
+        struct Foo {
+            foo: logic,
+        }
+        let foo: Foo = Foo'{ foo: 0 };
+
+        function Func::<foo: Foo> {}
+        always_comb {
+            Func::<foo>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericArgument { .. }
+    ));
+
+    let code = r#"
+    package PkgA {
+        struct Baz {
+            baz: logic,
+        }
+        struct Bar {
+            bar: Baz
+        }
+        function Func::<baz: Baz> {}
+    }
+    package PkgB {
+        import PkgA::*;
+        const FOO: Bar = Bar'{ bar: Baz'{ baz: 1 } };
+    }
+    module ModuleA {
+        import PkgB::*;
+        always_comb {
+            PkgA::Func::<PkgB::FOO.bar>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

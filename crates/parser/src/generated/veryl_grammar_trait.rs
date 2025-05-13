@@ -4651,13 +4651,13 @@ pub struct GenericProtoBoundFixedType {
 ///
 /// Type derived for production 862
 ///
-/// `WithGenericArgumentItem: ScopedIdentifier;`
+/// `WithGenericArgumentItem: ExpressionIdentifier;`
 ///
 #[allow(dead_code)]
 #[derive(Builder, Debug, Clone)]
 #[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithGenericArgumentItemScopedIdentifier {
-    pub scoped_identifier: Box<ScopedIdentifier>,
+pub struct WithGenericArgumentItemExpressionIdentifier {
+    pub expression_identifier: Box<ExpressionIdentifier>,
 }
 
 ///
@@ -13687,7 +13687,7 @@ pub struct WithGenericArgument {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum WithGenericArgumentItem {
-    ScopedIdentifier(WithGenericArgumentItemScopedIdentifier),
+    ExpressionIdentifier(WithGenericArgumentItemExpressionIdentifier),
     FixedType(WithGenericArgumentItemFixedType),
     Number(WithGenericArgumentItemNumber),
     BooleanLiteral(WithGenericArgumentItemBooleanLiteral),
@@ -34057,21 +34057,22 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 862:
     ///
-    /// `WithGenericArgumentItem: ScopedIdentifier;`
+    /// `WithGenericArgumentItem: ExpressionIdentifier;`
     ///
     #[parol_runtime::function_name::named]
     fn with_generic_argument_item_0(
         &mut self,
-        _scoped_identifier: &ParseTreeType<'t>,
+        _expression_identifier: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let scoped_identifier = pop_item!(self, scoped_identifier, ScopedIdentifier, context);
-        let with_generic_argument_item_0_built = WithGenericArgumentItemScopedIdentifier {
-            scoped_identifier: Box::new(scoped_identifier),
+        let expression_identifier =
+            pop_item!(self, expression_identifier, ExpressionIdentifier, context);
+        let with_generic_argument_item_0_built = WithGenericArgumentItemExpressionIdentifier {
+            expression_identifier: Box::new(expression_identifier),
         };
         let with_generic_argument_item_0_built =
-            WithGenericArgumentItem::ScopedIdentifier(with_generic_argument_item_0_built);
+            WithGenericArgumentItem::ExpressionIdentifier(with_generic_argument_item_0_built);
         // Calling user action here
         self.user_grammar
             .with_generic_argument_item(&with_generic_argument_item_0_built)?;

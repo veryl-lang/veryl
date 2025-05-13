@@ -2663,8 +2663,8 @@ pub trait VerylWalker {
     fn with_generic_argument_item(&mut self, arg: &WithGenericArgumentItem) {
         before!(self, with_generic_argument_item, arg);
         match arg {
-            WithGenericArgumentItem::ScopedIdentifier(x) => {
-                self.scoped_identifier(&x.scoped_identifier);
+            WithGenericArgumentItem::ExpressionIdentifier(x) => {
+                self.expression_identifier(&x.expression_identifier);
             }
             WithGenericArgumentItem::FixedType(x) => {
                 self.fixed_type(&x.fixed_type);

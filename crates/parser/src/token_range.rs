@@ -1125,7 +1125,7 @@ impl_token_range!(WithGenericArgument, colon_colon_l_angle, r_angle);
 impl_token_range_list!(WithGenericArgumentList, WithGenericArgumentItem);
 impl_token_range_enum!(
     WithGenericArgumentItem,
-    scoped_identifier,
+    expression_identifier,
     fixed_type,
     number,
     boolean_literal
