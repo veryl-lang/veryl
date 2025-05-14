@@ -56,7 +56,7 @@ watch:
 
 install:
 	verylup install local
-	cargo install --path crates/mdbook
+	cargo install --profile release-verylup --path crates/mdbook
 
 gen_sv:
 	cargo run --bin veryl -- build
