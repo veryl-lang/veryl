@@ -24,6 +24,24 @@ impl Handler for CheckFunction {
     }
 }
 
+fn get_arity(kind: &SymbolKind) -> Option<usize> {
+    match kind {
+        SymbolKind::GenericInstance(x) => {
+            let base = symbol_table::get(x.base).unwrap();
+            get_arity(&base.kind)
+        }
+        SymbolKind::Function(x) => Some(x.ports.len()),
+        SymbolKind::ModportFunctionMember(x) => {
+            if let SymbolKind::Function(x) = symbol_table::get(x.function).unwrap().kind {
+                Some(x.ports.len())
+            } else {
+                unreachable!();
+            }
+        }
+        _ => None,
+    }
+}
+
 impl VerylGrammarTrait for CheckFunction {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -87,18 +105,7 @@ impl VerylGrammarTrait for CheckFunction {
             }
 
             if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                let arity = match symbol.found.kind {
-                    SymbolKind::Function(x) => Some(x.ports.len()),
-                    SymbolKind::ModportFunctionMember(x) => {
-                        if let SymbolKind::Function(x) = symbol_table::get(x.function).unwrap().kind
-                        {
-                            Some(x.ports.len())
-                        } else {
-                            unreachable!();
-                        }
-                    }
-                    _ => None,
-                };
+                let arity = get_arity(&symbol.found.kind);
 
                 let mut args = 0;
                 if let Some(ref x) = arg.identifier_factor_opt {

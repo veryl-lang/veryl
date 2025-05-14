@@ -1033,6 +1033,22 @@ fn mismatch_function_arity() {
         errors[0],
         AnalyzerError::MismatchFunctionArity { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA::<WIDTH: u32> (
+            a: input logic,
+        ) -> logic {}
+
+        let _a: logic = FuncA::<10>(1, 2);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
 }
 
 #[test]
