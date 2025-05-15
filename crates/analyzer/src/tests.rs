@@ -751,6 +751,20 @@ fn invalid_import() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+
+    let code = r#"
+    package Pkg {
+        function Func::<V: u32>() -> u32 {
+            return V;
+        }
+    }
+    module ModuleA {
+        import Pkg::Func::<1>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
 }
 
 #[test]
@@ -1166,6 +1180,40 @@ fn mismatch_generics_arity() {
     module TopD {
         inst u_subd_1: SubD::<1>();
         inst u_subd_2: SubD::<2>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgE {
+        function Foo::<V: u32> -> u32 {
+            return V;
+        }
+        struct Bar::<W: u32> {
+            bar: logic<W>,
+        }
+        union Baz::<W: u32> {
+            baz: logic<W>,
+        }
+    }
+    module ModuleE {
+        import PkgE::Foo;
+        let _a: u32 = Foo::<0>();
+        let _b: u32 = Foo::<1>();
+
+        import PkgE::Bar;
+        var _c: Bar::<1>;
+        var _d: Bar::<2>;
+        assign _c.bar = 0;
+        assign _d.bar = 0;
+
+        import PkgE::Baz;
+        var _e: Baz::<1>;
+        var _f: Baz::<2>;
+        assign _e.baz = 0;
+        assign _f.baz = 0;
     }
     "#;
 
