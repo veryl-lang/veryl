@@ -165,6 +165,15 @@ impl Symbol {
         None
     }
 
+    pub fn get_parent_package(&self) -> Option<Symbol> {
+        let parent = self.get_parent()?;
+        if parent.is_package(true) {
+            Some(parent)
+        } else {
+            None
+        }
+    }
+
     pub fn evaluate(&self) -> Evaluated {
         if let Some(x) = self.overrides.last() {
             x.clone()

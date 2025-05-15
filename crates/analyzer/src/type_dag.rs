@@ -171,18 +171,29 @@ impl TypeDag {
             let base_path = path.base_path(i);
 
             if let Ok(symbol) = symbol_table::resolve((&base_path, namespace)) {
-                let base = &symbol.found;
+                let base = if let Some(x) = symbol.found.get_parent_package() {
+                    x
+                } else {
+                    symbol.found
+                };
+
                 let generic_args: Vec<_> = path.paths[i]
                     .arguments
                     .iter()
                     .filter_map(|x| {
-                        symbol_table::resolve((&x.mangled_path(), namespace))
-                            .map(|x| x.found)
+                        symbol_table::resolve((&x.generic_path(), namespace))
+                            .map(|symbol| {
+                                if let Some(x) = symbol.found.get_parent_package() {
+                                    x
+                                } else {
+                                    symbol.found
+                                }
+                            })
                             .ok()
                     })
                     .collect();
 
-                if let Some(base) = self.insert_symbol(base) {
+                if let Some(base) = self.insert_symbol(&base) {
                     if let Some(parent) = parent {
                         let parent_symbol = symbol_table::get(parent.0).unwrap();
                         let parent_context = parent.1;
