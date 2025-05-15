@@ -3908,6 +3908,30 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA::<W: u32> {
+        var a: logic<W>;
+        modport mp {
+            a: output,
+        }
+    }
+    alias interface AliasIf = InterfaceA::<10>;
+    module ModuleA (
+        foo_if: modport AliasIf::mp,
+    ){
+        assign foo_if.a = 0;
+
+        function FuncA(
+            bar_if: modport AliasIf::mp,
+        ) {
+            bar_if.a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

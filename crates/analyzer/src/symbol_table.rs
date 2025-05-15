@@ -180,30 +180,25 @@ impl SymbolTable {
         mut context: ResolveContext<'a>,
         path: &GenericSymbolPath,
     ) -> Result<ResolveContext<'a>, ResolveError> {
-        let mangled_symbol = self.resolve(&path.mangled_path(), &[], context.push());
-        let generic_symbol = self.resolve(
+        let symbol = self.resolve(
             &path.generic_path(),
             &path.generic_arguments(),
             context.push(),
-        );
-        if let Ok(x) = &generic_symbol {
-            context.generic_tables = x.generic_tables.clone();
-        }
+        )?;
+        context.generic_tables = symbol.generic_tables.clone();
 
-        let type_symbol = mangled_symbol.unwrap_or(generic_symbol?).found;
-
-        match type_symbol.kind {
+        match symbol.found.kind {
             SymbolKind::AliasModule(x) => self.trace_type_path(context, &x.target),
             SymbolKind::AliasInterface(x) => self.trace_type_path(context, &x.target),
             SymbolKind::AliasPackage(x) => self.trace_type_path(context, &x.target),
-            SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &type_symbol),
-            SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &type_symbol),
+            SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &symbol.found),
+            SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &symbol.found),
             _ => {
-                if matches!(type_symbol.kind, SymbolKind::SystemVerilog) {
+                if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
                     context.sv_member = true;
                 }
-                context.namespace = type_symbol.inner_namespace();
-                context.last_found_type = Some(type_symbol.id);
+                context.namespace = symbol.found.inner_namespace();
+                context.last_found_type = Some(symbol.found.id);
                 context.inner = true;
                 Ok(context)
             }
