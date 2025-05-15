@@ -1468,3 +1468,62 @@ endmodule
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn shorten_mangled_name() {
+    let code = r#"
+package PkgA::<
+    A: u32,
+    B: u32,
+    C: u32,
+    D: u32,
+> {
+    const V: u32 = A + B + C + D;
+}
+module ModuleA {
+    function FuncA::<V: u32>() -> u32 {
+        return V;
+    }
+    let _a: u32 = FuncA::<PkgA::<0, 1, 2, 3>::V>();
+    let _b: u32 = FuncA::<PkgA::<0, 1, 2, 3>::V>();
+    let _c: u32 = FuncA::<PkgA::<4, 5, 6, 7>::V>();
+}
+"#;
+
+    let expect = r#"// __PkgA__0__1__2__3
+package prj___PkgA__3894375d1deadabb;
+    localparam int unsigned V = 0 + 1 + 2 + 3;
+endpackage
+// __PkgA__4__5__6__7
+package prj___PkgA__c10f54f86dbec958;
+    localparam int unsigned V = 4 + 5 + 6 + 7;
+endpackage
+module prj_ModuleA;
+    // __FuncA____PkgA__0__1__2__3_V
+    function automatic int unsigned __FuncA__830b4abf8aba07ce() ;
+        return prj___PkgA__3894375d1deadabb::V;
+    endfunction
+    // __FuncA____PkgA__4__5__6__7_V
+    function automatic int unsigned __FuncA__e5a0d24d19f5a43d() ;
+        return prj___PkgA__c10f54f86dbec958::V;
+    endfunction
+    int unsigned _a; always_comb _a = __FuncA__830b4abf8aba07ce();
+    int unsigned _b; always_comb _b = __FuncA__830b4abf8aba07ce();
+    int unsigned _c; always_comb _c = __FuncA__e5a0d24d19f5a43d();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.build.shorten_mangled_name = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
