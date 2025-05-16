@@ -52,9 +52,7 @@ impl InstanceHistory {
         if self.full.len() > self.total_limit {
             return Err(InstanceHistoryError::ExceedTotalLimit);
         }
-        if self.hierarchy.iter().any(|x| *x == sig)
-            && sig.params.iter().all(|x| x.1.get_value().is_some())
-        {
+        if self.hierarchy.contains(&sig) && sig.params.iter().all(|x| x.1.get_value().is_some()) {
             return Err(InstanceHistoryError::InfiniteRecursion);
         }
         if self.full.contains(&sig) {
