@@ -56,6 +56,7 @@ impl ExpandModportConnections {
 
 pub struct ExpandModportConnectionsTableEntry {
     id: StrId,
+    index: usize,
     pub connections: Vec<ExpandModportConnections>,
 }
 
@@ -161,7 +162,7 @@ impl ExpandModportConnectionsTable {
         namespace: &Namespace,
         in_function: bool,
     ) {
-        for (modport, port) in collect_modports(defined_ports, namespace) {
+        for (modport, port, index) in collect_modports(defined_ports, namespace) {
             if !(in_function || attribute_table::is_expand(&port.token.token, ExpandItem::Modport))
             {
                 continue;
@@ -192,6 +193,7 @@ impl ExpandModportConnectionsTable {
 
             let entry = ExpandModportConnectionsTableEntry {
                 id: port.name(),
+                index,
                 connections,
             };
             self.entries.push(entry);
@@ -203,16 +205,17 @@ impl ExpandModportConnectionsTable {
         Some(self.entries.remove(index))
     }
 
-    pub fn pop_front(&mut self) -> Option<ExpandModportConnectionsTableEntry> {
-        if self.is_empty() {
-            None
-        } else {
+    pub fn pop_front(&mut self, port_index: usize) -> Option<ExpandModportConnectionsTableEntry> {
+        if self
+            .entries
+            .first()
+            .map(|x| x.index == port_index)
+            .unwrap_or(false)
+        {
             Some(self.entries.remove(0))
+        } else {
+            None
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -320,7 +323,7 @@ impl ExpandedModportPortTable {
         in_function: bool,
         context: &SymbolContext,
     ) {
-        for (modport, port) in collect_modports(defined_ports, namespace) {
+        for (modport, port, _) in collect_modports(defined_ports, namespace) {
             if !(in_function || attribute_table::is_expand(&port.token.token, ExpandItem::Modport))
             {
                 continue;
@@ -387,14 +390,15 @@ impl ExpandedModportPortTable {
     }
 }
 
-fn collect_modports(ports: &[Port], namespace: &Namespace) -> Vec<(Symbol, Port)> {
+fn collect_modports(ports: &[Port], namespace: &Namespace) -> Vec<(Symbol, Port, usize)> {
     ports
         .iter()
-        .filter_map(|port| {
+        .enumerate()
+        .filter_map(|(i, port)| {
             let property = port.property();
             if let Some((_, Some(symbol))) = property.r#type.trace_user_defined(namespace) {
                 if matches!(symbol.kind, SymbolKind::Modport(_)) {
-                    Some((symbol, port.clone()))
+                    Some((symbol, port.clone(), i))
                 } else {
                     None
                 }
