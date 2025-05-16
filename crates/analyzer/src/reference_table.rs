@@ -26,6 +26,7 @@ pub enum ReferenceCandidate {
     ScopedIdentifier {
         arg: ScopedIdentifier,
         namespace: Namespace,
+        in_import_declaration: bool,
     },
     ExpressionIdentifier {
         arg: ExpressionIdentifier,
@@ -67,11 +68,12 @@ impl From<&HierarchicalIdentifier> for ReferenceCandidate {
     }
 }
 
-impl From<&ScopedIdentifier> for ReferenceCandidate {
-    fn from(value: &ScopedIdentifier) -> Self {
+impl From<(&ScopedIdentifier, bool)> for ReferenceCandidate {
+    fn from(value: (&ScopedIdentifier, bool)) -> Self {
         Self::ScopedIdentifier {
-            arg: value.clone(),
+            arg: value.0.clone(),
             namespace: namespace_table::get_default(),
+            in_import_declaration: value.1,
         }
     }
 }
@@ -210,6 +212,7 @@ impl ReferenceTable {
         &mut self,
         path: &GenericSymbolPath,
         namespace: &Namespace,
+        in_import_declaration: bool,
         generics_token: Option<Token>,
     ) {
         if path.is_generic_reference() {
@@ -233,12 +236,28 @@ impl ReferenceTable {
                     // Check number of arguments
                     let params = symbol.found.generic_parameters();
                     let n_args = path.paths[i].arguments.len();
+
+                    if in_import_declaration
+                        && !params.is_empty()
+                        && matches!(
+                            symbol.found.kind,
+                            SymbolKind::Function(_) | SymbolKind::Struct(_) | SymbolKind::Union(_)
+                        )
+                    {
+                        // Generic function, struct and union should be imorted as-is
+                        // but not as thier instances.
+                        // https://github.com/veryl-lang/veryl/issues/1619
+                        if n_args != 0 {
+                            self.errors.push(AnalyzerError::invalid_import(&path.range))
+                        }
+                        continue;
+                    }
+
                     let match_artiy = if params.len() > n_args {
                         params[n_args].1.default_value.is_some()
                     } else {
                         params.len() == n_args
                     };
-
                     if !match_artiy {
                         self.errors.push(AnalyzerError::mismatch_generics_arity(
                             &path.paths[i].base.to_string(),
@@ -286,6 +305,7 @@ impl ReferenceTable {
                             self.generic_symbol_path(
                                 path,
                                 &symbol.found.inner_namespace(),
+                                false,
                                 Some(symbol.found.token),
                             );
                         }
@@ -345,14 +365,18 @@ impl ReferenceTable {
                         }
                     }
                 }
-                ReferenceCandidate::ScopedIdentifier { arg, namespace } => {
+                ReferenceCandidate::ScopedIdentifier {
+                    arg,
+                    namespace,
+                    in_import_declaration,
+                } => {
                     namespace_table::set_default(&namespace.paths);
 
                     let ident = arg.identifier().token;
                     let path: GenericSymbolPath = arg.into();
                     let namespace = namespace_table::get(ident.id).unwrap();
 
-                    self.generic_symbol_path(&path, &namespace, None);
+                    self.generic_symbol_path(&path, &namespace, *in_import_declaration, None);
                 }
                 ReferenceCandidate::ExpressionIdentifier { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);

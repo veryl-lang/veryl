@@ -101,6 +101,7 @@ pub struct CreateSymbolTable {
     function_ids: HashMap<StrId, SymbolId>,
     exist_clock_without_domain: bool,
     in_proto: bool,
+    in_import: bool,
     file_scope_import_item: Vec<SymbolPathNamespace>,
     file_scope_import_wildcard: Vec<SymbolPathNamespace>,
     is_public: bool,
@@ -631,7 +632,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     };
                     reference_table::add(cand);
                 } else {
-                    reference_table::add(arg.into());
+                    reference_table::add((arg, self.in_import).into());
                 }
 
                 // Add symbols under $sv namespace
@@ -1620,29 +1621,34 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let token = &arg.scoped_identifier.identifier().token;
-            let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-            let path: SymbolPathNamespace =
-                (&path.generic_path(), &self.get_namespace(token)).into();
-            let namespace = path.1.clone();
-            let wildcard = arg.import_declaration_opt.is_some();
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_import = true;
 
-            let import = SymImport {
-                path: path.clone(),
-                namespace,
-                wildcard,
-            };
+                let token = &arg.scoped_identifier.identifier().token;
+                let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+                let path: SymbolPathNamespace =
+                    (&path.generic_path(), &self.get_namespace(token)).into();
+                let namespace = path.1.clone();
+                let wildcard = arg.import_declaration_opt.is_some();
 
-            if self.affiliation.is_empty() {
-                if wildcard {
-                    self.file_scope_import_wildcard.push(path);
+                let import = SymImport {
+                    path: path.clone(),
+                    namespace,
+                    wildcard,
+                };
+
+                if self.affiliation.is_empty() {
+                    if wildcard {
+                        self.file_scope_import_wildcard.push(path);
+                    } else {
+                        self.file_scope_import_item.push(path);
+                    }
                 } else {
-                    self.file_scope_import_item.push(path);
+                    symbol_table::add_import(import);
                 }
-            } else {
-                symbol_table::add_import(import);
             }
+            HandlerPoint::After => self.in_import = false,
         }
         Ok(())
     }
