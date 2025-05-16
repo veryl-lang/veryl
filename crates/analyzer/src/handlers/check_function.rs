@@ -24,6 +24,58 @@ impl Handler for CheckFunction {
     }
 }
 
+fn check_function_args(
+    identifier: &ExpressionIdentifier,
+    function_call: Option<&FunctionCall>,
+) -> Option<AnalyzerError> {
+    // skip system function
+    if matches!(
+        identifier
+            .scoped_identifier
+            .scoped_identifier_group
+            .as_ref(),
+        ScopedIdentifierGroup::DollarIdentifier(_)
+    ) {
+        return None;
+    }
+
+    let Ok(symbol) = symbol_table::resolve(identifier) else {
+        return None;
+    };
+
+    let mut args = 0;
+    if let Some(x) = function_call {
+        if let Some(ref x) = x.function_call_opt {
+            let list: Vec<_> = x.argument_list.as_ref().into();
+
+            let positional_only = list.iter().all(|x| x.argument_item_opt.is_none());
+            let named_only = list.iter().all(|x| x.argument_item_opt.is_some());
+            if !positional_only && !named_only {
+                return Some(AnalyzerError::mixed_function_argument(&identifier.into()));
+            }
+
+            args += list.len();
+        }
+    }
+
+    if let Some(arity) = get_arity(&symbol.found.kind) {
+        if arity != args {
+            let name = format!(
+                "{}",
+                SymbolPath::from(identifier).as_slice().last().unwrap()
+            );
+            return Some(AnalyzerError::mismatch_function_arity(
+                &name,
+                arity,
+                args,
+                &identifier.into(),
+            ));
+        }
+    }
+
+    None
+}
+
 fn get_arity(kind: &SymbolKind) -> Option<usize> {
     match kind {
         SymbolKind::GenericInstance(x) => {
@@ -45,7 +97,12 @@ fn get_arity(kind: &SymbolKind) -> Option<usize> {
 impl VerylGrammarTrait for CheckFunction {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let IdentifierStatementGroup::FunctionCall(_) = &*arg.identifier_statement_group {
+            if let IdentifierStatementGroup::FunctionCall(x) = &*arg.identifier_statement_group {
+                let error = check_function_args(&arg.expression_identifier, Some(&x.function_call));
+                if let Some(error) = error {
+                    self.errors.push(error);
+                }
+
                 // skip system function
                 if matches!(
                     arg.expression_identifier
@@ -93,59 +150,17 @@ impl VerylGrammarTrait for CheckFunction {
             if arg.identifier_factor_opt.is_none() {
                 return Ok(());
             }
-            // skip system function
-            if matches!(
-                arg.expression_identifier
-                    .scoped_identifier
-                    .scoped_identifier_group
-                    .as_ref(),
-                ScopedIdentifierGroup::DollarIdentifier(_)
-            ) {
-                return Ok(());
-            }
 
-            if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                let arity = get_arity(&symbol.found.kind);
-
-                let mut args = 0;
-                if let Some(ref x) = arg.identifier_factor_opt {
-                    if let IdentifierFactorOptGroup::FunctionCall(x) =
-                        x.identifier_factor_opt_group.as_ref()
-                    {
-                        if let Some(ref x) = x.function_call.function_call_opt {
-                            let list: Vec<_> = x.argument_list.as_ref().into();
-
-                            let positional_only =
-                                list.iter().all(|x| x.argument_item_opt.is_none());
-                            let named_only = list.iter().all(|x| x.argument_item_opt.is_some());
-
-                            if !positional_only && !named_only {
-                                self.errors.push(AnalyzerError::mixed_function_argument(
-                                    &arg.expression_identifier.as_ref().into(),
-                                ));
-                            }
-
-                            args += list.len();
-                        }
-                    }
-                }
-
-                if let Some(arity) = arity {
-                    if arity != args {
-                        let name = format!(
-                            "{}",
-                            SymbolPath::from(arg.expression_identifier.as_ref())
-                                .as_slice()
-                                .last()
-                                .unwrap()
-                        );
-                        self.errors.push(AnalyzerError::mismatch_function_arity(
-                            &name,
-                            arity,
-                            args,
-                            &arg.expression_identifier.as_ref().into(),
-                        ));
-                    }
+            if let Some(ref x) = arg.identifier_factor_opt {
+                let error = if let IdentifierFactorOptGroup::FunctionCall(x) =
+                    x.identifier_factor_opt_group.as_ref()
+                {
+                    check_function_args(&arg.expression_identifier, Some(&x.function_call))
+                } else {
+                    check_function_args(&arg.expression_identifier, None)
+                };
+                if let Some(error) = error {
+                    self.errors.push(error);
                 }
             }
         }
