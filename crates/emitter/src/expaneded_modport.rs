@@ -114,17 +114,32 @@ impl ExpandModportConnectionsTable {
 
         let connected_ports: HashMap<StrId, Option<&VerylToken>> = list
             .iter()
-            .map(|x| {
-                let lhs_token = x.argument_expression.expression.unwrap_identifier();
-                let rhs_token = if let Some(ref x) = x.argument_item_opt {
-                    x.expression.unwrap_identifier().map(|x| x.identifier())
+            .enumerate()
+            .map(|(i, arg)| {
+                if i < defined_ports.len() && arg.argument_item_opt.is_none() {
+                    let lhs_token = defined_ports[i].token.token.text;
+                    let rhs_token = arg
+                        .argument_expression
+                        .expression
+                        .unwrap_identifier()
+                        .map(|x| x.identifier());
+                    (Some(lhs_token), rhs_token)
                 } else {
-                    None
-                };
-                (lhs_token, rhs_token)
+                    let lhs_token = arg
+                        .argument_expression
+                        .expression
+                        .unwrap_identifier()
+                        .map(|x| x.identifier().token.text);
+                    let rhs_token = if let Some(ref rhs) = arg.argument_item_opt {
+                        rhs.expression.unwrap_identifier().map(|x| x.identifier())
+                    } else {
+                        None
+                    };
+                    (lhs_token, rhs_token)
+                }
             })
             .filter(|(lhs, _)| lhs.is_some())
-            .map(|(lhs, rhs)| (lhs.unwrap().identifier().token.text, rhs))
+            .map(|(lhs, rhs)| (lhs.unwrap(), rhs))
             .collect();
 
         let mut ret = ExpandModportConnectionsTable::new();
@@ -186,6 +201,14 @@ impl ExpandModportConnectionsTable {
     pub fn remove(&mut self, token: &VerylToken) -> Option<ExpandModportConnectionsTableEntry> {
         let index = self.entries.iter().position(|x| x.id == token.token.text)?;
         Some(self.entries.remove(index))
+    }
+
+    pub fn pop_front(&mut self) -> Option<ExpandModportConnectionsTableEntry> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self.entries.remove(0))
+        }
     }
 
     pub fn is_empty(&self) -> bool {

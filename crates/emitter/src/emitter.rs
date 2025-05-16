@@ -68,6 +68,7 @@ pub struct Emitter {
     in_scalar_type: bool,
     in_expression: Vec<()>,
     in_attribute: bool,
+    in_function_call: Vec<()>,
     in_named_argument: Vec<bool>,
     signed: bool,
     default_clock: Option<SymbolId>,
@@ -117,6 +118,7 @@ impl Default for Emitter {
             in_scalar_type: false,
             in_expression: Vec::new(),
             in_attribute: false,
+            in_function_call: Vec::new(),
             in_named_argument: Vec::new(),
             signed: false,
             default_clock: None,
@@ -1598,6 +1600,7 @@ impl Emitter {
             false
         };
 
+        self.in_function_call.push(());
         self.in_named_argument.push(in_named_argument);
         if in_named_argument {
             self.token_will_push(&function_call.l_paren.l_paren_token);
@@ -1641,6 +1644,7 @@ impl Emitter {
             self.newline_pop();
         }
         self.r_paren(&function_call.r_paren);
+        self.in_function_call.pop();
         self.in_named_argument.pop();
         self.modport_connections_table = None;
     }
@@ -2643,7 +2647,11 @@ impl VerylWalker for Emitter {
         let modport_entry =
             if let Some(identifier) = arg.argument_expression.expression.unwrap_identifier() {
                 if let Some(table) = self.modport_connections_table.as_mut() {
-                    table.remove(identifier.identifier())
+                    if self.in_function_call.is_empty() || arg.argument_item_opt.is_some() {
+                        table.remove(identifier.identifier())
+                    } else {
+                        table.pop_front()
+                    }
                 } else {
                     None
                 }
