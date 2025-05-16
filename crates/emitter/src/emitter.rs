@@ -68,7 +68,6 @@ pub struct Emitter {
     in_scalar_type: bool,
     in_expression: Vec<()>,
     in_attribute: bool,
-    in_function_call: Vec<()>,
     in_named_argument: Vec<bool>,
     signed: bool,
     default_clock: Option<SymbolId>,
@@ -86,7 +85,7 @@ pub struct Emitter {
     resolved_identifier: Vec<String>,
     last_token: Option<VerylToken>,
     duplicated_index: usize,
-    modport_connections_table: Option<ExpandModportConnectionsTable>,
+    modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
 }
 
@@ -118,7 +117,6 @@ impl Default for Emitter {
             in_scalar_type: false,
             in_expression: Vec::new(),
             in_attribute: false,
-            in_function_call: Vec::new(),
             in_named_argument: Vec::new(),
             signed: false,
             default_clock: None,
@@ -136,7 +134,7 @@ impl Default for Emitter {
             resolved_identifier: Vec::new(),
             last_token: None,
             duplicated_index: 0,
-            modport_connections_table: None,
+            modport_connections_tables: Vec::new(),
             modport_ports_table: None,
         }
     }
@@ -1600,7 +1598,6 @@ impl Emitter {
             false
         };
 
-        self.in_function_call.push(());
         self.in_named_argument.push(in_named_argument);
         if in_named_argument {
             self.token_will_push(&function_call.l_paren.l_paren_token);
@@ -1617,9 +1614,8 @@ impl Emitter {
                     &generic_map,
                     &namespace,
                 );
-            if !modport_connections_table.is_empty() {
-                self.modport_connections_table = Some(modport_connections_table);
-            }
+            self.modport_connections_tables
+                .push(modport_connections_table);
 
             self.argument_list(&x.argument_list);
             1 + x.argument_list.argument_list_list.len()
@@ -1644,9 +1640,83 @@ impl Emitter {
             self.newline_pop();
         }
         self.r_paren(&function_call.r_paren);
-        self.in_function_call.pop();
         self.in_named_argument.pop();
-        self.modport_connections_table = None;
+        self.modport_connections_tables.pop();
+    }
+
+    fn emit_argument_item(&mut self, arg: &ArgumentItem, port_index: usize) {
+        let modport_entry =
+            if let Some(identifier) = arg.argument_expression.expression.unwrap_identifier() {
+                if let Some(table) = self.modport_connections_tables.last_mut() {
+                    if arg.argument_item_opt.is_some() {
+                        table.remove(identifier.identifier())
+                    } else {
+                        table.pop_front(port_index)
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+        if let Some(x) = modport_entry {
+            let src_line = self.src_line;
+            self.aligner.disable_auto_finish();
+            self.clear_adjust_line();
+
+            for (i, connection) in x
+                .connections
+                .iter()
+                .flat_map(|x| x.connections.iter())
+                .enumerate()
+            {
+                if i > 0 {
+                    self.str(",");
+                    if *self.in_named_argument.last().unwrap() {
+                        self.newline();
+                    } else {
+                        self.space(1);
+                    }
+                }
+
+                if arg.argument_item_opt.is_some() {
+                    self.str(".");
+                    self.align_start(align_kind::IDENTIFIER);
+                    self.duplicated_token(&connection.port_target);
+                    self.align_finish(align_kind::IDENTIFIER);
+                    self.space(1);
+
+                    self.str("(");
+                    self.align_start(align_kind::EXPRESSION);
+                    self.duplicated_token(&connection.interface_target);
+                    self.align_finish(align_kind::EXPRESSION);
+                    self.str(")");
+                } else {
+                    self.duplicated_token(&connection.interface_target);
+                }
+
+                self.clear_adjust_line();
+            }
+
+            self.aligner.enable_auto_finish();
+            self.src_line = src_line;
+        } else if let Some(ref x) = arg.argument_item_opt {
+            self.str(".");
+            self.align_start(align_kind::IDENTIFIER);
+            // Directly emittion because named argument can't be resolved and emitted by symbol_string
+            let token = VerylToken::new(arg.argument_expression.expression.first());
+            self.token(&token);
+            self.align_finish(align_kind::IDENTIFIER);
+            self.space(1);
+            self.str("(");
+            self.align_start(align_kind::EXPRESSION);
+            self.expression(&x.expression);
+            self.align_finish(align_kind::EXPRESSION);
+            self.str(")");
+        } else {
+            self.argument_expression(&arg.argument_expression);
+        }
     }
 
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
@@ -2630,91 +2700,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ArgumentList'
     fn argument_list(&mut self, arg: &ArgumentList) {
-        self.argument_item(&arg.argument_item);
-        for x in &arg.argument_list_list {
+        self.emit_argument_item(&arg.argument_item, 0);
+        for (i, x) in arg.argument_list_list.iter().enumerate() {
             self.comma(&x.comma);
             if *self.in_named_argument.last().unwrap() {
                 self.newline();
             } else {
                 self.space(1);
             }
-            self.argument_item(&x.argument_item);
-        }
-    }
-
-    /// Semantic action for non-terminal 'ArgumentItem'
-    fn argument_item(&mut self, arg: &ArgumentItem) {
-        let modport_entry =
-            if let Some(identifier) = arg.argument_expression.expression.unwrap_identifier() {
-                if let Some(table) = self.modport_connections_table.as_mut() {
-                    if self.in_function_call.is_empty() || arg.argument_item_opt.is_some() {
-                        table.remove(identifier.identifier())
-                    } else {
-                        table.pop_front()
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-        if let Some(x) = modport_entry {
-            let src_line = self.src_line;
-            self.aligner.disable_auto_finish();
-            self.clear_adjust_line();
-
-            for (i, connection) in x
-                .connections
-                .iter()
-                .flat_map(|x| x.connections.iter())
-                .enumerate()
-            {
-                if i > 0 {
-                    self.str(",");
-                    if *self.in_named_argument.last().unwrap() {
-                        self.newline();
-                    } else {
-                        self.space(1);
-                    }
-                }
-
-                if arg.argument_item_opt.is_some() {
-                    self.str(".");
-                    self.align_start(align_kind::IDENTIFIER);
-                    self.duplicated_token(&connection.port_target);
-                    self.align_finish(align_kind::IDENTIFIER);
-                    self.space(1);
-
-                    self.str("(");
-                    self.align_start(align_kind::EXPRESSION);
-                    self.duplicated_token(&connection.interface_target);
-                    self.align_finish(align_kind::EXPRESSION);
-                    self.str(")");
-                } else {
-                    self.duplicated_token(&connection.interface_target);
-                }
-
-                self.clear_adjust_line();
-            }
-
-            self.aligner.enable_auto_finish();
-            self.src_line = src_line;
-        } else if let Some(ref x) = arg.argument_item_opt {
-            self.str(".");
-            self.align_start(align_kind::IDENTIFIER);
-            // Directly emittion because named argument can't be resolved and emitted by symbol_string
-            let token = VerylToken::new(arg.argument_expression.expression.first());
-            self.token(&token);
-            self.align_finish(align_kind::IDENTIFIER);
-            self.space(1);
-            self.str("(");
-            self.align_start(align_kind::EXPRESSION);
-            self.expression(&x.expression);
-            self.align_finish(align_kind::EXPRESSION);
-            self.str(")");
-        } else {
-            self.argument_expression(&arg.argument_expression);
+            self.emit_argument_item(&x.argument_item, i + 1);
         }
     }
 
@@ -4292,9 +4286,8 @@ impl VerylWalker for Emitter {
             &generic_map,
             &namespace,
         );
-        if !modport_connections_table.is_empty() {
-            self.modport_connections_table = Some(modport_connections_table);
-        }
+        self.modport_connections_tables
+            .push(modport_connections_table);
 
         let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
         let single_line =
@@ -4348,7 +4341,7 @@ impl VerylWalker for Emitter {
             self.single_line_finish();
         }
 
-        self.modport_connections_table = None;
+        self.modport_connections_tables.pop();
     }
 
     /// Semantic action for non-terminal 'InstParameter'
@@ -4446,7 +4439,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstPortItem'
     fn inst_port_item(&mut self, arg: &InstPortItem) {
-        let modport_entry = if let Some(table) = self.modport_connections_table.as_mut() {
+        let modport_entry = if let Some(table) = self.modport_connections_tables.last_mut() {
             table.remove(&arg.identifier.identifier_token)
         } else {
             None

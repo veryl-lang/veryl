@@ -1215,6 +1215,18 @@ package PkgA::<W: u32> {
     ) {
         a <> b;
     }
+
+    function FuncB (
+        enable: input   bool                   ,
+        a     : modport InterfaceA::<W>::master,
+    ) {
+        if enable {
+            a.valid   = 1;
+            a.command = 1;
+        } else {
+            a <> 0;
+        }
+    }
 }
 module ModuleA {
     inst a_if: InterfaceA::<8>;
@@ -1235,6 +1247,19 @@ module ModuleA {
 
     always_comb {
         PkgA::<8>::FuncA(a: c_if, b: d_if);
+    }
+
+    inst e_if: InterfaceA::<8>;
+
+    connect e_if.slave  <> 0;
+
+    function get_enable(v: input u32) -> bool {
+        return v != 0;
+    }
+
+    let enable: u32 = 0;
+    always_comb {
+        PkgA::<8>::FuncB(get_enable(enable), e_if);
     }
 }
 "#;
@@ -1268,6 +1293,21 @@ package prj___PkgA__8;
         __b_ready   = __a_ready;
         __a_valid   = __b_valid;
         __a_command = __b_command;
+    endfunction
+
+    function automatic void FuncB(
+        input  var logic         enable     ,
+        input  var logic         __a_ready  ,
+        output var logic         __a_valid  ,
+        output var logic [8-1:0] __a_command
+    ) ;
+        if (enable) begin
+            __a_valid   = 1;
+            __a_command = 1;
+        end else begin
+            __a_valid   = 0;
+            __a_command = 0;
+        end
     endfunction
 endpackage
 module prj_ModuleA;
@@ -1306,6 +1346,23 @@ module prj_ModuleA;
             .__b_valid   (d_if.valid  ),
             .__b_command (d_if.command)
         );
+    end
+
+    prj___InterfaceA__8 e_if ();
+
+    always_comb begin
+        e_if.ready = 0;
+    end
+
+    function automatic logic get_enable(
+        input var int unsigned v
+    ) ;
+        return v != 0;
+    endfunction
+
+    int unsigned enable; always_comb enable = 0;
+    always_comb begin
+        prj___PkgA__8::FuncB(get_enable(enable), e_if.ready, e_if.valid, e_if.command);
     end
 endmodule
 //# sourceMappingURL=test.sv.map
