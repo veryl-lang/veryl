@@ -1063,6 +1063,38 @@ fn mismatch_function_arity() {
         errors[0],
         AnalyzerError::MismatchFunctionArity { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA(a: input u32) {
+        }
+        always_comb {
+            FuncA(0, 1);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        function FuncA(a: input u32) {
+        }
+        always_comb {
+            FuncA();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
 }
 
 #[test]
