@@ -1210,10 +1210,10 @@ interface InterfaceA::<W: u32> {
 }
 package PkgA::<W: u32> {
     function FuncA (
-        a_if: modport InterfaceA::<W>::master,
-        b_if: modport InterfaceA::<W>::slave ,
+        a: modport InterfaceA::<W>::master,
+        b: modport InterfaceA::<W>::slave ,
     ) {
-        a_if <> b_if;
+        a <> b;
     }
 }
 module ModuleA {
@@ -1225,6 +1225,16 @@ module ModuleA {
 
     always_comb {
         PkgA::<8>::FuncA(a_if, b_if);
+    }
+
+    inst c_if: InterfaceA::<8>;
+    inst d_if: InterfaceA::<8>;
+
+    connect c_if.slave  <> 0;
+    connect d_if.master <> 0;
+
+    always_comb {
+        PkgA::<8>::FuncA(a: c_if, b: d_if);
     }
 }
 "#;
@@ -1248,16 +1258,16 @@ module ModuleA {
 endinterface
 package prj___PkgA__8;
     function automatic void FuncA(
-        input  var logic         __a_if_ready  ,
-        output var logic         __a_if_valid  ,
-        output var logic [8-1:0] __a_if_command,
-        output var logic         __b_if_ready  ,
-        input  var logic         __b_if_valid  ,
-        input  var logic [8-1:0] __b_if_command
+        input  var logic         __a_ready  ,
+        output var logic         __a_valid  ,
+        output var logic [8-1:0] __a_command,
+        output var logic         __b_ready  ,
+        input  var logic         __b_valid  ,
+        input  var logic [8-1:0] __b_command
     ) ;
-        __b_if_ready   = __a_if_ready;
-        __a_if_valid   = __b_if_valid;
-        __a_if_command = __b_if_command;
+        __b_ready   = __a_ready;
+        __a_valid   = __b_valid;
+        __a_command = __b_command;
     endfunction
 endpackage
 module prj_ModuleA;
@@ -1275,6 +1285,28 @@ module prj_ModuleA;
     always_comb begin
         prj___PkgA__8::FuncA(a_if.ready, a_if.valid, a_if.command, b_if.ready, b_if.valid, b_if.command);
     end
+
+    prj___InterfaceA__8 c_if ();
+    prj___InterfaceA__8 d_if ();
+
+    always_comb begin
+        c_if.ready = 0;
+    end
+    always_comb begin
+        d_if.valid   = 0;
+        d_if.command = 0;
+    end
+
+    always_comb begin
+        prj___PkgA__8::FuncA(
+            .__a_ready   (c_if.ready  ),
+            .__a_valid   (c_if.valid  ),
+            .__a_command (c_if.command),
+            .__b_ready   (d_if.ready  ),
+            .__b_valid   (d_if.valid  ),
+            .__b_command (d_if.command)
+        );
+    end
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -1288,6 +1320,7 @@ endmodule
         emit(&metadata, code)
     };
 
+    println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
 

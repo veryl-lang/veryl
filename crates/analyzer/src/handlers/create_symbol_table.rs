@@ -805,6 +805,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.identifier_factor_names
+                    .push(*arg.expression_identifier.clone());
+            }
+            HandlerPoint::After => {
+                self.identifier_factor_names.pop();
+            }
+        }
+        Ok(())
+    }
+
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
