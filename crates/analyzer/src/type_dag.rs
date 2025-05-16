@@ -10,6 +10,7 @@ use daggy::{Dag, Walker, petgraph::algo};
 use std::cell::RefCell;
 use veryl_parser::veryl_token::Token;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum TypeDagCandidate {
     Path {
