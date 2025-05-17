@@ -1358,6 +1358,8 @@ impl Emitter {
 
         let assign_operator = if self.in_always_ff { "<=" } else { "=" };
 
+        self.str("begin");
+        self.newline_push();
         if let Some((ports, _)) = operation.get_ports_with_expression() {
             for (i, (port, _)) in ports.iter().enumerate() {
                 if i > 0 {
@@ -1439,6 +1441,8 @@ impl Emitter {
 
             self.force_duplicated = false;
         }
+        self.newline_pop();
+        self.str("end");
 
         true
     }
