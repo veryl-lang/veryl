@@ -74,18 +74,24 @@ module veryl_testcase_Module80A (
     veryl_testcase_Interface80C bus_if ();
 
     always_comb begin
-        command_if.command_ready = bus_if.command_ready;
-        bus_if.command_valid     = command_if.command_valid;
-        bus_if.command           = command_if.command;
-        bus_if.status_ready      = status_if.status_ready;
-        status_if.status_valid   = bus_if.status_valid;
-        status_if.status         = veryl_testcase_Package80::Status'(bus_if.status);
+        begin
+            command_if.command_ready = bus_if.command_ready;
+            bus_if.command_valid     = command_if.command_valid;
+            bus_if.command           = command_if.command;
+        end
+        begin
+            bus_if.status_ready      = status_if.status_ready;
+            status_if.status_valid   = bus_if.status_valid;
+            status_if.status         = veryl_testcase_Package80::Status'(bus_if.status);
+        end
     end
 
     always_comb begin
-        bus_if.command_ready = 0;
-        bus_if.status_valid  = 0;
-        bus_if.status        = 0;
+        begin
+            bus_if.command_ready = 0;
+            bus_if.status_valid  = 0;
+            bus_if.status        = 0;
+        end
     end
 endmodule
 
