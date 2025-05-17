@@ -6,7 +6,9 @@ use veryl_analyzer::evaluator::Evaluator;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::Type as SymType;
-use veryl_analyzer::symbol::{GenericMap, Port, Symbol, SymbolKind, VariableProperty};
+use veryl_analyzer::symbol::{
+    GenericMap, GenericTables, Port, Symbol, SymbolKind, VariableProperty,
+};
 use veryl_analyzer::symbol_table;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait::*;
@@ -329,7 +331,9 @@ impl ExpandedModportPortTable {
                 continue;
             }
 
-            let Some(interface_symbol) = resolve_interface(&port, namespace, generic_map) else {
+            let Some((interface_symbol, interface_tables)) =
+                resolve_interface(&port, namespace, generic_map)
+            else {
                 unreachable!()
             };
 
@@ -337,7 +341,12 @@ impl ExpandedModportPortTable {
             let array_size = evaluate_array_size(&property.r#type.array, generic_map);
             let array_index = expand_array_index(&array_size, &[]);
             let interface_name = {
-                let text = symbol_string(namespace_token, &interface_symbol, context);
+                let text = symbol_string(
+                    namespace_token,
+                    &interface_symbol,
+                    &interface_tables,
+                    context,
+                );
                 port.token.replace(&text)
             };
 
@@ -480,7 +489,7 @@ fn resolve_interface(
     port: &Port,
     namespace: &Namespace,
     generic_map: &[GenericMap],
-) -> Option<Symbol> {
+) -> Option<(Symbol, GenericTables)> {
     let property = port.property();
     let (user_defined, _) = property.r#type.trace_user_defined(namespace)?;
 
@@ -488,5 +497,5 @@ fn resolve_interface(
     path.paths.pop(); // remove modport path
 
     let (result, _) = resolve_generic_path(&path, namespace, Some(&generic_map.to_vec()));
-    result.ok().map(|x| x.found)
+    result.ok().map(|x| (x.found, x.generic_tables))
 }

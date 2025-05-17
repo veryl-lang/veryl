@@ -903,13 +903,18 @@ interface InterfaceC::<PKG: ProtPkg> {
         command: output,
     }
 }
+alias interface AliasInterfaceC = InterfaceC::<Pkg::<2>>;
 module ModuleC (
     a_if: modport InterfaceC::<Pkg::<2>>::mp,
+    b_if: modport AliasInterfaceC::mp       ,
 ) {
-    inst b_if: InterfaceC::<Pkg::<2>>;
+    inst c_if: InterfaceC::<Pkg::<2>>;
+    inst d_if: AliasInterfaceC;
 
     connect a_if    <> 0;
-    connect b_if.mp <> 0;
+    connect b_if    <> 0;
+    connect c_if.mp <> 0;
+    connect d_if.mp <> 0;
 }
 "#;
 
@@ -931,10 +936,14 @@ interface prj___InterfaceC____Pkg__2;
         output command
     );
 endinterface
+
+
 module prj_ModuleC (
-    prj___InterfaceC____Pkg__2.mp a_if
+    prj___InterfaceC____Pkg__2.mp a_if,
+    prj___InterfaceC____Pkg__2.mp b_if
 );
-    prj___InterfaceC____Pkg__2 b_if ();
+    prj___InterfaceC____Pkg__2 c_if ();
+    prj___InterfaceC____Pkg__2 d_if ();
 
     always_comb begin
         a_if.valid   = 0;
@@ -943,6 +952,14 @@ module prj_ModuleC (
     always_comb begin
         b_if.valid   = 0;
         b_if.command = prj___Pkg__2::Command'(0);
+    end
+    always_comb begin
+        c_if.valid   = 0;
+        c_if.command = prj___Pkg__2::Command'(0);
+    end
+    always_comb begin
+        d_if.valid   = 0;
+        d_if.command = prj___Pkg__2::Command'(0);
     end
 endmodule
 //# sourceMappingURL=test.sv.map
@@ -957,6 +974,7 @@ endmodule
         emit(&metadata, code)
     };
 
+    println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
 
