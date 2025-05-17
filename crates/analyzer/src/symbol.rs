@@ -52,10 +52,13 @@ impl DocComment {
     }
 }
 
+pub type GenericTable = HashMap<StrId, GenericSymbolPath>;
+pub type GenericTables = HashMap<Namespace, GenericTable>;
+
 #[derive(Clone, Debug, Default)]
 pub struct GenericMap {
     pub id: Option<SymbolId>,
-    pub map: HashMap<StrId, GenericSymbolPath>,
+    pub map: GenericTable,
 }
 
 impl GenericMap {
@@ -359,10 +362,7 @@ impl Symbol {
         ret
     }
 
-    pub fn generic_table(
-        &self,
-        arguments: &[GenericSymbolPath],
-    ) -> HashMap<StrId, GenericSymbolPath> {
+    pub fn generic_table(&self, arguments: &[GenericSymbolPath]) -> GenericTable {
         let generic_parameters = self.generic_parameters();
         let mut ret = HashMap::default();
 
