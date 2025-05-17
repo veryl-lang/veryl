@@ -3,7 +3,7 @@ use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
 use crate::sv_system_function;
 use crate::symbol::{
-    Direction, DocComment, GenericBoundKind, Symbol, SymbolId, SymbolKind, TypeKind,
+    Direction, DocComment, GenericBoundKind, GenericTables, Symbol, SymbolId, SymbolKind, TypeKind,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
@@ -19,7 +19,7 @@ pub struct ResolveResult {
     pub found: Symbol,
     pub full_path: Vec<SymbolId>,
     pub imported: bool,
-    pub generic_tables: HashMap<Namespace, HashMap<StrId, GenericSymbolPath>>,
+    pub generic_tables: GenericTables,
 }
 
 #[derive(Clone, Debug)]
@@ -1002,7 +1002,7 @@ struct ResolveContext<'a> {
     full_path: Vec<SymbolId>,
     namespace: Namespace,
     generic_namespace_map: HashMap<StrId, StrId>,
-    generic_tables: HashMap<Namespace, HashMap<StrId, GenericSymbolPath>>,
+    generic_tables: GenericTables,
     inner: bool,
     other_prj: bool,
     sv_member: bool,
@@ -1019,7 +1019,7 @@ impl ResolveContext<'_> {
             full_path: vec![],
             namespace: namespace.clone(),
             generic_namespace_map: HashMap::default(),
-            generic_tables: HashMap::default(),
+            generic_tables: GenericTables::default(),
             inner: false,
             other_prj: false,
             sv_member: false,

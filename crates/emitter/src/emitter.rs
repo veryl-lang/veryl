@@ -11,7 +11,7 @@ use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
-    GenericMap, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
+    GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
@@ -1526,7 +1526,10 @@ impl Emitter {
         driver: Option<&Symbol>,
         driver_map: Option<&Vec<GenericMap>>,
     ) -> bool {
-        fn get_type_symbol(symbol: &Symbol, map: &Vec<GenericMap>) -> Option<Symbol> {
+        fn get_type_symbol(
+            symbol: &Symbol,
+            map: &Vec<GenericMap>,
+        ) -> Option<(Symbol, GenericTables)> {
             let r#type = symbol.kind.get_type();
             if r#type.is_none() || !r#type.unwrap().width.is_empty() {
                 return None;
@@ -1535,15 +1538,15 @@ impl Emitter {
             let user_defined = r#type.unwrap().get_user_defined()?;
             let (type_symbol, _) =
                 resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
-            type_symbol.ok().map(|x| x.found)
+            type_symbol.ok().map(|x| (x.found, x.generic_tables))
         }
 
-        let Some(target_type) = get_type_symbol(target, target_map) else {
+        let Some((target_type, target_tables)) = get_type_symbol(target, target_map) else {
             return false;
         };
 
         if let (Some(driver), Some(driver_map)) = (driver, driver_map) {
-            if let Some(driver_type) = get_type_symbol(driver, driver_map) {
+            if let Some((driver_type, _)) = get_type_symbol(driver, driver_map) {
                 if target_type.id == driver_type.id {
                     return false;
                 }
@@ -1557,7 +1560,7 @@ impl Emitter {
             in_direction_modport: false,
             generic_map: target_map.clone(),
         };
-        let text = symbol_string(token, &target_type, &context);
+        let text = symbol_string(token, &target_type, &target_tables, &context);
         self.str(&text);
         self.str("'(");
 
@@ -2226,7 +2229,12 @@ impl VerylWalker for Emitter {
             match self.resolve_scoped_idnetifier(arg) {
                 (Ok(symbol), _) => {
                     let context: SymbolContext = self.into();
-                    let text = symbol_string(arg.identifier(), &symbol.found, &context);
+                    let text = symbol_string(
+                        arg.identifier(),
+                        &symbol.found,
+                        &symbol.generic_tables,
+                        &context,
+                    );
                     self.identifier(&Identifier {
                         identifier_token: arg.identifier().replace(&text),
                     });
@@ -4895,8 +4903,12 @@ impl VerylWalker for Emitter {
                 self.emit_generic_instance_name(&arg.identifier.identifier_token, map, false);
             } else {
                 let context: SymbolContext = self.into();
-                self.str(&namespace_string(&symbol.found.namespace, &context));
-                self.identifier(&arg.identifier);
+                let text = format!(
+                    "{}{}",
+                    namespace_string(&symbol.found.namespace, &symbol.generic_tables, &context),
+                    arg.identifier.identifier_token
+                );
+                self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
             let file_scope_import = self.file_scope_import.clone();
             if !file_scope_import.is_empty() {
@@ -4978,8 +4990,12 @@ impl VerylWalker for Emitter {
                 self.emit_generic_instance_name(&arg.identifier.identifier_token, map, false);
             } else {
                 let context: SymbolContext = self.into();
-                self.str(&namespace_string(&symbol.found.namespace, &context));
-                self.identifier(&arg.identifier);
+                let text = format!(
+                    "{}{}",
+                    namespace_string(&symbol.found.namespace, &symbol.generic_tables, &context),
+                    arg.identifier.identifier_token
+                );
+                self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
             let file_scope_import = self.file_scope_import.clone();
             if !file_scope_import.is_empty() {
@@ -5179,8 +5195,12 @@ impl VerylWalker for Emitter {
                 self.emit_generic_instance_name(&arg.identifier.identifier_token, map, false);
             } else {
                 let context: SymbolContext = self.into();
-                self.str(&namespace_string(&symbol.found.namespace, &context));
-                self.identifier(&arg.identifier);
+                let text = format!(
+                    "{}{}",
+                    namespace_string(&symbol.found.namespace, &symbol.generic_tables, &context),
+                    arg.identifier.identifier_token
+                );
+                self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
             for (i, x) in arg.package_declaration_list.iter().enumerate() {
@@ -5390,7 +5410,11 @@ impl From<&mut Emitter> for SymbolContext {
     }
 }
 
-fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
+fn namespace_string(
+    namespace: &Namespace,
+    generic_tables: &GenericTables,
+    context: &SymbolContext,
+) -> String {
     let mut ret = String::from("");
     let mut resolve_namespace = Namespace::new();
     let mut in_sv_namespace = false;
@@ -5416,21 +5440,10 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
         } else {
             let symbol_path = SymbolPath::new(&[*path]);
             if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
-                let text = if let SymbolKind::GenericInstance(ref x) = symbol.found.kind {
-                    let base = symbol_table::get(x.base).unwrap();
-                    let separator =
-                        namespace_separator(&base, context.in_direction_modport, in_sv_namespace);
-                    if context.build_opt.shorten_mangled_name {
-                        let name = symbol
-                            .found
-                            .generic_maps()
-                            .first()
-                            .map(|x| x.name(false, true))
-                            .unwrap();
-                        format!("{}{}", name, separator)
-                    } else {
-                        format!("{}{}", path, separator)
-                    }
+                let text = if let SymbolKind::GenericInstance(_) = symbol.found.kind {
+                    generic_instance_namespace_string(&symbol.found, context)
+                } else if let Some(symbol) = get_generic_instance(&symbol.found, generic_tables) {
+                    generic_instance_namespace_string(&symbol, context)
                 } else {
                     let separator = namespace_separator(
                         &symbol.found,
@@ -5451,6 +5464,25 @@ fn namespace_string(namespace: &Namespace, context: &SymbolContext) -> String {
     ret.replace("$std_", "__std_")
 }
 
+fn generic_instance_namespace_string(symbol: &Symbol, context: &SymbolContext) -> String {
+    let SymbolKind::GenericInstance(ref inst) = symbol.kind else {
+        unreachable!()
+    };
+
+    let base = symbol_table::get(inst.base).unwrap();
+    let separator = namespace_separator(&base, context.in_direction_modport, false);
+    if context.build_opt.shorten_mangled_name {
+        let name = symbol
+            .generic_maps()
+            .first()
+            .map(|x| x.name(false, true))
+            .unwrap();
+        format!("{}{}", name, separator)
+    } else {
+        format!("{}{}", symbol.token, separator)
+    }
+}
+
 fn namespace_separator(
     symbol: &Symbol,
     in_direction_modport: bool,
@@ -5466,7 +5498,34 @@ fn namespace_separator(
     separator.to_string()
 }
 
-pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContext) -> String {
+fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Option<Symbol> {
+    let table = generic_tables.get(&symbol.inner_namespace())?;
+    let params = symbol.generic_parameters();
+    if params.is_empty() {
+        return None;
+    }
+
+    let mut path: GenericSymbolPath = (&symbol.token).into();
+    for (param, default_value) in &params {
+        let arg = if let Some(x) = table.get(param) {
+            x
+        } else {
+            default_value.default_value.as_ref().unwrap()
+        };
+        path.paths[0].arguments.push(arg.clone());
+    }
+
+    symbol_table::resolve((&path.mangled_path(), &symbol.namespace))
+        .ok()
+        .map(|x| x.found)
+}
+
+pub fn symbol_string(
+    token: &VerylToken,
+    symbol: &Symbol,
+    generic_tables: &GenericTables,
+    context: &SymbolContext,
+) -> String {
     let mut ret = String::new();
     let namespace = namespace_table::get(token.token.id).unwrap();
 
@@ -5479,7 +5538,11 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
 
     match &symbol.kind {
         SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
-            ret.push_str(&namespace_string(&symbol.namespace, context));
+            ret.push_str(&namespace_string(
+                &symbol.namespace,
+                generic_tables,
+                context,
+            ));
             ret.push_str(&token_text);
         }
         SymbolKind::Parameter(_)
@@ -5493,7 +5556,11 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
             if visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
-                ret.push_str(&namespace_string(&symbol.namespace, context));
+                ret.push_str(&namespace_string(
+                    &symbol.namespace,
+                    generic_tables,
+                    context,
+                ));
                 ret.push_str(&token_text);
             }
         }
@@ -5503,18 +5570,26 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
 
             // if enum definition is not visible, explicit namespace is required
             if !namespace.included(&enum_namespace) {
-                ret.push_str(&namespace_string(&enum_namespace, context));
+                ret.push_str(&namespace_string(&enum_namespace, generic_tables, context));
             }
             ret.push_str(&x.prefix);
             ret.push('_');
             ret.push_str(&token_text);
         }
         SymbolKind::Modport(_) => {
-            ret.push_str(&namespace_string(&symbol.namespace, context));
+            ret.push_str(&namespace_string(
+                &symbol.namespace,
+                generic_tables,
+                context,
+            ));
             ret.push_str(&token_text);
         }
         SymbolKind::SystemVerilog => {
-            ret.push_str(&namespace_string(&symbol.namespace, context));
+            ret.push_str(&namespace_string(
+                &symbol.namespace,
+                generic_tables,
+                context,
+            ));
             ret.push_str(&token_text);
         }
         SymbolKind::GenericInstance(x) => {
@@ -5525,7 +5600,11 @@ pub fn symbol_string(token: &VerylToken, symbol: &Symbol, context: &SymbolContex
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
             if !visible | top_level {
-                ret.push_str(&namespace_string(&symbol.namespace, context));
+                ret.push_str(&namespace_string(
+                    &symbol.namespace,
+                    generic_tables,
+                    context,
+                ));
             }
             if context.build_opt.shorten_mangled_name {
                 let name = symbol
