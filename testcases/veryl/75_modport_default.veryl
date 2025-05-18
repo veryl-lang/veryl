@@ -4,6 +4,12 @@ interface Interface75 {
     var c: logic;
     var d: logic;
 
+    function Func75 () -> logic {
+        var e: logic;
+        e = 0;
+        return e;
+    }
+
     modport master {
         a: input ,
         b: input ,

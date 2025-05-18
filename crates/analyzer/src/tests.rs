@@ -3860,6 +3860,31 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
+    interface InterfaceA {
+        var a: logic;
+
+        function Func() -> logic {
+            var b: logic;
+            b = 0;
+            return b;
+        }
+
+        modport mp {
+            ..input
+        }
+    }
+    module ModuleA (
+        a_if: modport InterfaceA::mp,
+    ) {
+        let _a: logic = a_if.a;
+        let _b: logic = a_if.b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+
+    let code = r#"
     module ModuleA {
         let _a: logic = 0;
         let _b: logic = _a._a;

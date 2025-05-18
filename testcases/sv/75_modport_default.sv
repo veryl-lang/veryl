@@ -4,6 +4,12 @@ interface veryl_testcase_Interface75;
     logic c;
     logic d;
 
+    function automatic logic Func75() ;
+        logic e;
+        e = 0;
+        return e;
+    endfunction
+
     modport master (
         input  a,
         input  b,

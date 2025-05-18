@@ -459,12 +459,19 @@ impl CreateSymbolTable {
             }
         }
 
+        let interface_namesapce = symbol_table::get(interface_id)
+            .map(|x| x.inner_namespace())
+            .unwrap();
         for id in &self.modport_ids.clone() {
             let mut mp = symbol_table::get(*id).unwrap();
             if let SymbolKind::Modport(ref x) = mp.kind {
                 // add default members
                 let mut members = x.members.clone();
-                members.append(&mut self.get_modport_default_members(&mp, &directions));
+                members.append(&mut self.get_modport_default_members(
+                    &mp,
+                    &interface_namesapce,
+                    &directions,
+                ));
 
                 let property = ModportProperty {
                     interface: interface_id,
@@ -481,6 +488,7 @@ impl CreateSymbolTable {
     fn get_modport_default_members(
         &mut self,
         mp: &Symbol,
+        interface_namesapce: &Namespace,
         directions: &HashMap<(StrId, StrId), SymDirection>,
     ) -> Vec<SymbolId> {
         let mut ret = Vec::new();
@@ -495,7 +503,16 @@ impl CreateSymbolTable {
                 let mut default_members: Vec<_> = self
                     .variable_ids
                     .iter()
-                    .filter(|(x, _)| !explicit_members.contains(x))
+                    .filter(|(x, y)| {
+                        !explicit_members.contains(x)
+                            && symbol_table::get(**y)
+                                .map(|x| {
+                                    // member variables should belong to
+                                    // the interface directly
+                                    x.namespace.matched(interface_namesapce)
+                                })
+                                .unwrap()
+                    })
                     .collect();
 
                 // Sort by SymbolId to keep inserting order as the same as definition order
