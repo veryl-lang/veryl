@@ -856,14 +856,18 @@ module prj_ModuleB (
     prj_InterfaceB if_1 ();
 
     always_comb begin
-        if_1.a = if_0.a;
-        if_0.b = if_1.b;
-        if_1.c = if_0.c;
-        if_0.d = if_1.d;
+        begin
+            if_1.a = if_0.a;
+            if_0.b = if_1.b;
+            if_1.c = if_0.c;
+            if_0.d = if_1.d;
+        end
     end
     always_comb begin
-        if_1.b = '0;
-        if_1.d = '0;
+        begin
+            if_1.b = '0;
+            if_1.d = '0;
+        end
     end
 endmodule
 //# sourceMappingURL=test.sv.map
@@ -1308,9 +1312,11 @@ package prj___PkgA__8;
         input  var logic         __b_valid  ,
         input  var logic [8-1:0] __b_command
     ) ;
-        __b_ready   = __a_ready;
-        __a_valid   = __b_valid;
-        __a_command = __b_command;
+        begin
+            __b_ready   = __a_ready;
+            __a_valid   = __b_valid;
+            __a_command = __b_command;
+        end
     endfunction
 
     function automatic void FuncB(
@@ -1323,8 +1329,10 @@ package prj___PkgA__8;
             __a_valid   = 1;
             __a_command = 1;
         end else begin
-            __a_valid   = 0;
-            __a_command = 0;
+            begin
+                __a_valid   = 0;
+                __a_command = 0;
+            end
         end
     endfunction
 endpackage
