@@ -425,6 +425,7 @@ impl SymbolTable {
                     | SymbolKind::ProtoConst(_)
                     | SymbolKind::StructMember(_)
                     | SymbolKind::UnionMember(_)
+                    | SymbolKind::GenericParameter(_)
             ),
             SymbolKind::Parameter(_)
             | SymbolKind::ProtoConst(_)
