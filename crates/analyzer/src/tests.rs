@@ -3591,6 +3591,22 @@ fn invisible_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        struct Foo {
+            foo: logic,
+        }
+        function Func::<foo: Foo>() -> logic {
+            return foo.foo;
+        }
+        const FOO: Foo = Foo'{ foo: 0 };
+        let _foo: logic = Func::<FOO>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
