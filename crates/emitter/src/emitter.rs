@@ -1533,7 +1533,7 @@ impl Emitter {
         fn get_type_symbol(
             symbol: &Symbol,
             map: &Vec<GenericMap>,
-        ) -> Option<(Symbol, GenericTables)> {
+        ) -> Option<(Symbol, Vec<SymbolId>, GenericTables)> {
             let r#type = symbol.kind.get_type();
             if r#type.is_none() || !r#type.unwrap().width.is_empty() {
                 return None;
@@ -1542,15 +1542,18 @@ impl Emitter {
             let user_defined = r#type.unwrap().get_user_defined()?;
             let (type_symbol, _) =
                 resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
-            type_symbol.ok().map(|x| (x.found, x.generic_tables))
+            type_symbol
+                .ok()
+                .map(|x| (x.found, x.full_path, x.generic_tables))
         }
 
-        let Some((target_type, target_tables)) = get_type_symbol(target, target_map) else {
+        let Some((target_type, target_path, target_tables)) = get_type_symbol(target, target_map)
+        else {
             return false;
         };
 
         if let (Some(driver), Some(driver_map)) = (driver, driver_map) {
-            if let Some((driver_type, _)) = get_type_symbol(driver, driver_map) {
+            if let Some((driver_type, _, _)) = get_type_symbol(driver, driver_map) {
                 if target_type.id == driver_type.id {
                     return false;
                 }
@@ -1564,7 +1567,7 @@ impl Emitter {
             in_direction_modport: false,
             generic_map: target_map.clone(),
         };
-        let text = symbol_string(token, &target_type, &target_tables, &context);
+        let text = symbol_string(token, &target_type, &target_path, &target_tables, &context);
         self.str(&text);
         self.str("'(");
 
@@ -2236,6 +2239,7 @@ impl VerylWalker for Emitter {
                     let text = symbol_string(
                         arg.identifier(),
                         &symbol.found,
+                        &symbol.full_path,
                         &symbol.generic_tables,
                         &context,
                     );
@@ -5527,6 +5531,7 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
 pub fn symbol_string(
     token: &VerylToken,
     symbol: &Symbol,
+    full_path: &[SymbolId],
     generic_tables: &GenericTables,
     context: &SymbolContext,
 ) -> String {
@@ -5643,10 +5648,23 @@ pub fn symbol_string(
                 ret.push_str(x);
             }
         }
+        SymbolKind::StructMember(_) | SymbolKind::UnionMember(_) => {
+            // for this case, struct member/union member is given as generic argument
+            for x in full_path
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| (i + 1) < full_path.len())
+                .map(|(_, id)| symbol_table::get(*id).unwrap())
+                .filter(|x| !matches!(x.kind, SymbolKind::Namespace | SymbolKind::Package(_)))
+            {
+                let text = symbol_string(token, &x, &[], &GenericTables::default(), context);
+                ret.push_str(&text);
+                ret.push('.');
+            }
+            ret.push_str(&token_text);
+        }
         SymbolKind::Instance(_)
         | SymbolKind::Block
-        | SymbolKind::StructMember(_)
-        | SymbolKind::UnionMember(_)
         | SymbolKind::ProtoConst(_)
         | SymbolKind::ProtoTypeDef
         | SymbolKind::ProtoFunction(_)

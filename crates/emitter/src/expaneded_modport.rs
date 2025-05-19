@@ -7,7 +7,7 @@ use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::Type as SymType;
 use veryl_analyzer::symbol::{
-    GenericMap, GenericTables, Port, Symbol, SymbolKind, VariableProperty,
+    GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, VariableProperty,
 };
 use veryl_analyzer::symbol_table;
 use veryl_parser::resource_table::StrId;
@@ -331,7 +331,7 @@ impl ExpandedModportPortTable {
                 continue;
             }
 
-            let Some((interface_symbol, interface_tables)) =
+            let Some((interface_symbol, interface_path, interface_tables)) =
                 resolve_interface(&port, namespace, generic_map)
             else {
                 unreachable!()
@@ -344,6 +344,7 @@ impl ExpandedModportPortTable {
                 let text = symbol_string(
                     namespace_token,
                     &interface_symbol,
+                    &interface_path,
                     &interface_tables,
                     context,
                 );
@@ -489,7 +490,7 @@ fn resolve_interface(
     port: &Port,
     namespace: &Namespace,
     generic_map: &[GenericMap],
-) -> Option<(Symbol, GenericTables)> {
+) -> Option<(Symbol, Vec<SymbolId>, GenericTables)> {
     let property = port.property();
     let (user_defined, _) = property.r#type.trace_user_defined(namespace)?;
 
@@ -497,5 +498,7 @@ fn resolve_interface(
     path.paths.pop(); // remove modport path
 
     let (result, _) = resolve_generic_path(&path, namespace, Some(&generic_map.to_vec()));
-    result.ok().map(|x| (x.found, x.generic_tables))
+    result
+        .ok()
+        .map(|x| (x.found, x.full_path, x.generic_tables))
 }

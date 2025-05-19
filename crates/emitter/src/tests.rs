@@ -1643,3 +1643,118 @@ endmodule
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn struct_member_as_generic_arg() {
+    let code = r#"
+module ModuleA {
+    struct Foo {
+        foo: logic,
+    }
+    struct Bar {
+        bar: Foo,
+    }
+    struct Baz {
+        baz: Bar,
+    }
+
+    const QUX: Baz = Baz'{ baz: Bar'{ bar: Foo'{ foo: 0 } } };
+
+    function Func::<bar: Bar> -> logic {
+        return bar.bar.foo;
+    }
+
+    let _a: logic = Func::<QUX.baz>();
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    typedef struct packed {
+        logic foo;
+    } Foo;
+    typedef struct packed {
+        Foo bar;
+    } Bar;
+    typedef struct packed {
+        Bar baz;
+    } Baz;
+
+    localparam Baz QUX = '{baz: '{bar: '{foo: 0}}};
+
+    function automatic logic __Func__QUX_baz;
+        return QUX.baz.bar.foo;
+    endfunction
+
+    logic _a; always_comb _a = __Func__QUX_baz();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+package Pkg {
+    struct Foo {
+        foo: logic,
+    }
+    struct Bar {
+        bar: Foo,
+    }
+    struct Baz {
+        baz: Bar,
+    }
+
+    const QUX: Baz = Baz'{ baz: Bar'{ bar: Foo'{ foo: 0 } } };
+}
+module ModuleB {
+    function Func::<bar: Pkg::Bar> -> logic {
+        return bar.bar.foo;
+    }
+    let _a: logic = Func::<Pkg::QUX.baz>();
+}
+"#;
+
+    let expect = r#"package prj_Pkg;
+    typedef struct packed {
+        logic foo;
+    } Foo;
+    typedef struct packed {
+        Foo bar;
+    } Bar;
+    typedef struct packed {
+        Bar baz;
+    } Baz;
+
+    localparam Baz QUX = '{baz: '{bar: '{foo: 0}}};
+endpackage
+module prj_ModuleB;
+    function automatic logic __Func__Pkg_QUX_baz;
+        return prj_Pkg::QUX.baz.bar.foo;
+    endfunction
+    logic _a; always_comb _a = __Func__Pkg_QUX_baz();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
