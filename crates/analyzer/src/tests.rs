@@ -4878,6 +4878,39 @@ fn anonymous_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<W: u32> (
+        o_a: output logic<W>,
+    ) {
+        assign o_a = '0;
+    }
+    module ModuleB {
+        inst u: ModuleA::<8> (
+            o_a: _
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<W: u32> (
+        o_a: output logic<W>,
+    ) {
+        assign o_a = '0;
+    }
+    alias module AliasModule = ModuleA::<8>;
+    module ModuleB {
+        inst u: AliasModule (
+            o_a: _
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

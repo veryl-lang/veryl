@@ -1,5 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
-use crate::symbol::{Direction, Port, SymbolKind};
+use crate::symbol::{Direction, Port, Symbol, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use veryl_parser::ParolError;
@@ -29,6 +29,32 @@ impl Handler for CheckAnonymous {
     }
 }
 
+fn get_inst_ports(symbol: &Symbol, ports: &mut Vec<Port>) {
+    match &symbol.kind {
+        SymbolKind::Module(x) => ports.extend(x.ports.clone()),
+        SymbolKind::ProtoModule(x) => ports.extend(x.ports.clone()),
+        SymbolKind::AliasModule(x) => {
+            if let Ok(symbol) = symbol_table::resolve((&x.target.generic_path(), &symbol.namespace))
+            {
+                get_inst_ports(&symbol.found, ports);
+            }
+        }
+        SymbolKind::GenericParameter(x) => {
+            if let Some(proto) = x.bound.resolve_proto_bound(&symbol.namespace) {
+                if let Some(symbol) = proto.get_symbol() {
+                    get_inst_ports(&symbol, ports);
+                }
+            }
+        }
+        SymbolKind::GenericInstance(x) => {
+            if let Some(symbol) = symbol_table::get(x.base) {
+                get_inst_ports(&symbol, ports);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl VerylGrammarTrait for CheckAnonymous {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
@@ -49,20 +75,8 @@ impl VerylGrammarTrait for CheckAnonymous {
             HandlerPoint::Before => {
                 if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
                     match symbol.found.kind {
-                        SymbolKind::Module(x) => self.inst_ports.extend(x.ports),
-                        SymbolKind::GenericParameter(x) => {
-                            if let Some(proto) =
-                                x.bound.resolve_proto_bound(&symbol.found.namespace)
-                            {
-                                if let Some(SymbolKind::ProtoModule(x)) =
-                                    proto.get_symbol().map(|x| x.kind)
-                                {
-                                    self.inst_ports.extend(x.ports);
-                                }
-                            }
-                        }
                         SymbolKind::SystemVerilog => self.inst_sv_module = true,
-                        _ => {}
+                        _ => get_inst_ports(&symbol.found, &mut self.inst_ports),
                     }
                 }
             }
