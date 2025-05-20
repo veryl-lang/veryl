@@ -11,10 +11,10 @@ module veryl_testcase_Module16;
             0: a = 1; // comment
             1: a = 1; // comment
             2: begin // comment
-                   a = 1; // comment
-                   a = 1;
-                   a = 1;
-               end //
+                a = 1; // comment
+                a = 1;
+                a = 1;
+            end //
             3, 4           : a = 1;
             [5:7          ]: a = 1;
             y - 1          : a = 1;
@@ -29,10 +29,10 @@ module veryl_testcase_Module16;
             z == 0: b = 1;
             z == 1: b = 1;
             z == 2: begin
-                        b = 1;
-                        b = 1;
-                        b = 1;
-                    end //
+                b = 1;
+                b = 1;
+                b = 1;
+            end //
             z == 3, z == 4                                 : b = 1;
             z == 4'd05, z == 5'd06, z == 5'd07, z == 5'd08,
             z == 5'd09, z == 4'd10, z == 4'd11, z == 4'd12,

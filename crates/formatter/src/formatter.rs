@@ -32,7 +32,6 @@ pub struct Formatter {
     single_line: Vec<()>,
     multi_line: Vec<()>,
     adjust_line: bool,
-    case_item_indent: Vec<usize>,
     in_scalar_type: bool,
     in_expression: Vec<()>,
     in_attribute: bool,
@@ -54,7 +53,6 @@ impl Default for Formatter {
             single_line: Vec::new(),
             multi_line: Vec::new(),
             adjust_line: false,
-            case_item_indent: Vec::new(),
             in_scalar_type: false,
             in_expression: Vec::new(),
             in_attribute: false,
@@ -84,10 +82,6 @@ impl Formatter {
         &self.string
     }
 
-    fn column(&self) -> usize {
-        self.string.len() - self.string.rfind('\n').unwrap_or(0)
-    }
-
     fn str(&mut self, x: &str) {
         match self.mode {
             Mode::Emit => {
@@ -105,8 +99,7 @@ impl Formatter {
             return;
         }
 
-        let indent_width =
-            self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0);
+        let indent_width = self.indent * self.format_opt.indent_width;
         if self.string.ends_with(&" ".repeat(indent_width)) {
             self.string.truncate(self.string.len() - indent_width);
         }
@@ -117,20 +110,8 @@ impl Formatter {
             return;
         }
 
-        let indent_width =
-            self.indent * self.format_opt.indent_width + self.case_item_indent.last().unwrap_or(&0);
+        let indent_width = self.indent * self.format_opt.indent_width;
         self.str(&" ".repeat(indent_width));
-    }
-
-    fn case_item_indent_push(&mut self, x: usize) {
-        self.case_item_indent.push(x);
-    }
-
-    fn case_item_indent_pop(&mut self) {
-        // cancel indent and re-indent after pop
-        self.unindent();
-        self.case_item_indent.pop();
-        self.indent();
     }
 
     fn newline_push(&mut self) {
@@ -1333,7 +1314,6 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'CaseItem'
     fn case_item(&mut self, arg: &CaseItem) {
-        let start = self.column();
         self.align_start(align_kind::EXPRESSION);
         match &*arg.case_item_group {
             CaseItemGroup::CaseCondition(x) => self.case_condition(&x.case_condition),
@@ -1345,9 +1325,7 @@ impl VerylWalker for Formatter {
         match &*arg.case_item_group0 {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::StatementBlock(x) => {
-                self.case_item_indent_push(self.column() - start);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent_pop();
             }
         }
     }
@@ -1386,7 +1364,6 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'SwitchItem'
     fn switch_item(&mut self, arg: &SwitchItem) {
-        let start = self.column();
         self.align_start(align_kind::EXPRESSION);
         match &*arg.switch_item_group {
             SwitchItemGroup::SwitchCondition(x) => self.switch_condition(&x.switch_condition),
@@ -1398,9 +1375,7 @@ impl VerylWalker for Formatter {
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
             SwitchItemGroup0::StatementBlock(x) => {
-                self.case_item_indent_push(self.column() - start);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent_pop();
             }
         }
     }
