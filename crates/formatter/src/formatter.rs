@@ -888,6 +888,7 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         self.newline_push();
+        self.align_reset();
         self.align_start(align_kind::EXPRESSION);
         self.case_condition(&arg.case_condition);
         self.align_finish(align_kind::EXPRESSION);
@@ -1301,6 +1302,7 @@ impl VerylWalker for Formatter {
         self.expression(&arg.expression);
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
+        self.align_reset();
         for (i, x) in arg.case_statement_list.iter().enumerate() {
             self.newline_list(i);
             self.case_item(&x.case_item);
