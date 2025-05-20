@@ -60,7 +60,6 @@ pub struct Emitter {
     single_line: Vec<()>,
     multi_line: Vec<()>,
     adjust_line: bool,
-    case_item_indent: Option<usize>,
     in_always_ff: bool,
     in_direction_modport: bool,
     in_direction_with_var: bool,
@@ -109,7 +108,6 @@ impl Default for Emitter {
             single_line: Vec::new(),
             multi_line: Vec::new(),
             adjust_line: false,
-            case_item_indent: None,
             in_always_ff: false,
             in_direction_modport: false,
             in_direction_with_var: false,
@@ -222,8 +220,7 @@ impl Emitter {
             return;
         }
 
-        let indent_width =
-            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0);
+        let indent_width = self.indent * self.format_opt.indent_width;
         if self.string.ends_with(&" ".repeat(indent_width)) {
             self.truncate(self.string.len() - indent_width);
         }
@@ -234,20 +231,8 @@ impl Emitter {
             return;
         }
 
-        let indent_width =
-            self.indent * self.format_opt.indent_width + self.case_item_indent.unwrap_or(0);
+        let indent_width = self.indent * self.format_opt.indent_width;
         self.str(&" ".repeat(indent_width));
-    }
-
-    fn case_item_indent_push(&mut self, x: usize) {
-        self.case_item_indent = Some(x);
-    }
-
-    fn case_item_indent_pop(&mut self) {
-        // cancel indent and re-indent after pop
-        self.unindent();
-        self.case_item_indent = None;
-        self.indent();
     }
 
     fn newline_push(&mut self) {
@@ -574,7 +559,6 @@ impl Emitter {
     }
 
     fn case_inside_item(&mut self, arg: &CaseItem, force_default: bool) {
-        let start = self.dst_column;
         self.align_start(align_kind::EXPRESSION);
         match &*arg.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
@@ -603,9 +587,7 @@ impl Emitter {
         match arg.case_item_group0.as_ref() {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::StatementBlock(x) => {
-                self.case_item_indent_push((self.dst_column - start) as usize);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent_pop();
             }
         }
     }
@@ -628,7 +610,6 @@ impl Emitter {
     }
 
     fn case_expanded_item(&mut self, lhs: &Expression, item: &CaseItem, force_default: bool) {
-        let start: u32 = self.dst_column;
         self.align_start(align_kind::EXPRESSION);
         match &*item.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
@@ -657,9 +638,7 @@ impl Emitter {
         match item.case_item_group0.as_ref() {
             CaseItemGroup0::Statement(x) => self.statement(&x.statement),
             CaseItemGroup0::StatementBlock(x) => {
-                self.case_item_indent_push((self.dst_column - start) as usize);
                 self.statement_block(&x.statement_block);
-                self.case_item_indent_pop();
             }
         }
     }
@@ -3398,7 +3377,6 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'SwitchItem'
     fn switch_item(&mut self, arg: &SwitchItem) {
-        let start = self.dst_column;
         self.align_start(align_kind::EXPRESSION);
         match &*arg.switch_item_group {
             SwitchItemGroup::SwitchCondition(x) => {
@@ -3420,12 +3398,10 @@ impl VerylWalker for Emitter {
         self.align_finish(align_kind::EXPRESSION);
         self.colon(&arg.colon);
         self.space(1);
-        self.case_item_indent_push((self.dst_column - start) as usize);
         match &*arg.switch_item_group0 {
             SwitchItemGroup0::Statement(x) => self.statement(&x.statement),
             SwitchItemGroup0::StatementBlock(x) => self.statement_block(&x.statement_block),
         }
-        self.case_item_indent_pop();
     }
 
     /// Semantic action for non-terminal 'Attribute'
