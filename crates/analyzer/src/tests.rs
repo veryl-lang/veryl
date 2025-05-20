@@ -4053,6 +4053,23 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        struct Foo {
+            foo: logic,
+        }
+    }
+    proto package ProtoPkgB {
+        const FOO: PkgA::Foo;
+    }
+    module ModuleA::<PKG: ProtoPkgB> {
+        let _foo: logic = PKG::FOO.foo;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
