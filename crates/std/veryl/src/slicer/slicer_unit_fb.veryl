@@ -1,0 +1,118 @@
+module slicer_unit_fb #(
+    param WIDTH       : u32  = 1    ,
+    param DISABLE_MBFF: bool = false,
+    param USE_RESET   : bool = false,
+) (
+    i_clk  : input  clock       ,
+    i_rst  : input  reset       ,
+    o_ready: output logic       ,
+    i_valid: input  logic       ,
+    i_data : input  logic<WIDTH>,
+    i_ready: input  logic       ,
+    o_valid: output logic       ,
+    o_data : output logic<WIDTH>,
+) {
+    var valid_0: logic;
+    var valid_1: logic;
+
+    always_comb {
+        o_ready = !valid_1;
+        o_valid = valid_0;
+    }
+
+    always_ff {
+        if_reset {
+            valid_0 = '0;
+        } else if !valid_0 || i_ready {
+            valid_0 = i_valid || valid_1;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            valid_1 = '0;
+        } else if i_ready {
+            valid_1 = '0;
+        } else if valid_0 && !valid_1 {
+            valid_1 = i_valid;
+        }
+    }
+
+    if !DISABLE_MBFF :g_data {
+        var data_0: logic<WIDTH>;
+        var data_1: logic<WIDTH>;
+
+        always_comb {
+            o_data = data_0;
+        }
+
+        if USE_RESET :g {
+            always_ff {
+                if_reset {
+                    data_0 = '0;
+                } else if !valid_0 || i_ready {
+                    if valid_1 {
+                        data_0 = data_1;
+                    } else if i_valid {
+                        data_0 = i_data;
+                    }
+                }
+            }
+        } else {
+            always_ff {
+                if !valid_0 || i_ready {
+                    if valid_1 {
+                        data_0 = data_1;
+                    } else if i_valid {
+                        data_0 = i_data;
+                    }
+                }
+            }
+        }
+
+        always_ff {
+            if valid_0 && (!valid_1) && (!i_ready) && i_valid {
+                data_1 = i_data;
+            }
+        }
+    } else {
+        for i in 0..WIDTH :g {
+            var d_0: logic;
+            var d_1: logic;
+
+            always_comb {
+                o_data[i] = d_0;
+            }
+
+            if USE_RESET :g {
+                always_ff {
+                    if_reset {
+                        d_0 = '0;
+                    } else if !valid_0 || i_ready {
+                        if valid_1 {
+                            d_0 = d_1;
+                        } else if i_valid {
+                            d_0 = i_data[i];
+                        }
+                    }
+                }
+            } else {
+                always_ff {
+                    if !valid_0 || i_ready {
+                        if valid_1 {
+                            d_0 = d_1;
+                        } else if i_valid {
+                            d_0 = i_data[i];
+                        }
+                    }
+                }
+            }
+
+            always_ff {
+                if valid_0 && (!valid_1) && (!i_ready) && i_valid {
+                    d_1 = i_data[i];
+                }
+            }
+        }
+    }
+}
