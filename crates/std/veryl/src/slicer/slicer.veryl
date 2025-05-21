@@ -5,7 +5,7 @@ pub module slicer #(
     param ASCENDING_ORDER: bool = true        ,
     param FULL_BANDWIDTH : bool = true        ,
     param DISABLE_MBFF   : bool = false       ,
-    param UES_RESET      : bool = false       ,
+    param USE_RESET      : bool = false       ,
 ) (
     i_clk  : input  clock,
     i_rst  : input  reset,
@@ -36,7 +36,7 @@ pub module slicer #(
         }
 
         for i in 0..STAGES :g {
-            const RESET: bool = UES_RESET && (i == (STAGES - 1));
+            const RESET: bool = USE_RESET && (i == (STAGES - 1));
 
             if FULL_BANDWIDTH :g {
                 inst u_slicer: slicer_unit_fb #(
@@ -84,7 +84,7 @@ pub module slicer #(
         }
 
         for i in 0..STAGES :g {
-            const RESET: bool = UES_RESET && (i == 0);
+            const RESET: bool = USE_RESET && (i == 0);
 
             if FULL_BANDWIDTH :g {
                 inst u_slicer: slicer_unit_fb #(
