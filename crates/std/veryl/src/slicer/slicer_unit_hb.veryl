@@ -1,0 +1,79 @@
+module slicer_unit_hb #(
+    param WIDTH       : u32  = 1    ,
+    param DISABLE_MBFF: bool = false,
+    param USE_RESET   : bool = false,
+) (
+    i_clk  : input  clock       ,
+    i_rst  : input  reset       ,
+    o_ready: output logic       ,
+    i_valid: input  logic       ,
+    i_data : input  logic<WIDTH>,
+    i_ready: input  logic       ,
+    o_valid: output logic       ,
+    o_data : output logic<WIDTH>,
+) {
+    var valid: logic;
+
+    always_comb {
+        o_ready = !valid;
+        o_valid = valid;
+    }
+
+    always_ff {
+        if_reset {
+            valid = '0;
+        } else if !valid {
+            valid = i_valid;
+        } else if i_ready {
+            valid = '0;
+        }
+    }
+
+    if DISABLE_MBFF :g_data {
+        var data: logic<WIDTH>;
+
+        always_comb {
+            o_data = data;
+        }
+
+        if USE_RESET :g {
+            always_ff {
+                if_reset {
+                    data = '0;
+                } else if (!valid) && i_valid {
+                    data = i_data;
+                }
+            }
+        } else {
+            always_ff {
+                if (!valid) && i_valid {
+                    data = i_data;
+                }
+            }
+        }
+    } else {
+        for i in 0..WIDTH :g {
+            var d: logic;
+
+            always_comb {
+                o_data[i] = d;
+            }
+
+            if USE_RESET :g {
+                always_ff {
+                    if_reset {
+                        d = '0;
+                    } else if (!valid) && i_valid {
+                        d = i_data[i];
+                    }
+                }
+            } else {
+                always_ff {
+                    if (!valid) && i_valid {
+                        d = i_data[i];
+                    }
+                }
+            }
+        }
+    }
+}
