@@ -570,6 +570,9 @@ impl SymbolTable {
                                     context = self.trace_type_kind(context, &x.r#type.kind)?;
                                 }
                             }
+                            SymbolKind::ProtoConst(x) => {
+                                context = self.trace_type_kind(context, &x.r#type.kind)?;
+                            }
                             SymbolKind::TypeDef(x) => {
                                 context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
@@ -628,7 +631,6 @@ impl SymbolTable {
                             | SymbolKind::ProtoModule(_)
                             | SymbolKind::Struct(_)
                             | SymbolKind::Union(_)
-                            | SymbolKind::ProtoConst(_)
                             | SymbolKind::ProtoTypeDef
                             | SymbolKind::Modport(_)
                             | SymbolKind::ModportFunctionMember(_)
