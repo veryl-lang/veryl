@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Modules</title>
+        <title>slicer</title>
 
 
         <!-- Custom HTML head -->
@@ -155,90 +155,98 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
+                        <h2 id="slicer"><a class="header" href="#slicer">slicer</a></h2>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
 <tr>
-    <th class="table_list_item"><a href="async_fifo.html">async_fifo::&lt;S&gt;</a></th>
-    <td class="table_list_item"> Asynchronous FIFO
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="async_handshake.html">async_handshake::&lt;S&gt;</a></th>
-    <td class="table_list_item"> Asynchronous handshake
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="binary_decoder.html">binary_decoder</a></th>
-    <td class="table_list_item"> A binary decoder.
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="binary_encoder.html">binary_encoder</a></th>
-    <td class="table_list_item"> A binary encoder.
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="counter.html">counter</a></th>
-    <td class="table_list_item"> Value counter
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="countones.html">countones</a></th>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="delay.html">delay</a></th>
-    <td class="table_list_item"> Delay input by configured cycle
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="demux.html">demux</a></th>
+    <th class="table_list_item">TYPE</th>
+    <td class="table_list_item"><span class="hljs-type">type</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="edge_detector.html">edge_detector</a></th>
-    <td class="table_list_item"> Edge detector
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="fifo.html">fifo</a></th>
+    <th class="table_list_item">STAGES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="gray_counter.html">gray_counter</a></th>
-    <td class="table_list_item"> Value counter using Gray Encoding
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="gray_decoder.html">gray_decoder</a></th>
-    <td class="table_list_item"> Converts a Gray encoded bit vector to a binary encoded bit-vector
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="gray_encoder.html">gray_encoder</a></th>
-    <td class="table_list_item"> Converts a binary encoded bit vector to a Gray encoded bit-vector
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="lfsr_galois.html">lfsr_galois</a></th>
+    <th class="table_list_item">ASCENDING_ORDER</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="mux.html">mux</a></th>
+    <th class="table_list_item">FULL_BANDWIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="onehot.html">onehot</a></th>
+    <th class="table_list_item">DISABLE_MBFF</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="ram.html">ram</a></th>
+    <th class="table_list_item">UES_RESET</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ports"><a class="header" href="#ports">Ports</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="slicer.html">slicer</a></th>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_ready</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_ready</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -248,11 +256,11 @@
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="ram.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="async_fifo.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="proto_modules.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -262,11 +270,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="ram.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="async_fifo.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="proto_modules.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

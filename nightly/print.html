@@ -256,6 +256,10 @@
     <th class="table_list_item"><a href="ram.html">ram</a></th>
     <td class="table_list_item"></td>
 </tr>
+<tr>
+    <th class="table_list_item"><a href="slicer.html">slicer</a></th>
+    <td class="table_list_item"></td>
+</tr>
 </tbody>
 </table>
 <h2 id="module-prototypes"><a class="header" href="#module-prototypes">Module Prototypes</a></h2>
@@ -414,6 +418,10 @@
 </tr>
 <tr>
     <th class="table_list_item"><a href="ram.html">ram</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item"><a href="slicer.html">slicer</a></th>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -1783,6 +1791,102 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="slicer"><a class="header" href="#slicer">slicer</a></h2>
+<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">TYPE</th>
+    <td class="table_list_item"><span class="hljs-type">type</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">STAGES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">ASCENDING_ORDER</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">FULL_BANDWIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">DISABLE_MBFF</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">UES_RESET</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_ready</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_ready</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="module-prototypes-1"><a class="header" href="#module-prototypes-1">Module Prototypes</a></h2>
 <hr />
 <table class="table_list">
@@ -1794,7 +1898,7 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="synchronizer"><a class="header" href="#synchronizer">synchronizer</a></h2>
-<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
+<h3 id="parameters-18"><a class="header" href="#parameters-18">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1822,7 +1926,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
+<h3 id="ports-18"><a class="header" href="#ports-18">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
