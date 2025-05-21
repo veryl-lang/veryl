@@ -10,9 +10,9 @@ pub module async_fifo::<S: synchronizer> #(
     param STAGES            : u32  = 2                         , /// Stages of synchronizer
     param DEPTH             : u32  = calc_default_depth(STAGES), /// Depth of FIFO
     param THRESHOLD         : u32  = DEPTH                     , /// Threshold for almost full signal
-    param USE_OUT_DATA_RESET: bit  = '0                        , /// Whether output data is reset
+    param USE_OUT_DATA_RESET: bool = false                     , /// Whether output data is reset
     param INITIAL_OUT_DATA  : TYPE = 0 as TYPE                 , /// Reset value of output data
-    param MERGE_RESET       : bit  = '0                        , /// Whether both reset are merged
+    param MERGE_RESET       : bool = false                     , /// Whether both reset are merged
     param RESET_SYNC_STAGES : u32  = 2                         , /// Stages of reset synchronizer
 ) (
     is_clk        : input  's clock, /// src clock
