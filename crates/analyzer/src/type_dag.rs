@@ -1,6 +1,6 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
-use crate::symbol::{ParameterKind, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{GenericMap, ParameterKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
@@ -161,56 +161,73 @@ impl TypeDag {
         namespace: &Namespace,
         parent: &Option<(SymbolId, Context)>,
     ) {
-        if path.is_generic_reference() {
-            return;
+        if let Some((parent_id, parent_context)) = parent {
+            let parent_symbol = symbol_table::get(*parent_id).unwrap();
+            for generic_map in parent_symbol.generic_maps() {
+                self.insert_path_with_generic_map(
+                    path,
+                    namespace,
+                    Some((&parent_symbol, parent_context)),
+                    Some(generic_map),
+                );
+            }
+        } else {
+            self.insert_path_with_generic_map(path, namespace, None, None);
         }
+    }
 
+    fn insert_path_with_generic_map(
+        &mut self,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+        parent: Option<(&Symbol, &Context)>,
+        generic_map: Option<GenericMap>,
+    ) {
         let mut path = path.clone();
         path.resolve_imported(namespace);
+        if let Some(map) = generic_map {
+            path.apply_map(&[map]);
+        }
 
         for i in 0..path.len() {
-            let base_path = path.base_path(i);
-
-            if let Ok(symbol) = symbol_table::resolve((&base_path, namespace)) {
-                let base = if let Some(x) = symbol.found.get_parent_package() {
-                    x
-                } else {
-                    symbol.found
-                };
-
-                let generic_args: Vec<_> = path.paths[i]
-                    .arguments
-                    .iter()
-                    .filter_map(|x| {
-                        symbol_table::resolve((&x.generic_path(), namespace))
-                            .map(|symbol| {
-                                if let Some(x) = symbol.found.get_parent_package() {
-                                    x
-                                } else {
-                                    symbol.found
-                                }
-                            })
-                            .ok()
-                    })
-                    .collect();
-
-                if let Some(base) = self.insert_symbol(&base) {
-                    if let Some(parent) = parent {
-                        let parent_symbol = symbol_table::get(parent.0).unwrap();
-                        let parent_context = parent.1;
-                        if let Some(parent) = self.insert_symbol(&parent_symbol) {
-                            if !self.is_dag_owned(parent, base) {
-                                self.insert_dag_edge(parent, base, parent_context);
-                            }
-                        }
+            let Ok(base_symbol) =
+                symbol_table::resolve((&path.base_path(i), namespace)).map(|symbol| {
+                    if let Some(x) = symbol.found.get_parent_package() {
+                        x
+                    } else {
+                        symbol.found
                     }
+                })
+            else {
+                continue;
+            };
 
-                    for arg in generic_args {
-                        if let Some(arg) = self.insert_symbol(&arg) {
-                            self.insert_dag_edge(base, arg, Context::GenericInstance);
-                        }
+            let Some(base) = self.insert_symbol(&base_symbol) else {
+                continue;
+            };
+            if let Some((parent_symbol, parent_context)) = parent {
+                if let Some(parent) = self.insert_symbol(parent_symbol) {
+                    if !self.is_dag_owned(parent, base) {
+                        self.insert_dag_edge(parent, base, *parent_context);
                     }
                 }
+            }
+
+            for arg in path.paths[i].arguments.iter().filter_map(|x| {
+                symbol_table::resolve((&x.generic_path(), namespace))
+                    .map(|symbol| {
+                        if let Some(x) = symbol.found.get_parent_package() {
+                            x
+                        } else {
+                            symbol.found
+                        }
+                    })
+                    .ok()
+            }) {
+                let Some(arg) = self.insert_symbol(&arg) else {
+                    continue;
+                };
+                self.insert_dag_edge(base, arg, Context::GenericInstance);
             }
         }
     }
