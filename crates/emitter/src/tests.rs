@@ -1229,6 +1229,12 @@ interface InterfaceA::<W: u32> {
         valid  : input ,
         command: input ,
     }
+
+    modport monitor {
+        ready  : input,
+        valid  : input,
+        command: input,
+    }
 }
 package PkgA::<W: u32> {
     function FuncA (
@@ -1248,6 +1254,12 @@ package PkgA::<W: u32> {
         } else {
             a <> 0;
         }
+    }
+
+    function FuncC (
+        a: modport InterfaceA::<W>::monitor,
+    ) -> logic {
+        return a.command[0];
     }
 }
 module ModuleA {
@@ -1283,6 +1295,11 @@ module ModuleA {
     always_comb {
         PkgA::<8>::FuncB(get_enable(enable), e_if);
     }
+
+    var _f: logic;
+    always_comb {
+        _f = PkgA::<8>::FuncC(e_if);
+    }
 }
 "#;
 
@@ -1301,6 +1318,12 @@ module ModuleA {
         output ready  ,
         input  valid  ,
         input  command
+    );
+
+    modport monitor (
+        input ready  ,
+        input valid  ,
+        input command
     );
 endinterface
 package prj___PkgA__8;
@@ -1334,6 +1357,14 @@ package prj___PkgA__8;
                 __a_command = 0;
             end
         end
+    endfunction
+
+    function automatic logic FuncC(
+        input var logic         __a_ready  ,
+        input var logic         __a_valid  ,
+        input var logic [8-1:0] __a_command
+    ) ;
+        return __a_command[0];
     endfunction
 endpackage
 module prj_ModuleA;
@@ -1389,6 +1420,11 @@ module prj_ModuleA;
     int unsigned enable; always_comb enable = 0;
     always_comb begin
         prj___PkgA__8::FuncB(get_enable(enable), e_if.ready, e_if.valid, e_if.command);
+    end
+
+    logic _f;
+    always_comb begin
+        _f = prj___PkgA__8::FuncC(e_if.ready, e_if.valid, e_if.command);
     end
 endmodule
 //# sourceMappingURL=test.sv.map
