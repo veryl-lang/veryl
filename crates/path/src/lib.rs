@@ -27,7 +27,7 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
     base_dir: T,
     ext: &str,
     symlink: bool,
-) -> Result<Vec<PathBuf>, PathError> {
+) -> Vec<PathBuf> {
     let mut inner_prj = Vec::new();
     for entry in WalkDir::new(base_dir.as_ref())
         .follow_links(symlink)
@@ -67,7 +67,7 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
             }
         }
     }
-    Ok(ret)
+    ret
 }
 
 #[cfg(not(target_family = "wasm"))]
