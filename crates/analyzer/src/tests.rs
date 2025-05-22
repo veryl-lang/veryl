@@ -6602,3 +6602,126 @@ fn unexpandable_modport() {
         AnalyzerError::UnexpandableModport { .. }
     ));
 }
+
+#[test]
+fn recursive_module_instance() {
+    let code = r#"
+    module ModuleA #(
+        param WIDTH: u32 = 2,
+    )(
+        i_a: input  logic<WIDTH>,
+        o_b: output logic       ,
+    ) {
+        if WIDTH == 1 :g {
+            assign o_b = i_a;
+        } else if WIDTH == 2 {
+            assign o_b = i_a[0] | i_a[1];
+        } else {
+            var result: logic<2>;
+
+            inst u0: ModuleA #(
+                WIDTH: WIDTH / 2
+            )(
+                i_a: i_a[WIDTH/2-1:0],
+                o_b: result[0]       ,
+            );
+
+            inst u1: ModuleA #(
+                WIDTH: WIDTH / 2
+            )(
+                i_a: i_a[WIDTH-1:WIDTH/2],
+                o_b: result[1]           ,
+            );
+
+            inst u2: ModuleA #(
+                WIDTH: 2
+            )(
+                i_a: result,
+                o_b: o_b   ,
+            );
+        }
+    }
+    module ModuleB (
+        i_a: input  logic<8>,
+        o_b: output logic   ,
+    ){
+        inst u: ModuleA #(
+            WIDTH: 8
+        )(
+            i_a,
+            o_b,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto module ProtoModuleA (
+        i_a: input  logic,
+        i_b: input  logic,
+        o_c: output logic,
+    );
+    module ModuleA for ProtoModuleA (
+        i_a: input  logic,
+        i_b: input  logic,
+        o_c: output logic,
+    ){
+        assign o_c = i_a | i_b;
+    }
+    module ModuleB::<M: ProtoModuleA>#(
+        param WIDTH: u32 = 2,
+    )(
+        i_a: input  logic<WIDTH>,
+        o_b: output logic       ,
+    ) {
+        if WIDTH == 1 :g {
+            assign o_b = i_a;
+        } else if WIDTH == 2 {
+            inst u: M (
+                i_a: i_a[0],
+                i_b: i_a[1],
+                o_c: o_b   ,
+            );
+        } else {
+            var result: logic<2>;
+
+            inst u0: ModuleB::<M>#(
+                WIDTH: WIDTH / 2
+            )(
+                i_a: i_a[WIDTH/2-1:0],
+                o_b: result[0]       ,
+            );
+
+            inst u1: ModuleB::<M>#(
+                WIDTH: WIDTH / 2
+            )(
+                i_a: i_a[WIDTH-1:WIDTH/2],
+                o_b: result[1]           ,
+            );
+
+            inst u2: ModuleB::<M>#(
+                WIDTH: 2
+            )(
+                i_a: result,
+                o_b: o_b   ,
+            );
+        }
+    }
+    module ModuleC (
+        i_a: input  logic<8>,
+        o_b: output logic   ,
+    ){
+        inst u: ModuleB::<ModuleA>#(
+            WIDTH: 8
+        )(
+            i_a,
+            o_b,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}

@@ -299,9 +299,16 @@ impl ReferenceTable {
                             id: None,
                             map: table,
                         }];
+
                         let mut references = symbol.found.generic_references();
                         for path in &mut references {
                             path.apply_map(&map);
+
+                            // check recursive reference
+                            if path.paths[0].base.text == symbol.found.token.text {
+                                continue;
+                            }
+
                             self.generic_symbol_path(
                                 path,
                                 &symbol.found.inner_namespace(),
