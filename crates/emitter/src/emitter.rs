@@ -2288,13 +2288,12 @@ impl VerylWalker for Emitter {
         }
 
         for (i, x) in arg.expression_identifier_list0.iter().enumerate() {
-            if i == 0 && expanded_modport.is_some() {
-                continue;
+            if i > 0 || expanded_modport.is_none() {
+                self.dot(&x.dot);
+                self.push_resolved_identifier(".");
+                self.identifier(&x.identifier);
             }
 
-            self.dot(&x.dot);
-            self.push_resolved_identifier(".");
-            self.identifier(&x.identifier);
             for x in &x.expression_identifier_list0_list {
                 self.select(&x.select);
             }
