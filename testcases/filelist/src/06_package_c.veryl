@@ -1,0 +1,7 @@
+proto package ProtoPackageC {
+    const WIDTH: u32;
+}
+
+package PackageC::<W: u32> for ProtoPackageC {
+    const WIDTH: u32 = W;
+}

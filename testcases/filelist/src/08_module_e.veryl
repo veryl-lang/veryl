@@ -1,0 +1,3 @@
+module ModuleE {
+  inst u: ModuleF::<PackageC::<8>>;
+}

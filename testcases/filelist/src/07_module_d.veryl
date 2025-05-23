@@ -1,0 +1,3 @@
+module ModuleD::<PKG: ProtoPackageC> {
+  let _a: logic<PKG::WIDTH> = 0;
+}

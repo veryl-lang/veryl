@@ -415,6 +415,10 @@ mod filelist {
             "03_module_a.veryl",
             "04_module_b.veryl",
             "05_module_c.veryl",
+            "06_package_c.veryl",
+            "07_module_d.veryl",
+            "08_module_e.veryl",
+            "09_module_f.veryl",
             "ram.veryl",
         ];
         check_list(&paths, all);
@@ -422,5 +426,8 @@ mod filelist {
         check_order(&paths, "01_package_a.veryl", "03_module_a.veryl");
         check_order(&paths, "02_package_b.veryl", "04_module_b.veryl");
         check_order(&paths, "ram.veryl", "05_module_c.veryl");
+        check_order(&paths, "06_package_c.veryl", "07_module_d.veryl");
+        check_order(&paths, "07_module_d.veryl", "09_module_f.veryl");
+        check_order(&paths, "09_module_f.veryl", "08_module_e.veryl");
     }
 }
