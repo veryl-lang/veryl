@@ -66,11 +66,11 @@ impl GenericMap {
         !self.map.is_empty()
     }
 
-    pub fn name(&self, include_namspace_prefix: bool, shoten_name: bool) -> String {
+    pub fn name(&self, include_namspace_prefix: bool, hashed_name: bool) -> String {
         let symbol = symbol_table::get(self.id.unwrap()).unwrap();
         if let SymbolKind::GenericInstance(x) = symbol.kind {
             let base = symbol_table::get(x.base).unwrap();
-            if shoten_name {
+            if hashed_name {
                 format!(
                     "{}__{}__{:x}",
                     self.get_name_prefix(&base, include_namspace_prefix),

@@ -1622,7 +1622,7 @@ endmodule
 }
 
 #[test]
-fn shorten_mangled_name() {
+fn hashed_mangled_name() {
     let code = r#"
 package PkgA::<
     A: u32,
@@ -1668,7 +1668,7 @@ endmodule
 
     let mut metadata: Metadata =
         toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
-    metadata.build.shorten_mangled_name = true;
+    metadata.build.hashed_mangled_name = true;
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")

@@ -43,7 +43,7 @@ pub struct Build {
     #[serde(default)]
     pub flatten_array_interface: bool,
     #[serde(default)]
-    pub shorten_mangled_name: bool,
+    pub hashed_mangled_name: bool,
 }
 
 fn default_source() -> PathBuf {
