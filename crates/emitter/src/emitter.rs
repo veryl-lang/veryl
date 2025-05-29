@@ -1827,7 +1827,7 @@ impl Emitter {
     }
 
     fn emit_generic_instance_name_comment(&mut self, generic_map: &GenericMap) {
-        if generic_map.generic() && self.build_opt.shorten_mangled_name {
+        if generic_map.generic() && self.build_opt.hashed_mangled_name {
             let name = generic_map.name(false, false);
             self.str(&format!("// {}", name));
             self.newline();
@@ -1840,7 +1840,7 @@ impl Emitter {
         generic_map: &GenericMap,
         omit_project_prefix: bool,
     ) {
-        let name = generic_map.name(true, self.build_opt.shorten_mangled_name);
+        let name = generic_map.name(true, self.build_opt.hashed_mangled_name);
         let name = if self.build_opt.omit_project_prefix || omit_project_prefix {
             let project_name = format!("{}_", self.project_name.unwrap());
             if let Some(x) = name.strip_prefix(&project_name) {
@@ -5454,7 +5454,7 @@ fn generic_instance_namespace_string(symbol: &Symbol, context: &SymbolContext) -
 
     let base = symbol_table::get(inst.base).unwrap();
     let separator = namespace_separator(&base, context.in_direction_modport, false);
-    if context.build_opt.shorten_mangled_name {
+    if context.build_opt.hashed_mangled_name {
         let name = symbol
             .generic_maps()
             .first()
@@ -5590,7 +5590,7 @@ pub fn symbol_string(
                     context,
                 ));
             }
-            if context.build_opt.shorten_mangled_name {
+            if context.build_opt.hashed_mangled_name {
                 let name = symbol
                     .generic_maps()
                     .first()
