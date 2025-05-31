@@ -245,16 +245,23 @@ impl Metadata {
 
     pub fn update_lockfile(&mut self) -> Result<(), MetadataError> {
         let modified = if self.lockfile_path.exists() {
+            dbg!("10");
             let mut lockfile = Lockfile::load(self)?;
+            dbg!("11");
             let modified = lockfile.update(self, false)?;
+            dbg!("12");
             self.lockfile = lockfile;
             modified
         } else {
+            dbg!("13");
             self.lockfile = Lockfile::new(self)?;
+            dbg!("14");
             true
         };
         if modified {
+            dbg!("15");
             self.lockfile.save(&self.lockfile_path)?;
+            dbg!("16");
         }
         Ok(())
     }
@@ -272,8 +279,9 @@ impl Metadata {
         let base = self.project_path();
         let src_base = base.join(&self.build.source);
 
+        dbg!("1");
         let src_files = if files.is_empty() {
-            veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
+            veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)
         } else {
             let mut ret = Vec::new();
             for file in files {
@@ -282,6 +290,7 @@ impl Metadata {
             ret
         };
 
+        dbg!("2");
         let mut ret = Vec::new();
         for src in src_files {
             let Ok(src_relative) = src.strip_prefix(&src_base) else {
@@ -319,21 +328,26 @@ impl Metadata {
             });
         }
 
+        dbg!("3");
         let base_dst = self.project_dependencies_path();
         if !base_dst.exists() {
             ignore_already_exists(fs::create_dir(&base_dst))?;
         }
 
+        dbg!("4");
         if !self.build.exclude_std {
             veryl_std::expand()?;
             ret.append(&mut veryl_std::paths(&base_dst)?);
         }
 
+        dbg!("5");
         self.update_lockfile()?;
 
+        dbg!("6");
         let mut deps = self.lockfile.paths(&base_dst)?;
         ret.append(&mut deps);
 
+        dbg!("7");
         Ok(ret)
     }
 
