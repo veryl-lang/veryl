@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-migrator"
-version               = "0.16.0"
+version               = "0.16.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -21,8 +21,8 @@ parol_runtime  = {version = "3.0", features = ["regex_automata"], default-featur
 paste          = "1.0"
 regex          = {workspace = true}
 thiserror      = {workspace = true}
-veryl-metadata = {version = "0.16.0", path = "../metadata"}
-veryl-parser   = {version = "0.16.0", path = "../parser"}
+veryl-metadata = {version = "0.16.1", path = "../metadata"}
+veryl-parser   = {version = "0.16.1", path = "../parser"}
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 miette        = {workspace = true, features = ["fancy-no-syscall"]}
