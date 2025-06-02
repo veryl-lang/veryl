@@ -42,6 +42,17 @@
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -119,7 +130,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -254,6 +265,10 @@
 </tr>
 <tr>
     <th class="table_list_item"><a href="ram.html">ram</a></th>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item"><a href="slicer.html">slicer</a></th>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
@@ -416,6 +431,10 @@
     <th class="table_list_item"><a href="ram.html">ram</a></th>
     <td class="table_list_item"></td>
 </tr>
+<tr>
+    <th class="table_list_item"><a href="slicer.html">slicer</a></th>
+    <td class="table_list_item"></td>
+</tr>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="async_fifos"><a class="header" href="#async_fifos">async_fifo::&lt;S&gt;</a></h2>
@@ -468,7 +487,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 </tr>
 <tr>
     <th class="table_list_item">USE_OUT_DATA_RESET</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"> Whether output data is reset
 </td>
 </tr>
@@ -480,7 +499,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 </tr>
 <tr>
     <th class="table_list_item">MERGE_RESET</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"> Whether both reset are merged
 </td>
 </tr>
@@ -1227,32 +1246,32 @@ a bit vector with a unary encoding.</p>
 </tr>
 <tr>
     <th class="table_list_item">FLAG_FF_OUT</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">DATA_FF_OUT</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">RESET_RAM</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">RESET_DATA_FF</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">CLEAR_DATA</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">PUSH_ON_CLEAR</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -1702,12 +1721,12 @@ a bit vector with a unary encoding.</p>
 </tr>
 <tr>
     <th class="table_list_item">BUFFER_OUT</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">USE_RESET</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -1783,6 +1802,102 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="slicer"><a class="header" href="#slicer">slicer</a></h2>
+<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">TYPE</th>
+    <td class="table_list_item"><span class="hljs-type">type</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">STAGES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">ASCENDING_ORDER</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">FULL_BANDWIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">DISABLE_MBFF</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">USE_RESET</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_ready</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_ready</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_valid</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="module-prototypes-1"><a class="header" href="#module-prototypes-1">Module Prototypes</a></h2>
 <hr />
 <table class="table_list">
@@ -1794,7 +1909,7 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="synchronizer"><a class="header" href="#synchronizer">synchronizer</a></h2>
-<h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
+<h3 id="parameters-18"><a class="header" href="#parameters-18">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
@@ -1822,7 +1937,7 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="ports-17"><a class="header" href="#ports-17">Ports</a></h3>
+<h3 id="ports-18"><a class="header" href="#ports-18">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>

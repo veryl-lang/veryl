@@ -41,6 +41,17 @@
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -118,7 +129,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -205,7 +216,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 </tr>
 <tr>
     <th class="table_list_item">USE_OUT_DATA_RESET</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"> Whether output data is reset
 </td>
 </tr>
@@ -217,7 +228,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
 </tr>
 <tr>
     <th class="table_list_item">MERGE_RESET</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
     <td class="table_list_item"> Whether both reset are merged
 </td>
 </tr>
