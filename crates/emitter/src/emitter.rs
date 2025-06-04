@@ -977,6 +977,9 @@ impl Emitter {
                     match &x {
                         StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
                         StatementBlockItem::Statement(x) => self.statement(&x.statement),
+                        StatementBlockItem::ConstDeclaration(x) => {
+                            self.const_declaration(&x.const_declaration)
+                        }
                         _ => unreachable!(),
                     }
                 }
