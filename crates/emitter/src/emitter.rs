@@ -1251,6 +1251,29 @@ impl Emitter {
         self.force_duplicated = false;
     }
 
+    fn emit_inst_param_port_item_assigned_by_name(&mut self, identifier: &Identifier) {
+        self.align_start(align_kind::EXPRESSION);
+        match self.resolve_generic_path(&identifier.into(), None) {
+            (Ok(symbol), _) => {
+                let context: SymbolContext = self.into();
+                let text = symbol_string(
+                    &identifier.identifier_token,
+                    &symbol.found,
+                    &symbol.full_path,
+                    &symbol.generic_tables,
+                    &context,
+                );
+                self.duplicated_token(&identifier.identifier_token.replace(&text));
+            }
+            (Err(_), path) => {
+                // literal provied by generic param
+                let text = path.base_path(0).0[0].to_string();
+                self.duplicated_token(&identifier.identifier_token.replace(&text));
+            }
+        }
+        self.align_finish(align_kind::EXPRESSION);
+    }
+
     fn emit_inst_unconnected_port(
         &mut self,
         defined_ports: &[Port],
@@ -4392,9 +4415,7 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
             self.align_finish(align_kind::EXPRESSION);
         } else {
-            self.align_start(align_kind::EXPRESSION);
-            self.duplicated_token(&arg.identifier.identifier_token);
-            self.align_finish(align_kind::EXPRESSION);
+            self.emit_inst_param_port_item_assigned_by_name(&arg.identifier);
         }
         self.str(")");
     }
@@ -4482,10 +4503,7 @@ impl VerylWalker for Emitter {
                 self.expression(&x.expression);
                 self.align_finish(align_kind::EXPRESSION);
             } else {
-                let token = emitting_identifier(arg.identifier.as_ref()).identifier_token;
-                self.align_start(align_kind::EXPRESSION);
-                self.duplicated_token(&token);
-                self.align_finish(align_kind::EXPRESSION);
+                self.emit_inst_param_port_item_assigned_by_name(&arg.identifier);
             }
             self.str(")");
         }
