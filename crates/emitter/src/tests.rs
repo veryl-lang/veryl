@@ -1794,3 +1794,52 @@ endmodule
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn emmit_inst_param_port_item_assigned_by_name() {
+    let code = r#"
+module ModuleA #(
+    param A: u32 = 32,
+) (
+    b: input logic,
+) {
+}
+module ModuleB::<A: u32, b: u32> {
+    inst a: ModuleA #(A) (b);
+}
+module ModuleC {
+  inst b: ModuleB::<1, 2>;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA #(
+    parameter int unsigned A = 32
+) (
+    input var logic b
+);
+endmodule
+module prj___ModuleB__1__2;
+    prj_ModuleA #(
+        .A (1)
+    ) a (
+        .b (2)
+    );
+endmodule
+module prj_ModuleC;
+    prj___ModuleB__1__2 b ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
