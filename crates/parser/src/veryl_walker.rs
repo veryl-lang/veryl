@@ -3299,6 +3299,10 @@ pub trait VerylWalker {
         before!(self, proto_type_def_declaration, arg);
         self.r#type(&arg.r#type);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.proto_type_def_declaration_opt {
+            self.equ(&x.equ);
+            self.array_type(&x.array_type);
+        }
         self.semicolon(&arg.semicolon);
         after!(self, proto_type_def_declaration, arg);
     }

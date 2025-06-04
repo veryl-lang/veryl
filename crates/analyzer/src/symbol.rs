@@ -604,7 +604,9 @@ impl Symbol {
 
     pub fn is_importable(&self, include_proto: bool) -> bool {
         match &self.kind {
-            SymbolKind::ProtoConst(_) | SymbolKind::ProtoTypeDef | SymbolKind::ProtoFunction(_) => {
+            SymbolKind::ProtoConst(_)
+            | SymbolKind::ProtoTypeDef(_)
+            | SymbolKind::ProtoFunction(_) => {
                 return include_proto;
             }
             SymbolKind::Parameter(_)
@@ -633,7 +635,7 @@ impl Symbol {
             | SymbolKind::Union(_)
             | SymbolKind::Struct(_)
             | SymbolKind::TypeDef(_)
-            | SymbolKind::ProtoTypeDef
+            | SymbolKind::ProtoTypeDef(_)
             | SymbolKind::SystemVerilog => true,
             SymbolKind::Parameter(x) => matches!(x.r#type.kind, TypeKind::Type),
             SymbolKind::GenericParameter(x) => matches!(x.bound, GenericBoundKind::Type),
@@ -711,7 +713,7 @@ pub enum SymbolKind {
     Union(UnionProperty),
     UnionMember(UnionMemberProperty),
     TypeDef(TypeDefProperty),
-    ProtoTypeDef,
+    ProtoTypeDef(ProtoTypeDefProperty),
     Enum(EnumProperty),
     EnumMember(EnumMemberProperty),
     EnumMemberMangled,
@@ -760,7 +762,7 @@ impl SymbolKind {
             SymbolKind::Union(_) => "union".to_string(),
             SymbolKind::UnionMember(_) => "union member".to_string(),
             SymbolKind::TypeDef(_) => "typedef".to_string(),
-            SymbolKind::ProtoTypeDef => "proto typedef".to_string(),
+            SymbolKind::ProtoTypeDef(_) => "proto typedef".to_string(),
             SymbolKind::Enum(_) => "enum".to_string(),
             SymbolKind::EnumMember(_) => "enum member".to_string(),
             SymbolKind::EnumMemberMangled => "enum member mangled".to_string(),
@@ -996,7 +998,13 @@ impl fmt::Display for SymbolKind {
             SymbolKind::TypeDef(x) => {
                 format!("typedef alias ({})", x.r#type)
             }
-            SymbolKind::ProtoTypeDef => "proto typedef".to_string(),
+            SymbolKind::ProtoTypeDef(x) => {
+                if let Some(ref r#type) = x.r#type {
+                    format!("proto typedef alias ({})", r#type)
+                } else {
+                    "proto typedef".to_string()
+                }
+            }
             SymbolKind::Enum(x) => {
                 if let Some(ref r#type) = x.r#type {
                     format!("enum ({})", r#type)
@@ -1960,6 +1968,11 @@ pub struct UnionMemberProperty {
 #[derive(Debug, Clone)]
 pub struct TypeDefProperty {
     pub r#type: Type,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtoTypeDefProperty {
+    pub r#type: Option<Type>,
 }
 
 #[derive(Debug, Clone)]

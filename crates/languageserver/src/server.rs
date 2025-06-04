@@ -404,7 +404,7 @@ impl Server {
                     VerylSymbolKind::Modport(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::Genvar => SymbolKind::VARIABLE,
                     VerylSymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
-                    VerylSymbolKind::ProtoTypeDef => SymbolKind::TYPE_PARAMETER,
+                    VerylSymbolKind::ProtoTypeDef(_) => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::ModportVariableMember(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::ModportFunctionMember(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::SystemVerilog => SymbolKind::NAMESPACE,

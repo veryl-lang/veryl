@@ -949,7 +949,7 @@ ProtoPacakgeItem: ProtoConstDeclaration
 
 ProtoConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Semicolon;
 
-ProtoTypeDefDeclaration: Type Identifier Semicolon;
+ProtoTypeDefDeclaration: Type Identifier [ Equ ArrayType ] Semicolon;
 
 ProtoFunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] Semicolon;
 
