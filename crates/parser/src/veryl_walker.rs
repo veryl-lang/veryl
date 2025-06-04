@@ -1739,6 +1739,7 @@ pub trait VerylWalker {
             StatementBlockItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
             StatementBlockItem::Statement(x) => self.statement(&x.statement),
+            StatementBlockItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
         }
         after!(self, statement_block_item, arg);
     }

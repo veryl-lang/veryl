@@ -619,7 +619,7 @@ StatementBlock: LBrace { StatementBlockGroup } RBrace;
 
 StatementBlockGroup: { Attribute } ( LBrace { StatementBlockGroup } RBrace | StatementBlockItem );
 
-StatementBlockItem: VarDeclaration | LetStatement | Statement;
+StatementBlockItem: VarDeclaration | LetStatement | ConstDeclaration | Statement;
 
 Statement: IdentifierStatement
          | IfStatement
