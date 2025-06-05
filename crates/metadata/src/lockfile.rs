@@ -198,7 +198,9 @@ impl Lockfile {
 
         let mut name_table = HashSet::new();
         let mut src_table = HashMap::new();
+        dbg!("20");
         let locks = self.gen_locks(metadata, &mut name_table, &mut src_table, true)?;
+        dbg!("21");
 
         let old_table = self.lock_table.clone();
         self.lock_table.clear();
@@ -244,7 +246,7 @@ impl Lockfile {
                 let metadata = self.get_metadata(&lock.source)?;
                 let path = metadata.project_path();
 
-                for src in &veryl_path::gather_files_with_extension(&path, "veryl", false)? {
+                for src in &veryl_path::gather_files_with_extension(&path, "veryl", false) {
                     let Ok(rel) = src.strip_prefix(&path) else {
                         return Err(MetadataError::InvalidSourceLocation(src.clone()));
                     };
@@ -325,8 +327,11 @@ impl Lockfile {
         // breadth first search because root has top priority of name
         let mut dependencies_metadata = Vec::new();
         for (name, dep) in &metadata.dependencies {
+            dbg!("30");
             let dependency = self.resolve_dependency(name, dep, root)?;
+            dbg!("31");
             let metadata = self.get_metadata(&dependency.source)?;
+            dbg!("32");
             let mut name = dependency.name.clone();
 
             // avoid name conflict by adding suffix
@@ -348,7 +353,9 @@ impl Lockfile {
 
             let mut dependencies = Vec::new();
             for (name, dep) in &metadata.dependencies {
+                dbg!("33");
                 let dependency = self.resolve_dependency(name, dep, root)?;
+                dbg!("34");
                 // project local name is not required to check name_table
                 dependencies.push(dependency);
             }
@@ -374,7 +381,9 @@ impl Lockfile {
         }
 
         for metadata in dependencies_metadata {
+            dbg!("35");
             let mut dependency_locks = self.gen_locks(&metadata, name_table, src_table, false)?;
+            dbg!("36");
             ret.append(&mut dependency_locks);
         }
 
@@ -566,7 +575,10 @@ impl Lockfile {
             let path = self.metadata_path.parent().unwrap().join(x);
             let path = path.join("Veryl.toml");
             if path.exists() {
-                Some(Metadata::load(path)?)
+                dbg!("40");
+                let a = Some(Metadata::load(path)?);
+                dbg!("41");
+                a
             } else {
                 None
             }
@@ -589,30 +601,49 @@ impl Lockfile {
                     let dependencies_dir = veryl_path::cache_path().join("dependencies");
 
                     if !dependencies_dir.exists() {
+                        dbg!("42");
                         ignore_already_exists(fs::create_dir_all(&dependencies_dir))?;
+                        dbg!("43");
                     }
 
+                    dbg!("44");
                     let path = Self::dependency_path(&x.url, &x.path, &x.revision)?;
+                    dbg!("45");
                     let toml = path.join("Veryl.toml");
 
                     if !path.exists() {
+                        dbg!("46");
                         let lock = veryl_path::lock_dir("dependencies")?;
+                        dbg!("47");
                         let git = self.git_clone(&x.url, &path)?;
+                        dbg!("48");
                         git.fetch()?;
+                        dbg!("49");
                         git.checkout(Some(&x.revision))?;
+                        dbg!("50");
                         veryl_path::unlock_dir(lock)?;
+                        dbg!("51");
                     } else {
+                        dbg!("52");
                         let git = Git::open(&path)?;
+                        dbg!("53");
                         let ret = git.is_clean().is_ok_and(|x| x);
 
                         // If the existing path is not git repository, cleanup and re-try
                         if !ret || !toml.exists() {
+                            dbg!("54");
                             let lock = veryl_path::lock_dir("dependencies")?;
-                            fs::remove_dir_all(&path)?;
+                            dbg!("55");
+                            let _ = fs::remove_dir_all(&path);
+                            dbg!("56");
                             let git = self.git_clone(&x.url, &path)?;
+                            dbg!("57");
                             git.fetch()?;
+                            dbg!("58");
                             git.checkout(Some(&x.revision))?;
+                            dbg!("59");
                             veryl_path::unlock_dir(lock)?;
+                            dbg!("60");
                         }
                     }
 

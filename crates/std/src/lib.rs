@@ -44,7 +44,7 @@ pub fn paths(base_dst: &Path) -> Result<Vec<PathSet>, PathError> {
     let mut ret = Vec::new();
     let std_dir = std_dir().canonicalize().unwrap();
 
-    for src in &veryl_path::gather_files_with_extension(&std_dir, "veryl", false)? {
+    for src in &veryl_path::gather_files_with_extension(&std_dir, "veryl", false) {
         let rel = src.strip_prefix(&std_dir)?;
         let mut dst = base_dst.join("std");
         dst.push(rel);
