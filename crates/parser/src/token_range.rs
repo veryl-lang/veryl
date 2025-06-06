@@ -811,7 +811,8 @@ impl_token_range_enum!(
     StatementBlockItem,
     var_declaration,
     let_statement,
-    statement
+    statement,
+    const_declaration
 );
 impl_token_range_enum!(
     Statement,
