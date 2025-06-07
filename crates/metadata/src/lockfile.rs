@@ -325,7 +325,7 @@ impl Lockfile {
         // breadth first search because root has top priority of name
         let mut dependencies_metadata = Vec::new();
         for (name, dep) in &metadata.dependencies {
-            let dependency = self.resolve_dependency(name, dep, root)?;
+            let dependency = self.resolve_dependency(metadata, name, dep, root)?;
             let metadata = self.get_metadata(&dependency.source)?;
             let mut name = dependency.name.clone();
 
@@ -348,7 +348,7 @@ impl Lockfile {
 
             let mut dependencies = Vec::new();
             for (name, dep) in &metadata.dependencies {
-                let dependency = self.resolve_dependency(name, dep, root)?;
+                let dependency = self.resolve_dependency(&metadata, name, dep, root)?;
                 // project local name is not required to check name_table
                 dependencies.push(dependency);
             }
@@ -383,6 +383,7 @@ impl Lockfile {
 
     fn resolve_dependency(
         &mut self,
+        metadata: &Metadata,
         name: &str,
         dep: &Dependency,
         root: bool,
@@ -425,7 +426,12 @@ impl Lockfile {
                         r#override,
                     }))
                 } else if let Some(path) = &x.path {
-                    LockSource::Path(path.clone())
+                    let path = if path.is_absolute() {
+                        path.clone()
+                    } else {
+                        metadata.metadata_path.parent().unwrap().join(path)
+                    };
+                    LockSource::Path(path)
                 } else {
                     return Err(MetadataError::InvalidDependency {
                         name: name.to_string(),

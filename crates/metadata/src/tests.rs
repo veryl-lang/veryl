@@ -35,6 +35,7 @@ sub1   = {git = "file://{}/sub1", version = "0.1.0"}
 sub2   = {git = "file://{}/sub2", version = "0.1.0"}
 sub3_2 = {git = "file://{}/sub3", project = "sub3", version = "0.2.0"}
 sub3_3 = {git = "file://{}/sub3", project = "sub3", version = "1.0.0"}
+sub4   = {path = "../sub4"}
 "#;
 
 const SUB1_TOML: &'static str = r#"
@@ -73,6 +74,29 @@ publish_commit = true
 sub1 = {git = "file://{}/sub1", version = "0.1.0"}
 "#;
 
+const SUB4_TOML: &'static str = r#"
+[project]
+name = "sub4"
+version = "0.4.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+
+[dependencies]
+sub5 = {path = "./sub5"}
+"#;
+
+const SUB5_TOML: &'static str = r#"
+[project]
+name = "sub5"
+version = "0.5.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+"#;
+
 fn create_metadata_simple() -> (Metadata, TempDir) {
     let tempdir = tempfile::tempdir().unwrap();
     let metadata = create_project(tempdir.path(), "test", TEST_TOML, false);
@@ -86,6 +110,8 @@ fn create_metadata_multi() -> (Metadata, TempDir) {
     create_project(tempdir.path(), "sub1", SUB1_TOML, true);
     create_project(tempdir.path(), "sub2", SUB2_TOML, true);
     create_project(tempdir.path(), "sub3", SUB3_TOML, true);
+    create_project(tempdir.path(), "sub4", SUB4_TOML, true);
+    create_project(&tempdir.path().join("sub4"), "sub5", SUB5_TOML, true);
 
     (metadata, tempdir)
 }
@@ -253,11 +279,19 @@ fn lockfile() {
     let sub3_3 = tbl
         .iter()
         .find_map(|(_, x)| x.iter().find(|x| x.name == "sub3_3"));
+    let sub4 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub4"));
+    let sub5 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub5"));
     assert!(sub1.is_some());
     assert!(sub2.is_some());
     assert!(sub2_0.is_some());
     assert!(sub3_2.is_some());
     assert!(sub3_3.is_some());
+    assert!(sub4.is_some());
+    assert!(sub5.is_some());
     assert_eq!(
         sub1.unwrap().source.get_version(),
         Some(&Version::parse("0.1.1").unwrap())
