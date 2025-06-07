@@ -1473,6 +1473,18 @@ fn incompat_proto() {
 
     let code = r#"
     proto interface ProtoInterface {
+        type T = logic;
+    }
+    interface Interface for ProtoInterface {
+        type T = bit;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
+
+    let code = r#"
+    proto interface ProtoInterface {
         type T;
     }
     interface Interface for ProtoInterface {}
@@ -1790,6 +1802,18 @@ fn incompat_proto() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        type T = logic;
+    }
+    package Pkg for ProtoPkg {
+        type T = bit;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::IncompatProto { .. }));
 
     let code = r#"
     proto package ProtoPkg {
@@ -4065,6 +4089,34 @@ fn unknown_member() {
     }
     module ModuleA::<PKG: ProtoPkgB> {
         let _foo: logic = PKG::FOO.foo;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package CommonPkg {
+        struct Foo {
+            foo: logic,
+        }
+        enum Bar {
+            BAR,
+        }
+    }
+    proto package ProtoPkg {
+        type Foo = CommonPkg::Foo;
+        type Bar = CommonPkg::Bar;
+    }
+    package Pkg for ProtoPkg {
+        type Foo = CommonPkg::Foo;
+        type Bar = CommonPkg::Bar;
+    }
+    module ModuleA::<PKG: ProtoPkg> {
+        var _foo: PKG::Foo;
+        var _bar: PKG::Bar;
+        assign _foo.foo = 0;
+        assign _bar     = PKG::Bar::BAR;
     }
     "#;
 

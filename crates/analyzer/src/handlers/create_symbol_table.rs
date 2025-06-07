@@ -18,9 +18,10 @@ use crate::symbol::{
     InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
     ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
     ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoInterfaceProperty,
-    ProtoModuleProperty, ProtoPackageProperty, StructMemberProperty, StructProperty, Symbol,
-    SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind, TypeModifierKind,
-    UnionMemberProperty, UnionProperty, VariableAffiliation, VariableProperty,
+    ProtoModuleProperty, ProtoPackageProperty, ProtoTypeDefProperty, StructMemberProperty,
+    StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty,
+    TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty, VariableAffiliation,
+    VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -2136,7 +2137,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
     ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let token = arg.identifier.identifier_token.token;
-            let kind = SymbolKind::ProtoTypeDef;
+            let proprety = if let Some(ref x) = arg.proto_type_def_declaration_opt {
+                let r#type = x.array_type.as_ref().into();
+                if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                    self.pop_type_dag_cand(None);
+                    return Ok(());
+                }
+                ProtoTypeDefProperty {
+                    r#type: Some(r#type),
+                }
+            } else {
+                ProtoTypeDefProperty { r#type: None }
+            };
+            let kind = SymbolKind::ProtoTypeDef(proprety);
             if let Some(id) = self.insert_symbol(&token, kind, false) {
                 self.push_declaration_item(id);
             }
