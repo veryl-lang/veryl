@@ -144,9 +144,9 @@ impl SymbolTable {
                 &x.path.generic_arguments(),
                 context.push(),
             )?;
-            match symbol.found.kind {
+            match &symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
-                SymbolKind::Parameter(ref x) => {
+                SymbolKind::Parameter(x) => {
                     if matches!(x.r#type.kind, TypeKind::Type) {
                         return self.trace_type_parameter(context, &x.value, &symbol.found);
                     }
@@ -155,7 +155,13 @@ impl SymbolTable {
                     context.namespace = symbol.found.namespace;
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
-                SymbolKind::GenericParameter(ref x) => {
+                SymbolKind::ProtoTypeDef(x) => {
+                    if let Some(r#type) = &x.r#type {
+                        context.namespace = symbol.found.namespace;
+                        return self.trace_type_kind(context, &r#type.kind);
+                    }
+                }
+                SymbolKind::GenericParameter(x) => {
                     if matches!(x.bound, GenericBoundKind::Type) {
                         return self.trace_generic_parameter(context.clone(), &symbol.found);
                     }
@@ -311,6 +317,11 @@ impl SymbolTable {
                 SymbolKind::TypeDef(x) => {
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
+                SymbolKind::ProtoTypeDef(x) => {
+                    if let Some(ref r#type) = x.r#type {
+                        return self.trace_type_kind(context, &r#type.kind);
+                    }
+                }
                 SymbolKind::GenericParameter(x) => {
                     if matches!(x.bound, GenericBoundKind::Type) {
                         if let Some(x) =
@@ -408,6 +419,9 @@ impl SymbolTable {
         let via_enum = match &last_found.kind {
             SymbolKind::Enum(_) => true,
             SymbolKind::TypeDef(_) => matches!(last_found_type, Some(SymbolKind::Enum(_))),
+            SymbolKind::ProtoTypeDef(x) => {
+                x.r#type.is_some() && matches!(last_found_type, Some(SymbolKind::Enum(_)))
+            }
             _ => false,
         };
         let via_namespace = matches!(last_found.kind, SymbolKind::Namespace);
@@ -430,7 +444,7 @@ impl SymbolTable {
             SymbolKind::Parameter(_)
             | SymbolKind::ProtoConst(_)
             | SymbolKind::TypeDef(_)
-            | SymbolKind::ProtoTypeDef
+            | SymbolKind::ProtoTypeDef(_)
             | SymbolKind::Enum(_)
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
@@ -576,6 +590,11 @@ impl SymbolTable {
                             SymbolKind::TypeDef(x) => {
                                 context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
+                            SymbolKind::ProtoTypeDef(x) => {
+                                if let Some(ref r#type) = x.r#type {
+                                    context = self.trace_type_kind(context, &r#type.kind)?;
+                                }
+                            }
                             SymbolKind::Port(x) => {
                                 context = self.trace_type_kind(context, &x.r#type.kind)?;
                             }
@@ -631,7 +650,6 @@ impl SymbolTable {
                             | SymbolKind::ProtoModule(_)
                             | SymbolKind::Struct(_)
                             | SymbolKind::Union(_)
-                            | SymbolKind::ProtoTypeDef
                             | SymbolKind::Modport(_)
                             | SymbolKind::ModportFunctionMember(_)
                             | SymbolKind::EnumMember(_)

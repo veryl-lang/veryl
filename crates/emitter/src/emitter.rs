@@ -5662,7 +5662,7 @@ pub fn symbol_string(
         SymbolKind::Instance(_)
         | SymbolKind::Block
         | SymbolKind::ProtoConst(_)
-        | SymbolKind::ProtoTypeDef
+        | SymbolKind::ProtoTypeDef(_)
         | SymbolKind::ProtoFunction(_)
         | SymbolKind::ModportVariableMember(_)
         | SymbolKind::ModportFunctionMember(_)

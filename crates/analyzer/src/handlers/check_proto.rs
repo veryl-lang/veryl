@@ -4,8 +4,9 @@ use crate::namespace::Namespace;
 use crate::symbol::{
     Direction, EnumProperty, FunctionProperty, InterfaceProperty, ModportProperty, ModuleProperty,
     PackageProperty, Parameter, ParameterProperty, Port, ProtoConstProperty,
-    ProtoInterfaceProperty, ProtoModuleProperty, ProtoPackageProperty, StructProperty, SymbolId,
-    SymbolKind, Type, TypeKind, UnionProperty, VariableProperty,
+    ProtoInterfaceProperty, ProtoModuleProperty, ProtoPackageProperty, ProtoTypeDefProperty,
+    StructProperty, SymbolId, SymbolKind, Type, TypeDefProperty, TypeKind, UnionProperty,
+    VariableProperty,
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
@@ -178,10 +179,12 @@ fn check_interface_compat(
                 (_, SymbolKind::Variable(_)) => {
                     ret.push(ProtoIncompatible::IncompatibleVar(text));
                 }
-                (SymbolKind::TypeDef(_), SymbolKind::ProtoTypeDef) => {
-                    // nothing to check
+                (SymbolKind::TypeDef(actual), SymbolKind::ProtoTypeDef(proto)) => {
+                    if !check_typedef_compat(actual, proto).is_empty() {
+                        ret.push(ProtoIncompatible::IncompatibleTypedef(text));
+                    }
                 }
-                (_, SymbolKind::ProtoTypeDef) => {
+                (_, SymbolKind::ProtoTypeDef(_)) => {
                     ret.push(ProtoIncompatible::IncompatibleTypedef(text));
                 }
                 (SymbolKind::Function(actual), SymbolKind::ProtoFunction(proto)) => {
@@ -253,7 +256,7 @@ fn check_interface_compat(
                     ret.push(ProtoIncompatible::MissingParam(text))
                 }
                 SymbolKind::Variable(_) => ret.push(ProtoIncompatible::MissingVar(text)),
-                SymbolKind::ProtoTypeDef => ret.push(ProtoIncompatible::MissingTypedef(text)),
+                SymbolKind::ProtoTypeDef(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
                 SymbolKind::ProtoFunction(_) => ret.push(ProtoIncompatible::MissingFunction(text)),
                 SymbolKind::ProtoAliasModule(_)
                 | SymbolKind::ProtoAliasInterface(_)
@@ -300,10 +303,12 @@ fn check_package_compat(
                 (_, SymbolKind::ProtoConst(_)) => {
                     ret.push(ProtoIncompatible::IncompatibleParam(text));
                 }
-                (SymbolKind::TypeDef(_), SymbolKind::ProtoTypeDef) => {
-                    // nothing to check
+                (SymbolKind::TypeDef(actual), SymbolKind::ProtoTypeDef(proto)) => {
+                    if !check_typedef_compat(actual, proto).is_empty() {
+                        ret.push(ProtoIncompatible::IncompatibleTypedef(text));
+                    }
                 }
-                (_, SymbolKind::ProtoTypeDef) => {
+                (_, SymbolKind::ProtoTypeDef(_)) => {
                     ret.push(ProtoIncompatible::IncompatibleTypedef(text));
                 }
                 (SymbolKind::Enum(actual), SymbolKind::Enum(proto)) => {
@@ -388,7 +393,7 @@ fn check_package_compat(
         } else {
             match proto.kind {
                 SymbolKind::ProtoConst(_) => ret.push(ProtoIncompatible::MissingParam(text)),
-                SymbolKind::ProtoTypeDef => ret.push(ProtoIncompatible::MissingTypedef(text)),
+                SymbolKind::ProtoTypeDef(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
                 SymbolKind::Enum(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
                 SymbolKind::Struct(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
                 SymbolKind::Union(_) => ret.push(ProtoIncompatible::MissingTypedef(text)),
@@ -520,6 +525,20 @@ fn check_const_compat(
     let mut ret = Vec::new();
     if !(actual.kind.is_const() && actual.r#type.is_compatible(&proto.r#type)) {
         ret.push(ProtoIncompatible::IncompatibleType)
+    }
+    ret
+}
+
+fn check_typedef_compat(
+    actual: &TypeDefProperty,
+    proto: &ProtoTypeDefProperty,
+) -> Vec<ProtoIncompatible> {
+    let mut ret = Vec::new();
+    if proto.r#type.is_some() {
+        ret.append(&mut check_type_compat(
+            &Some(actual.r#type.clone()),
+            &proto.r#type,
+        ));
     }
     ret
 }
