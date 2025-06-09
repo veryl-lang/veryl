@@ -221,7 +221,7 @@ impl ReferenceTable {
 
         let orig_len = path.len();
         let mut path = path.clone();
-        path.resolve_imported(namespace);
+        path.resolve_imported(namespace, None);
 
         // Prefix paths added by `resolve_imported` have already been resolved.
         // They should be skipped.
@@ -391,7 +391,7 @@ impl ReferenceTable {
                     let ident = arg.identifier().token;
                     let namespace = namespace_table::get(ident.id).unwrap();
                     let mut path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-                    path.resolve_imported(&namespace);
+                    path.resolve_imported(&namespace, None);
                     let mut path = path.mangled_path();
 
                     for x in &arg.expression_identifier_list0 {

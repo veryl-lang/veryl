@@ -6,7 +6,9 @@ use crate::symbol::{
     Direction, DocComment, GenericBoundKind, GenericMap, GenericTable, GenericTables, Symbol,
     SymbolId, SymbolKind, TypeKind,
 };
-use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{
+    GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath, SymbolPathNamespace,
+};
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use log::trace;
 use std::cell::RefCell;
@@ -47,7 +49,7 @@ impl ResolveError {
 
 #[derive(Clone, Debug)]
 pub struct Import {
-    pub path: SymbolPathNamespace,
+    pub path: GenericSymbolPathNamesapce,
     pub namespace: Namespace,
     pub wildcard: bool,
 }
@@ -542,7 +544,7 @@ impl SymbolTable {
                         let imported = symbol
                             .imported
                             .iter()
-                            .any(|x| context.namespace.included(x));
+                            .any(|(_, namespace)| context.namespace.included(namespace));
                         (
                             context.namespace.included(&symbol.namespace) || imported,
                             imported,
@@ -655,7 +657,7 @@ impl SymbolTable {
                             }
                             SymbolKind::Instance(x) => {
                                 let mut type_name = x.type_name.clone();
-                                type_name.resolve_imported(&context.namespace);
+                                type_name.resolve_imported(&context.namespace, None);
                                 context = self.trace_type_path(context, &type_name)?;
                             }
                             SymbolKind::GenericInstance(_) => {
@@ -900,18 +902,32 @@ impl SymbolTable {
         }
     }
 
-    fn add_imported_item(&mut self, target: TokenId, namespace: &Namespace) {
+    fn add_imported_item(
+        &mut self,
+        target: TokenId,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.token.id == target {
-                symbol.imported.push(namespace.to_owned());
+                symbol
+                    .imported
+                    .push((path.to_owned(), namespace.to_owned()));
             }
         }
     }
 
-    fn add_imported_package(&mut self, target: &Namespace, namespace: &Namespace) {
+    fn add_imported_package(
+        &mut self,
+        target: &Namespace,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.namespace.matched(target) {
-                symbol.imported.push(namespace.to_owned());
+                symbol
+                    .imported
+                    .push((path.to_owned(), namespace.to_owned()));
             }
         }
     }
@@ -924,7 +940,7 @@ impl SymbolTable {
         let mut ret = Vec::new();
         for import in &self.import_list {
             let context = ResolveContext::new(&import.path.1);
-            if let Ok(symbol) = self.resolve(&import.path.0, &[], context) {
+            if let Ok(symbol) = self.resolve(&import.path.0.generic_path(), &[], context) {
                 ret.push((import.clone(), symbol.found));
             }
         }
@@ -936,10 +952,10 @@ impl SymbolTable {
             if import.wildcard {
                 if let Some(pkg) = self.get_package(symbol, false) {
                     let target = pkg.inner_namespace();
-                    self.add_imported_package(&target, &import.namespace);
+                    self.add_imported_package(&target, &import.path.0, &import.namespace);
                 }
             } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                self.add_imported_item(symbol.token.id, &import.namespace);
+                self.add_imported_item(symbol.token.id, &import.path.0, &import.namespace);
             }
         }
         self.import_list.clear();
