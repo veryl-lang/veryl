@@ -413,17 +413,7 @@ impl GenericSymbolPath {
 
         for path in &mut self.paths {
             for arg in &mut path.arguments {
-                for map in maps.iter().rev() {
-                    let head = &arg.paths[0];
-                    if let Some(x) = map.map.get(&head.base()) {
-                        let mut paths: Vec<_> = arg.paths.drain(1..).collect();
-                        arg.paths.clone_from(&x.paths);
-                        arg.paths.append(&mut paths);
-                        arg.kind = x.kind;
-                        arg.range = x.range;
-                        break;
-                    }
-                }
+                arg.apply_map(maps);
             }
         }
     }

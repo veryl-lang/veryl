@@ -1,4 +1,4 @@
-module Module68 (
+module Module68A (
     i_clk : input  clock   ,
     i_rst : input  reset   ,
     i_push: input  logic   ,
@@ -18,5 +18,68 @@ module Module68 (
         i_data           ,
         i_pop            ,
         o_data           ,
+    );
+}
+
+module Module68B::<ADDRESS_WIDTH: u32> (
+    axi_if: modport $std::axi4_if::<$std::axi4_pkg::<ADDRESS_WIDTH, 8, 8, 8, 8, 8, 8, 8>>::slave,
+) {
+    always_comb {
+        axi_if.awready = '0;
+        axi_if.wready  = '0;
+        axi_if.bvalid  = '0;
+        axi_if.bresp   = $std::axi4_pkg::<ADDRESS_WIDTH, 8, 8, 8, 8, 8, 8, 8>::resp_t::OKAY;
+        axi_if.bid     = '0;
+        axi_if.buser   = '0;
+        axi_if.arready = '0;
+        axi_if.rvalid  = '0;
+        axi_if.rlast   = '0;
+        axi_if.rdata   = '0;
+        axi_if.rresp   = $std::axi4_pkg::<ADDRESS_WIDTH, 8, 8, 8, 8, 8, 8, 8>::resp_t::OKAY;
+        axi_if.rid     = '0;
+        axi_if.ruser   = '0;
+    }
+}
+
+module Module68C {
+    inst axi_if: $std::axi4_if::<$std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>>;
+    always_comb {
+        axi_if.awvalid  = '0;
+        axi_if.awaddr   = '0;
+        axi_if.awsize   = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>::size_t::BYTES_PER_TRANSFER_1;
+        axi_if.awcache  = '0;
+        axi_if.awburst  = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>::burst_t::FIXED_BURST;
+        axi_if.awcache  = '0;
+        axi_if.awprot   = '0;
+        axi_if.awid     = '0;
+        axi_if.awlen    = '0;
+        axi_if.awlock   = '0;
+        axi_if.awqos    = '0;
+        axi_if.awregion = '0;
+        axi_if.awuser   = '0;
+        axi_if.wvalid   = '0;
+        axi_if.wlast    = '0;
+        axi_if.wdata    = '0;
+        axi_if.wstrb    = '0;
+        axi_if.wuser    = '0;
+        axi_if.bready   = '0;
+        axi_if.arvalid  = '0;
+        axi_if.araddr   = '0;
+        axi_if.arsize   = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>::size_t::BYTES_PER_TRANSFER_1;
+        axi_if.arcache  = '0;
+        axi_if.arburst  = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>::burst_t::FIXED_BURST;
+        axi_if.arcache  = '0;
+        axi_if.arprot   = '0;
+        axi_if.arid     = '0;
+        axi_if.arlen    = '0;
+        axi_if.arlock   = '0;
+        axi_if.arqos    = '0;
+        axi_if.arregion = '0;
+        axi_if.aruser   = '0;
+        axi_if.rready   = '0;
+    }
+
+    inst u: Module68B::<32> (
+        axi_if: axi_if,
     );
 }
