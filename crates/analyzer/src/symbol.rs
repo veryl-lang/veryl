@@ -122,7 +122,7 @@ pub struct Symbol {
     pub namespace: Namespace,
     pub references: Vec<Token>,
     pub generic_instances: Vec<SymbolId>,
-    pub imported: Vec<Namespace>,
+    pub imported: Vec<(GenericSymbolPath, Namespace)>,
     pub evaluated: RefCell<Option<Evaluated>>,
     pub overrides: Vec<Evaluated>,
     pub allow_unused: bool,
@@ -170,10 +170,31 @@ impl Symbol {
 
     pub fn get_parent_package(&self) -> Option<Symbol> {
         let parent = self.get_parent()?;
-        if parent.is_package(true) {
-            Some(parent)
-        } else {
-            None
+        Symbol::trace_package_symbol(&parent)
+    }
+
+    fn trace_package_symbol(symbol: &Symbol) -> Option<Symbol> {
+        match &symbol.kind {
+            SymbolKind::Package(_) | SymbolKind::ProtoPackage(_) => Some(symbol.clone()),
+            SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
+                Symbol::trace_package_symbol(&symbol.found)
+            }
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base)?;
+                Symbol::trace_package_symbol(&symbol)
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let Some(ProtoBound::ProtoPackage(x)) =
+                    x.bound.resolve_proto_bound(&symbol.namespace)
+                {
+                    Symbol::trace_package_symbol(&x)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 

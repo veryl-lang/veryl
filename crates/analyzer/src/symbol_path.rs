@@ -213,6 +213,22 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
     }
 }
 
+impl From<&GenericSymbolPathNamesapce> for SymbolPathNamespace {
+    fn from(value: &GenericSymbolPathNamesapce) -> Self {
+        SymbolPathNamespace(value.0.generic_path(), value.1.clone())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericSymbolPathNamesapce(pub GenericSymbolPath, pub Namespace);
+
+impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamesapce {
+    fn from(value: (&GenericSymbolPath, &Namespace)) -> Self {
+        let (path, namespace) = value;
+        GenericSymbolPathNamesapce(path.clone(), namespace.clone())
+    }
+}
+
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]
 pub enum GenericSymbolPathKind {
     Identifier,
@@ -374,6 +390,7 @@ impl GenericSymbolPath {
         if !self.is_resolvable() {
             return false;
         }
+
         let head = &self.paths[0];
         if let Ok(symbol) = symbol_table::resolve(&head.base) {
             if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
@@ -383,14 +400,8 @@ impl GenericSymbolPath {
         // path contains generic parameter as generic argument
         for path in &self.paths {
             for arg in &path.arguments {
-                if !arg.is_resolvable() {
-                    continue;
-                }
-                let head = &arg.paths[0];
-                if let Ok(symbol) = symbol_table::resolve(&head.base) {
-                    if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
-                        return true;
-                    }
+                if arg.is_generic_reference() {
+                    return true;
                 }
             }
         }
@@ -413,23 +424,17 @@ impl GenericSymbolPath {
 
         for path in &mut self.paths {
             for arg in &mut path.arguments {
-                for map in maps.iter().rev() {
-                    let head = &arg.paths[0];
-                    if let Some(x) = map.map.get(&head.base()) {
-                        let mut paths: Vec<_> = arg.paths.drain(1..).collect();
-                        arg.paths.clone_from(&x.paths);
-                        arg.paths.append(&mut paths);
-                        arg.kind = x.kind;
-                        arg.range = x.range;
-                        break;
-                    }
-                }
+                arg.apply_map(maps);
             }
         }
     }
 
     /// Resolve and expand path if the path is imported at declaration
-    pub fn resolve_imported(&mut self, namespace: &Namespace) {
+    pub fn resolve_imported(
+        &mut self,
+        namespace: &Namespace,
+        generic_maps: Option<&Vec<GenericMap>>,
+    ) {
         if !self.is_resolvable() {
             return;
         }
@@ -443,28 +448,41 @@ impl GenericSymbolPath {
                 else {
                     return;
                 };
+
                 if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {
-                    let mut parent = symbol.found.namespace.clone();
-                    parent.strip_prefix(&namespace_table::get_default());
+                    if let Some(parent) = symbol.found.get_parent_package() {
+                        let package_symbol = if parent.is_package(false) {
+                            parent
+                        } else if let Some(maps) = generic_maps {
+                            // replace proto package with actual package
+                            let mut package_path = symbol
+                                .found
+                                .imported
+                                .iter()
+                                .find(|(_, x)| *x == *namespace)
+                                .map(|(x, _)| x)
+                                .unwrap()
+                                .clone();
+                            package_path.apply_map(maps);
+                            symbol_table::resolve((&package_path.mangled_path(), namespace))
+                                .map(|x| x.found)
+                                .unwrap()
+                        } else {
+                            parent
+                        };
 
-                    if parent.depth() == 0 {
-                        return;
-                    }
+                        // If symbol belongs Package, it can be expanded
+                        let mut package_namespace = package_symbol.inner_namespace();
+                        package_namespace.strip_prefix(&namespace_table::get_default());
 
-                    // If symbol belongs Package, it can be expanded
-                    if let Ok(parent_symbol) =
-                        symbol_table::resolve((&parent.paths, &self_namespace))
-                    {
-                        if parent_symbol.found.is_package(false) {
-                            for (i, path) in parent.paths.iter().enumerate() {
-                                let token = Token::generate(*path, self_file_path);
-                                namespace_table::insert(token.id, self_file_path, &self_namespace);
-                                let generic_symbol = GenericSymbol {
-                                    base: token,
-                                    arguments: vec![],
-                                };
-                                self.paths.insert(i, generic_symbol);
-                            }
+                        for (i, path) in package_namespace.paths.iter().enumerate() {
+                            let token = Token::generate(*path, self_file_path);
+                            namespace_table::insert(token.id, self_file_path, &self_namespace);
+                            let generic_symbol = GenericSymbol {
+                                base: token,
+                                arguments: vec![],
+                            };
+                            self.paths.insert(i, generic_symbol);
                         }
                     }
                 }
@@ -472,7 +490,7 @@ impl GenericSymbolPath {
         }
         for path in &mut self.paths {
             for arg in &mut path.arguments {
-                arg.resolve_imported(namespace);
+                arg.resolve_imported(namespace, generic_maps);
             }
         }
     }
