@@ -10,7 +10,7 @@ endmodule
             end
         endmodule
     `endif
-
+`ifndef SYNTHESIS
 module test1;
    initial begin
        $display("hello");
@@ -22,6 +22,7 @@ module test1;
    end
 endmodule
 `endif
+`endif
 
 `ifdef __veryl_test_veryl_testcase_test2__
     `ifdef __veryl_wavedump_veryl_testcase_test2__
@@ -32,11 +33,12 @@ endmodule
             end
         endmodule
     `endif
-
+`ifndef SYNTHESIS
 module test2;
     // parse error
     initial
 endmodule
+`endif
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test3__
@@ -48,12 +50,13 @@ endmodule
             end
         endmodule
     `endif
-
+`ifndef SYNTHESIS
 module test3;
     // elaborate error
     tri logic a;
     always_comb a = 1;
 endmodule
+`endif
 `endif
 
 `ifdef __veryl_test_veryl_testcase_test4__

@@ -1,4 +1,10 @@
-module Module47 {}
+module Module47 {
+    embed (inline) sv{{{
+        initial begin
+            $display("hello");
+        end
+    }}}
+}
 
 embed (inline) sv{{{
 module test;

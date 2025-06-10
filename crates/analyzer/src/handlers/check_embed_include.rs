@@ -11,6 +11,7 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 pub struct CheckEmbedInclude {
     pub errors: Vec<AnalyzerError>,
     point: HandlerPoint,
+    in_component: bool,
 }
 
 impl CheckEmbedInclude {
@@ -26,6 +27,30 @@ impl Handler for CheckEmbedInclude {
 }
 
 impl VerylGrammarTrait for CheckEmbedInclude {
+    fn module_declaration(&mut self, _arg: &ModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_component = true,
+            HandlerPoint::After => self.in_component = false,
+        }
+        Ok(())
+    }
+
+    fn interface_declaration(&mut self, _arg: &InterfaceDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_component = true,
+            HandlerPoint::After => self.in_component = false,
+        }
+        Ok(())
+    }
+
+    fn package_declaration(&mut self, _arg: &PackageDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_component = true,
+            HandlerPoint::After => self.in_component = false,
+        }
+        Ok(())
+    }
+
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let way = arg.identifier.identifier_token.to_string();
@@ -42,6 +67,14 @@ impl VerylGrammarTrait for CheckEmbedInclude {
                 self.errors.push(AnalyzerError::unknown_embed_lang(
                     &lang,
                     &arg.identifier0.as_ref().into(),
+                ));
+            }
+
+            if self.in_component && (way != "inline" || lang != "sv") {
+                self.errors.push(AnalyzerError::invalid_embed(
+                    &way,
+                    &lang,
+                    &arg.identifier.as_ref().into(),
                 ));
             }
         }
