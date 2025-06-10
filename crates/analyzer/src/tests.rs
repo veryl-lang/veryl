@@ -3804,6 +3804,99 @@ fn unknown_attribute() {
 }
 
 #[test]
+fn invalid_embed() {
+    let code = r#"
+    module ModuleA {
+        embed (inline) py{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    module ModuleA {
+        embed (cocotb) sv{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    module ModuleA {
+        embed (cocotb) py{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        embed (inline) py{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        embed (cocotb) sv{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        embed (cocotb) py{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    package PkgA {
+        embed (inline) py{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    package PkgA {
+        embed (cocotb) sv{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+
+    let code = r#"
+    package PkgA {
+        embed (cocotb) py{{{
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+}
+
+#[test]
 fn unknown_embed_lang() {
     let code = r#"
     embed (inline) x{{{

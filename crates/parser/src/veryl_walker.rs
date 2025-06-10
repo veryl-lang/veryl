@@ -3076,6 +3076,7 @@ pub trait VerylWalker {
             GenerateItem::InitialDeclaration(x) => self.initial_declaration(&x.initial_declaration),
             GenerateItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
             GenerateItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
+            GenerateItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
         };
         after!(self, generate_item, arg);
     }
@@ -3136,6 +3137,7 @@ pub trait VerylWalker {
             }
             PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             PackageItem::AliasDeclaration(x) => self.alias_declaration(&x.alias_declaration),
+            PackageItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
         }
         after!(self, package_item, arg);
     }
