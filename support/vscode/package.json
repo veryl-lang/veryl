@@ -31,8 +31,38 @@
         "command": "vscode-veryl.restartServer",
         "title": "Restart language server",
         "category": "vscode-veryl"
+      },
+      {
+        "command": "waveformRender.start",
+        "title": "Draw",
+        "category": "Waveform Render"
+      },
+      {
+        "command": "waveformRender.toggleLivePreview",
+        "title": "Toggle Live Waveform Preview",
+        "category": "Waveform Render",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "waveformRender.saveAsPng",
+        "title": "Save as PNG",
+        "category": "Waveform Render"
+      },
+      {
+        "command": "waveformRender.saveAsSvg",
+        "title": "Save as SVG",
+        "category": "Waveform Render"
       }
     ],
+        "menus": {
+      "editor/title": [
+        {
+          "command": "waveformRender.toggleLivePreview",
+          "group": "navigation",
+          "when": "resourceExtname == .json || resourceExtname == .JSON || resourceExtname == .json5 || resourceExtname == .JSON5 || resourceExtname == .veryl"
+        }
+      ]
+    },
     "configuration": [
       {
         "title": "Veryl Language Server",
@@ -45,6 +75,11 @@
             ],
             "default": null,
             "markdownDescription": "Specify veryl-ls binary path."
+          },
+          "waveformRender.closePanelOnDisable": {
+            "type": "boolean",
+            "default": false,
+            "description": "Close the Waveform panel when live preview is disabled."
           }
         }
       }
@@ -79,6 +114,7 @@
     "test": "node ./out/test/runTest.js",
     "deploy:linux-x64": "vsce publish --target linux-x64",
     "deploy:win32-x64": "vsce publish --target win32-x64",
+    "predeploy:win32-x64": "vsce prepublish --target win32-x64",
     "deploy:darwin-x64": "vsce publish --target darwin-x64",
     "deploy:darwin-arm64": "vsce publish --target darwin-arm64"
   },
