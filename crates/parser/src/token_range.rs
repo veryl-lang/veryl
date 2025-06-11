@@ -1276,7 +1276,8 @@ impl_token_range_enum!(
     alias_declaration,
     initial_declaration,
     final_declaration,
-    unsafe_block
+    unsafe_block,
+    embed_declaration
 );
 
 // ----------------------------------------------------------------------------
@@ -1293,7 +1294,8 @@ impl_token_range_enum!(
     struct_union_declaration,
     function_declaration,
     import_declaration,
-    alias_declaration
+    alias_declaration,
+    embed_declaration
 );
 
 // ----------------------------------------------------------------------------

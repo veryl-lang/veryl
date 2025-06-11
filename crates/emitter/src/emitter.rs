@@ -5261,8 +5261,16 @@ impl VerylWalker for Emitter {
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         if arg.identifier.identifier_token.to_string() == "inline" {
             let text = arg.embed_content.embed_content_token.to_string();
-            let text = text.strip_prefix("{{{").unwrap();
-            let text = text.strip_suffix("}}}").unwrap();
+            let text = if arg.identifier0.identifier_token.to_string() == "sv" {
+                &text
+                    .replace("{{{", "`ifndef SYNTHESIS")
+                    .replace("}}}", "`endif")
+            } else {
+                text.strip_prefix("{{{")
+                    .unwrap()
+                    .strip_prefix("}}}")
+                    .unwrap()
+            };
             self.veryl_token(&arg.embed_content.embed_content_token.replace(text));
         }
     }
