@@ -1,4 +1,4 @@
-module Module68 (
+module Module68A (
     i_clk : input  clock   ,
     i_rst : input  reset   ,
     i_push: input  logic   ,
@@ -18,5 +18,20 @@ module Module68 (
         i_data           ,
         i_pop            ,
         o_data           ,
+    );
+}
+
+module Module68B::<ADDRESS_WIDTH: u32> (
+    axi_if: modport $std::axi4_if::<$std::axi4_pkg::<ADDRESS_WIDTH, 8, 8, 8, 8, 8, 8, 8>>::slave,
+) {
+    connect axi_if <> 0;
+}
+
+module Module68C {
+    inst axi_if       : $std::axi4_if::<$std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>>;
+    connect axi_if.master <> 0;
+
+    inst u: Module68B::<32> (
+        axi_if: axi_if,
     );
 }

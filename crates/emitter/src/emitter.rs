@@ -5556,8 +5556,8 @@ pub fn symbol_string(
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible =
-                namespace.included(&symbol.namespace) || symbol.imported.contains(&namespace);
+            let visible = namespace.included(&symbol.namespace)
+                || symbol.imported.iter().any(|(_, x)| *x == namespace);
             if visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
@@ -5599,7 +5599,8 @@ pub fn symbol_string(
         }
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
-            let visible = namespace.included(&base.namespace) || base.imported.contains(&namespace);
+            let visible = namespace.included(&base.namespace)
+                || base.imported.iter().any(|(_, x)| *x == namespace);
             let top_level = matches!(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
@@ -5661,9 +5662,6 @@ pub fn symbol_string(
         }
         SymbolKind::Instance(_)
         | SymbolKind::Block
-        | SymbolKind::ProtoConst(_)
-        | SymbolKind::ProtoTypeDef(_)
-        | SymbolKind::ProtoFunction(_)
         | SymbolKind::ModportVariableMember(_)
         | SymbolKind::ModportFunctionMember(_)
         | SymbolKind::Genvar
@@ -5677,6 +5675,9 @@ pub fn symbol_string(
         | SymbolKind::ProtoAliasPackage(_)
         | SymbolKind::ClockDomain
         | SymbolKind::EnumMemberMangled
+        | SymbolKind::ProtoConst(_)
+        | SymbolKind::ProtoTypeDef(_)
+        | SymbolKind::ProtoFunction(_)
         | SymbolKind::Test(_) => {
             unreachable!()
         }
@@ -5720,11 +5721,15 @@ pub fn resolve_generic_path(
     generic_maps: Option<&Vec<GenericMap>>,
 ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
     let mut path = path.clone();
-    path.resolve_imported(namespace);
+    path.resolve_imported(namespace, generic_maps);
 
     for i in 0..path.len() {
         let base = path.base_path(i);
         if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
+            if !symbol.found.kind.is_generic() {
+                continue;
+            }
+
             let params = symbol.found.generic_parameters();
             let n_args = path.paths[i].arguments.len();
 
