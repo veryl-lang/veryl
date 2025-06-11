@@ -4,6 +4,7 @@ use crate::metadata::{Dependency, Metadata, UrlPath};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
 use log::info;
+use pathdiff::diff_paths;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -175,7 +176,7 @@ impl Lockfile {
 
         let mut name_table = HashSet::new();
         let mut src_table = HashMap::new();
-        let locks = ret.gen_locks(metadata, &mut name_table, &mut src_table, true)?;
+        let locks = ret.gen_locks(metadata, &mut name_table, &mut src_table, true, metadata)?;
 
         for lock in locks {
             info!("Adding dependency ({})", lock.source);
@@ -198,7 +199,7 @@ impl Lockfile {
 
         let mut name_table = HashSet::new();
         let mut src_table = HashMap::new();
-        let locks = self.gen_locks(metadata, &mut name_table, &mut src_table, true)?;
+        let locks = self.gen_locks(metadata, &mut name_table, &mut src_table, true, metadata)?;
 
         let old_table = self.lock_table.clone();
         self.lock_table.clear();
@@ -319,13 +320,14 @@ impl Lockfile {
         name_table: &mut HashSet<String>,
         src_table: &mut HashMap<LockSource, String>,
         root: bool,
+        root_metadata: &Metadata,
     ) -> Result<Vec<Lock>, MetadataError> {
         let mut ret = Vec::new();
 
         // breadth first search because root has top priority of name
         let mut dependencies_metadata = Vec::new();
         for (name, dep) in &metadata.dependencies {
-            let dependency = self.resolve_dependency(name, dep, root)?;
+            let dependency = self.resolve_dependency(metadata, name, dep, root, root_metadata)?;
             let metadata = self.get_metadata(&dependency.source)?;
             let mut name = dependency.name.clone();
 
@@ -348,7 +350,8 @@ impl Lockfile {
 
             let mut dependencies = Vec::new();
             for (name, dep) in &metadata.dependencies {
-                let dependency = self.resolve_dependency(name, dep, root)?;
+                let dependency =
+                    self.resolve_dependency(&metadata, name, dep, root, root_metadata)?;
                 // project local name is not required to check name_table
                 dependencies.push(dependency);
             }
@@ -374,7 +377,8 @@ impl Lockfile {
         }
 
         for metadata in dependencies_metadata {
-            let mut dependency_locks = self.gen_locks(&metadata, name_table, src_table, false)?;
+            let mut dependency_locks =
+                self.gen_locks(&metadata, name_table, src_table, false, root_metadata)?;
             ret.append(&mut dependency_locks);
         }
 
@@ -383,9 +387,11 @@ impl Lockfile {
 
     fn resolve_dependency(
         &mut self,
+        metadata: &Metadata,
         name: &str,
         dep: &Dependency,
         root: bool,
+        root_metadata: &Metadata,
     ) -> Result<LockDependency, MetadataError> {
         Ok(match dep {
             Dependency::Version(_) => {
@@ -425,7 +431,16 @@ impl Lockfile {
                         r#override,
                     }))
                 } else if let Some(path) = &x.path {
-                    LockSource::Path(path.clone())
+                    let path = if path.is_absolute() {
+                        path.clone()
+                    } else {
+                        diff_paths(
+                            metadata.metadata_path.parent().unwrap().join(path),
+                            root_metadata.project_path(),
+                        )
+                        .unwrap()
+                    };
+                    LockSource::Path(path)
                 } else {
                     return Err(MetadataError::InvalidDependency {
                         name: name.to_string(),

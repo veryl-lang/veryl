@@ -5310,6 +5310,7 @@ dependencies = [
  "log",
  "miette",
  "once_cell",
+ "pathdiff",
  "regex",
  "semver",
  "serde",
