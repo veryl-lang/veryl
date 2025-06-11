@@ -72,8 +72,8 @@ export function activate(context: vscode.ExtensionContext) {
 			stopServer().then(function () {startServer(context);}, startServer);
 		})
 	);
+  // Added by Kalyan for Waveform Render start
 	// Start and live preview mode
-	// Kalyan start
 	context.subscriptions.push(
 		vscode.commands.registerCommand("waveformRender.start", () => {
 		WaveformRenderPanel.disableLivePreview();
@@ -95,10 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (
 			WaveformRenderPanel.livePreview &&
 			editor &&
-			(editor.document.fileName.toLowerCase().endsWith(".json") ||
-			editor.document.fileName.toLowerCase().endsWith(".json5") ||
-			// Added by Kalyan to support Veryl files
-			editor.document.fileName.toLowerCase().endsWith(".veryl"))
+			(editor.document.fileName.toLowerCase().endsWith(".veryl"))
 		) {
 			WaveformRenderPanel.createOrShow(context.extensionPath);
 		}
@@ -116,7 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
 		WaveformRenderPanel.saveAsSvg();
 		})
 	);
-	// Kalyan end
+	// Added by Kalyan for Waveform Render start
 
 	startServer(context);
 }
@@ -127,7 +124,7 @@ export function deactivate(): Thenable<void> {
 }
 
 
-// Added by kalyan
+// Added by kalyan for Waveform Render start
 function getFilename() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !editor.document) {
@@ -140,7 +137,7 @@ function getFilename() {
   return fileName
     .split(/[\\/]/)
     .pop()
-    ?.replace(/\.json5?$/i, "") ?? "untitled";
+    ?.replace(/\.veryl?$/i, "") ?? "untitled";
 }
 
 function getTitle() {
@@ -157,8 +154,8 @@ class WaveformRenderPanel {
   public static currentPanel: WaveformRenderPanel | undefined;
 
   public static livePreview: boolean = false;
-public static livePreviewDocumentPath: string | null;
-public static listenerTextChange: vscode.Disposable | undefined;
+  public static livePreviewDocumentPath: string | null;
+  public static listenerTextChange: vscode.Disposable | undefined;
 
   public static readonly viewType = "waveformRender";
 
@@ -210,12 +207,7 @@ public static listenerTextChange: vscode.Disposable | undefined;
     // Ensure we have an active editor and it's a JSON file
     if (
       !activeEditor ||
-      !(
-        activeEditor.document.fileName.toLowerCase().endsWith(".json") ||
-        activeEditor.document.fileName.toLowerCase().endsWith(".json5") ||
-		// Added by Kalyan to support Veryl files
-		activeEditor.document.fileName.toLowerCase().endsWith(".veryl")
-      )
+      !(activeEditor.document.fileName.toLowerCase().endsWith(".veryl"))
     ) {
       return;
     }
@@ -307,18 +299,8 @@ public static listenerTextChange: vscode.Disposable | undefined;
     let docContent = doc.getText();
   const match = docContent.match(/```wavedrom([\s\S]*?)```/);
   const wavedromContent = match ? match[1].trim() : "";
-  // if (match) {
-  // const wavedromContent = match[1].trim();
-  // console.log("Extracted content:\n", wavedromContent);
-  // }
-  const cleaned = wavedromContent.replace(/\//g, '');
-  console.log("Kalyan: docContent", docContent);
-  vscode.window.showInformationMessage(
-      "Kalyan " + cleaned
-    );
-    // Set the webview's html content
-    // this._update(docContent, getFilename());
-  this._update(cleaned, getFilename());
+  const cleanedContent = wavedromContent.replace(/\//g, '');
+  this._update(cleanedContent, getFilename());
   }
 
   private _update(

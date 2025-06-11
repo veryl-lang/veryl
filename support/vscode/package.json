@@ -59,7 +59,7 @@
         {
           "command": "waveformRender.toggleLivePreview",
           "group": "navigation",
-          "when": "resourceExtname == .json || resourceExtname == .JSON || resourceExtname == .json5 || resourceExtname == .JSON5 || resourceExtname == .veryl"
+          "when": "resourceExtname == .veryl"
         }
       ]
     },
@@ -112,9 +112,9 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
+    "update-wavedrom-scripts": "mkdir -p localScripts/skins && curl -k -o localScripts/wavedrom.min.js https://wavedrom.com/wavedrom.min.js && curl -k -o localScripts/skins/dark.js https://wavedrom.com/skins/dark.js && curl -k -o localScripts/skins/default.js https://wavedrom.com/skins/default.js && curl -k -o localScripts/skins/lowkey.js https://wavedrom.com/skins/lowkey.js && curl -k -o localScripts/skins/narrow.js https://wavedrom.com/skins/narrow.js && curl -k -o localScripts/skins/narrower.js https://wavedrom.com/skins/narrower.js && curl -k -o localScripts/skins/narrowerer.js https://wavedrom.com/skins/narrowerer.js && curl -k -o localScripts/skins/width.html https://wavedrom.com/skins/width.html",
     "deploy:linux-x64": "vsce publish --target linux-x64",
     "deploy:win32-x64": "vsce publish --target win32-x64",
-    "predeploy:win32-x64": "vsce prepublish --target win32-x64",
     "deploy:darwin-x64": "vsce publish --target darwin-x64",
     "deploy:darwin-arm64": "vsce publish --target darwin-arm64"
   },
