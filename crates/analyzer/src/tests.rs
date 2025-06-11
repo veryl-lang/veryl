@@ -4685,6 +4685,97 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module Foo (
+        bar: output logic,
+        baz: output logic,
+    ) {
+        always_comb {
+            if true {
+                bar = 0;
+                baz = bar;
+            } else {
+                bar = 1;
+                baz = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module Foo (
+        bar: output logic,
+        baz: output logic,
+    ) {
+        always_comb {
+            if true {
+                if true {
+                    baz = bar;
+                } else {
+                    baz = 0;
+                }
+                if true {
+                    bar = 0;
+                } else {
+                    bar = 1;
+                }
+            } else {
+                bar = 1;
+                baz = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module Foo (
+        bar: output logic,
+        baz: output logic,
+    ) {
+        always_comb {
+            if true {
+                baz = bar;
+            } else {
+                baz = 0;
+            }
+            bar = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module Foo (
+        bar: output logic,
+        baz: output logic,
+    ) {
+        always_comb {
+            if true {
+                baz = bar;
+            } else {
+                baz = 0;
+            }
+
+            if true {
+                bar = 0;
+            } else {
+                bar = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
 
 #[test]
@@ -4811,6 +4902,27 @@ fn uncovered_branch() {
         always_comb {
             if x {
                 a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+
+    let code = r#"
+    module ModuleC {
+        var a: logic;
+        let x: logic = 1;
+        let y: logic = 1;
+
+        always_comb {
+            if x {
+                if y {
+                    a = 1;
+                }
+            } else {
+                a = 0;
             }
         }
     }

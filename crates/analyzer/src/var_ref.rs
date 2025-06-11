@@ -16,6 +16,30 @@ pub struct VarRef {
     pub r#type: VarRefType,
     pub affiliation: VarRefAffiliation,
     pub path: VarRefPath,
+    // `branch group` and `branch index` are used to distinguish two statements.
+    // two `VarRef` are visible from each other if either of following conditions is met.
+    // * two `VarRef` belong to different branch group
+    //      * two `branch group` share no elements
+    // * two `VarRef` belong to the same branch
+    //      * two `branch group` share elements but `branch index` are different
+    //
+    //  if {        branch group [0]    branch index [0]
+    //      if {    branch group [0, 1] branch index [0, 0]
+    //      }
+    //  } else {    branch group [0]    branch index [1]
+    //      if {    branch group [0, 2] branch index [1, 0]
+    //      }
+    //  }
+    //
+    //  if {        branch group [3]    branch index [0]
+    //      if {    branch group [3, 4] branch index [0, 0]
+    //      }
+    //  } else {    branch group [3]    branch index [1]
+    //      if {    branch group [3, 5] branch index [1, 0]
+    //      }
+    //  }
+    pub branch_group: Vec<usize>,
+    pub branch_index: Vec<usize>,
 }
 
 impl VarRef {
