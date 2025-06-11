@@ -31,7 +31,9 @@ pub struct CheckVarRef {
     in_expression: Vec<bool>,
     in_if_expression: Vec<()>,
     function_call: Vec<Option<FunctionCallContext>>,
-    branch_index: usize,
+    branch_group_index: usize,
+    branch_group: Vec<usize>,
+    branch_index: Vec<usize>,
 }
 
 impl CheckVarRef {
@@ -47,6 +49,8 @@ impl CheckVarRef {
             r#type,
             affiliation: *self.affiliation.last().unwrap(),
             path: path.clone(),
+            branch_group: self.branch_group.clone(),
+            branch_index: self.branch_index.clone(),
         };
         symbol_table::add_var_ref(&assign);
         self.assign_position.pop();
@@ -58,6 +62,8 @@ impl CheckVarRef {
             r#type,
             affiliation: *self.affiliation.last().unwrap(),
             path: path.clone(),
+            branch_group: self.branch_group.clone(),
+            branch_index: self.branch_index.clone(),
         };
         symbol_table::add_var_ref(&expression);
     }
@@ -97,6 +103,25 @@ impl CheckVarRef {
         } else {
             self.function_call.push(None);
         }
+    }
+
+    fn push_branch(&mut self) {
+        self.branch_group.push(self.branch_group_index);
+        self.branch_group_index += 1;
+        self.branch_index.push(0);
+    }
+
+    fn pop_branch(&mut self) {
+        self.branch_group.pop();
+        self.branch_index.pop();
+    }
+
+    fn get_branch_index(&self) -> usize {
+        *self.branch_index.last().unwrap_or(&0)
+    }
+
+    fn inc_branch_index(&mut self) {
+        *self.branch_index.last_mut().unwrap() += 1;
     }
 }
 
@@ -175,18 +200,18 @@ impl VerylGrammarTrait for CheckVarRef {
                     AssignPositionType::StatementBranchItem {
                         token: arg.else_token.token,
                         define_context: arg.else_token.token.into(),
-                        index: self.branch_index,
+                        index: self.get_branch_index(),
                         r#type: AssignStatementBranchItemType::Else,
                     }
                 } else {
                     AssignPositionType::DeclarationBranchItem {
                         token: arg.else_token.token,
                         define_context: arg.else_token.token.into(),
-                        index: self.branch_index,
+                        index: self.get_branch_index(),
                     }
                 };
                 *self.assign_position.0.last_mut().unwrap() = position;
-                self.branch_index += 1;
+                self.inc_branch_index();
             }
         }
         Ok(())
@@ -397,7 +422,7 @@ impl VerylGrammarTrait for CheckVarRef {
     fn if_statement(&mut self, arg: &IfStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.branch_index = 0;
+                self.push_branch();
                 let branches = 1 + arg.if_statement_list.len() + arg.if_statement_opt.iter().len();
                 let has_explicit_default = arg.if_statement_opt.is_some();
                 let has_cond_type = has_cond_type(&arg.r#if.if_token.token);
@@ -415,12 +440,13 @@ impl VerylGrammarTrait for CheckVarRef {
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.r#if.if_token.token,
                         define_context: arg.r#if.if_token.token.into(),
-                        index: self.branch_index,
+                        index: self.get_branch_index(),
                         r#type: AssignStatementBranchItemType::If,
                     });
-                self.branch_index += 1;
+                self.inc_branch_index();
             }
             HandlerPoint::After => {
+                self.pop_branch();
                 self.assign_position.pop();
                 self.assign_position.pop();
             }
@@ -431,7 +457,7 @@ impl VerylGrammarTrait for CheckVarRef {
     fn if_reset_statement(&mut self, arg: &IfResetStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.branch_index = 0;
+                self.push_branch();
                 let branches =
                     1 + arg.if_reset_statement_list.len() + arg.if_reset_statement_opt.iter().len();
                 let has_explicit_default = arg.if_reset_statement_opt.is_some();
@@ -454,12 +480,13 @@ impl VerylGrammarTrait for CheckVarRef {
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.if_reset.if_reset_token.token,
                         define_context: arg.if_reset.if_reset_token.token.into(),
-                        index: self.branch_index,
+                        index: self.get_branch_index(),
                         r#type: AssignStatementBranchItemType::IfReset,
                     });
-                self.branch_index += 1;
+                self.inc_branch_index();
             }
             HandlerPoint::After => {
+                self.pop_branch();
                 self.assign_position.pop();
                 self.assign_position.pop();
             }
@@ -484,7 +511,7 @@ impl VerylGrammarTrait for CheckVarRef {
     fn case_statement(&mut self, arg: &CaseStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.branch_index = 0;
+                self.push_branch();
                 let branches = arg.case_statement_list.len();
                 let has_explicit_default = arg.case_statement_list.iter().any(|x| {
                     matches!(
@@ -505,6 +532,7 @@ impl VerylGrammarTrait for CheckVarRef {
                     });
             }
             HandlerPoint::After => {
+                self.pop_branch();
                 self.assign_position.pop();
             }
         }
@@ -518,10 +546,10 @@ impl VerylGrammarTrait for CheckVarRef {
                     .push(AssignPositionType::StatementBranchItem {
                         token: arg.colon.colon_token.token,
                         define_context: arg.colon.colon_token.token.into(),
-                        index: self.branch_index,
+                        index: self.get_branch_index(),
                         r#type: AssignStatementBranchItemType::Case,
                     });
-                self.branch_index += 1;
+                self.inc_branch_index();
             }
             HandlerPoint::After => {
                 self.assign_position.pop();
@@ -784,7 +812,7 @@ impl VerylGrammarTrait for CheckVarRef {
     fn generate_if_declaration(&mut self, arg: &GenerateIfDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.branch_index = 0;
+                self.push_branch();
                 let branches = 1
                     + arg.generate_if_declaration_list.len()
                     + arg.generate_if_declaration_opt.iter().len();
@@ -798,11 +826,12 @@ impl VerylGrammarTrait for CheckVarRef {
                     .push(AssignPositionType::DeclarationBranchItem {
                         token: arg.r#if.if_token.token,
                         define_context: arg.r#if.if_token.token.into(),
-                        index: self.branch_index,
+                        index: self.get_branch_index(),
                     });
-                self.branch_index += 1;
+                self.inc_branch_index();
             }
             HandlerPoint::After => {
+                self.pop_branch();
                 self.assign_position.pop();
             }
         }
