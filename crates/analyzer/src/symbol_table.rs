@@ -3,7 +3,8 @@ use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
 use crate::sv_system_function;
 use crate::symbol::{
-    Direction, DocComment, GenericBoundKind, GenericTables, Symbol, SymbolId, SymbolKind, TypeKind,
+    Direction, DocComment, GenericBoundKind, GenericMap, GenericTable, GenericTables, Symbol,
+    SymbolId, SymbolKind, TypeKind,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
@@ -486,11 +487,30 @@ impl SymbolTable {
 
         trace!("symbol_table: {}resolve   '{}'", context.indent(), path);
 
+        let namespace_generic_map = self.get_namespace_generic_map(&context.namespace);
         for (i, name) in path.as_slice().iter().enumerate() {
             let mut max_depth = 0;
             context.found = None;
 
-            let generic_argument = generic_arguments.get(i);
+            let generic_argument = if let (Some(args), Some(map)) =
+                (generic_arguments.get(i), &namespace_generic_map)
+            {
+                // Generic argumetns will be resolved in the namespace of base component.
+                // Therefore, generic parameters given as generic arguments should be replaced
+                // with thier types.
+                // See: https://github.com/veryl-lang/veryl/issues/1714#issuecomment-2967149726
+                let args: Vec<_> = args
+                    .iter()
+                    .map(|arg| {
+                        let mut arg = arg.clone();
+                        arg.apply_map(map);
+                        arg
+                    })
+                    .collect();
+                Some(args)
+            } else {
+                generic_arguments.get(i).cloned()
+            };
 
             if context.sv_member {
                 let token = Token::new(&name.to_string(), 0, 0, 0, 0, TokenSource::External);
@@ -551,7 +571,7 @@ impl SymbolTable {
                     if let Some(x) = generic_argument {
                         context
                             .generic_tables
-                            .insert(found.inner_namespace(), found.generic_table(x));
+                            .insert(found.inner_namespace(), found.generic_table(&x));
                     }
 
                     context.last_found = context.found;
@@ -707,6 +727,85 @@ impl SymbolTable {
 
             let cause = ResolveErrorCause::NotFound(context.namespace.pop().unwrap());
             Err(ResolveError::new(context.last_found, cause))
+        }
+    }
+
+    fn get_namespace_generic_map(&self, namespace: &Namespace) -> Option<Vec<GenericMap>> {
+        if namespace.depth() <= 1 {
+            return None;
+        }
+
+        let mut namespace = namespace.clone();
+        let path = namespace.pop().map(|x| SymbolPath::new(&[x]))?;
+        let context = ResolveContext::new(&namespace);
+        let params = self
+            .resolve(&path, &[], context)
+            .map(|x| self.collect_generic_bounds(&x.found))
+            .ok()?;
+
+        if params.is_empty() {
+            return None;
+        }
+
+        let mut map = GenericTable::default();
+        for (key, bound) in params {
+            if let GenericBoundKind::Proto(x) = bound {
+                let TypeKind::UserDefined(x) = x.kind else {
+                    continue;
+                };
+                map.insert(key, x.path);
+            }
+        }
+
+        let map = GenericMap { id: None, map };
+        Some(vec![map])
+    }
+
+    fn collect_generic_bounds(&self, symbol: &Symbol) -> Vec<(StrId, GenericBoundKind)> {
+        fn get_generic_bound(table: &SymbolTable, id: SymbolId) -> (StrId, GenericBoundKind) {
+            let symbol = table.get(id).unwrap();
+            let SymbolKind::GenericParameter(x) = symbol.kind else {
+                unreachable!();
+            };
+            (symbol.token.text, x.bound)
+        }
+
+        match &symbol.kind {
+            SymbolKind::Function(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_bound(self, *x))
+                .collect(),
+            SymbolKind::Module(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_bound(self, *x))
+                .collect(),
+            SymbolKind::Interface(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_bound(self, *x))
+                .collect(),
+            SymbolKind::Package(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_bound(self, *x))
+                .collect(),
+            SymbolKind::Struct(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_bound(self, *x))
+                .collect(),
+            SymbolKind::Union(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_bound(self, *x))
+                .collect(),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = self.get(x.base).unwrap();
+                self.collect_generic_bounds(&symbol)
+            }
+            _ => Vec::new(),
         }
     }
 
