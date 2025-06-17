@@ -4122,6 +4122,29 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+        struct Foo {
+            foo: logic,
+        }
+    }
+    interface InterfaceA::<Pkg: ProtoPkg> {
+        var foo: Pkg::Foo;
+        modport mp {
+            foo: input,
+        }
+    }
+    module ModuleB::<Pkg: ProtoPkg> (
+        if_a: modport InterfaceA::<Pkg>::mp,
+    ) {
+        var _foo: logic;
+        assign _foo = if_a.foo.foo;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
