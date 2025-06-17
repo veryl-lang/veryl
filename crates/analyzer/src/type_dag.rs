@@ -1,7 +1,7 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::symbol::{GenericMap, ParameterKind, Symbol, SymbolId, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce};
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
@@ -22,7 +22,7 @@ pub enum TypeDagCandidate {
         id: SymbolId,
         context: Context,
         parent: Option<(SymbolId, Context)>,
-        import: Vec<SymbolPathNamespace>,
+        import: Vec<GenericSymbolPathNamesapce>,
     },
 }
 
@@ -184,9 +184,11 @@ impl TypeDag {
         generic_map: Option<GenericMap>,
     ) {
         let mut path = path.clone();
-        path.resolve_imported(namespace);
-        if let Some(map) = generic_map {
-            path.apply_map(&[map]);
+
+        let maps = generic_map.map(|map| vec![map]);
+        path.resolve_imported(namespace, maps.as_ref());
+        if let Some(maps) = maps.as_ref() {
+            path.apply_map(maps);
         }
 
         for i in 0..path.len() {

@@ -1,11 +1,14 @@
 use crate::Emitter;
 use std::path::PathBuf;
-use veryl_analyzer::Analyzer;
+use veryl_analyzer::{Analyzer, attribute_table, symbol_table};
 use veryl_metadata::{ClockType, Metadata, ResetType};
 use veryl_parser::Parser;
 
 #[track_caller]
 fn emit(metadata: &Metadata, code: &str) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
 
@@ -964,6 +967,72 @@ module prj_ModuleC (
     always_comb begin
         d_if.valid   = 0;
         d_if.command = prj___Pkg__2::Command'(0);
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"proto package ProtoPkg {
+  enum Foo {
+    FOO
+  }
+  type Bar;
+}
+package Pkg::<W: u32> for ProtoPkg {
+  enum Foo {
+    FOO
+  }
+  type Bar = logic<W>;
+}
+interface IfA::<PKG: ProtoPkg> {
+  import PKG::*;
+  var foo: Foo;
+  var bar: Bar;
+  modport mp {
+    foo: output,
+    bar: output,
+  }
+}
+module ModuleA {
+  inst if_a: IfA::<Pkg::<32>>;
+  connect if_a.mp <> 0;
+}
+"#;
+
+    let expect = r#"
+
+package prj___Pkg__32;
+    typedef enum logic [1-1:0] {
+        Foo_FOO
+    } Foo;
+    typedef logic [32-1:0] Bar;
+endpackage
+interface prj___IfA____Pkg__32;
+    import prj___Pkg__32::*;
+    prj___Pkg__32::Foo foo;
+    prj___Pkg__32::Bar bar;
+    modport mp (
+        output foo,
+        output bar
+    );
+endinterface
+module prj_ModuleA;
+    prj___IfA____Pkg__32 if_a     ();
+    always_comb begin
+        if_a.foo = prj___Pkg__32::Foo'(0);
+        if_a.bar = prj___Pkg__32::Bar'(0);
     end
 endmodule
 //# sourceMappingURL=test.sv.map
