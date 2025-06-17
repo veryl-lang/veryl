@@ -419,6 +419,8 @@ mod filelist {
             "07_module_d.veryl",
             "08_module_e.veryl",
             "09_module_f.veryl",
+            "10_package_g.veryl",
+            "11_package_h.veryl",
             "ram.veryl",
         ];
         check_list(&paths, all);
@@ -429,5 +431,6 @@ mod filelist {
         check_order(&paths, "06_package_c.veryl", "07_module_d.veryl");
         check_order(&paths, "07_module_d.veryl", "09_module_f.veryl");
         check_order(&paths, "09_module_f.veryl", "08_module_e.veryl");
+        check_order(&paths, "10_package_g.veryl", "11_package_h.veryl");
     }
 }

@@ -163,16 +163,18 @@ impl TypeDag {
     ) {
         if let Some((parent_id, parent_context)) = parent {
             let parent_symbol = symbol_table::get(*parent_id).unwrap();
+            let parent_package = parent_symbol.get_parent_package();
             for generic_map in parent_symbol.generic_maps() {
                 self.insert_path_with_generic_map(
                     path,
                     namespace,
                     Some((&parent_symbol, parent_context)),
+                    parent_package.as_ref(),
                     Some(generic_map),
                 );
             }
         } else {
-            self.insert_path_with_generic_map(path, namespace, None, None);
+            self.insert_path_with_generic_map(path, namespace, None, None, None);
         }
     }
 
@@ -181,6 +183,7 @@ impl TypeDag {
         path: &GenericSymbolPath,
         namespace: &Namespace,
         parent: Option<(&Symbol, &Context)>,
+        parent_package: Option<&Symbol>,
         generic_map: Option<GenericMap>,
     ) {
         let mut path = path.clone();
@@ -207,10 +210,19 @@ impl TypeDag {
             let Some(base) = self.insert_symbol(&base_symbol) else {
                 continue;
             };
+
             if let Some((parent_symbol, parent_context)) = parent {
+                let (parent_symbol, parent_context) = if parent_package
+                    .map(|x| x.id != base_symbol.id)
+                    .unwrap_or(false)
+                {
+                    (parent_package.unwrap(), Context::Package)
+                } else {
+                    (parent_symbol, *parent_context)
+                };
                 if let Some(parent) = self.insert_symbol(parent_symbol) {
                     if !self.is_dag_owned(parent, base) {
-                        self.insert_dag_edge(parent, base, *parent_context);
+                        self.insert_dag_edge(parent, base, parent_context);
                     }
                 }
             }
