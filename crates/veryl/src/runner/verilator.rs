@@ -140,6 +140,23 @@ impl Runner for Verilator {
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
 
+        for include_file in &metadata.test.include_files {
+            if include_file.is_dir() {
+                miette::bail!("Including directories currently unsupported");
+            } else if let Some(file_name) = include_file.iter().next_back() {
+                let target_path = temp_dir.path().join(file_name);
+                if std::fs::copy(include_file, &target_path).is_err() {
+                    miette::bail!(
+                        "Failed to copy include {:?} to {:?}",
+                        include_file,
+                        target_path
+                    )
+                }
+            } else {
+                miette::bail!("Failed to get include file name {:?}", include_file);
+            }
+        }
+
         info!("Compiling test ({})", test);
 
         let mut defines = vec![format!(

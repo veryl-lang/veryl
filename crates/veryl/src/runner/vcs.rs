@@ -130,6 +130,11 @@ impl Runner for Vcs {
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
 
+        // in this case, the global includes may be irrelevant
+        if !metadata.test.include_files.is_empty() {
+            warn!("Including files is unimplemented for this backend!");
+        }
+
         info!("Compiling test ({})", test);
 
         let mut defines = vec![format!(
