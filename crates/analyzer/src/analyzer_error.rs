@@ -961,6 +961,17 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_enbed), help(""), url(""))]
+    #[error("embed (way: {way}/lang: {lang}) can't be used at here")]
+    InvalidEmbed {
+        way: String,
+        lang: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(unknown_embed_lang),
@@ -1872,6 +1883,15 @@ impl AnalyzerError {
     pub fn unknown_attribute(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownAttribute {
             name: name.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_embed(way: &str, lang: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidEmbed {
+            way: way.to_string(),
+            lang: lang.to_string(),
             input: source(token),
             error_location: token.into(),
         }
