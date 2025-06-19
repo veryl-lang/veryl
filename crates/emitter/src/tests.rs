@@ -646,53 +646,86 @@ endmodule
 
 #[test]
 fn emit_nested_generic_instances() {
-    let code = r#"package Pkg::<A: u32> {
-    function Func::<B: u32> -> i32 {
-        return A + B;
+    let code = r#"proto package ProtoPkgA {
+    const WIDTH: u32;
+    enum Foo: logic<WIDTH> {
+        FOO,
     }
-    struct Struct::<W: cosnt> {
-        foo: logic<W>,
+}
+package PkgA::<W: u32> for ProtoPkgA {
+    const WIDTH: u32 = W;
+    enum Foo: logic<WIDTH> {
+        FOO,
+    }
+}
+package PkgB::<PKG: ProtoPkgA> {
+    import PKG::*;
+    function Func::<B: u32> -> u32 {
+        return Foo::FOO + B;
+    }
+    struct Struct::<W: u32> {
+        foo: Foo     ,
+        bar: logic<W>,
     }
 }
 module Module {
-    let _a: i32 = Pkg::<1>::Func::<1>();
-    let _b: i32 = Pkg::<1>::Func::<2>();
-    let _c: i32 = Pkg::<2>::Func::<1>();
-    var _d: Pkg::<1>::Struct::<2>;
-    var _e: Pkg::<2>::Struct::<1>;
-    var _f: Pkg::<2>::Struct::<2>;
+    let _a: i32 = PkgB::<PkgA::<1>>::Func::<1>();
+    let _b: i32 = PkgB::<PkgA::<1>>::Func::<2>();
+    let _c: i32 = PkgB::<PkgA::<2>>::Func::<1>();
+    var _d: PkgB::<PkgA::<1>>::Struct::<2>;
+    var _e: PkgB::<PkgA::<2>>::Struct::<1>;
+    var _f: PkgB::<PkgA::<2>>::Struct::<2>;
 }
 "#;
 
-    let expect = r#"package prj___Pkg__1;
-    function automatic int signed __Func__1;
-        return 1 + 1;
+    let expect = r#"
+
+package prj___PkgA__1;
+    localparam int unsigned WIDTH = 1;
+    typedef enum logic [WIDTH-1:0] {
+        Foo_FOO
+    } Foo;
+endpackage
+package prj___PkgA__2;
+    localparam int unsigned WIDTH = 2;
+    typedef enum logic [WIDTH-1:0] {
+        Foo_FOO
+    } Foo;
+endpackage
+package prj___PkgB____PkgA__1;
+    import prj___PkgA__1::*;
+    function automatic int unsigned __Func__1;
+        return prj___PkgA__1::Foo_FOO + 1;
     endfunction
-    function automatic int signed __Func__2;
-        return 1 + 2;
+    function automatic int unsigned __Func__2;
+        return prj___PkgA__1::Foo_FOO + 2;
     endfunction
     typedef struct packed {
-        logic [2-1:0] foo;
+        prj___PkgA__1::Foo         foo;
+        logic              [2-1:0] bar;
     } __Struct__2;
 endpackage
-package prj___Pkg__2;
-    function automatic int signed __Func__1;
-        return 2 + 1;
+package prj___PkgB____PkgA__2;
+    import prj___PkgA__2::*;
+    function automatic int unsigned __Func__1;
+        return prj___PkgA__2::Foo_FOO + 1;
     endfunction
     typedef struct packed {
-        logic [1-1:0] foo;
+        prj___PkgA__2::Foo         foo;
+        logic              [1-1:0] bar;
     } __Struct__1;
     typedef struct packed {
-        logic [2-1:0] foo;
+        prj___PkgA__2::Foo         foo;
+        logic              [2-1:0] bar;
     } __Struct__2;
 endpackage
 module prj_Module;
-    int signed                _a; always_comb _a = prj___Pkg__1::__Func__1();
-    int signed                _b; always_comb _b = prj___Pkg__1::__Func__2();
-    int signed                _c; always_comb _c = prj___Pkg__2::__Func__1();
-    prj___Pkg__1::__Struct__2 _d;
-    prj___Pkg__2::__Struct__1 _e;
-    prj___Pkg__2::__Struct__2 _f;
+    int signed                         _a; always_comb _a = prj___PkgB____PkgA__1::__Func__1();
+    int signed                         _b; always_comb _b = prj___PkgB____PkgA__1::__Func__2();
+    int signed                         _c; always_comb _c = prj___PkgB____PkgA__2::__Func__1();
+    prj___PkgB____PkgA__1::__Struct__2 _d;
+    prj___PkgB____PkgA__2::__Struct__1 _e;
+    prj___PkgB____PkgA__2::__Struct__2 _f;
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -706,6 +739,7 @@ endmodule
         emit(&metadata, code)
     };
 
+    println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
 
