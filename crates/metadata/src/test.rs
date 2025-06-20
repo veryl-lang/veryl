@@ -16,6 +16,8 @@ pub struct Test {
     pub waveform_target: WaveFormTarget,
     #[serde(default)]
     pub waveform_format: WaveFormFormat,
+    #[serde(default)]
+    pub include_files: Vec<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

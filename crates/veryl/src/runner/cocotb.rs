@@ -1,6 +1,6 @@
 use crate::runner::{Runner, copy_wave};
 use futures::prelude::*;
-use log::{error, info};
+use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -128,6 +128,11 @@ impl Runner for Cocotb {
         info!("Executing test ({})", test);
 
         let src_path = temp_dir.path().join(format!("{}.py", test));
+
+        // in this case, the global includes may be irrelevant
+        if !metadata.test.include_files.is_empty() {
+            warn!("Including files is unimplemented for this backend!");
+        }
 
         match self.source {
             CocotbSource::Embed(x) => {
