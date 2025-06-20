@@ -1946,3 +1946,54 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn emit_generic_function_with_imported_proto_item() {
+    let code = r#"proto package ProtoPkgA {
+    type A;
+}
+package PkgA::<W: u32> for ProtoPkgA {
+    type A = logic<W>;
+}
+module ModuleA::<PKG: ProtoPkgA> {
+    import PKG::*;
+    function func::<T: type>() -> u32 {
+        return $bits(T);
+    }
+    let _w: u32 = func::<A>();
+}
+module ModuleB {
+    inst u_a: ModuleA::<PkgA::<32>>;
+}
+"#;
+
+    let expect = r#"
+
+package prj___PkgA__32;
+    typedef logic [32-1:0] A;
+endpackage
+module prj___ModuleA____PkgA__32;
+    import prj___PkgA__32::*;
+    function automatic int unsigned __func____PkgA__32_A() ;
+        return $bits(prj___PkgA__32::A);
+    endfunction
+    int unsigned _w; always_comb _w = __func____PkgA__32_A();
+endmodule
+module prj_ModuleB;
+    prj___ModuleA____PkgA__32 u_a ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

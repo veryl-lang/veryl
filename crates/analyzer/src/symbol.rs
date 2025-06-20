@@ -450,15 +450,20 @@ impl Symbol {
     }
 
     pub fn generic_references(&self) -> Vec<GenericSymbolPath> {
-        match &self.kind {
-            SymbolKind::Function(x) => x.generic_references.clone(),
-            SymbolKind::Module(x) => x.generic_references.clone(),
-            SymbolKind::Interface(x) => x.generic_references.clone(),
-            SymbolKind::Package(x) => x.generic_references.clone(),
-            SymbolKind::Struct(x) => x.generic_references.clone(),
-            SymbolKind::Union(x) => x.generic_references.clone(),
-            _ => Vec::new(),
-        }
+        let references = match &self.kind {
+            SymbolKind::Function(x) => &x.generic_references,
+            SymbolKind::Module(x) => &x.generic_references,
+            SymbolKind::Interface(x) => &x.generic_references,
+            SymbolKind::Package(x) => &x.generic_references,
+            SymbolKind::Struct(x) => &x.generic_references,
+            SymbolKind::Union(x) => &x.generic_references,
+            _ => return Vec::new(),
+        };
+        references
+            .iter()
+            .filter(|r| r.is_generic_reference())
+            .cloned()
+            .collect()
     }
 
     pub fn proto(&self) -> Option<SymbolId> {
