@@ -214,14 +214,18 @@ impl ReferenceTable {
         namespace: &Namespace,
         in_import_declaration: bool,
         generics_token: Option<Token>,
+        generic_maps: Option<&Vec<GenericMap>>,
     ) {
+        let orig_len = path.len();
+        let mut path = path.clone();
+        if let Some(maps) = generic_maps {
+            path.apply_map(maps);
+        }
+        path.resolve_imported(namespace, generic_maps);
+
         if path.is_generic_reference() {
             return;
         }
-
-        let orig_len = path.len();
-        let mut path = path.clone();
-        path.resolve_imported(namespace, None);
 
         // Prefix paths added by `resolve_imported` have already been resolved.
         // They should be skipped.
@@ -302,8 +306,6 @@ impl ReferenceTable {
 
                         let mut references = symbol.found.generic_references();
                         for path in &mut references {
-                            path.apply_map(&map);
-
                             // check recursive reference
                             if path.paths[0].base.text == symbol.found.token.text {
                                 continue;
@@ -314,6 +316,7 @@ impl ReferenceTable {
                                 &symbol.found.inner_namespace(),
                                 false,
                                 Some(symbol.found.token),
+                                Some(&map),
                             );
                         }
                     }
@@ -383,7 +386,7 @@ impl ReferenceTable {
                     let path: GenericSymbolPath = arg.into();
                     let namespace = namespace_table::get(ident.id).unwrap();
 
-                    self.generic_symbol_path(&path, &namespace, *in_import_declaration, None);
+                    self.generic_symbol_path(&path, &namespace, *in_import_declaration, None, None);
                 }
                 ReferenceCandidate::ExpressionIdentifier { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);

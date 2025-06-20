@@ -62,7 +62,9 @@ impl GenericContext {
     }
 
     pub fn push_reference(&mut self, path: GenericSymbolPath) {
-        self.references.last_mut().unwrap().push(path);
+        if !self.references.is_empty() && path.may_be_generic_reference() {
+            self.references.last_mut().unwrap().push(path);
+        }
     }
 }
 
@@ -691,10 +693,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
             }
             HandlerPoint::After => {
-                let path: GenericSymbolPath = arg.into();
-                if path.is_generic_reference() {
-                    self.generic_context.push_reference(path);
-                }
+                self.generic_context.push_reference(arg.into());
             }
         }
         Ok(())
