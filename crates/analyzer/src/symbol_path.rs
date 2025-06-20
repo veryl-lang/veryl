@@ -439,7 +439,17 @@ impl GenericSymbolPath {
             return;
         }
         if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), namespace)) {
-            if symbol.imported {
+            if matches!(symbol.found.kind, SymbolKind::EnumMember(_)) {
+                // The parent enum declaration is imported but not the enum member.
+                // Therefore, we need to execute `resolve_imported` to the parent enum declaration.
+                // see:
+                // https://github.com/veryl-lang/veryl/issues/1721#issuecomment-2986758880
+                let member_path = self.paths.pop().unwrap();
+                let mut namespace = namespace.clone();
+                namespace.pop();
+                self.resolve_imported(&namespace, generic_maps);
+                self.paths.push(member_path);
+            } else if symbol.imported {
                 let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
                 let TokenSource::File {
                     path: self_file_path,
@@ -459,7 +469,7 @@ impl GenericSymbolPath {
                                 .found
                                 .imported
                                 .iter()
-                                .find(|(_, x)| *x == *namespace)
+                                .find(|(_, x)| namespace.included(x))
                                 .map(|(x, _)| x)
                                 .unwrap()
                                 .clone();
