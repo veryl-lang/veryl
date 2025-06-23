@@ -74,3 +74,54 @@ fn empty_body_with_comment() {
     let ret = format(&metadata, &code);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn empty_list() {
+    let code = r#"module ModuleA #(
+
+) (
+
+) {
+
+}
+module ModuleB {
+  inst u: ModuleA #(
+
+    ) (
+
+    );
+
+    function Func (
+
+    ) {
+
+    }
+
+    always_comb {
+        Func(
+
+        );
+    }
+}
+"#;
+
+    let expect = r#"module ModuleA #() () {}
+module ModuleB {
+    inst u: ModuleA ;
+
+    function Func () {}
+
+    always_comb {
+        Func();
+    }
+}
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = format(&metadata, &code);
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
