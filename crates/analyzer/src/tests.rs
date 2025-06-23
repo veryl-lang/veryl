@@ -2897,6 +2897,20 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkg {
+    const A: u32;
+    }
+
+    module ModuleA::<PKG: ProtoPkg> {
+    import PKG::*;
+    let _a: u32 = 0 as A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
