@@ -168,6 +168,10 @@ See [Getting Started](https://doc.veryl-lang.org/book/03_getting_started.html).
   [[Paper]](https://veryl-lang.org/docs/veryl_dvcon-jpn-2024.pdf)
   [[Slides]](https://veryl-lang.org/docs/veryl_dvcon-jpn-2024-slide.pdf)
   [[arXiv]](http://arxiv.org/abs/2411.12983)
+* Naoya Hatta.
+  Veryl: A New Hardware Description Language Developed as Open Source Software.
+  June 2025. In: 2025 Symposium on VLSI Technology and Circuits, Workshop 7 "What is Possible with Open Chip Design? The Journey so Far.".
+  [[Slides]](https://veryl-lang.org/docs/veryl_vlsi2025.pdf)
 
 ## Related Projects
 
