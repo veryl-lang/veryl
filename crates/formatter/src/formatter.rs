@@ -1817,8 +1817,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
-        let single_line = arg.inst_declaration_opt2.is_none() || compact;
+        let single_line = is_single_line_inst_declaration(arg);
 
         self.inst(&arg.inst);
         self.space(1);
@@ -1882,14 +1881,16 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstParameter'
     fn inst_parameter(&mut self, arg: &InstParameter) {
-        self.hash(&arg.hash);
-        self.token_will_push(&arg.l_paren.l_paren_token);
-        self.newline_push();
         if let Some(ref x) = arg.inst_parameter_opt {
+            self.hash(&arg.hash);
+            self.token_will_push(&arg.l_paren.l_paren_token);
+            self.newline_push();
             self.inst_parameter_list(&x.inst_parameter_list);
+            self.newline_pop();
+            self.r_paren(&arg.r_paren);
+        } else {
+            // Remove empty '#()'
         }
-        self.newline_pop();
-        self.r_paren(&arg.r_paren);
     }
 
     /// Semantic action for non-terminal 'InstParameterList'
@@ -2849,4 +2850,19 @@ impl VerylWalker for Formatter {
         }
         self.newline();
     }
+}
+
+fn is_single_line_inst_declaration(arg: &InstDeclaration) -> bool {
+    if attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact) {
+        return true;
+    }
+
+    if let Some(x) = &arg.inst_declaration_opt2 {
+        if x.inst_declaration_opt3.is_some() {
+            // Non empty port list
+            return false;
+        }
+    }
+
+    true
 }
