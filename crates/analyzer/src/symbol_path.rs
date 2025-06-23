@@ -393,7 +393,16 @@ impl GenericSymbolPath {
 
         let head = &self.paths[0];
         if let Ok(symbol) = symbol_table::resolve(&head.base) {
-            if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
+            let is_generic = matches!(
+                symbol.found.kind,
+                SymbolKind::GenericParameter(_) | SymbolKind::ProtoPackage(_)
+            ) || (symbol.imported
+                && symbol
+                    .found
+                    .get_parent_package()
+                    .map(|x| matches!(x.kind, SymbolKind::ProtoPackage(_)))
+                    .unwrap_or(false));
+            if is_generic {
                 return true;
             }
         }
@@ -403,6 +412,28 @@ impl GenericSymbolPath {
                 if arg.is_generic_reference() {
                     return true;
                 }
+            }
+        }
+
+        false
+    }
+
+    pub fn may_be_generic_reference(&self) -> bool {
+        // path starts with generic parameter
+        if !self.is_resolvable() {
+            return false;
+        }
+
+        let head = &self.paths[0];
+        if let Ok(symbol) = symbol_table::resolve(&head.base) {
+            if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
+                return true;
+            }
+        }
+
+        for path in &self.paths {
+            if path.arguments.iter().any(|a| a.is_resolvable()) {
+                return true;
             }
         }
 
