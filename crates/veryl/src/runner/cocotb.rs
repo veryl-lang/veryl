@@ -1,6 +1,6 @@
 use crate::runner::{Runner, copy_wave};
 use futures::prelude::*;
-use log::{error, info, warn};
+use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -129,9 +129,21 @@ impl Runner for Cocotb {
 
         let src_path = temp_dir.path().join(format!("{}.py", test));
 
-        // in this case, the global includes may be irrelevant
-        if !metadata.test.include_files.is_empty() {
-            warn!("Including files is unimplemented for this backend!");
+        for include_file in &metadata.test.include_files {
+            if include_file.is_dir() {
+                miette::bail!("Including directories currently unsupported");
+            } else if let Some(file_name) = include_file.iter().next_back() {
+                let target_path = temp_dir.path().join("sim_build").join(file_name);
+                if std::fs::copy(include_file, &target_path).is_err() {
+                    miette::bail!(
+                        "Failed to copy include {:?} to {:?}",
+                        include_file,
+                        target_path
+                    )
+                }
+            } else {
+                miette::bail!("Failed to get include file name {:?}", include_file);
+            }
         }
 
         match self.source {
