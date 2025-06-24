@@ -664,6 +664,7 @@ impl Symbol {
             | SymbolKind::ProtoTypeDef(_)
             | SymbolKind::SystemVerilog => true,
             SymbolKind::Parameter(x) => matches!(x.r#type.kind, TypeKind::Type),
+            SymbolKind::ProtoConst(x) => matches!(x.r#type.kind, TypeKind::Type),
             SymbolKind::GenericParameter(x) => matches!(x.bound, GenericBoundKind::Type),
             SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
                 .map(|x| x.is_variable_type())
@@ -673,14 +674,15 @@ impl Symbol {
     }
 
     pub fn is_casting_type(&self) -> bool {
-        if let SymbolKind::Parameter(x) = &self.kind {
-            matches!(
-                x.r#type.kind,
-                TypeKind::Type | TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64
-            )
-        } else {
-            self.is_variable_type()
-        }
+        let type_kind = match &self.kind {
+            SymbolKind::Parameter(x) => &x.r#type.kind,
+            SymbolKind::ProtoConst(x) => &x.r#type.kind,
+            _ => return self.is_variable_type(),
+        };
+        matches!(
+            type_kind,
+            TypeKind::Type | TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64
+        )
     }
 
     pub fn is_struct(&self) -> bool {
