@@ -146,7 +146,14 @@ impl VerylGrammarTrait for CheckAnonymous {
                 } else if is_wildcard {
                     symbol.found.is_package(false)
                 } else {
-                    symbol.found.is_importable(false)
+                    let package_symbol = symbol
+                        .full_path
+                        .get(symbol.full_path.len() - 2)
+                        .map(|x| symbol_table::get(*x).unwrap())
+                        .unwrap();
+                    // The preceding symbol must be a package or
+                    // a proto-package referenced through a generic parameter.
+                    package_symbol.is_package(false) && symbol.found.is_importable(true)
                 };
 
                 if !is_valid_import {

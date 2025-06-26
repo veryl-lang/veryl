@@ -765,6 +765,18 @@ fn invalid_import() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+
+    let code = r#"
+    proto package ProtoPkg {
+        const C: u32;
+    }
+    module ModuleA::<PKG: ProtoPkg> {
+        import PKG::C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
