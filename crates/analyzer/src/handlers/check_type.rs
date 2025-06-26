@@ -152,11 +152,7 @@ fn check_generic_inst_arg(
                 return None;
             };
 
-            let Some(proto_symbol) = type_symbol
-                .found
-                .proto()
-                .map(|x| symbol_table::get(x).unwrap())
-            else {
+            let Some(proto_symbol) = type_symbol.found.proto() else {
                 break 'inst type_symbol.found.kind.to_kind_name();
             };
 
@@ -196,7 +192,7 @@ fn check_generic_proto_arg(
         None
     };
     let type_symbol = if let Some(x) = &arg_symbol {
-        let proto_symbol = x.found.proto_symbol();
+        let proto_symbol = x.found.proto();
         if proto_symbol.is_some() {
             proto_symbol
         } else if let Some(r#type) = x.found.kind.get_type() {

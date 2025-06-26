@@ -2923,6 +2923,23 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package Pkg for ProtoPkg {
+    const V: u32 = 0;
+    }
+    proto package ProtoPkg {
+    const V: u32;
+    }
+    module Sub::<PKG: ProtoPkg> {
+    }
+    module Top {
+    inst u_sub: Sub::<Pkg>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
