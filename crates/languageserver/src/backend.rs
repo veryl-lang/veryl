@@ -268,13 +268,13 @@ impl LanguageServer for Backend {
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
-    ) -> Result<Option<Vec<SymbolInformation>>> {
+    ) -> Result<Option<OneOf<Vec<SymbolInformation>, Vec<WorkspaceSymbol>>>> {
         let query = params.query;
 
         self.send(MsgToServer::Symbol { query }).await;
 
         if let Some(MsgFromServer::Symbol(x)) = self.recv().await {
-            Ok(Some(x))
+            Ok(Some(OneOf::Left(x)))
         } else {
             Ok(None)
         }
