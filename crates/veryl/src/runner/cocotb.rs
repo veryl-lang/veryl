@@ -137,7 +137,10 @@ impl Runner for Cocotb {
                 fs::create_dir_all(&sim_build_path)
                     .into_diagnostic()
                     .with_context(|| {
-                        format!("Failed to create `sim_build` directory at {:?}", sim_build_path)
+                        format!(
+                            "Failed to create `sim_build` directory at {:?}",
+                            sim_build_path
+                        )
                     })?;
 
                 let target_path = sim_build_path.join(file_name);
