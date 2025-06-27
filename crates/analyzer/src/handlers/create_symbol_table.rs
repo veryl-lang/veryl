@@ -1739,11 +1739,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         self.pop_type_dag_cand(None);
                         return Ok(());
                     }
-
-                    // existance of protptype will be checked at 'analyze_post_pass1' phase
-                    symbol_table::resolve((&path.generic_path(), &self.namespace))
-                        .ok()
-                        .map(|x| x.found.id)
+                    Some(path)
                 } else {
                     None
                 };
@@ -1875,10 +1871,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         return Ok(());
                     }
 
-                    // existance of protptype will be checked at 'analyze_post_pass1' phase
-                    symbol_table::resolve((&path.generic_path(), &self.namespace))
-                        .ok()
-                        .map(|x| x.found.id)
+                    Some(path)
                 } else {
                     None
                 };
@@ -1941,10 +1934,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         return Ok(());
                     }
 
-                    // existance of protptype will be checked at 'analyze_post_pass1' phase
-                    symbol_table::resolve((&path.generic_path(), &self.namespace))
-                        .ok()
-                        .map(|x| x.found.id)
+                    Some(path)
                 } else {
                     None
                 };

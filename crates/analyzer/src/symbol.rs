@@ -466,19 +466,27 @@ impl Symbol {
             .collect()
     }
 
-    pub fn proto(&self) -> Option<SymbolId> {
+    pub fn proto(&self) -> Option<Symbol> {
         match &self.kind {
-            SymbolKind::Module(x) => return x.proto,
+            SymbolKind::Module(x) => {
+                if let Some(proto) = &x.proto {
+                    return symbol_table::resolve((&proto.generic_path(), &self.namespace))
+                        .map(|x| x.found)
+                        .ok();
+                }
+            }
             SymbolKind::AliasModule(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
                 return symbol.found.proto();
             }
             SymbolKind::Interface(x) => {
-                if x.proto.is_some() {
-                    return x.proto;
+                if let Some(proto) = &x.proto {
+                    return symbol_table::resolve((&proto.generic_path(), &self.namespace))
+                        .map(|x| x.found)
+                        .ok();
                 } else if x.generic_parameters.is_empty() {
-                    return Some(self.id);
+                    return Some(self.clone());
                 }
             }
             SymbolKind::AliasInterface(x) => {
@@ -486,7 +494,13 @@ impl Symbol {
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
                 return symbol.found.proto();
             }
-            SymbolKind::Package(x) => return x.proto,
+            SymbolKind::Package(x) => {
+                if let Some(proto) = &x.proto {
+                    return symbol_table::resolve((&proto.generic_path(), &self.namespace))
+                        .map(|x| x.found)
+                        .ok();
+                }
+            }
             SymbolKind::AliasPackage(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
@@ -494,16 +508,12 @@ impl Symbol {
             }
             SymbolKind::GenericParameter(x) => {
                 let proto = x.bound.resolve_proto_bound(&self.namespace)?;
-                return proto.get_symbol().map(|x| x.id);
+                return proto.get_symbol();
             }
             _ => {}
         }
 
         None
-    }
-
-    pub fn proto_symbol(&self) -> Option<Symbol> {
-        self.proto().map(|x| symbol_table::get(x).unwrap())
     }
 
     pub fn alias_target(&self) -> Option<GenericSymbolPath> {
@@ -1826,7 +1836,7 @@ impl Parameter {
 #[derive(Debug, Clone)]
 pub struct ModuleProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolId>,
+    pub proto: Option<GenericSymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
@@ -1851,7 +1861,7 @@ pub struct AliasModuleProperty {
 #[derive(Debug, Clone)]
 pub struct InterfaceProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolId>,
+    pub proto: Option<GenericSymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
@@ -1952,7 +1962,7 @@ pub struct InstanceProperty {
 #[derive(Debug, Clone)]
 pub struct PackageProperty {
     pub range: TokenRange,
-    pub proto: Option<SymbolId>,
+    pub proto: Option<GenericSymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub members: Vec<SymbolId>,

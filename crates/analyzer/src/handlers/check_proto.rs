@@ -597,11 +597,7 @@ fn check_alias_compat(
         else {
             return ret;
         };
-        if let Some(proto) = symbol.found.proto() {
-            symbol_table::get(proto)
-        } else {
-            None
-        }
+        symbol.found.proto()
     };
     let Ok(required_proto) = symbol_table::resolve((&proto_path.generic_path(), proto_namespace))
     else {
