@@ -133,14 +133,22 @@ impl Runner for Cocotb {
             if include_file.is_dir() {
                 miette::bail!("Including directories currently unsupported");
             } else if let Some(file_name) = include_file.iter().next_back() {
-                let target_path = temp_dir.path().join("sim_build").join(file_name);
-                if std::fs::copy(include_file, &target_path).is_err() {
-                    miette::bail!(
-                        "Failed to copy include {:?} to {:?}",
-                        include_file,
-                        target_path
-                    )
-                }
+                let sim_build_path = temp_dir.path().join("sim_build");
+                fs::create_dir_all(&sim_build_path)
+                    .into_diagnostic()
+                    .with_context(|| {
+                        format!("Failed to create `sim_build` directory at {:?}", sim_build_path)
+                    })?;
+
+                let target_path = sim_build_path.join(file_name);
+                fs::copy(include_file, &target_path)
+                    .into_diagnostic()
+                    .with_context(|| {
+                        format!(
+                            "Failed to copy include {:?} to {:?}",
+                            include_file, target_path
+                        )
+                    })?;
             } else {
                 miette::bail!("Failed to get include file name {:?}", include_file);
             }
