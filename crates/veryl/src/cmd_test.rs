@@ -68,10 +68,10 @@ impl CmdTest {
         }
 
         if failure == 0 {
-            info!("Completed tests : {} passed, {} failed", success, failure);
+            info!("Completed tests : {success} passed, {failure} failed");
             Ok(true)
         } else {
-            error!("Completed tests : {} passed, {} failed", success, failure);
+            error!("Completed tests : {success} passed, {failure} failed");
             Ok(false)
         }
     }

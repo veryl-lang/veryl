@@ -89,7 +89,7 @@ impl Mermaid {
                 let mermaid_content = &content[code_span.clone()];
                 let mermaid_content = escape_html(mermaid_content);
                 let mermaid_content = mermaid_content.replace("\r\n", "\n");
-                let mermaid_code = format!("<pre class=\"mermaid\">{}</pre>\n\n", mermaid_content);
+                let mermaid_code = format!("<pre class=\"mermaid\">{mermaid_content}</pre>\n\n");
                 mermaid_blocks.push((span, mermaid_code));
 
                 start_new_code_span = true;
@@ -101,7 +101,7 @@ impl Mermaid {
             let pre_content = &content[0..span.start];
             let post_content = &content[span.end..];
 
-            content = format!("{}\n{}{}", pre_content, block, post_content);
+            content = format!("{pre_content}\n{block}{post_content}");
         }
         Ok(content)
     }

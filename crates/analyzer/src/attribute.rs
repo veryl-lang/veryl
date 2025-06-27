@@ -59,36 +59,36 @@ impl Attribute {
 impl fmt::Display for Attribute {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            Attribute::Ifdef(x) => format!("ifdef({})", x),
-            Attribute::Ifndef(x) => format!("ifndef({})", x),
-            Attribute::Elsif(x, _, _) => format!("elsif({})", x),
+            Attribute::Ifdef(x) => format!("ifdef({x})"),
+            Attribute::Ifndef(x) => format!("ifndef({x})"),
+            Attribute::Elsif(x, _, _) => format!("elsif({x})"),
             Attribute::Else(_, _) => String::from("else"),
-            Attribute::Sv(x) => format!("sv(\"{}\")", x),
-            Attribute::Allow(x) => format!("allow({})", x),
-            Attribute::EnumEncoding(x) => format!("enum_encoding({})", x),
-            Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({})", x),
+            Attribute::Sv(x) => format!("sv(\"{x}\")"),
+            Attribute::Allow(x) => format!("allow({x})"),
+            Attribute::EnumEncoding(x) => format!("enum_encoding({x})"),
+            Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({x})"),
             Attribute::Test(x, _) => format!("test({})", x.text),
-            Attribute::CondType(x) => format!("cond_type({})", x),
+            Attribute::CondType(x) => format!("cond_type({x})"),
             Attribute::Align(x) => {
                 let mut arg = String::new();
                 for x in x {
-                    arg.push_str(&format!("{}, ", x));
+                    arg.push_str(&format!("{x}, "));
                 }
-                format!("align({})", arg)
+                format!("align({arg})")
             }
             Attribute::Format(x) => {
                 let mut arg = String::new();
                 for x in x {
-                    arg.push_str(&format!("{}, ", x));
+                    arg.push_str(&format!("{x}, "));
                 }
-                format!("format({})", arg)
+                format!("format({arg})")
             }
             Attribute::Expand(x) => {
                 let mut arg = String::new();
                 for x in x {
-                    arg.push_str(&format!("{}, ", x));
+                    arg.push_str(&format!("{x}, "));
                 }
-                format!("expand({})", arg)
+                format!("expand({arg})")
             }
         };
         text.fmt(f)

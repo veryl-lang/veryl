@@ -125,9 +125,9 @@ impl Runner for Cocotb {
 
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
 
-        info!("Executing test ({})", test);
+        info!("Executing test ({test})");
 
-        let src_path = temp_dir.path().join(format!("{}.py", test));
+        let src_path = temp_dir.path().join(format!("{test}.py"));
 
         for include_file in &metadata.test.include_files {
             if include_file.is_dir() {
@@ -252,10 +252,10 @@ runner.test(
         }
 
         if self.success {
-            info!("Succeeded test ({})", test);
+            info!("Succeeded test ({test})");
             Ok(true)
         } else {
-            error!("Failed test ({})", test);
+            error!("Failed test ({test})");
             Ok(false)
         }
     }

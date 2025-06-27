@@ -267,7 +267,7 @@ fn check_generic_proto_arg(
             if is_matched {
                 None
             } else {
-                Some(format!("{}", x))
+                Some(format!("{x}"))
             }
         }
     };

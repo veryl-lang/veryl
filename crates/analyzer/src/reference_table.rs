@@ -138,7 +138,7 @@ impl ReferenceTable {
                     };
 
                     if !is_generic_if {
-                        let member = format!("{}", not_found);
+                        let member = format!("{not_found}");
                         self.errors
                             .push(AnalyzerError::unknown_member(&name, &member, token));
                     }
@@ -153,7 +153,7 @@ impl ReferenceTable {
                 }
             }
         } else if let ResolveErrorCause::NotFound(not_found) = err.cause {
-            let name = format!("{}", not_found);
+            let name = format!("{not_found}");
             if let Some(generics_token) = generics_token {
                 self.errors
                     .push(AnalyzerError::unresolvable_generic_argument(

@@ -236,21 +236,21 @@ impl fmt::Display for VarRefPathItem {
             }
             VarRefPathItem::SelectSingle { index } => {
                 if let EvaluatedValue::Fixed(index) = index.value {
-                    format!("[{}]", index)
+                    format!("[{index}]")
                 } else {
                     "[]".to_string()
                 }
             }
             VarRefPathItem::SelectColon { msb, lsb } => match (&msb.value, &lsb.value) {
                 (EvaluatedValue::Fixed(msb), EvaluatedValue::Fixed(lsb)) => {
-                    format!("[{}:{}]", msb, lsb)
+                    format!("[{msb}:{lsb}]")
                 }
                 _ => "[]".to_string(),
             },
             VarRefPathItem::SelectPlusClon { position, width } => {
                 match (&position.value, &width.value) {
                     (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
-                        format!("[{}+:{}]", position, width)
+                        format!("[{position}+:{width}]")
                     }
                     _ => "[]".to_string(),
                 }
@@ -258,14 +258,14 @@ impl fmt::Display for VarRefPathItem {
             VarRefPathItem::SelectMinusColon { position, width } => {
                 match (&position.value, &width.value) {
                     (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
-                        format!("[{}-:{}]", position, width)
+                        format!("[{position}-:{width}]")
                     }
                     _ => "[]".to_string(),
                 }
             }
             VarRefPathItem::SelectStep { index, step } => match (&index.value, &step.value) {
                 (EvaluatedValue::Fixed(index), EvaluatedValue::Fixed(step)) => {
-                    format!("[{} step {}]", index, step)
+                    format!("[{index} step {step}]")
                 }
                 _ => "[]".to_string(),
             },
