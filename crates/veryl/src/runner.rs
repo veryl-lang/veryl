@@ -107,7 +107,7 @@ pub fn copy_wave(
     work_path: &Path,
 ) -> Result<()> {
     // The file always has a `.vcd` extension, because `$dumpfile` doesn't have the metadata information
-    let wave_src_path = work_path.join(format!("{}.vcd", test_name));
+    let wave_src_path = work_path.join(format!("{test_name}.vcd"));
 
     // but let's rename the target file to the correct extension, based on the selected format
     let target_name = format!(

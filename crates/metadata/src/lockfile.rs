@@ -360,7 +360,7 @@ impl Lockfile {
                 if root {
                     return Err(MetadataError::InvalidDependency {
                         name: dependency.name.clone(),
-                        cause: format!("it conflicts with {}", x),
+                        cause: format!("it conflicts with {x}"),
                     });
                 }
             } else {

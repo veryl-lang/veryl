@@ -90,8 +90,7 @@ impl Wavedrom {
                 let wavedrom_content = escape_html(wavedrom_content);
                 let wavedrom_content = wavedrom_content.replace("\r\n", "\n");
                 let wavedrom_code = format!(
-                    "<body onload=\"WaveDrom.ProcessAll()\">\n\n<script type=\"WaveDrom\">{}</script>\n\n",
-                    wavedrom_content
+                    "<body onload=\"WaveDrom.ProcessAll()\">\n\n<script type=\"WaveDrom\">{wavedrom_content}</script>\n\n"
                 );
                 wavedrom_blocks.push((span, wavedrom_code));
 
@@ -104,7 +103,7 @@ impl Wavedrom {
             let pre_content = &content[0..span.start];
             let post_content = &content[span.end..];
 
-            content = format!("{}\n{}{}", pre_content, block, post_content);
+            content = format!("{pre_content}\n{block}{post_content}");
         }
         Ok(content)
     }

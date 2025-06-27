@@ -85,8 +85,8 @@ impl CheckExpression {
 
                 if src_array_dim != dst_array_dim {
                     self.errors.push(AnalyzerError::mismatch_assignment(
-                        &format!("{}-D array", src_array_dim),
-                        &format!("{}-D array", dst_array_dim),
+                        &format!("{src_array_dim}-D array"),
+                        &format!("{dst_array_dim}-D array"),
                         token,
                         &self.inst_context,
                     ));

@@ -837,7 +837,7 @@ impl Emitter {
             ResetType::SyncLow => "!",
         };
 
-        self.reset_signal = Some(format!("{}{}", prefix_op, token));
+        self.reset_signal = Some(format!("{prefix_op}{token}"));
     }
 
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
@@ -913,11 +913,7 @@ impl Emitter {
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
         self.default_block = Some(emitting_identifier(arg.identifier.as_ref()));
-        self.token_will_push(
-            &arg.l_brace
-                .l_brace_token
-                .replace(&format!("{}begin", prefix)),
-        );
+        self.token_will_push(&arg.l_brace.l_brace_token.replace(&format!("{prefix}begin")));
         self.space(1);
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
@@ -1026,7 +1022,7 @@ impl Emitter {
                         return None;
                     }
                     Attr::CondType(x) => {
-                        return Some(format!("{} ", x));
+                        return Some(format!("{x} "));
                     }
                     _ => (),
                 }
@@ -1205,7 +1201,7 @@ impl Emitter {
             if !entry.array_size.is_empty() {
                 self.space(1);
                 for size in entry.array_size {
-                    self.str(&format!("[0:{}-1]", size));
+                    self.str(&format!("[0:{size}-1]"));
                 }
             }
             self.space(1);
@@ -1855,7 +1851,7 @@ impl Emitter {
     fn emit_generic_instance_name_comment(&mut self, generic_map: &GenericMap) {
         if generic_map.generic() && self.build_opt.hashed_mangled_name {
             let name = generic_map.name(false, false);
-            self.str(&format!("// {}", name));
+            self.str(&format!("// {name}"));
             self.newline();
         }
     }
@@ -2089,9 +2085,9 @@ impl VerylWalker for Emitter {
         let demension_number = msb_table::get(arg.msb_token.token.id).unwrap();
 
         let text = if demension_number == 0 {
-            format!("($bits({}) - 1)", identifier)
+            format!("($bits({identifier}) - 1)")
         } else {
-            format!("($size({}, {}) - 1)", identifier, demension_number)
+            format!("($size({identifier}, {demension_number}) - 1)")
         };
         self.token(&arg.msb_token.replace(&text));
     }
@@ -3439,7 +3435,7 @@ impl VerylWalker for Emitter {
                 let remove_endif = elsif_else && self.string.trim_end().ends_with("`endif");
                 if remove_endif {
                     self.unindent();
-                    self.truncate(self.string.len() - format!("`endif{}", NEWLINE).len());
+                    self.truncate(self.string.len() - format!("`endif{NEWLINE}").len());
                 }
 
                 self.consume_adjust_line(&arg.identifier.identifier_token.token);
@@ -4134,7 +4130,7 @@ impl VerylWalker for Emitter {
 
         self.identifier(&identifier_with_prefix_suffix(
             &arg.identifier,
-            &Some(format!("{}_", prefix)),
+            &Some(format!("{prefix}_")),
             &None,
         ));
         if let Some(ref x) = arg.enum_item_opt {
@@ -5433,7 +5429,7 @@ fn namespace_string(
     for (i, path) in namespace.paths.iter().enumerate() {
         if i == 0 {
             // top level namespace is always `_`
-            let text = format!("{}_", path);
+            let text = format!("{path}_");
 
             // "$sv" namespace should be removed
             if text == "$sv_" {
@@ -5462,11 +5458,11 @@ fn namespace_string(
                         context.in_direction_modport,
                         in_sv_namespace,
                     );
-                    format!("{}{}", path, separator)
+                    format!("{path}{separator}")
                 };
                 ret.push_str(&text);
             } else {
-                return format!("{}", namespace);
+                return format!("{namespace}");
             }
         }
 
@@ -5489,7 +5485,7 @@ fn generic_instance_namespace_string(symbol: &Symbol, context: &SymbolContext) -
             .first()
             .map(|x| x.name(false, true))
             .unwrap();
-        format!("{}{}", name, separator)
+        format!("{name}{separator}")
     } else {
         format!("{}{}", symbol.token, separator)
     }

@@ -37,7 +37,7 @@ impl DocComment {
     pub fn format(&self, single_line: bool) -> String {
         let mut ret = String::new();
         for t in &self.0 {
-            let t = format!("{}", t);
+            let t = format!("{t}");
             let t = t.trim_start_matches("///");
             ret.push_str(t);
             if single_line {
@@ -1028,14 +1028,14 @@ impl fmt::Display for SymbolKind {
             }
             SymbolKind::ProtoTypeDef(x) => {
                 if let Some(ref r#type) = x.r#type {
-                    format!("proto typedef alias ({})", r#type)
+                    format!("proto typedef alias ({type})")
                 } else {
                     "proto typedef".to_string()
                 }
             }
             SymbolKind::Enum(x) => {
                 if let Some(ref r#type) = x.r#type {
-                    format!("enum ({})", r#type)
+                    format!("enum ({type})")
                 } else {
                     "enum ()".to_string()
                 }

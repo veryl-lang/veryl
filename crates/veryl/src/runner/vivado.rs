@@ -121,7 +121,7 @@ impl Runner for Vivado {
                 let target_path = temp_dir.path().join(file_name);
                 includes.push("-i".to_string());
                 includes.push(target_path.to_string_lossy().to_string());
-                println!("{:?}", target_path);
+                println!("{target_path:?}");
                 if std::fs::copy(include_file, &target_path).is_err() {
                     miette::bail!(
                         "Failed to copy include {:?} to {:?}",
@@ -134,7 +134,7 @@ impl Runner for Vivado {
             }
         }
 
-        info!("Compiling test ({})", test);
+        info!("Compiling test ({test})");
 
         let mut defines = vec![
             "-d".to_string(),
@@ -174,11 +174,11 @@ impl Runner for Vivado {
         })?;
 
         if !self.success {
-            error!("Failed compile ({})", test);
+            error!("Failed compile ({test})");
             return Ok(false);
         }
 
-        info!("Elaborating test ({})", test);
+        info!("Elaborating test ({test})");
 
         let mut top = vec![test.to_string()];
         let opt = if wave && WaveFormFormat::Vcd == metadata.test.waveform_format {
@@ -206,11 +206,11 @@ impl Runner for Vivado {
         })?;
 
         if !self.success {
-            error!("Failed elaborate ({})", test);
+            error!("Failed elaborate ({test})");
             return Ok(false);
         }
 
-        info!("Executing test ({})", test);
+        info!("Executing test ({test})");
 
         rt.block_on(async {
             let simulate = Command::new("xsim")
@@ -232,10 +232,10 @@ impl Runner for Vivado {
         }
 
         if self.success {
-            info!("Succeeded test ({})", test);
+            info!("Succeeded test ({test})");
             Ok(true)
         } else {
-            error!("Failed test ({})", test);
+            error!("Failed test ({test})");
             Ok(false)
         }
     }

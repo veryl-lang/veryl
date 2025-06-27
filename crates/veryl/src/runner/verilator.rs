@@ -157,7 +157,7 @@ impl Runner for Verilator {
             }
         }
 
-        info!("Compiling test ({})", test);
+        info!("Compiling test ({test})");
 
         let mut defines = vec![format!(
             "+define+__veryl_test_{}_{}__",
@@ -206,11 +206,11 @@ impl Runner for Verilator {
         })?;
 
         if !self.success {
-            error!("Failed compile ({})", test);
+            error!("Failed compile ({test})");
             return Ok(false);
         }
 
-        info!("Executing test ({})", test);
+        info!("Executing test ({test})");
 
         rt.block_on(async {
             let simulate = Command::new("./obj_dir/simv")
@@ -230,10 +230,10 @@ impl Runner for Verilator {
         }
 
         if self.success {
-            info!("Succeeded test ({})", test);
+            info!("Succeeded test ({test})");
             Ok(true)
         } else {
-            error!("Failed test ({})", test);
+            error!("Failed test ({test})");
             Ok(false)
         }
     }

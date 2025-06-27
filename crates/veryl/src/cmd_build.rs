@@ -250,7 +250,7 @@ impl CmdBuild {
         let mut used_paths = HashMap::new();
         for symbol in &candidate_symbols {
             if let TokenSource::File { path, .. } = symbol.token.source {
-                let path = PathBuf::from(format!("{}", path));
+                let path = PathBuf::from(format!("{path}"));
                 if let Some(x) = table.remove(&path) {
                     used_paths.insert(path, x);
                 }
@@ -265,7 +265,7 @@ impl CmdBuild {
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             ) {
                 if let TokenSource::File { path, .. } = symbol.token.source {
-                    let path = PathBuf::from(format!("{}", path));
+                    let path = PathBuf::from(format!("{path}"));
                     if let Some(x) = used_paths.remove(&path) {
                         ret.push(x.clone());
                     }

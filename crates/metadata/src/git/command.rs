@@ -93,10 +93,10 @@ impl Git {
                 }
 
                 let context = String::from_utf8_lossy(&output.stderr).to_string();
-                let msg = format!("failed to clone repository: {}", url);
+                let msg = format!("failed to clone repository: {url}");
                 return Err(GitCommandError { msg, context }.into());
             }
-            debug!("Cloned repository ({})", url);
+            debug!("Cloned repository ({url})");
         }
 
         Ok(Git {

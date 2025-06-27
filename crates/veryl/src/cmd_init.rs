@@ -52,7 +52,7 @@ impl CmdInit {
                 Git::init(&self.opt.path)?;
             }
 
-            info!("Created \"{}\" project", name);
+            info!("Created \"{name}\" project");
         } else {
             bail!("path \"{}\" is not valid", self.opt.path.to_string_lossy());
         }

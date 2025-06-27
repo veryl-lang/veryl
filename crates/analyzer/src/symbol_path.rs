@@ -296,7 +296,7 @@ impl GenericSymbol {
             for a in &self.arguments {
                 text.push('_');
                 for a in a.mangled_path().0.as_slice() {
-                    text.push_str(&format!("_{}", a));
+                    text.push_str(&format!("_{a}"));
                 }
             }
             resource_table::insert_str(&text)

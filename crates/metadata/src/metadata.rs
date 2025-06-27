@@ -163,7 +163,7 @@ impl Metadata {
         let version = self.project.version.clone();
         let revision = git.get_revision()?;
 
-        info!("Publishing release ({} @ {})", version, revision);
+        info!("Publishing release ({version} @ {revision})");
 
         let release = Release { version, revision };
 

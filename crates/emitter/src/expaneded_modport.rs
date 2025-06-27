@@ -36,7 +36,7 @@ impl ExpandModportConnections {
                 let (port_target, interface_target) = if array_index.is_empty() {
                     (
                         format!("__{}_{}", port.name(), variable_token),
-                        format!("{}.{}", interface_name, variable_token),
+                        format!("{interface_name}.{variable_token}"),
                     )
                 } else {
                     let index: Vec<_> = array_index.iter().map(|x| format!("{x}")).collect();

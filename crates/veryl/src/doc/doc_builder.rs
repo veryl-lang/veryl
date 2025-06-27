@@ -468,7 +468,7 @@ impl DocBuilder {
 
         let file = self.theme_dir.join("custom.css");
         let mut file = File::create(file).into_diagnostic()?;
-        write!(file, "{}", custom_css).into_diagnostic()?;
+        write!(file, "{custom_css}").into_diagnostic()?;
 
         let favicon = include_bytes!("../../resource/favicon.png");
         let file = self.theme_dir.join("favicon.png");
@@ -496,7 +496,7 @@ impl DocBuilder {
     fn build_component(&self, name: &str, content: String) -> Result<()> {
         let file = self.src_dir.join(name);
         let mut file = File::create(file).into_diagnostic()?;
-        write!(file, "{}", content).into_diagnostic()?;
+        write!(file, "{content}").into_diagnostic()?;
         Ok(())
     }
 

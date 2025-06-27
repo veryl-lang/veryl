@@ -173,8 +173,8 @@ impl Preprocessor for Veryl {
                                             );
                                             for change in diff.iter_all_changes() {
                                                 match change.tag() {
-                                                    ChangeTag::Delete => eprint!("-{}", change),
-                                                    ChangeTag::Insert => eprint!("+{}", change),
+                                                    ChangeTag::Delete => eprint!("-{change}"),
+                                                    ChangeTag::Insert => eprint!("+{change}"),
                                                     ChangeTag::Equal => (),
                                                 }
                                             }

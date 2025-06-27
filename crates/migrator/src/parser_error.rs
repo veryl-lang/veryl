@@ -36,16 +36,14 @@ impl std::fmt::Display for SyntaxError {
             let token = self.unexpected_tokens[0].token_type;
             if token == TokenType::LAngle {
                 f.write_str(&format!(
-                    "Unexpected token: '{}', do you mean \"less than operator '<:'\" ?",
-                    token
+                    "Unexpected token: '{token}', do you mean \"less than operator '<:'\" ?"
                 ))
             } else if token == TokenType::RAngle {
                 f.write_str(&format!(
-                    "Unexpected token: '{}', do you mean \"greater than operator '>:'\" ?",
-                    token
+                    "Unexpected token: '{token}', do you mean \"greater than operator '>:'\" ?"
                 ))
             } else {
-                f.write_str(&format!("Unexpected token: '{}'", token))
+                f.write_str(&format!("Unexpected token: '{token}'"))
             }
         } else {
             f.write_str("Syntax Error")
