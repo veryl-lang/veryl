@@ -694,6 +694,8 @@ package prj___PkgA__2;
 endpackage
 package prj___PkgB____PkgA__1;
     import prj___PkgA__1::*;
+
+
     function automatic int unsigned __Func__1;
         return prj___PkgA__1::Foo_FOO + 1;
     endfunction
@@ -707,6 +709,8 @@ package prj___PkgB____PkgA__1;
 endpackage
 package prj___PkgB____PkgA__2;
     import prj___PkgA__2::*;
+
+
     function automatic int unsigned __Func__1;
         return prj___PkgA__2::Foo_FOO + 1;
     endfunction
@@ -1053,8 +1057,11 @@ package prj___Pkg__32;
     } Foo;
     typedef logic [32-1:0] Bar;
 endpackage
-interface prj___IfA____Pkg__32;
+interface prj___IfA____Pkg__32
     import prj___Pkg__32::*;
+;
+
+
     prj___Pkg__32::Foo foo;
     prj___Pkg__32::Bar bar;
     modport mp (
@@ -1972,8 +1979,11 @@ module ModuleB {
 package prj___PkgA__32;
     typedef logic [32-1:0] A;
 endpackage
-module prj___ModuleA____PkgA__32;
+module prj___ModuleA____PkgA__32
     import prj___PkgA__32::*;
+;
+
+
     function automatic int unsigned __func____PkgA__32_A() ;
         return $bits(prj___PkgA__32::A);
     endfunction

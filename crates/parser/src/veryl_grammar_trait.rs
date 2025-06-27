@@ -428,6 +428,96 @@ impl Expression {
     }
 }
 
+impl ModuleDeclaration {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        for x in &self.module_declaration_list {
+            ret.append(&mut x.module_group.collect_import_declarations());
+        }
+        ret
+    }
+}
+
+impl ModuleGroup {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        match &*self.module_group_group {
+            ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
+                for x in &x.module_group_group_list {
+                    ret.append(&mut x.module_group.collect_import_declarations());
+                }
+            }
+            ModuleGroupGroup::ModuleItem(x) => {
+                if let GenerateItem::ImportDeclaration(x) = &*x.module_item.generate_item {
+                    ret.push(x.import_declaration.as_ref().clone());
+                }
+            }
+        }
+
+        ret
+    }
+}
+
+impl InterfaceDeclaration {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        for x in &self.interface_declaration_list {
+            ret.append(&mut x.interface_group.collect_import_declarations());
+        }
+        ret
+    }
+}
+
+impl InterfaceGroup {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        match &*self.interface_group_group {
+            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
+                for x in &x.interface_group_group_list {
+                    ret.append(&mut x.interface_group.collect_import_declarations());
+                }
+            }
+            InterfaceGroupGroup::InterfaceItem(x) => {
+                if let InterfaceItem::GenerateItem(x) = &*x.interface_item {
+                    if let GenerateItem::ImportDeclaration(x) = &*x.generate_item {
+                        ret.push(x.import_declaration.as_ref().clone());
+                    }
+                }
+            }
+        }
+        ret
+    }
+}
+
+impl PackageDeclaration {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        for x in &self.package_declaration_list {
+            ret.append(&mut x.package_group.collect_import_declarations());
+        }
+        ret
+    }
+}
+
+impl PackageGroup {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        match &*self.package_group_group {
+            PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
+                for x in &x.package_group_group_list {
+                    ret.append(&mut x.package_group.collect_import_declarations());
+                }
+            }
+            PackageGroupGroup::PackageItem(x) => {
+                if let PackageItem::ImportDeclaration(x) = &*x.package_item {
+                    ret.push(x.import_declaration.as_ref().clone());
+                }
+            }
+        }
+        ret
+    }
+}
+
 impl fmt::Display for Direction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let token = match self {

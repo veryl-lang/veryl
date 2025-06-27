@@ -16,11 +16,13 @@ package veryl_testcase_Package56C;
     } StructA;
 endpackage
 
-module veryl_testcase_Module56 (
+module veryl_testcase_Module56
+    import veryl_testcase_Package56A::X;
+ (
     veryl_testcase___Interface56D__Package56C_StructA.X x0,
     veryl_testcase___Interface56E__Package56C.X         x1
 );
-    import veryl_testcase_Package56A::X;
+
 
     veryl_testcase___Interface56A__Package56A_X u_a0 ();
     veryl_testcase___Interface56A__Package56B_X u_a1 ();
