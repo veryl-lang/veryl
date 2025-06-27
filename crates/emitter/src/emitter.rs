@@ -76,7 +76,7 @@ pub struct Emitter {
     enum_width: usize,
     enum_type: Option<ScalarType>,
     emit_enum_implicit_valiant: bool,
-    file_scope_import: Vec<String>,
+    file_scope_import: Vec<ImportDeclaration>,
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
     generic_map: Vec<Vec<GenericMap>>,
@@ -909,6 +909,24 @@ impl Emitter {
         self.build_opt
             .implicit_parameter_types
             .contains(&BuiltinType::Type)
+    }
+
+    fn emit_import_declaration(&mut self, arg: &ImportDeclaration) {
+        let src_line = self.src_line;
+        self.clear_adjust_line();
+
+        self.in_import = true;
+        self.import(&arg.import);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        if let Some(ref x) = arg.import_declaration_opt {
+            self.colon_colon(&x.colon_colon);
+            self.star(&x.star);
+        }
+        self.semicolon(&arg.semicolon);
+        self.in_import = false;
+
+        self.src_line = src_line;
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
@@ -4843,17 +4861,8 @@ impl VerylWalker for Emitter {
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'
-    fn import_declaration(&mut self, arg: &ImportDeclaration) {
-        self.in_import = true;
-        self.import(&arg.import);
-        self.space(1);
-        self.scoped_identifier(&arg.scoped_identifier);
-        if let Some(ref x) = arg.import_declaration_opt {
-            self.colon_colon(&x.colon_colon);
-            self.star(&x.star);
-        }
-        self.semicolon(&arg.semicolon);
-        self.in_import = false;
+    fn import_declaration(&mut self, _arg: &ImportDeclaration) {
+        // nothing to emit
     }
 
     /// Semantic action for non-terminal 'UnsafeBlock'
@@ -4910,19 +4919,20 @@ impl VerylWalker for Emitter {
                 );
                 self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
-            let file_scope_import = self.file_scope_import.clone();
-            if !file_scope_import.is_empty() {
+
+            let mut import_declarations = self.file_scope_import.clone();
+            import_declarations.append(&mut arg.collect_import_declarations());
+            if !import_declarations.is_empty() {
                 self.newline_push();
-            }
-            for (i, x) in file_scope_import.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
+                for (i, x) in import_declarations.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
+                    self.emit_import_declaration(x);
                 }
-                self.str(x);
-            }
-            if !file_scope_import.is_empty() {
                 self.newline_pop();
             }
+
             if let Some(ref x) = arg.module_declaration_opt1 {
                 self.space(1);
                 self.with_parameter(&x.with_parameter);
@@ -4997,19 +5007,20 @@ impl VerylWalker for Emitter {
                 );
                 self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
-            let file_scope_import = self.file_scope_import.clone();
-            if !file_scope_import.is_empty() {
+
+            let mut import_declarations = self.file_scope_import.clone();
+            import_declarations.append(&mut arg.collect_import_declarations());
+            if !import_declarations.is_empty() {
                 self.newline_push();
-            }
-            for (i, x) in file_scope_import.iter().enumerate() {
-                if i != 0 {
-                    self.newline();
+                for (i, x) in import_declarations.iter().enumerate() {
+                    if i != 0 {
+                        self.newline();
+                    }
+                    self.emit_import_declaration(x);
                 }
-                self.str(x);
-            }
-            if !file_scope_import.is_empty() {
                 self.newline_pop();
             }
+
             if let Some(ref x) = arg.interface_declaration_opt1 {
                 self.space(1);
                 self.with_parameter(&x.with_parameter);
@@ -5206,9 +5217,10 @@ impl VerylWalker for Emitter {
             for (i, x) in arg.package_declaration_list.iter().enumerate() {
                 self.newline_list(i);
                 if i == 0 {
-                    let file_scope_import = self.file_scope_import.clone();
-                    for x in &file_scope_import {
-                        self.str(x);
+                    let mut import_declarations = self.file_scope_import.clone();
+                    import_declarations.append(&mut arg.collect_import_declarations());
+                    for x in import_declarations {
+                        self.emit_import_declaration(&x);
                         self.newline();
                     }
                 }
@@ -5357,14 +5369,8 @@ impl VerylWalker for Emitter {
                     let items: Vec<DescriptionItem> = x.description_group.as_ref().into();
                     for item in items {
                         if let DescriptionItem::ImportDeclaration(x) = item {
-                            let mut emitter = Emitter {
-                                project_name: self.project_name,
-                                build_opt: self.build_opt.clone(),
-                                format_opt: self.format_opt.clone(),
-                                ..Default::default()
-                            };
-                            emitter.import_declaration(&x.import_declaration);
-                            self.file_scope_import.push(emitter.as_str().to_string());
+                            self.file_scope_import
+                                .push(x.import_declaration.as_ref().clone());
                         }
                     }
                 }
