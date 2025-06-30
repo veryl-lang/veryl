@@ -84,4 +84,11 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::Path), help(""))]
     #[error("path error")]
     Path(#[from] PathError),
+
+    #[diagnostic(code(MetadataError::DeprecetadField), help(""))]
+    #[error("\"{orig_field}\" field is deprecetad. Replace it with \"{new_field}\" field.")]
+    DeprecetadField {
+        orig_field: String,
+        new_field: String,
+    },
 }
