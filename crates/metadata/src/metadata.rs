@@ -11,7 +11,7 @@ use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
 use crate::test::Test;
 use crate::{FilelistType, MetadataError, SourceMapTarget};
-use log::{debug, info};
+use log::{debug, info, warn};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use semver::VersionReq;
@@ -269,54 +269,66 @@ impl Metadata {
         files: &[T],
         symlink: bool,
     ) -> Result<Vec<PathSet>, MetadataError> {
-        let base = self.project_path();
-        let src_base = base.join(&self.build.source);
-
-        let src_files = if files.is_empty() {
-            veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
+        let sources = if self.build.source.iter().count() > 0 {
+            warn!(
+                "[Veryl.toml] \"source\" field is deprecetad. Replace it with \"soruces\" field."
+            );
+            vec![self.build.source.clone()]
         } else {
-            let mut ret = Vec::new();
-            for file in files {
-                ret.push(fs::canonicalize(file.as_ref())?);
-            }
-            ret
+            self.build.sources.clone()
         };
 
+        let base = self.project_path();
         let mut ret = Vec::new();
-        for src in src_files {
-            let Ok(src_relative) = src.strip_prefix(&src_base) else {
-                return Err(MetadataError::InvalidSourceLocation(src));
-            };
-            let dst = match self.build.target {
-                Target::Source => src.with_extension("sv"),
-                Target::Directory { ref path } => {
-                    base.join(path.join(src_relative.with_extension("sv")))
+
+        for source in &sources {
+            let src_base = base.join(source);
+
+            let src_files = if files.is_empty() {
+                veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
+            } else {
+                let mut ret = Vec::new();
+                for file in files {
+                    ret.push(fs::canonicalize(file.as_ref())?);
                 }
-                Target::Bundle { .. } => base.join(
-                    PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
-                ),
+                ret
             };
-            let map = match &self.build.sourcemap_target {
-                SourceMapTarget::Directory { path } => {
-                    if let Target::Directory { .. } = self.build.target {
-                        base.join(path.join(src_relative.with_extension("sv.map")))
-                    } else {
-                        let dst = dst.strip_prefix(&base).unwrap();
-                        base.join(path.join(dst.with_extension("sv.map")))
+
+            for src in src_files {
+                let Ok(src_relative) = src.strip_prefix(&src_base) else {
+                    return Err(MetadataError::InvalidSourceLocation(src));
+                };
+                let dst = match self.build.target {
+                    Target::Source => src.with_extension("sv"),
+                    Target::Directory { ref path } => {
+                        base.join(path.join(src_relative.with_extension("sv")))
                     }
-                }
-                _ => {
-                    let mut map = dst.clone();
-                    map.set_extension("sv.map");
-                    map
-                }
-            };
-            ret.push(PathSet {
-                prj: self.project.name.clone(),
-                src: src.to_path_buf(),
-                dst,
-                map,
-            });
+                    Target::Bundle { .. } => base.join(
+                        PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
+                    ),
+                };
+                let map = match &self.build.sourcemap_target {
+                    SourceMapTarget::Directory { path } => {
+                        if let Target::Directory { .. } = self.build.target {
+                            base.join(path.join(src_relative.with_extension("sv.map")))
+                        } else {
+                            let dst = dst.strip_prefix(&base).unwrap();
+                            base.join(path.join(dst.with_extension("sv.map")))
+                        }
+                    }
+                    _ => {
+                        let mut map = dst.clone();
+                        map.set_extension("sv.map");
+                        map
+                    }
+                };
+                ret.push(PathSet {
+                    prj: self.project.name.clone(),
+                    src: src.to_path_buf(),
+                    dst,
+                    map,
+                });
+            }
         }
 
         let base_dst = self.project_dependencies_path();
