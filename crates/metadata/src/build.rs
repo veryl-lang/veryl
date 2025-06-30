@@ -20,6 +20,8 @@ pub struct Build {
     pub filelist_type: FilelistType,
     #[serde(default = "default_source")]
     pub source: PathBuf,
+    #[serde(default = "default_sources")]
+    pub sources: Vec<PathBuf>,
     #[serde(default)]
     pub target: Target,
     #[serde(default)]
@@ -48,6 +50,10 @@ pub struct Build {
 
 fn default_source() -> PathBuf {
     PathBuf::new()
+}
+
+fn default_sources() -> Vec<PathBuf> {
+    vec![PathBuf::new()]
 }
 
 fn default_instance_depth_limit() -> usize {

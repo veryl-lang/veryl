@@ -172,7 +172,7 @@ mod emitter {
 #[cfg(test)]
 mod path {
     use std::path::PathBuf;
-    use veryl_metadata::{Metadata, SourceMapTarget, Target};
+    use veryl_metadata::{Metadata, MetadataError, SourceMapTarget, Target};
 
     fn path_test(mut metadata: Metadata, src_exp: &str, dst_exp: &str, map_exp: &str) {
         let base = metadata.project_path();
@@ -192,7 +192,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("");
+        metadata.build.sources = vec![PathBuf::from("")];
         metadata.build.target = Target::Source;
         metadata.build.sourcemap_target = SourceMapTarget::Target;
 
@@ -209,7 +209,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("");
+        metadata.build.sources = vec![PathBuf::from("")];
         metadata.build.target = Target::Source;
         metadata.build.sourcemap_target = SourceMapTarget::Directory {
             path: "testcases/map".into(),
@@ -228,7 +228,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("");
+        metadata.build.sources = vec![PathBuf::from("")];
         metadata.build.target = Target::Directory {
             path: "testcases/sv".into(),
         };
@@ -247,7 +247,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("");
+        metadata.build.sources = vec![PathBuf::from("")];
         metadata.build.target = Target::Directory {
             path: "testcases/sv".into(),
         };
@@ -268,7 +268,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("testcases/veryl/");
+        metadata.build.sources = vec![PathBuf::from("testcases/veryl/")];
         metadata.build.target = Target::Source;
         metadata.build.sourcemap_target = SourceMapTarget::Target;
 
@@ -285,7 +285,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("testcases/veryl/");
+        metadata.build.sources = vec![PathBuf::from("testcases/veryl/")];
         metadata.build.target = Target::Source;
         metadata.build.sourcemap_target = SourceMapTarget::Directory {
             path: "testcases/map".into(),
@@ -304,7 +304,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("testcases/veryl/");
+        metadata.build.sources = vec![PathBuf::from("testcases/veryl/")];
         metadata.build.target = Target::Directory {
             path: "testcases/sv".into(),
         };
@@ -323,7 +323,7 @@ mod path {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        metadata.build.source = PathBuf::from("testcases/veryl/");
+        metadata.build.sources = vec![PathBuf::from("testcases/veryl/")];
         metadata.build.target = Target::Directory {
             path: "testcases/sv".into(),
         };
@@ -337,6 +337,17 @@ mod path {
             "testcases/sv/01_number.sv",
             "testcases/map/01_number.sv.map",
         );
+    }
+
+    #[test]
+    fn deprecetad_source_field() {
+        let metadata_path = Metadata::search_from_current().unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+
+        metadata.build.source = PathBuf::from("testcases/veryl/");
+        let result = metadata.paths::<PathBuf>(&[], false);
+
+        assert!(matches!(result, Err(MetadataError::DeprecetadField { .. })))
     }
 }
 
