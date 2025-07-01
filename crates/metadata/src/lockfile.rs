@@ -268,6 +268,9 @@ impl Lockfile {
     }
 
     pub fn clear_cache(&self) -> Result<(), MetadataError> {
+        let lock_resolve = veryl_path::lock_dir("resolve")?;
+        let lock_dependencies = veryl_path::lock_dir("dependencies")?;
+
         for locks in self.lock_table.values() {
             for lock in locks {
                 if let LockSource::Repository(x) = &lock.source {
@@ -282,6 +285,10 @@ impl Lockfile {
                 }
             }
         }
+
+        veryl_path::unlock_dir(lock_resolve)?;
+        veryl_path::unlock_dir(lock_dependencies)?;
+
         Ok(())
     }
 
@@ -623,7 +630,7 @@ impl Lockfile {
                         // If the existing path is not git repository, cleanup and re-try
                         if !ret || !toml.exists() {
                             let lock = veryl_path::lock_dir("dependencies")?;
-                            fs::remove_dir_all(&path)?;
+                            veryl_path::ignore_directory_not_empty(fs::remove_dir_all(&path))?;
                             let git = self.git_clone(&x.url, &path)?;
                             git.fetch()?;
                             git.checkout(Some(&x.revision))?;
