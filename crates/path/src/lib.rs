@@ -103,3 +103,12 @@ pub fn ignore_already_exists(x: Result<(), std::io::Error>) -> Result<(), std::i
     }
     Ok(())
 }
+
+pub fn ignore_directory_not_empty(x: Result<(), std::io::Error>) -> Result<(), std::io::Error> {
+    if let Err(x) = x {
+        if x.kind() != std::io::ErrorKind::DirectoryNotEmpty {
+            return Err(x);
+        }
+    }
+    Ok(())
+}
