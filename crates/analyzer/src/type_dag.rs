@@ -1,7 +1,7 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::symbol::{GenericMap, ParameterKind, Symbol, SymbolId, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath};
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
@@ -70,6 +70,7 @@ pub enum Context {
     Function,
     TypeDef,
     Const,
+    Alias,
     Module,
     Interface,
     Package,
@@ -195,18 +196,9 @@ impl TypeDag {
         }
 
         for i in 0..path.len() {
-            let Ok(base_symbol) =
-                symbol_table::resolve((&path.base_path(i), namespace)).map(|symbol| {
-                    if let Some(x) = symbol.found.get_parent_package() {
-                        x
-                    } else {
-                        symbol.found
-                    }
-                })
-            else {
+            let Some(base_symbol) = Self::resolve_symbol_path(&path.base_path(i), namespace) else {
                 continue;
             };
-
             let Some(base) = self.insert_symbol(&base_symbol) else {
                 continue;
             };
@@ -227,17 +219,11 @@ impl TypeDag {
                 }
             }
 
-            for arg in path.paths[i].arguments.iter().filter_map(|x| {
-                symbol_table::resolve((&x.generic_path(), namespace))
-                    .map(|symbol| {
-                        if let Some(x) = symbol.found.get_parent_package() {
-                            x
-                        } else {
-                            symbol.found
-                        }
-                    })
-                    .ok()
-            }) {
+            for arg in path.paths[i]
+                .arguments
+                .iter()
+                .filter_map(|x| Self::resolve_symbol_path(&x.generic_path(), namespace))
+            {
                 let Some(arg) = self.insert_symbol(&arg) else {
                     continue;
                 };
@@ -246,12 +232,34 @@ impl TypeDag {
         }
     }
 
+    fn resolve_symbol_path(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
+        let symbol = symbol_table::resolve((path, namespace)).ok()?;
+        let symbol = if let Some(alias_path) = symbol.found.alias_target() {
+            // alias referenced as generic arg for generic instance put on the same namespace
+            // causes cyclic dependency error.
+            // https://github.com/veryl-lang/veryl/blob/52b46337148340b43f8ab1c8f2ab67f58cd3c943/crates/analyzer/src/tests.rs#L3740-L3743
+            // Need to use the target symbol of the alias instead of it to prevent this situation.
+            Self::resolve_symbol_path(&alias_path.generic_path(), &symbol.found.namespace)?
+        } else {
+            symbol.found
+        };
+
+        if let Some(pacakge) = symbol.get_parent_package() {
+            Some(pacakge)
+        } else {
+            Some(symbol)
+        }
+    }
+
     fn insert_symbol(&mut self, symbol: &Symbol) -> Option<u32> {
         let is_dag_symbol = match symbol.kind {
             SymbolKind::Module(_)
+            | SymbolKind::AliasModule(_)
             | SymbolKind::Interface(_)
+            | SymbolKind::AliasInterface(_)
             | SymbolKind::Modport(_)
             | SymbolKind::Package(_)
+            | SymbolKind::AliasPackage(_)
             | SymbolKind::Enum(_)
             | SymbolKind::TypeDef(_)
             | SymbolKind::Struct(_)

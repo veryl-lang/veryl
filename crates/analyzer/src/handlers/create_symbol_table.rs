@@ -1962,30 +1962,38 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     /// Semantic action for non-terminal 'AliasDeclaration'
     fn alias_declaration(&mut self, arg: &AliasDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::After = self.point {
-            let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-            if !self.check_identifer_with_type_path(&arg.identifier, &target) {
-                return Ok(());
+        match self.point {
+            HandlerPoint::Before => {
+                self.push_type_dag_cand();
             }
+            HandlerPoint::After => {
+                let target: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+                if !self.check_identifer_with_type_path(&arg.identifier, &target) {
+                    return Ok(());
+                }
 
-            let kind = match &*arg.alias_declaration_group {
-                AliasDeclarationGroup::Module(_) => {
-                    let property = AliasModuleProperty { target };
-                    SymbolKind::AliasModule(property)
+                let kind = match &*arg.alias_declaration_group {
+                    AliasDeclarationGroup::Module(_) => {
+                        let property = AliasModuleProperty { target };
+                        SymbolKind::AliasModule(property)
+                    }
+                    AliasDeclarationGroup::Interface(_) => {
+                        let property = AliasInterfaceProperty { target };
+                        SymbolKind::AliasInterface(property)
+                    }
+                    AliasDeclarationGroup::Package(_) => {
+                        let property = AliasPackageProperty { target };
+                        SymbolKind::AliasPackage(property)
+                    }
+                };
+                if let Some(id) =
+                    self.insert_symbol(&arg.identifier.identifier_token.token, kind, self.is_public)
+                {
+                    self.push_declaration_item(id);
+                    self.pop_type_dag_cand(Some((id, Context::Alias, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
                 }
-                AliasDeclarationGroup::Interface(_) => {
-                    let property = AliasInterfaceProperty { target };
-                    SymbolKind::AliasInterface(property)
-                }
-                AliasDeclarationGroup::Package(_) => {
-                    let property = AliasPackageProperty { target };
-                    SymbolKind::AliasPackage(property)
-                }
-            };
-            if let Some(id) =
-                self.insert_symbol(&arg.identifier.identifier_token.token, kind, self.is_public)
-            {
-                self.push_declaration_item(id);
             }
         }
         Ok(())
