@@ -1,5 +1,25 @@
-module Module47 {
+package Package47A {
+    const A: u32 = 32;
+}
+
+package Package47B {
+    const B: u32 = 64;
+}
+
+module Module47A {}
+
+module Module47B::<V: u32> {}
+
+module Module47C {
+    inst u_a: Module47A;
+
     embed (inline) sv{{{
+        bind u_a
+        \(((Module47B::<Package47A::A>))) u_b0 ();
+
+        bind u_a
+        \(((Module47B::<Package47B::B>))) u_b1 ();
+
         initial begin
             $display("hello");
         end

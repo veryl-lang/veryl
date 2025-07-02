@@ -227,6 +227,55 @@ pub trait VerylWalker {
         after!(self, dot, arg);
     }
 
+    /// Semantic action for non-terminal 'EmbedLBrace'
+    fn embed_l_brace(&mut self, arg: &EmbedLBrace) {
+        before!(self, embed_l_brace, arg);
+        self.veryl_token(&arg.embed_l_brace_token);
+        after!(self, embed_l_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedLParen'
+    fn embed_l_paren(&mut self, arg: &EmbedLParen) {
+        before!(self, embed_l_paren, arg);
+        self.veryl_token(&arg.embed_l_paren_token);
+        after!(self, embed_l_paren, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedRBrace'
+    fn embed_r_brace(&mut self, arg: &EmbedRBrace) {
+        before!(self, embed_r_brace, arg);
+        self.veryl_token(&arg.embed_r_brace_token);
+        after!(self, embed_r_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedRParen'
+    fn embed_r_paren(&mut self, arg: &EmbedRParen) {
+        before!(self, embed_r_paren, arg);
+        self.veryl_token(&arg.embed_r_paren_token);
+        after!(self, embed_r_paren, arg);
+    }
+
+    /// Semantic action for non-terminal 'EscapedBackslash'
+    fn escaped_backslash(&mut self, arg: &EscapedBackslash) {
+        before!(self, escaped_backslash, arg);
+        self.veryl_token(&arg.escaped_backslash_token);
+        after!(self, escaped_backslash, arg);
+    }
+
+    /// Semantic action for non-terminal 'EscapedChar'
+    fn escaped_char(&mut self, arg: &EscapedChar) {
+        before!(self, escaped_char, arg);
+        self.veryl_token(&arg.escaped_char_token);
+        after!(self, escaped_char, arg);
+    }
+
+    /// Semantic action for non-terminal 'EscapedLParen'
+    fn escaped_l_paren(&mut self, arg: &EscapedLParen) {
+        before!(self, escaped_l_paren, arg);
+        self.veryl_token(&arg.escaped_l_paren_token);
+        after!(self, escaped_l_paren, arg);
+    }
+
     /// Semantic action for non-terminal 'Equ'
     fn equ(&mut self, arg: &Equ) {
         before!(self, equ, arg);
@@ -890,6 +939,13 @@ pub trait VerylWalker {
         before!(self, identifier, arg);
         self.veryl_token(&arg.identifier_token);
         after!(self, identifier, arg);
+    }
+
+    /// Semantic action for non-terminal 'CodeSnippet'
+    fn code_snippet(&mut self, arg: &CodeSnippet) {
+        before!(self, code_snippet, arg);
+        self.veryl_token(&arg.code_snippet_token);
+        after!(self, code_snippet, arg);
     }
 
     /// Semantic action for non-terminal 'Number'
@@ -3356,11 +3412,88 @@ pub trait VerylWalker {
         after!(self, embed_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'EmbedTripleLBrace'
+    fn embed_triple_l_brace(&mut self, arg: &EmbedTripleLBrace) {
+        before!(self, embed_triple_l_brace, arg);
+        self.veryl_token(&arg.embed_triple_l_brace_token);
+        after!(self, embed_triple_l_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedTripleRBrace'
+    fn embed_triple_r_brace(&mut self, arg: &EmbedTripleRBrace) {
+        before!(self, embed_triple_r_brace, arg);
+        self.veryl_token(&arg.embed_triple_r_brace_token);
+        after!(self, embed_triple_r_brace, arg);
+    }
+
     /// Semantic action for non-terminal 'EmbedContent'
     fn embed_content(&mut self, arg: &EmbedContent) {
         before!(self, embed_content, arg);
-        self.veryl_token(&arg.embed_content_token);
+        self.embed_triple_l_brace(&arg.embed_triple_l_brace);
+        for x in &arg.embed_content_list {
+            self.embed_item(&x.embed_item);
+        }
+        self.embed_triple_r_brace(&arg.embed_triple_r_brace);
         after!(self, embed_content, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedIdentifier'
+    fn embed_identifier(&mut self, arg: &EmbedIdentifier) {
+        before!(self, embed_identifier, arg);
+        self.escaped_l_paren(&arg.escaped_l_paren);
+        self.embed_l_paren(&arg.embed_l_paren);
+        self.embed_l_paren(&arg.embed_l_paren0);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.embed_r_paren(&arg.embed_r_paren);
+        self.embed_r_paren(&arg.embed_r_paren0);
+        self.embed_r_paren(&arg.embed_r_paren1);
+        after!(self, embed_identifier, arg);
+    }
+
+    /// Semantic action for non-terminal 'BracedEmbedItem'
+    fn braced_embed_item(&mut self, arg: &BracedEmbedItem) {
+        before!(self, braced_embed_item, arg);
+        self.embed_l_brace(&arg.embed_l_brace);
+        for x in &arg.braced_embed_item_list {
+            self.embed_item(&x.embed_item);
+        }
+        self.embed_r_brace(&arg.embed_r_brace);
+        after!(self, braced_embed_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'ParenedEmbedItem'
+    fn parened_embed_item(&mut self, arg: &ParenedEmbedItem) {
+        before!(self, parened_embed_item, arg);
+        self.embed_l_paren(&arg.embed_l_paren);
+        for x in &arg.parened_embed_item_list {
+            self.embed_item(&x.embed_item);
+        }
+        self.embed_r_paren(&arg.embed_r_paren);
+        after!(self, parened_embed_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedItem'
+    fn embed_item(&mut self, arg: &EmbedItem) {
+        before!(self, embed_item, arg);
+        match arg {
+            EmbedItem::EmbedIdentifier(x) => self.embed_identifier(&x.embed_identifier),
+            EmbedItem::EscapedBackslash(x) => {
+                self.escaped_backslash(&x.escaped_backslash);
+            }
+            EmbedItem::EscapedChar(x) => {
+                self.escaped_char(&x.escaped_char);
+            }
+            EmbedItem::BracedEmbedItem(x) => {
+                self.braced_embed_item(&x.braced_embed_item);
+            }
+            EmbedItem::ParenedEmbedItem(x) => {
+                self.parened_embed_item(&x.parened_embed_item);
+            }
+            EmbedItem::CodeSnippet(x) => {
+                self.code_snippet(&x.code_snippet);
+            }
+        }
+        after!(self, embed_item, arg);
     }
 
     /// Semantic action for non-terminal 'IncludeDeclaration'

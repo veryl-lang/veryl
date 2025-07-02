@@ -60,6 +60,7 @@ pub struct Emitter {
     single_line: Vec<()>,
     multi_line: Vec<()>,
     adjust_line: bool,
+    keep_tail_newline: bool,
     in_always_ff: bool,
     in_direction_modport: bool,
     in_direction_with_var: bool,
@@ -108,6 +109,7 @@ impl Default for Emitter {
             single_line: Vec::new(),
             multi_line: Vec::new(),
             adjust_line: false,
+            keep_tail_newline: false,
             in_always_ff: false,
             in_direction_modport: false,
             in_direction_with_var: false,
@@ -328,7 +330,7 @@ impl Emitter {
     fn push_token(&mut self, x: &Token) {
         self.consume_adjust_line(x);
         let text = resource_table::get_str_value(x.text).unwrap();
-        let text = if text.ends_with('\n') {
+        let text = if !self.keep_tail_newline && text.ends_with('\n') {
             self.consumed_next_newline = true;
             text.trim_end()
         } else {
@@ -1559,8 +1561,7 @@ impl Emitter {
             }
 
             let user_defined = r#type.unwrap().get_user_defined()?;
-            let (type_symbol, _) =
-                resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
+            let (type_symbol, _) = user_defined.path.resolve_path(&symbol.namespace, Some(map));
             type_symbol
                 .ok()
                 .map(|x| (x.found, x.full_path, x.generic_tables))
@@ -1796,10 +1797,10 @@ impl Emitter {
     ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
         let generic_map = self.generic_map.last();
         if let Some(namespace) = namespace {
-            resolve_generic_path(path, namespace, generic_map)
+            path.resolve_path(namespace, generic_map)
         } else {
             let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
-            resolve_generic_path(path, &namespace, generic_map)
+            path.resolve_path(&namespace, generic_map)
         }
     }
 
@@ -2005,6 +2006,11 @@ impl VerylWalker for Emitter {
         } else {
             self.veryl_token(&arg.comma_token);
         }
+    }
+
+    /// Semantic action for non-terminal 'EscapedBackslash'
+    fn escaped_backslash(&mut self, arg: &EscapedBackslash) {
+        self.token(&arg.escaped_backslash_token.replace("\\"));
     }
 
     /// Semantic action for non-terminal 'Bool'
@@ -5289,19 +5295,37 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EmbedDeclaration'
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         if arg.identifier.identifier_token.to_string() == "inline" {
-            let text = arg.embed_content.embed_content_token.to_string();
-            let text = if arg.identifier0.identifier_token.to_string() == "sv" {
-                &text
-                    .replace("{{{", "`ifndef SYNTHESIS")
-                    .replace("}}}", "`endif")
-            } else {
-                text.strip_prefix("{{{")
-                    .unwrap()
-                    .strip_prefix("}}}")
-                    .unwrap()
-            };
-            self.veryl_token(&arg.embed_content.embed_content_token.replace(text));
+            let is_sv = arg.identifier0.identifier_token.to_string() == "sv";
+
+            if is_sv {
+                self.token(
+                    &arg.embed_content
+                        .embed_triple_l_brace
+                        .embed_triple_l_brace_token
+                        .replace("`ifndef SYNTHESIS"),
+                );
+            }
+
+            self.keep_tail_newline = true;
+            for x in &arg.embed_content.embed_content_list {
+                self.embed_item(&x.embed_item);
+            }
+            self.keep_tail_newline = false;
+
+            if is_sv {
+                self.token(
+                    &arg.embed_content
+                        .embed_triple_r_brace
+                        .embed_triple_r_brace_token
+                        .replace("`endif"),
+                );
+            }
         }
+    }
+
+    /// Semantic action for non-terminal 'EmbedIdentifier'
+    fn embed_identifier(&mut self, arg: &EmbedIdentifier) {
+        self.scoped_identifier(&arg.scoped_identifier);
     }
 
     /// Semantic action for non-terminal 'IncludeDeclaration'
@@ -5744,64 +5768,4 @@ pub fn emitting_identifier(arg: &Identifier) -> Identifier {
         (None, None)
     };
     identifier_with_prefix_suffix(arg, &prefix, &suffix)
-}
-
-pub fn resolve_generic_path(
-    path: &GenericSymbolPath,
-    namespace: &Namespace,
-    generic_maps: Option<&Vec<GenericMap>>,
-) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
-    let mut path = path.clone();
-    path.resolve_imported(namespace, generic_maps);
-
-    for i in 0..path.len() {
-        let base = path.base_path(i);
-        if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
-            if !symbol.found.kind.is_generic() {
-                continue;
-            }
-
-            let params = symbol.found.generic_parameters();
-            let n_args = path.paths[i].arguments.len();
-
-            for param in params.iter().skip(n_args) {
-                path.paths[i]
-                    .arguments
-                    .push(param.1.default_value.as_ref().unwrap().clone());
-            }
-
-            for arg in &mut path.paths[i].arguments {
-                if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace)) {
-                    if let Some(target) = symbol.found.alias_target() {
-                        if let (Ok(_), path) =
-                            resolve_generic_path(&target, &symbol.found.namespace, generic_maps)
-                        {
-                            *arg = path;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(maps) = generic_maps {
-        path.apply_map(maps);
-    }
-
-    let result = symbol_table::resolve((&path.mangled_path(), namespace));
-    if let Ok(symbol) = &result {
-        if let Some(target) = symbol.found.alias_target() {
-            if let Some(parent) = symbol.found.get_parent() {
-                if matches!(parent.kind, SymbolKind::GenericInstance(_)) {
-                    // Alias target may be a generic parameter if it is defined in a generic package.
-                    // Need to apply parent's generic map to resolve a generic parameter.
-                    let map = parent.generic_maps();
-                    return resolve_generic_path(&target, &symbol.found.namespace, Some(&map));
-                }
-            }
-            return resolve_generic_path(&target, &symbol.found.namespace, generic_maps);
-        }
-    }
-
-    (result, path)
 }

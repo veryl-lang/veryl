@@ -2255,15 +2255,23 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
             }
 
-            let content = &arg.embed_content.embed_content_token.token;
+            let content = &arg.embed_content;
+            let content_source = content
+                .embed_triple_l_brace
+                .embed_triple_l_brace_token
+                .token
+                .source;
             let r#type = match way.as_str() {
                 "inline" => Some(TestType::Inline),
-                "cocotb" => Some(TestType::CocotbEmbed(content.text)),
+                "cocotb" => Some(TestType::CocotbEmbed(
+                    content.as_ref().clone(),
+                    self.namespace.clone(),
+                )),
                 _ => None,
             };
 
             if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
-                let path = if let TokenSource::File { path, .. } = content.source {
+                let path = if let TokenSource::File { path, .. } = content_source {
                     path
                 } else {
                     unreachable!()

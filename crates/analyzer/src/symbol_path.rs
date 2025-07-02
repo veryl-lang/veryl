@@ -1,7 +1,7 @@
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolKind};
-use crate::symbol_table;
+use crate::symbol_table::{self, ResolveError, ResolveResult};
 use crate::{SVec, svec};
 use std::cmp::Ordering;
 use std::fmt;
@@ -458,6 +458,66 @@ impl GenericSymbolPath {
                 arg.apply_map(maps);
             }
         }
+    }
+
+    pub fn resolve_path(
+        &self,
+        namespace: &Namespace,
+        generic_maps: Option<&Vec<GenericMap>>,
+    ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+        let mut path = self.clone();
+        path.resolve_imported(namespace, generic_maps);
+
+        for i in 0..path.len() {
+            let base = path.base_path(i);
+            if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
+                if !symbol.found.kind.is_generic() {
+                    continue;
+                }
+
+                let params = symbol.found.generic_parameters();
+                let n_args = path.paths[i].arguments.len();
+
+                for param in params.iter().skip(n_args) {
+                    path.paths[i]
+                        .arguments
+                        .push(param.1.default_value.as_ref().unwrap().clone());
+                }
+
+                for arg in &mut path.paths[i].arguments {
+                    if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace)) {
+                        if let Some(target) = symbol.found.alias_target() {
+                            if let (Ok(_), path) =
+                                target.resolve_path(&symbol.found.namespace, generic_maps)
+                            {
+                                *arg = path;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(maps) = generic_maps {
+            path.apply_map(maps);
+        }
+
+        let result = symbol_table::resolve((&path.mangled_path(), namespace));
+        if let Ok(symbol) = &result {
+            if let Some(target) = symbol.found.alias_target() {
+                if let Some(parent) = symbol.found.get_parent() {
+                    if matches!(parent.kind, SymbolKind::GenericInstance(_)) {
+                        // Alias target may be a generic parameter if it is defined in a generic package.
+                        // Need to apply parent's generic map to resolve a generic parameter.
+                        let map = parent.generic_maps();
+                        return target.resolve_path(&symbol.found.namespace, Some(&map));
+                    }
+                }
+                return target.resolve_path(&symbol.found.namespace, generic_maps);
+            }
+        }
+
+        (result, path)
     }
 
     /// Resolve and expand path if the path is imported at declaration

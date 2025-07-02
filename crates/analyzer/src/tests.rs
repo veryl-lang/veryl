@@ -3770,6 +3770,20 @@ fn undefined_identifier() {
         errors[1],
         AnalyzerError::UndefinedIdentifier { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        embed(inline) sv {{{
+            \((( ModuleB ))) u_monitor();
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
 }
 
 #[test]

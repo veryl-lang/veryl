@@ -1,4 +1,4 @@
-use crate::emitter::{SymbolContext, resolve_generic_path, symbol_string};
+use crate::emitter::{SymbolContext, symbol_string};
 use std::collections::HashMap;
 use veryl_analyzer::attribute::ExpandItem;
 use veryl_analyzer::attribute_table;
@@ -497,7 +497,7 @@ fn resolve_interface(
     let mut path = user_defined.get_user_defined()?.path.clone();
     path.paths.pop(); // remove modport path
 
-    let (result, _) = resolve_generic_path(&path, namespace, Some(&generic_map.to_vec()));
+    let (result, _) = path.resolve_path(namespace, Some(&generic_map.to_vec()));
     result
         .ok()
         .map(|x| (x.found, x.full_path, x.generic_tables))

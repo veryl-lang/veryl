@@ -291,11 +291,15 @@ impl_token_range_singular!(Comma);
 impl_token_range_singular!(DotDot);
 impl_token_range_singular!(DotDotEqu);
 impl_token_range_singular!(Dot);
+impl_token_range_singular!(EmbedLBrace);
+impl_token_range_singular!(EmbedLParen);
+impl_token_range_singular!(EmbedRBrace);
+impl_token_range_singular!(EmbedRParen);
 impl_token_range_singular!(Equ);
+impl_token_range_singular!(EscapedBackslash);
+impl_token_range_singular!(EscapedChar);
+impl_token_range_singular!(EscapedLParen);
 impl_token_range_singular!(Hash);
-impl_token_range_singular!(Question);
-impl_token_range_singular!(Quote);
-impl_token_range_singular!(QuoteLBrace);
 impl_token_range_singular!(LAngle);
 impl_token_range_singular!(LBrace);
 impl_token_range_singular!(LBracket);
@@ -303,6 +307,9 @@ impl_token_range_singular!(LParen);
 impl_token_range_singular!(MinusColon);
 impl_token_range_singular!(MinusGT);
 impl_token_range_singular!(PlusColon);
+impl_token_range_singular!(Question);
+impl_token_range_singular!(Quote);
+impl_token_range_singular!(QuoteLBrace);
 impl_token_range_singular!(RAngle);
 impl_token_range_singular!(RBrace);
 impl_token_range_singular!(RBracket);
@@ -408,6 +415,8 @@ impl_token_range_singular!(Var);
 // Identifier
 impl_token_range_singular!(DollarIdentifier);
 impl_token_range_singular!(Identifier);
+
+impl_token_range_singular!(CodeSnippet);
 
 // ----------------------------------------------------------------------------
 // Number
@@ -1361,7 +1370,21 @@ impl_token_range!(ProtoAliasDeclaration, alias, semicolon);
 // ----------------------------------------------------------------------------
 
 impl_token_range!(EmbedDeclaration, embed, embed_content);
-impl_token_range_singular!(EmbedContent);
+impl_token_range_singular!(EmbedTripleLBrace);
+impl_token_range_singular!(EmbedTripleRBrace);
+impl_token_range!(EmbedContent, embed_triple_l_brace, embed_triple_r_brace);
+impl_token_range!(EmbedIdentifier, escaped_l_paren, embed_r_paren1);
+impl_token_range!(BracedEmbedItem, embed_l_brace, embed_r_brace);
+impl_token_range!(ParenedEmbedItem, embed_l_paren, embed_r_paren);
+impl_token_range_enum!(
+    EmbedItem,
+    embed_identifier,
+    escaped_backslash,
+    escaped_char,
+    braced_embed_item,
+    parened_embed_item,
+    code_snippet
+);
 
 // ----------------------------------------------------------------------------
 // Include
