@@ -27,7 +27,7 @@
 
 // Longest match should be first
 
-CommentsTerm          : <INITIAL, Generic,        Attr, ClockDomain>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
+CommentsTerm          : <INITIAL, Generic, Embed, Attr, ClockDomain>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
 StringLiteralTerm     : <INITIAL, Generic,        Attr             >"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
 ExponentTerm          : <INITIAL, Generic                          >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : <INITIAL, Generic                          >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
@@ -59,18 +59,21 @@ DotDotEquTerm         : <INITIAL, Generic                          >'..='       
 DotDotTerm            : <INITIAL, Generic                          >'..'                                                                                  : Token;
 DotTerm               : <INITIAL, Generic                          >'.'                                                                                   : Token;
 EquTerm               : <INITIAL, Generic                          >'='                                                                                   : Token;
+EscapedBackslashTerm  : <                  Embed                   >/[\\]{2}/                                                                             : Token;
+EscapedCharTerm       : <                  Embed                   >/\\[^\\(]/                                                                            : Token;
+EscapedLParenTerm     : <                  Embed                   >'\('                                                                                  : Token;
 HashTerm              : <INITIAL, Generic,        Attr             >'#'                                                                                   : Token;
 LAngleTerm            : <INITIAL, Generic                          >'<'                                                                                   : Token;
+LBraceTerm            : <INITIAL, Generic, Embed, Attr             >'{'                                                                                   : Token;
+LBracketTerm          : <INITIAL, Generic,        Attr             >'['                                                                                   : Token;
+LParenTerm            : <INITIAL, Generic, Embed, Attr             >'('                                                                                   : Token;
 QuestionTerm          : <INITIAL                                   >'?'                                                                                   : Token;
 QuoteTerm             : <                               ClockDomain>"'"                                                                                   : Token;
 QuoteLBraceTerm       : <INITIAL, Generic                          >"'\{"                                                                                 : Token;
-LBraceTerm            : <INITIAL, Generic, Embed, Attr             >'{'                                                                                   : Token;
-LBracketTerm          : <INITIAL, Generic,        Attr             >'['                                                                                   : Token;
-LParenTerm            : <INITIAL, Generic,        Attr             >'('                                                                                   : Token;
 RAngleTerm            : <INITIAL, Generic                          >'>'                                                                                   : Token;
 RBraceTerm            : <INITIAL, Generic, Embed, Attr             >'}'                                                                                   : Token;
 RBracketTerm          : <INITIAL, Generic,        Attr             >']'                                                                                   : Token;
-RParenTerm            : <INITIAL, Generic,        Attr             >')'                                                                                   : Token;
+RParenTerm            : <INITIAL, Generic, Embed, Attr             >')'                                                                                   : Token;
 SemicolonTerm         : <INITIAL, Generic                          >';'                                                                                   : Token;
 StarTerm              : <INITIAL, Generic                          >'*'                                                                                   : Token;
 AliasTerm             : <INITIAL, Generic,              ClockDomain>/(?-u:\b)alias(?-u:\b)/                                                               : Token;
@@ -150,7 +153,7 @@ UnsafeTerm            : <INITIAL, Generic,              ClockDomain>/(?-u:\b)uns
 VarTerm               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)var(?-u:\b)/                                                                 : Token;
 DollarIdentifierTerm  : <INITIAL, Generic,              ClockDomain>/\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
 IdentifierTerm        : <INITIAL, Generic,        Attr, ClockDomain>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/                                                      : Token;
-AnyTerm               : <                  Embed                   >/[^{}]+/                                                                              : Token;
+CodeSnippetTerm       : <                  Embed                   >/[^{}()\\]+/                                                                          : Token;
 
 // ----------------------------------------------------------------------------
 // Token
@@ -190,11 +193,15 @@ CommaToken           : CommaTerm           : Token Comments;
 DotDotToken          : DotDotTerm          : Token Comments;
 DotDotEquToken       : DotDotEquTerm       : Token Comments;
 DotToken             : DotTerm             : Token Comments;
+EmbedLBraceToken     : LBraceTerm          : Token         ;
+EmbedLParenToken     : LParenTerm          : Token         ;
+EmbedRBraceToken     : RBraceTerm          : Token         ;
+EmbedRParenToken     : RParenTerm          : Token         ;
+EscapedBackslashToken: EscapedBackslashTerm: Token         ;
+EscapedCharToken     : EscapedCharTerm     : Token         ;
+EscapedLParenToken   : EscapedLParenTerm   : Token         ;
 EquToken             : EquTerm             : Token Comments;
 HashToken            : HashTerm            : Token Comments;
-QuestionToken        : QuestionTerm        : Token Comments;
-QuoteToken           : QuoteTerm           : Token Comments;
-QuoteLBraceToken     : QuoteLBraceTerm     : Token Comments;
 LAngleToken          : LAngleTerm          : Token Comments;
 LBraceToken          : LBraceTerm          : Token Comments;
 LBracketToken        : LBracketTerm        : Token Comments;
@@ -202,6 +209,9 @@ LParenToken          : LParenTerm          : Token Comments;
 MinusColonToken      : MinusColonTerm      : Token Comments;
 MinusGTToken         : MinusGTTerm         : Token Comments;
 PlusColonToken       : PlusColonTerm       : Token Comments;
+QuestionToken        : QuestionTerm        : Token Comments;
+QuoteToken           : QuoteTerm           : Token Comments;
+QuoteLBraceToken     : QuoteLBraceTerm     : Token Comments;
 RAngleToken          : RAngleTerm          : Token Comments;
 RBraceToken          : RBraceTerm          : Token Comments;
 RBracketToken        : RBracketTerm        : Token Comments;
@@ -287,6 +297,7 @@ VarToken           : VarTerm           : Token Comments;
 
 DollarIdentifierToken: DollarIdentifierTerm: Token Comments;
 IdentifierToken      : IdentifierTerm      : Token Comments;
+CodeSnippetToken     : CodeSnippetTerm     : Token         ;
 
 // ----------------------------------------------------------------------------
 // VerylToken
@@ -329,11 +340,15 @@ Comma           : CommaToken           : VerylToken;
 DotDot          : DotDotToken          : VerylToken;
 DotDotEqu       : DotDotEquToken       : VerylToken;
 Dot             : DotToken             : VerylToken;
+EmbedLBrace     : EmbedLBraceToken     : VerylToken;
+EmbedLParen     : EmbedLParenToken     : VerylToken;
+EmbedRBrace     : EmbedRBraceToken     : VerylToken;
+EmbedRParen     : EmbedRParenToken     : VerylToken;
+EscapedBackslash: EscapedBackslashToken: VerylToken;
+EscapedChar     : EscapedCharToken     : VerylToken;
+EscapedLParen   : EscapedLParenToken   : VerylToken;
 Equ             : EquToken             : VerylToken;
 Hash            : HashToken            : VerylToken;
-Question        : QuestionToken        : VerylToken;
-Quote           : QuoteToken           : VerylToken;
-QuoteLBrace     : QuoteLBraceToken     : VerylToken;
 LAngle          : LAngleToken          : VerylToken;
 LBrace          : LBraceToken          : VerylToken;
 LBracket        : LBracketToken        : VerylToken;
@@ -341,6 +356,9 @@ LParen          : LParenToken          : VerylToken;
 MinusColon      : MinusColonToken      : VerylToken;
 MinusGT         : MinusGTToken         : VerylToken;
 PlusColon       : PlusColonToken       : VerylToken;
+Question        : QuestionToken        : VerylToken;
+Quote           : QuoteToken           : VerylToken;
+QuoteLBrace     : QuoteLBraceToken     : VerylToken;
 RAngle          : RAngleToken          : VerylToken;
 RBrace          : RBraceToken          : VerylToken;
 RBracket        : RBracketToken        : VerylToken;
@@ -428,6 +446,8 @@ Var           : VarToken           : VerylToken;
 // Identifier
 DollarIdentifier: DollarIdentifierToken: VerylToken;
 Identifier      : IdentifierToken      : VerylToken;
+
+CodeSnippet: CodeSnippetToken: VerylToken;
 
 // ----------------------------------------------------------------------------
 // Number
@@ -963,12 +983,24 @@ ProtoAliasDeclaration: Alias ( Module | Interface | Package ) Identifier Colon S
 
 EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
 
-EmbedContent: EmbedContentToken: VerylToken;
+EmbedTripleLBraceToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm;
+EmbedTripleLBrace: EmbedTripleLBraceToken: VerylToken;
 
-EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm { EmbedItem } RBraceTerm RBraceTerm RBraceTerm %pop() Comments;
+EmbedTripleRBraceToken: RBraceTerm RBraceTerm RBraceTerm %pop() Comments;
+EmbedTripleRBrace: EmbedTripleRBraceToken: VerylToken;
 
-EmbedItem: LBraceTerm { EmbedItem } RBraceTerm
-         | AnyTerm;
+EmbedContent: EmbedTripleLBrace { EmbedItem } EmbedTripleRBrace;
+
+EmbedIdentifier : EscapedLParen EmbedLParen EmbedLParen %push(INITIAL) ScopedIdentifier EmbedRParen %pop() EmbedRParen EmbedRParen;
+BracedEmbedItem : EmbedLBrace { EmbedItem } EmbedRBrace;
+ParenedEmbedItem: EmbedLParen { EmbedItem } EmbedRParen;
+
+EmbedItem: EmbedIdentifier
+         | EscapedBackslash
+         | EscapedChar
+         | BracedEmbedItem
+         | ParenedEmbedItem
+         | CodeSnippet;
 
 // ----------------------------------------------------------------------------
 // Include
