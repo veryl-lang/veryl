@@ -185,6 +185,55 @@ endmodule
 }
 
 #[test]
+fn clock_reset_port_name() {
+    let code = r#"module ModuleA (
+    i_clk: input clock,
+    i_rst: input reset,
+) {}
+module ModuleB (
+    i_clock: input clock,
+    i_reset: input reset,
+) {
+    inst u: ModuleA (
+        i_clk: i_clock,
+        i_rst: i_reset,
+    );
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_clk_p,
+    input var logic i_rst_x
+);
+endmodule
+module prj_ModuleB (
+    input var logic i_clock_p,
+    input var logic i_reset_x
+);
+    prj_ModuleA u (
+        .i_clk_p (i_clock_p),
+        .i_rst_x (i_reset_x)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.build.clock_posedge_suffix = Some("_p".to_string());
+    metadata.build.reset_low_suffix = Some("_x".to_string());
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn omit_project_prefix() {
     let code = r#"module ModuleA {
     inst u: InterfaceB::<10>;

@@ -13,7 +13,7 @@ use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
-use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
+use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
@@ -86,6 +86,7 @@ pub struct Emitter {
     duplicated_index: usize,
     modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
+    inst_module_namespace: Option<Namespace>,
 }
 
 impl Default for Emitter {
@@ -134,6 +135,7 @@ impl Default for Emitter {
             duplicated_index: 0,
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
+            inst_module_namespace: None,
         }
     }
 }
@@ -541,6 +543,23 @@ impl Emitter {
         self.align_finish(align_kind::WIDTH);
     }
 
+    fn emit_identifier(&mut self, arg: &Identifier, namespace: Option<Namespace>) {
+        let align = !self.align_any()
+            && !self.in_attribute
+            && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
+        if align {
+            self.align_start(align_kind::IDENTIFIER);
+        }
+
+        let text = emitting_identifier(arg, namespace).identifier_token;
+        self.veryl_token(&text);
+        self.push_resolved_identifier(&text.to_string());
+
+        if align {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
+    }
+
     fn case_inside_statement(&mut self, arg: &CaseStatement) {
         let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.case.case_token.token);
         self.token(&arg.case.case_token.append(&prefix, &None));
@@ -930,7 +949,7 @@ impl Emitter {
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
-        self.default_block = Some(emitting_identifier(arg.identifier.as_ref()));
+        self.default_block = Some(emitting_identifier(arg.identifier.as_ref(), None));
         self.token_will_push(&arg.l_brace.l_brace_token.replace(&format!("{prefix}begin")));
         self.space(1);
         self.colon(&arg.colon);
@@ -1289,6 +1308,11 @@ impl Emitter {
             }
         }
         self.align_finish(align_kind::EXPRESSION);
+    }
+
+    fn emit_port_identifier(&mut self, identifier: &Identifier) {
+        let namespace = self.inst_module_namespace.clone();
+        self.emit_identifier(identifier, namespace);
     }
 
     fn emit_inst_unconnected_port(
@@ -2147,20 +2171,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let align = !self.align_any()
-            && !self.in_attribute
-            && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
-        if align {
-            self.align_start(align_kind::IDENTIFIER);
-        }
-
-        let text = emitting_identifier(arg).identifier_token;
-        self.veryl_token(&text);
-        self.push_resolved_identifier(&text.to_string());
-
-        if align {
-            self.align_finish(align_kind::IDENTIFIER);
-        }
+        self.emit_identifier(arg, None);
     }
 
     /// Semantic action for non-terminal 'Number'
@@ -3148,7 +3159,7 @@ impl VerylWalker for Emitter {
         //self.str(";");
         //self.newline();
         self.align_start(align_kind::IDENTIFIER);
-        self.identifier(&emitting_identifier(arg.identifier.as_ref()));
+        self.identifier(&emitting_identifier(arg.identifier.as_ref(), None));
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.equ(&arg.equ);
@@ -3558,7 +3569,7 @@ impl VerylWalker for Emitter {
             self.str("always_comb");
         }
         self.space(1);
-        self.identifier(&emitting_identifier(arg.identifier.as_ref()));
+        self.identifier(&emitting_identifier(arg.identifier.as_ref(), None));
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -4281,22 +4292,22 @@ impl VerylWalker for Emitter {
             &arg.inst.inst_token.token,
             Attr::Allow(AllowItem::MissingPort),
         );
-        let (defined_ports, generic_map, namespace) =
+        let (defined_ports, generic_map, symbol) =
             if let (Ok(symbol), _) = self.resolve_scoped_idnetifier(&arg.scoped_identifier) {
                 match symbol.found.kind {
                     SymbolKind::Module(ref x) if !allow_missing_port => {
-                        (x.ports.clone(), vec![], symbol.found.namespace)
+                        (x.ports.clone(), vec![], symbol.found)
                     }
                     SymbolKind::GenericInstance(ref x) => {
                         let base = symbol_table::get(x.base).unwrap();
                         match base.kind {
                             SymbolKind::Module(ref x) if !allow_missing_port => {
-                                (x.ports.clone(), symbol.found.generic_maps(), base.namespace)
+                                (x.ports.clone(), symbol.found.generic_maps(), base)
                             }
-                            _ => (vec![], vec![], base.namespace),
+                            _ => (vec![], vec![], base),
                         }
                     }
-                    _ => (vec![], vec![], symbol.found.namespace),
+                    _ => (vec![], vec![], symbol.found),
                 }
             } else {
                 unreachable!()
@@ -4315,10 +4326,11 @@ impl VerylWalker for Emitter {
             &defined_ports,
             &connected_ports,
             &generic_map,
-            &namespace,
+            &symbol.namespace,
         );
         self.modport_connections_tables
             .push(modport_connections_table);
+        self.inst_module_namespace = Some(symbol.inner_namespace());
 
         let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
         let single_line =
@@ -4373,6 +4385,7 @@ impl VerylWalker for Emitter {
         }
 
         self.modport_connections_tables.pop();
+        self.inst_module_namespace = None;
     }
 
     /// Semantic action for non-terminal 'InstParameter'
@@ -4510,7 +4523,7 @@ impl VerylWalker for Emitter {
         } else {
             self.str(".");
             self.align_start(align_kind::IDENTIFIER);
-            self.identifier(&arg.identifier);
+            self.emit_port_identifier(&arg.identifier);
             self.align_finish(align_kind::IDENTIFIER);
             self.space(1);
             self.str("(");
@@ -5733,8 +5746,14 @@ pub fn identifier_with_prefix_suffix(
     }
 }
 
-pub fn emitting_identifier(arg: &Identifier) -> Identifier {
-    let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
+pub fn emitting_identifier(arg: &Identifier, namespace: Option<Namespace>) -> Identifier {
+    let path_namespace = if let Some(x) = namespace {
+        SymbolPathNamespace(arg.into(), x)
+    } else {
+        arg.into()
+    };
+
+    let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(path_namespace) {
         match &found.found.kind {
             SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
             SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
