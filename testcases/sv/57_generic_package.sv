@@ -46,9 +46,8 @@ package veryl_testcase___Package57F__Module57F;
 
 endpackage
 
-module veryl_testcase_Module57
+module veryl_testcase_Module57;
     import veryl_testcase_Package57E::Y;
-;
 
 
     localparam int unsigned     A = veryl_testcase___Package57A__1::X;

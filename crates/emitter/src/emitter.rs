@@ -4885,6 +4885,8 @@ impl VerylWalker for Emitter {
         } else {
             unreachable!()
         };
+        let empty_header =
+            arg.module_declaration_opt1.is_none() && arg.module_declaration_opt2.is_none();
 
         let maps = self.get_generic_maps(&symbol.found);
         for (i, map) in maps.iter().enumerate() {
@@ -4922,7 +4924,7 @@ impl VerylWalker for Emitter {
 
             let mut import_declarations = self.file_scope_import.clone();
             import_declarations.append(&mut arg.collect_import_declarations());
-            if !import_declarations.is_empty() {
+            if !import_declarations.is_empty() && !empty_header {
                 self.newline_push();
                 for (i, x) in import_declarations.iter().enumerate() {
                     if i != 0 {
@@ -4934,16 +4936,26 @@ impl VerylWalker for Emitter {
             }
 
             if let Some(ref x) = arg.module_declaration_opt1 {
-                self.space(1);
+                if import_declarations.is_empty() {
+                    self.space(1);
+                }
                 self.with_parameter(&x.with_parameter);
             }
             if let Some(ref x) = arg.module_declaration_opt2 {
-                self.space(1);
+                if import_declarations.is_empty() || arg.module_declaration_opt1.is_some() {
+                    self.space(1);
+                }
                 self.port_declaration(&x.port_declaration);
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
             for (i, x) in arg.module_declaration_list.iter().enumerate() {
                 self.newline_list(i);
+                if i == 0 && !import_declarations.is_empty() && empty_header {
+                    for x in &import_declarations {
+                        self.emit_import_declaration(x);
+                        self.newline();
+                    }
+                }
                 if i == 0 && self.modport_ports_table.is_some() {
                     self.emit_expanded_modport_connections();
                     self.modport_ports_table = None;
@@ -4985,8 +4997,9 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = self.get_generic_maps(&symbol.found);
+        let empty_header = arg.interface_declaration_opt1.is_none();
 
+        let maps = self.get_generic_maps(&symbol.found);
         for (i, map) in maps.iter().enumerate() {
             if i != 0 {
                 self.newline();
@@ -5010,7 +5023,7 @@ impl VerylWalker for Emitter {
 
             let mut import_declarations = self.file_scope_import.clone();
             import_declarations.append(&mut arg.collect_import_declarations());
-            if !import_declarations.is_empty() {
+            if !import_declarations.is_empty() && !empty_header {
                 self.newline_push();
                 for (i, x) in import_declarations.iter().enumerate() {
                     if i != 0 {
@@ -5022,12 +5035,20 @@ impl VerylWalker for Emitter {
             }
 
             if let Some(ref x) = arg.interface_declaration_opt1 {
-                self.space(1);
+                if import_declarations.is_empty() {
+                    self.space(1);
+                }
                 self.with_parameter(&x.with_parameter);
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
             for (i, x) in arg.interface_declaration_list.iter().enumerate() {
                 self.newline_list(i);
+                if i == 0 && !import_declarations.is_empty() && empty_header {
+                    for x in &import_declarations {
+                        self.emit_import_declaration(x);
+                        self.newline();
+                    }
+                }
                 self.interface_group(&x.interface_group);
             }
             self.newline_list_post(arg.interface_declaration_list.is_empty());

@@ -1057,9 +1057,8 @@ package prj___Pkg__32;
     } Foo;
     typedef logic [32-1:0] Bar;
 endpackage
-interface prj___IfA____Pkg__32
+interface prj___IfA____Pkg__32;
     import prj___Pkg__32::*;
-;
 
 
     prj___Pkg__32::Foo foo;
@@ -1979,9 +1978,8 @@ module ModuleB {
 package prj___PkgA__32;
     typedef logic [32-1:0] A;
 endpackage
-module prj___ModuleA____PkgA__32
+module prj___ModuleA____PkgA__32;
     import prj___PkgA__32::*;
-;
 
 
     function automatic int unsigned __func____PkgA__32_A() ;
