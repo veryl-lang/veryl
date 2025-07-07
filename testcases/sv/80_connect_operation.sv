@@ -10,9 +10,8 @@ package veryl_testcase_Package80;
     } Status;
 endpackage
 
-interface veryl_testcase_Interface80A
+interface veryl_testcase_Interface80A;
     import veryl_testcase_Package80::Command;
-;
 
 
     logic   command_ready;
@@ -26,9 +25,8 @@ interface veryl_testcase_Interface80A
     );
 endinterface
 
-interface veryl_testcase_Interface80B
+interface veryl_testcase_Interface80B;
     import veryl_testcase_Package80::Status;
-;
 
 
     logic  status_ready;
@@ -42,9 +40,8 @@ interface veryl_testcase_Interface80B
     );
 endinterface
 
-interface veryl_testcase_Interface80C
+interface veryl_testcase_Interface80C;
     import veryl_testcase_Package80::Command;
-;
 
 
     logic   command_ready;

@@ -2,15 +2,37 @@ import $sv::PackageA::A;
 import $sv::PackageA::*;
 
 package PackageA {
-    const A: u32 = 0;
+    const A: u32 = 1;
 }
 
-module Module19 {
+module Module19A {
     import PackageA::A;
     import PackageA::*;
 }
 
-interface Interface19 {
+module Module19B #(
+    param P: u32 = A,
+) {
+    import PackageA::A;
+    import PackageA::*;
+}
+
+module Module19C (
+    o_d: output logic<A>,
+) {
+    import PackageA::A;
+    import PackageA::*;
+    assign o_d = '0;
+}
+
+interface Interface19A {
+    import PackageA::A;
+    import PackageA::*;
+}
+
+interface Interface19B #(
+    param P: u32 = A,
+) {
     import PackageA::A;
     import PackageA::*;
 }

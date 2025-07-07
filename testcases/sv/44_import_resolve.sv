@@ -6,10 +6,9 @@ package veryl_testcase_Package44B;
     localparam int unsigned y = 0;
 endpackage
 
-module veryl_testcase_Module44
+module veryl_testcase_Module44;
     import veryl_testcase_Package44A::z;
     import veryl_testcase_Package44B::*;
-;
     logic [10-1:0] a;
     logic [10-1:0] b;
     logic [10-1:0] c;
