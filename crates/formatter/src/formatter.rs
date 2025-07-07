@@ -2723,6 +2723,12 @@ impl VerylWalker for Formatter {
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
+        if let Some(x) = &arg.proto_type_def_declaration_opt {
+            self.space(1);
+            self.equ(&x.equ);
+            self.space(1);
+            self.array_type(&x.array_type);
+        }
         self.semicolon(&arg.semicolon);
     }
 

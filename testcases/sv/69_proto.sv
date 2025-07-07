@@ -12,4 +12,15 @@ module veryl_testcase_Module69A #(
 );
     always_comb c = a;
 endmodule
+
+package veryl_testcase_Package69A;
+    typedef struct packed {
+        logic a;
+    } A;
+endpackage
+
+
+package veryl_testcase_Package69B;
+    typedef veryl_testcase_Package69A::A A;
+endpackage
 //# sourceMappingURL=../map/69_proto.sv.map
