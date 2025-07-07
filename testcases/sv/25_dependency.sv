@@ -7,17 +7,17 @@ module veryl_testcase_Module25 (
     veryl_sample3_data_if data_if ();
 
     veryl_sample_delay u0 (
-        .i_clk   (i_clk       ),
-        .i_rst_n (i_rst_n     ),
-        .i_d     (in_if.data  ),
-        .o_d     (data_if.data)
+        .i_clk     (i_clk       ),
+        .i_rst_n_n (i_rst_n     ),
+        .i_d       (in_if.data  ),
+        .o_d       (data_if.data)
     );
 
     veryl_sample2_delay u1 (
-        .i_clk   (i_clk       ),
-        .i_rst_n (i_rst_n     ),
-        .i_d     (data_if.data),
-        .o_d     (out_if.data )
+        .i_clk     (i_clk       ),
+        .i_rst_n_n (i_rst_n     ),
+        .i_d       (data_if.data),
+        .o_d       (out_if.data )
     );
 endmodule
 //# sourceMappingURL=../map/25_dependency.sv.map
