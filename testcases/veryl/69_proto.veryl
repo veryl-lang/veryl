@@ -27,3 +27,17 @@ module Module69A for Proto69 #(
 ) {
     assign c = a;
 }
+
+package Package69A {
+    struct A {
+        a: logic,
+    }
+}
+
+proto package ProtoPackage69B {
+    type A = Package69A::A;
+}
+
+package Package69B for ProtoPackage69B {
+    type A = Package69A::A;
+}
