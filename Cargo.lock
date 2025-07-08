@@ -2937,7 +2937,7 @@ dependencies = [
 
 [[package]]
 name = "mdbook-veryl"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -5253,7 +5253,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "veryl"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anstyle",
  "clap",
@@ -5287,14 +5287,14 @@ dependencies = [
 
 [[package]]
 name = "veryl-aligner"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "veryl-parser",
 ]
 
 [[package]]
 name = "veryl-analyzer"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "bimap",
  "daggy",
@@ -5312,7 +5312,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-emitter"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "serde",
  "strnum_bitwidth",
@@ -5326,7 +5326,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-formatter"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "toml 0.8.23",
  "veryl-aligner",
@@ -5337,7 +5337,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-ls"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-channel",
  "dashmap 6.1.0",
@@ -5359,7 +5359,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-metadata"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "git-repository",
  "log",
@@ -5385,7 +5385,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-migrator"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "bimap",
@@ -5402,7 +5402,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-parser"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "bimap",
@@ -5417,7 +5417,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-path"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "directories",
  "fs4",
@@ -5429,7 +5429,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-simulator"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "toml 0.8.23",
  "veryl-analyzer",
@@ -5440,7 +5440,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-sourcemap"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "miette",
  "relative-path",
@@ -5450,7 +5450,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-std"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "merkle_hash",
  "miette",

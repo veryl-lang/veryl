@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-formatter"
-version               = "0.16.1"
+version               = "0.16.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -13,10 +13,10 @@ edition.workspace     = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-veryl-aligner  = {version = "0.16.1", path = "../aligner"}
-veryl-analyzer = {version = "0.16.1", path = "../analyzer"}
-veryl-metadata = {version = "0.16.1", path = "../metadata"}
-veryl-parser   = {version = "0.16.1", path = "../parser"}
+veryl-aligner  = {version = "0.16.2", path = "../aligner"}
+veryl-analyzer = {version = "0.16.2", path = "../analyzer"}
+veryl-metadata = {version = "0.16.2", path = "../metadata"}
+veryl-parser   = {version = "0.16.2", path = "../parser"}
 
 [dev-dependencies]
 toml = {workspace = true}
