@@ -1,14 +1,14 @@
 module ModuleC {
     inst u: $std::ram (
-        i_clk : _,
-        i_rst : _,
-        i_clr : _,
-        i_mea : _,
-        i_wea : _,
-        i_adra: _,
-        i_da  : _,
-        i_meb : _,
-        i_adrb: _,
+        i_clk : 0,
+        i_rst : 0,
+        i_clr : 0,
+        i_mea : 0,
+        i_wea : 0,
+        i_adra: 0,
+        i_da  : 0,
+        i_meb : 0,
+        i_adrb: 0,
         o_qb  : _,
     );
 }

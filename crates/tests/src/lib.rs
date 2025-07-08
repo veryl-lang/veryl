@@ -389,16 +389,22 @@ mod filelist {
             contexts.push((path, input, parser, analyzer));
         }
 
-        let _ = Analyzer::analyze_post_pass1();
+        let err = Analyzer::analyze_post_pass1();
+        dbg!(&err);
+        assert!(err.is_empty());
 
         for (path, _, parser, analyzer) in &contexts {
-            let _ = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
+            let err = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
+            dbg!(&err);
+            assert!(err.is_empty());
         }
 
         let info = Analyzer::analyze_post_pass2();
 
         for (path, _, parser, analyzer) in &contexts {
-            let _ = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
+            let err = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
+            dbg!(&err);
+            assert!(err.is_empty());
         }
 
         let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);
