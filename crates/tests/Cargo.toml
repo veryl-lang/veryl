@@ -16,7 +16,7 @@ veryl-path      = {version = "0.16.1", path = "../path"}
 veryl           = {version = "0.16.1", path = "../veryl"}
 
 [dev-dependencies]
-criterion = {package = "codspeed-criterion-compat", version = "2.7"}
+criterion = {package = "codspeed-criterion-compat", version = "3.0"}
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pprof = {version = "0.15.0", features = ["flamegraph"]}
