@@ -7,23 +7,29 @@ module Module69::<T: Proto69> {
 }
 
 proto module Proto69 #(
-    param A: u32 = 1,
-    param B: u32 = 1,
-    param C: u32 = 1,
+    param A      : u32 = 2        ,
+    param B      : u32 = 3        ,
+    param C      : u32 = 4        ,
+    const A_WIDTH: u32 = $clog2(A),
+    const B_WIDTH: u32 = $clog2(B),
+    const C_WIDTH: u32 = $clog2(C),
 ) (
-    a: input  logic,
-    b: input  logic,
-    c: output logic,
+    a: input  logic<A_WIDTH>,
+    b: input  logic<B_WIDTH>,
+    c: output logic<C_WIDTH>,
 );
 
 module Module69A for Proto69 #(
-    param A: u32 = 1,
-    param B: u32 = 1,
-    param C: u32 = 1,
+    param A      : u32 = 2        ,
+    param B      : u32 = 3        ,
+    param C      : u32 = 4        ,
+    const A_WIDTH: u32 = $clog2(A),
+    const B_WIDTH: u32 = $clog2(B),
+    const C_WIDTH: u32 = $clog2(C),
 ) (
-    a: input  logic,
-    b: input  logic,
-    c: output logic,
+    a: input  logic<A_WIDTH>,
+    b: input  logic<B_WIDTH>,
+    c: output logic<C_WIDTH>,
 ) {
     assign c = a;
 }

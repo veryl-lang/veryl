@@ -893,4 +893,52 @@ impl VerylGrammarTrait for CheckVarRef {
         }
         Ok(())
     }
+
+    fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Module {
+                    token: arg.module.module_token.token,
+                });
+            }
+            HandlerPoint::After => {
+                self.affiliation.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_interface_declaration(
+        &mut self,
+        arg: &ProtoInterfaceDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Interface {
+                    token: arg.interface.interface_token.token,
+                });
+            }
+            HandlerPoint::After => {
+                self.affiliation.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn proto_package_declaration(
+        &mut self,
+        arg: &ProtoPackageDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.affiliation.push(VarRefAffiliation::Package {
+                    token: arg.package.package_token.token,
+                });
+            }
+            HandlerPoint::After => {
+                self.affiliation.pop();
+            }
+        }
+        Ok(())
+    }
 }
