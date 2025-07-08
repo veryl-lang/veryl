@@ -74,6 +74,7 @@ pub struct CreateSymbolTable {
     build_opt: Build,
     point: HandlerPoint,
     namespace: Namespace,
+    project_namespace: Namespace,
     module_namspace_depth: usize,
     default_block: Option<StrId>,
     for_identifier: Option<Token>,
@@ -128,6 +129,7 @@ impl CreateSymbolTable {
     pub fn new(build_opt: &Build) -> Self {
         Self {
             build_opt: build_opt.clone(),
+            project_namespace: namespace_table::get_default(),
             ..Default::default()
         }
     }
@@ -684,6 +686,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     let cand = TypeDagCandidate::Path {
                         path,
                         namespace,
+                        project_namespace: self.project_namespace.clone(),
                         parent: None,
                     };
 
