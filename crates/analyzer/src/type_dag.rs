@@ -1,5 +1,6 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
+use crate::namespace_table;
 use crate::symbol::{GenericMap, ParameterKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath};
 use crate::symbol_table;
@@ -16,6 +17,7 @@ pub enum TypeDagCandidate {
     Path {
         path: GenericSymbolPath,
         namespace: Namespace,
+        project_namespace: Namespace,
         parent: Option<(SymbolId, Context)>,
     },
     Symbol {
@@ -146,10 +148,11 @@ impl TypeDag {
             if let TypeDagCandidate::Path {
                 path,
                 namespace,
+                project_namespace,
                 parent,
             } = cand
             {
-                self.insert_path(path, namespace, parent);
+                self.insert_path(path, namespace, project_namespace, parent);
             }
         }
 
@@ -160,8 +163,10 @@ impl TypeDag {
         &mut self,
         path: &GenericSymbolPath,
         namespace: &Namespace,
+        project_namespace: &Namespace,
         parent: &Option<(SymbolId, Context)>,
     ) {
+        namespace_table::set_default(&project_namespace.paths);
         if let Some((parent_id, parent_context)) = parent {
             let parent_symbol = symbol_table::get(*parent_id).unwrap();
             let parent_package = parent_symbol.get_parent_package();
