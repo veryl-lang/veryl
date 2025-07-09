@@ -4350,6 +4350,34 @@ fn unknown_msb() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package foo_proto_pkg {
+        type Foo;
+    }
+    module ModuleA::<PKG: foo_proto_pkg> {
+        import PKG::*;
+        let foo     : Foo   = 0;
+        let _msb_foo: logic = foo[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
+
+    let code = r#"
+    proto package foo_proto_pkg {
+        type Foo = logic<2>;
+    }
+    module ModuleA::<PKG: foo_proto_pkg> {
+        import PKG::*;
+        let foo     : Foo   = 0;
+        let _msb_foo: logic = foo[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
