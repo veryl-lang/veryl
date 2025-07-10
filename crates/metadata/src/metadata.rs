@@ -271,7 +271,7 @@ impl Metadata {
     ) -> Result<Vec<PathSet>, MetadataError> {
         let sources = if self.build.source.iter().count() > 0 {
             warn!(
-                "[Veryl.toml] \"source\" field is deprecetad. Replace it with \"soruces\" field."
+                "[Veryl.toml] \"source\" field is deprecated. Replace it with \"sources\" field."
             );
             vec![self.build.source.clone()]
         } else {
