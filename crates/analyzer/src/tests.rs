@@ -803,6 +803,26 @@ fn invalid_msb() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidMsb { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var _foo: logic<2, 3>;
+        var _bar: logic<2, 3>;
+        for i in 0..2 :g {
+            always_comb {
+            _foo[i][msb:0] = 0;
+            }
+        }
+        always_comb {
+            for i: u32 in 0..2 {
+            _bar[i][msb:0] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -15,13 +15,17 @@ pub struct CheckMsbLsb {
     point: HandlerPoint,
     identifier_path: Vec<SymbolPathNamespace>,
     select_dimension: Vec<usize>,
-    in_expression_identifier: bool,
+    in_expression_identifier: Vec<()>,
     in_select: bool,
 }
 
 impl CheckMsbLsb {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn is_in_expression_identifier(&self) -> bool {
+        !self.in_expression_identifier.is_empty()
     }
 }
 
@@ -52,7 +56,7 @@ fn trace_type(r#type: &SymType) -> Vec<(SymType, Option<SymbolKind>)> {
 impl VerylGrammarTrait for CheckMsbLsb {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if !(self.in_expression_identifier && self.in_select) {
+            if !(self.is_in_expression_identifier() && self.in_select) {
                 self.errors
                     .push(AnalyzerError::invalid_lsb(&arg.lsb_token.token.into()));
             }
@@ -62,7 +66,7 @@ impl VerylGrammarTrait for CheckMsbLsb {
 
     fn msb(&mut self, arg: &Msb) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_expression_identifier && self.in_select {
+            if self.is_in_expression_identifier() && self.in_select {
                 let resolved = if let Ok(x) =
                     symbol_table::resolve(self.identifier_path.last().unwrap().clone())
                 {
@@ -147,7 +151,7 @@ impl VerylGrammarTrait for CheckMsbLsb {
 
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if self.in_expression_identifier {
+            if self.is_in_expression_identifier() {
                 self.identifier_path
                     .last_mut()
                     .unwrap()
@@ -165,7 +169,7 @@ impl VerylGrammarTrait for CheckMsbLsb {
             }
             HandlerPoint::After => {
                 self.in_select = false;
-                if self.in_expression_identifier {
+                if self.is_in_expression_identifier() {
                     *self.select_dimension.last_mut().unwrap() += 1;
                 }
             }
@@ -181,12 +185,12 @@ impl VerylGrammarTrait for CheckMsbLsb {
                 self.identifier_path
                     .push(SymbolPathNamespace(symbol_path, namespace));
                 self.select_dimension.push(0);
-                self.in_expression_identifier = true;
+                self.in_expression_identifier.push(());
             }
             HandlerPoint::After => {
                 self.identifier_path.pop();
                 self.select_dimension.pop();
-                self.in_expression_identifier = false;
+                self.in_expression_identifier.pop();
             }
         }
         Ok(())
