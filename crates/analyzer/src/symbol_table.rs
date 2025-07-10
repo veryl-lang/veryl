@@ -151,7 +151,8 @@ impl SymbolTable {
                 SymbolKind::SystemVerilog => context.sv_member = true,
                 SymbolKind::Parameter(x) => {
                     if matches!(x.r#type.kind, TypeKind::Type) {
-                        return self.trace_type_parameter(context, &x.value, &symbol.found);
+                        let value = x.value.as_ref().unwrap();
+                        return self.trace_type_parameter(context, value, &symbol.found);
                     }
                 }
                 SymbolKind::TypeDef(x) => {
@@ -314,7 +315,8 @@ impl SymbolTable {
             match &symbol.found.kind {
                 SymbolKind::Parameter(x) => {
                     if matches!(x.r#type.kind, TypeKind::Type) {
-                        return self.trace_type_parameter(context, &x.value, &symbol.found);
+                        let value = x.value.as_ref().unwrap();
+                        return self.trace_type_parameter(context, value, &symbol.found);
                     }
                 }
                 SymbolKind::TypeDef(x) => {
@@ -600,8 +602,8 @@ impl SymbolTable {
                             }
                             SymbolKind::Parameter(x) => {
                                 if matches!(x.r#type.kind, TypeKind::Type) {
-                                    context =
-                                        self.trace_type_parameter(context, &x.value, found)?;
+                                    let value = x.value.as_ref().unwrap();
+                                    context = self.trace_type_parameter(context, value, found)?;
                                 } else {
                                     context = self.trace_type_kind(context, &x.r#type.kind)?;
                                 }

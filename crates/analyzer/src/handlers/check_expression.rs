@@ -27,6 +27,7 @@ pub struct CheckExpression {
     evaluator: Evaluator,
     in_inst_declaration: bool,
     port_direction: Option<Direction>,
+    in_proto: bool,
     in_input_port_default_value: bool,
     disable: bool,
     disable_block_beg: HashSet<TokenId>,
@@ -682,10 +683,17 @@ impl VerylGrammarTrait for CheckExpression {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<(), ParolError> {
         if !self.disable {
             if let HandlerPoint::Before = self.point {
-                let exp = self.evaluator.expression(&arg.expression);
-                self.evaluated_error(&exp.errors);
+                if let Some(x) = &arg.with_parameter_item_opt {
+                    let exp = self.evaluator.expression(&x.expression);
+                    self.evaluated_error(&exp.errors);
 
-                // TODO type check
+                    // TODO type check
+                } else if !self.in_proto {
+                    self.errors.push(AnalyzerError::missing_default_argument(
+                        &arg.identifier.identifier_token.token.to_string(),
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
             }
         }
 
@@ -802,6 +810,28 @@ impl VerylGrammarTrait for CheckExpression {
             }
         }
 
+        Ok(())
+    }
+
+    fn proto_module_declaration(
+        &mut self,
+        _arg: &ProtoModuleDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_proto = true,
+            HandlerPoint::After => self.in_proto = false,
+        }
+        Ok(())
+    }
+
+    fn proto_interface_declaration(
+        &mut self,
+        _arg: &ProtoInterfaceDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_proto = true,
+            HandlerPoint::After => self.in_proto = false,
+        }
         Ok(())
     }
 }

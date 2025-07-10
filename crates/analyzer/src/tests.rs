@@ -1184,6 +1184,51 @@ fn missing_default_generic_argument() {
 }
 
 #[test]
+fn missing_default_parameter_argument() {
+    let code = r#"
+    module ModuleA #(
+        param A: u32,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingDefaultArgument { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA #(
+        param A: u32,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MissingDefaultArgument { .. }
+    ));
+
+    let code = r#"
+    proto module ProtoModuleA #(
+        param A: u32,
+    );
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface InterfaceA #(
+        param A: u32,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn mismatch_generics_arity() {
     let code = r#"
     module ModuleA {

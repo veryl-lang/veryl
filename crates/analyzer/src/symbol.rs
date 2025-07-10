@@ -274,11 +274,15 @@ impl Symbol {
                     }
                 }
                 SymbolKind::Parameter(x) => {
-                    let mut evaluator = Evaluator::new(&[]);
-                    if let Some(width) = evaluator.type_width(x.r#type.clone()) {
-                        evaluator.context_width = width;
+                    if let Some(value) = &x.value {
+                        let mut evaluator = Evaluator::new(&[]);
+                        if let Some(width) = evaluator.type_width(x.r#type.clone()) {
+                            evaluator.context_width = width;
+                        }
+                        evaluator.expression(value)
+                    } else {
+                        self.create_evaluated_with_error()
                     }
-                    evaluator.expression(&x.value)
                 }
                 SymbolKind::EnumMember(x) => {
                     let value = x.value.value();
@@ -309,14 +313,7 @@ impl Symbol {
                 | SymbolKind::SystemFunction(_)
                 | SymbolKind::GenericInstance(_)
                 | SymbolKind::ClockDomain
-                | SymbolKind::Test(_) => {
-                    let mut ret = Evaluated::create_unknown();
-                    ret.errors.push(EvaluatedError::InvalidFactor {
-                        kind: self.kind.to_kind_name(),
-                        token: self.token,
-                    });
-                    ret
-                }
+                | SymbolKind::Test(_) => self.create_evaluated_with_error(),
                 SymbolKind::Instance(x) => {
                     let mut evaluator = Evaluator::new(&[]);
                     if let Ok(symbol) =
@@ -329,12 +326,7 @@ impl Symbol {
                                 Evaluated::create_unknown()
                             }
                         } else {
-                            let mut ret = Evaluated::create_unknown();
-                            ret.errors.push(EvaluatedError::InvalidFactor {
-                                kind: self.kind.to_kind_name(),
-                                token: self.token,
-                            });
-                            ret
+                            self.create_evaluated_with_error()
                         }
                     } else {
                         Evaluated::create_unknown()
@@ -346,6 +338,15 @@ impl Symbol {
             self.evaluated.replace(Some(evaluated.clone()));
             evaluated
         }
+    }
+
+    fn create_evaluated_with_error(&self) -> Evaluated {
+        let mut ret = Evaluated::create_unknown();
+        ret.errors.push(EvaluatedError::InvalidFactor {
+            kind: self.kind.to_kind_name(),
+            token: self.token,
+        });
+        ret
     }
 
     pub fn inner_namespace(&self) -> Namespace {
@@ -996,15 +997,17 @@ impl fmt::Display for SymbolKind {
                 )
             }
             SymbolKind::Parameter(x) => {
-                let mut stringifier = Stringifier::new();
-                stringifier.expression(&x.value);
-                match x.kind {
-                    ParameterKind::Param => {
-                        format!("parameter ({}) = {}", x.r#type, stringifier.as_str())
-                    }
-                    ParameterKind::Const => {
-                        format!("localparam ({}) = {}", x.r#type, stringifier.as_str())
-                    }
+                if let Some(value) = &x.value {
+                    let mut stringifier = Stringifier::new();
+                    stringifier.expression(value);
+                    format!(
+                        "{} ({}) = {}",
+                        x.kind.to_sv_snippet(),
+                        x.r#type,
+                        stringifier.as_str()
+                    )
+                } else {
+                    format!("{} ({})", x.kind.to_sv_snippet(), x.r#type)
                 }
             }
             SymbolKind::ProtoConst(x) => {
@@ -1801,6 +1804,14 @@ impl ParameterKind {
     pub fn is_const(&self) -> bool {
         matches!(self, ParameterKind::Const)
     }
+
+    pub fn to_sv_snippet(&self) -> String {
+        if self.is_const() {
+            "localparam".to_string()
+        } else {
+            "parameter".to_string()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1808,7 +1819,7 @@ pub struct ParameterProperty {
     pub token: Token,
     pub r#type: Type,
     pub kind: ParameterKind,
-    pub value: syntax_tree::Expression,
+    pub value: Option<syntax_tree::Expression>,
 }
 
 #[derive(Debug, Clone)]

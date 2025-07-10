@@ -476,7 +476,7 @@ fn traverse_type_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath> {
                 }
             }
             SymbolKind::Parameter(x) if x.r#type.kind == TypeKind::Type => {
-                let r#type: Result<crate::symbol::Type, ()> = (&x.value).try_into();
+                let r#type: Result<crate::symbol::Type, ()> = x.value.as_ref().unwrap().try_into();
                 if let Ok(r#type) = r#type {
                     if let TypeKind::UserDefined(ref x) = r#type.kind {
                         if let Some(id) = x.symbol {

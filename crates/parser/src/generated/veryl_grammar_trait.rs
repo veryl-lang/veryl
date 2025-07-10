@@ -9,7 +9,6 @@
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::upper_case_acronyms)]
 
-use parol_runtime::derive_builder::Builder;
 use parol_runtime::log::trace;
 #[allow(unused_imports)]
 use parol_runtime::parol_macros::{pop_and_reverse_item, pop_item};
@@ -2771,8 +2770,7 @@ pub trait VerylGrammarTrait {
 /// `Number: IntegralNumber;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct NumberIntegralNumber {
     pub integral_number: Box<IntegralNumber>,
 }
@@ -2783,8 +2781,7 @@ pub struct NumberIntegralNumber {
 /// `Number: RealNumber;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct NumberRealNumber {
     pub real_number: Box<RealNumber>,
 }
@@ -2795,8 +2792,7 @@ pub struct NumberRealNumber {
 /// `IntegralNumber: Based;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IntegralNumberBased {
     pub based: Box<Based>,
 }
@@ -2807,8 +2803,7 @@ pub struct IntegralNumberBased {
 /// `IntegralNumber: BaseLess;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IntegralNumberBaseLess {
     pub base_less: Box<BaseLess>,
 }
@@ -2819,8 +2814,7 @@ pub struct IntegralNumberBaseLess {
 /// `IntegralNumber: AllBit;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IntegralNumberAllBit {
     pub all_bit: Box<AllBit>,
 }
@@ -2831,8 +2825,7 @@ pub struct IntegralNumberAllBit {
 /// `RealNumber: FixedPoint;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RealNumberFixedPoint {
     pub fixed_point: Box<FixedPoint>,
 }
@@ -2843,8 +2836,7 @@ pub struct RealNumberFixedPoint {
 /// `RealNumber: Exponent;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RealNumberExponent {
     pub exponent: Box<Exponent>,
 }
@@ -2855,8 +2847,7 @@ pub struct RealNumberExponent {
 /// `ScopedIdentifierGroup: DollarIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScopedIdentifierGroupDollarIdentifier {
     pub dollar_identifier: Box<DollarIdentifier>,
 }
@@ -2867,8 +2858,7 @@ pub struct ScopedIdentifierGroupDollarIdentifier {
 /// `ScopedIdentifierGroup: Identifier ScopedIdentifierOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScopedIdentifierGroupIdentifierScopedIdentifierOpt {
     pub identifier: Box<Identifier>,
     pub scoped_identifier_opt: Option<ScopedIdentifierOpt>,
@@ -2880,8 +2870,7 @@ pub struct ScopedIdentifierGroupIdentifierScopedIdentifierOpt {
 /// `Expression10ListGroup: Operator11;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression10ListGroupOperator11 {
     pub operator11: Box<Operator11>,
 }
@@ -2892,8 +2881,7 @@ pub struct Expression10ListGroupOperator11 {
 /// `Expression10ListGroup: Star;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression10ListGroupStar {
     pub star: Box<Star>,
 }
@@ -2904,8 +2892,7 @@ pub struct Expression10ListGroupStar {
 /// `Expression13ListGroup: UnaryOperator;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13ListGroupUnaryOperator {
     pub unary_operator: Box<UnaryOperator>,
 }
@@ -2916,8 +2903,7 @@ pub struct Expression13ListGroupUnaryOperator {
 /// `Expression13ListGroup: Operator10;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13ListGroupOperator10 {
     pub operator10: Box<Operator10>,
 }
@@ -2928,8 +2914,7 @@ pub struct Expression13ListGroupOperator10 {
 /// `Expression13ListGroup: Operator06;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13ListGroupOperator06 {
     pub operator06: Box<Operator06>,
 }
@@ -2940,8 +2925,7 @@ pub struct Expression13ListGroupOperator06 {
 /// `Expression13ListGroup: Operator04;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13ListGroupOperator04 {
     pub operator04: Box<Operator04>,
 }
@@ -2952,8 +2936,7 @@ pub struct Expression13ListGroupOperator04 {
 /// `Expression13ListGroup: Operator05;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13ListGroupOperator05 {
     pub operator05: Box<Operator05>,
 }
@@ -2964,8 +2947,7 @@ pub struct Expression13ListGroupOperator05 {
 /// `Factor: Number;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorNumber {
     pub number: Box<Number>,
 }
@@ -2976,8 +2958,7 @@ pub struct FactorNumber {
 /// `Factor: BooleanLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorBooleanLiteral {
     pub boolean_literal: Box<BooleanLiteral>,
 }
@@ -2988,8 +2969,7 @@ pub struct FactorBooleanLiteral {
 /// `Factor: IdentifierFactor;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorIdentifierFactor {
     pub identifier_factor: Box<IdentifierFactor>,
 }
@@ -3000,8 +2980,7 @@ pub struct FactorIdentifierFactor {
 /// `Factor: LParen Expression RParen;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorLParenExpressionRParen {
     pub l_paren: Box<LParen>,
     pub expression: Box<Expression>,
@@ -3014,8 +2993,7 @@ pub struct FactorLParenExpressionRParen {
 /// `Factor: LBrace ConcatenationList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorLBraceConcatenationListRBrace {
     pub l_brace: Box<LBrace>,
     pub concatenation_list: Box<ConcatenationList>,
@@ -3028,8 +3006,7 @@ pub struct FactorLBraceConcatenationListRBrace {
 /// `Factor: QuoteLBrace ArrayLiteralList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorQuoteLBraceArrayLiteralListRBrace {
     pub quote_l_brace: Box<QuoteLBrace>,
     pub array_literal_list: Box<ArrayLiteralList>,
@@ -3042,8 +3019,7 @@ pub struct FactorQuoteLBraceArrayLiteralListRBrace {
 /// `Factor: CaseExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorCaseExpression {
     pub case_expression: Box<CaseExpression>,
 }
@@ -3054,8 +3030,7 @@ pub struct FactorCaseExpression {
 /// `Factor: SwitchExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorSwitchExpression {
     pub switch_expression: Box<SwitchExpression>,
 }
@@ -3066,8 +3041,7 @@ pub struct FactorSwitchExpression {
 /// `Factor: StringLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorStringLiteral {
     pub string_literal: Box<StringLiteral>,
 }
@@ -3078,8 +3052,7 @@ pub struct FactorStringLiteral {
 /// `Factor: FactorGroup;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorFactorGroup {
     pub factor_group: Box<FactorGroup>,
 }
@@ -3090,8 +3063,7 @@ pub struct FactorFactorGroup {
 /// `FactorGroup: Msb;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorGroupMsb {
     pub msb: Box<Msb>,
 }
@@ -3102,8 +3074,7 @@ pub struct FactorGroupMsb {
 /// `FactorGroup: Lsb;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorGroupLsb {
     pub lsb: Box<Lsb>,
 }
@@ -3114,8 +3085,7 @@ pub struct FactorGroupLsb {
 /// `Factor: InsideExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorInsideExpression {
     pub inside_expression: Box<InsideExpression>,
 }
@@ -3126,8 +3096,7 @@ pub struct FactorInsideExpression {
 /// `Factor: OutsideExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorOutsideExpression {
     pub outside_expression: Box<OutsideExpression>,
 }
@@ -3138,8 +3107,7 @@ pub struct FactorOutsideExpression {
 /// `Factor: TypeExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorTypeExpression {
     pub type_expression: Box<TypeExpression>,
 }
@@ -3150,8 +3118,7 @@ pub struct FactorTypeExpression {
 /// `Factor: FactorTypeFactor;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorFactorTypeFactor {
     pub factor_type_factor: Box<FactorTypeFactor>,
 }
@@ -3162,8 +3129,7 @@ pub struct FactorFactorTypeFactor {
 /// `BooleanLiteral: True;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BooleanLiteralTrue {
     pub r#true: Box<True>,
 }
@@ -3174,8 +3140,7 @@ pub struct BooleanLiteralTrue {
 /// `BooleanLiteral: False;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BooleanLiteralFalse {
     pub r#false: Box<False>,
 }
@@ -3186,8 +3151,7 @@ pub struct BooleanLiteralFalse {
 /// `IdentifierFactorOptGroup: FunctionCall;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierFactorOptGroupFunctionCall {
     pub function_call: Box<FunctionCall>,
 }
@@ -3198,8 +3162,7 @@ pub struct IdentifierFactorOptGroupFunctionCall {
 /// `IdentifierFactorOptGroup: StructConstructor;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierFactorOptGroupStructConstructor {
     pub struct_constructor: Box<StructConstructor>,
 }
@@ -3210,8 +3173,7 @@ pub struct IdentifierFactorOptGroupStructConstructor {
 /// `ArrayLiteralItemGroup: Expression ArrayLiteralItemOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralItemGroupExpressionArrayLiteralItemOpt {
     pub expression: Box<Expression>,
     pub array_literal_item_opt: Option<ArrayLiteralItemOpt>,
@@ -3223,8 +3185,7 @@ pub struct ArrayLiteralItemGroupExpressionArrayLiteralItemOpt {
 /// `ArrayLiteralItemGroup: Defaul Colon Expression;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralItemGroupDefaulColonExpression {
     pub defaul: Box<Defaul>,
     pub colon: Box<Colon>,
@@ -3237,8 +3198,7 @@ pub struct ArrayLiteralItemGroupDefaulColonExpression {
 /// `SelectOperator: Colon;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SelectOperatorColon {
     pub colon: Box<Colon>,
 }
@@ -3249,8 +3209,7 @@ pub struct SelectOperatorColon {
 /// `SelectOperator: PlusColon;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SelectOperatorPlusColon {
     pub plus_colon: Box<PlusColon>,
 }
@@ -3261,8 +3220,7 @@ pub struct SelectOperatorPlusColon {
 /// `SelectOperator: MinusColon;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SelectOperatorMinusColon {
     pub minus_colon: Box<MinusColon>,
 }
@@ -3273,8 +3231,7 @@ pub struct SelectOperatorMinusColon {
 /// `SelectOperator: Step;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SelectOperatorStep {
     pub step: Box<Step>,
 }
@@ -3285,8 +3242,7 @@ pub struct SelectOperatorStep {
 /// `RangeOperator: DotDot;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeOperatorDotDot {
     pub dot_dot: Box<DotDot>,
 }
@@ -3297,8 +3253,7 @@ pub struct RangeOperatorDotDot {
 /// `RangeOperator: DotDotEqu;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeOperatorDotDotEqu {
     pub dot_dot_equ: Box<DotDotEqu>,
 }
@@ -3309,8 +3264,7 @@ pub struct RangeOperatorDotDotEqu {
 /// `FixedType: U8;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeU8 {
     pub u8: Box<U8>,
 }
@@ -3321,8 +3275,7 @@ pub struct FixedTypeU8 {
 /// `FixedType: U16;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeU16 {
     pub u16: Box<U16>,
 }
@@ -3333,8 +3286,7 @@ pub struct FixedTypeU16 {
 /// `FixedType: U32;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeU32 {
     pub u32: Box<U32>,
 }
@@ -3345,8 +3297,7 @@ pub struct FixedTypeU32 {
 /// `FixedType: U64;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeU64 {
     pub u64: Box<U64>,
 }
@@ -3357,8 +3308,7 @@ pub struct FixedTypeU64 {
 /// `FixedType: I8;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeI8 {
     pub i8: Box<I8>,
 }
@@ -3369,8 +3319,7 @@ pub struct FixedTypeI8 {
 /// `FixedType: I16;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeI16 {
     pub i16: Box<I16>,
 }
@@ -3381,8 +3330,7 @@ pub struct FixedTypeI16 {
 /// `FixedType: I32;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeI32 {
     pub i32: Box<I32>,
 }
@@ -3393,8 +3341,7 @@ pub struct FixedTypeI32 {
 /// `FixedType: I64;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeI64 {
     pub i64: Box<I64>,
 }
@@ -3405,8 +3352,7 @@ pub struct FixedTypeI64 {
 /// `FixedType: F32;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeF32 {
     pub f32: Box<F32>,
 }
@@ -3417,8 +3363,7 @@ pub struct FixedTypeF32 {
 /// `FixedType: F64;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeF64 {
     pub f64: Box<F64>,
 }
@@ -3429,8 +3374,7 @@ pub struct FixedTypeF64 {
 /// `FixedType: Bool;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeBool {
     pub bool: Box<Bool>,
 }
@@ -3441,8 +3385,7 @@ pub struct FixedTypeBool {
 /// `FixedType: Strin;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedTypeStrin {
     pub strin: Box<Strin>,
 }
@@ -3453,8 +3396,7 @@ pub struct FixedTypeStrin {
 /// `VariableType: Clock;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeClock {
     pub clock: Box<Clock>,
 }
@@ -3465,8 +3407,7 @@ pub struct VariableTypeClock {
 /// `VariableType: ClockPosedge;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeClockPosedge {
     pub clock_posedge: Box<ClockPosedge>,
 }
@@ -3477,8 +3418,7 @@ pub struct VariableTypeClockPosedge {
 /// `VariableType: ClockNegedge;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeClockNegedge {
     pub clock_negedge: Box<ClockNegedge>,
 }
@@ -3489,8 +3429,7 @@ pub struct VariableTypeClockNegedge {
 /// `VariableType: Reset;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeReset {
     pub reset: Box<Reset>,
 }
@@ -3501,8 +3440,7 @@ pub struct VariableTypeReset {
 /// `VariableType: ResetAsyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeResetAsyncHigh {
     pub reset_async_high: Box<ResetAsyncHigh>,
 }
@@ -3513,8 +3451,7 @@ pub struct VariableTypeResetAsyncHigh {
 /// `VariableType: ResetAsyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeResetAsyncLow {
     pub reset_async_low: Box<ResetAsyncLow>,
 }
@@ -3525,8 +3462,7 @@ pub struct VariableTypeResetAsyncLow {
 /// `VariableType: ResetSyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeResetSyncHigh {
     pub reset_sync_high: Box<ResetSyncHigh>,
 }
@@ -3537,8 +3473,7 @@ pub struct VariableTypeResetSyncHigh {
 /// `VariableType: ResetSyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeResetSyncLow {
     pub reset_sync_low: Box<ResetSyncLow>,
 }
@@ -3549,8 +3484,7 @@ pub struct VariableTypeResetSyncLow {
 /// `VariableType: Logic;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeLogic {
     pub logic: Box<Logic>,
 }
@@ -3561,8 +3495,7 @@ pub struct VariableTypeLogic {
 /// `VariableType: Bit;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VariableTypeBit {
     pub bit: Box<Bit>,
 }
@@ -3573,8 +3506,7 @@ pub struct VariableTypeBit {
 /// `TypeModifier: Tri;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeModifierTri {
     pub tri: Box<Tri>,
 }
@@ -3585,8 +3517,7 @@ pub struct TypeModifierTri {
 /// `TypeModifier: Signed;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeModifierSigned {
     pub signed: Box<Signed>,
 }
@@ -3597,8 +3528,7 @@ pub struct TypeModifierSigned {
 /// `TypeModifier: Defaul;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeModifierDefaul {
     pub defaul: Box<Defaul>,
 }
@@ -3609,8 +3539,7 @@ pub struct TypeModifierDefaul {
 /// `FactorTypeGroup: VariableType FactorTypeOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorTypeGroupVariableTypeFactorTypeOpt {
     pub variable_type: Box<VariableType>,
     pub factor_type_opt: Option<FactorTypeOpt>,
@@ -3622,8 +3551,7 @@ pub struct FactorTypeGroupVariableTypeFactorTypeOpt {
 /// `FactorTypeGroup: FixedType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorTypeGroupFixedType {
     pub fixed_type: Box<FixedType>,
 }
@@ -3634,8 +3562,7 @@ pub struct FactorTypeGroupFixedType {
 /// `ScalarTypeGroup: UserDefinedType ScalarTypeOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScalarTypeGroupUserDefinedTypeScalarTypeOpt {
     pub user_defined_type: Box<UserDefinedType>,
     pub scalar_type_opt: Option<ScalarTypeOpt>,
@@ -3647,8 +3574,7 @@ pub struct ScalarTypeGroupUserDefinedTypeScalarTypeOpt {
 /// `ScalarTypeGroup: FactorType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScalarTypeGroupFactorType {
     pub factor_type: Box<FactorType>,
 }
@@ -3659,8 +3585,7 @@ pub struct ScalarTypeGroupFactorType {
 /// `CastingType: U8;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeU8 {
     pub u8: Box<U8>,
 }
@@ -3671,8 +3596,7 @@ pub struct CastingTypeU8 {
 /// `CastingType: U16;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeU16 {
     pub u16: Box<U16>,
 }
@@ -3683,8 +3607,7 @@ pub struct CastingTypeU16 {
 /// `CastingType: U32;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeU32 {
     pub u32: Box<U32>,
 }
@@ -3695,8 +3618,7 @@ pub struct CastingTypeU32 {
 /// `CastingType: U64;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeU64 {
     pub u64: Box<U64>,
 }
@@ -3707,8 +3629,7 @@ pub struct CastingTypeU64 {
 /// `CastingType: I8;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeI8 {
     pub i8: Box<I8>,
 }
@@ -3719,8 +3640,7 @@ pub struct CastingTypeI8 {
 /// `CastingType: I16;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeI16 {
     pub i16: Box<I16>,
 }
@@ -3731,8 +3651,7 @@ pub struct CastingTypeI16 {
 /// `CastingType: I32;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeI32 {
     pub i32: Box<I32>,
 }
@@ -3743,8 +3662,7 @@ pub struct CastingTypeI32 {
 /// `CastingType: I64;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeI64 {
     pub i64: Box<I64>,
 }
@@ -3755,8 +3673,7 @@ pub struct CastingTypeI64 {
 /// `CastingType: F32;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeF32 {
     pub f32: Box<F32>,
 }
@@ -3767,8 +3684,7 @@ pub struct CastingTypeF32 {
 /// `CastingType: F64;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeF64 {
     pub f64: Box<F64>,
 }
@@ -3779,8 +3695,7 @@ pub struct CastingTypeF64 {
 /// `CastingType: Bool;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeBool {
     pub bool: Box<Bool>,
 }
@@ -3791,8 +3706,7 @@ pub struct CastingTypeBool {
 /// `CastingType: Clock;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeClock {
     pub clock: Box<Clock>,
 }
@@ -3803,8 +3717,7 @@ pub struct CastingTypeClock {
 /// `CastingType: ClockPosedge;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeClockPosedge {
     pub clock_posedge: Box<ClockPosedge>,
 }
@@ -3815,8 +3728,7 @@ pub struct CastingTypeClockPosedge {
 /// `CastingType: ClockNegedge;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeClockNegedge {
     pub clock_negedge: Box<ClockNegedge>,
 }
@@ -3827,8 +3739,7 @@ pub struct CastingTypeClockNegedge {
 /// `CastingType: Reset;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeReset {
     pub reset: Box<Reset>,
 }
@@ -3839,8 +3750,7 @@ pub struct CastingTypeReset {
 /// `CastingType: ResetAsyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeResetAsyncHigh {
     pub reset_async_high: Box<ResetAsyncHigh>,
 }
@@ -3851,8 +3761,7 @@ pub struct CastingTypeResetAsyncHigh {
 /// `CastingType: ResetAsyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeResetAsyncLow {
     pub reset_async_low: Box<ResetAsyncLow>,
 }
@@ -3863,8 +3772,7 @@ pub struct CastingTypeResetAsyncLow {
 /// `CastingType: ResetSyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeResetSyncHigh {
     pub reset_sync_high: Box<ResetSyncHigh>,
 }
@@ -3875,8 +3783,7 @@ pub struct CastingTypeResetSyncHigh {
 /// `CastingType: ResetSyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeResetSyncLow {
     pub reset_sync_low: Box<ResetSyncLow>,
 }
@@ -3887,8 +3794,7 @@ pub struct CastingTypeResetSyncLow {
 /// `CastingType: UserDefinedType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeUserDefinedType {
     pub user_defined_type: Box<UserDefinedType>,
 }
@@ -3899,8 +3805,7 @@ pub struct CastingTypeUserDefinedType {
 /// `CastingType: Based;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeBased {
     pub based: Box<Based>,
 }
@@ -3911,8 +3816,7 @@ pub struct CastingTypeBased {
 /// `CastingType: BaseLess;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CastingTypeBaseLess {
     pub base_less: Box<BaseLess>,
 }
@@ -3923,8 +3827,7 @@ pub struct CastingTypeBaseLess {
 /// `StatementBlockGroupGroup: LBrace StatementBlockGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockGroupGroupLBraceStatementBlockGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub statement_block_group_group_list: Vec<StatementBlockGroupGroupList>,
@@ -3937,8 +3840,7 @@ pub struct StatementBlockGroupGroupLBraceStatementBlockGroupGroupListRBrace {
 /// `StatementBlockGroupGroup: StatementBlockItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockGroupGroupStatementBlockItem {
     pub statement_block_item: Box<StatementBlockItem>,
 }
@@ -3949,8 +3851,7 @@ pub struct StatementBlockGroupGroupStatementBlockItem {
 /// `StatementBlockItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockItemVarDeclaration {
     pub var_declaration: Box<VarDeclaration>,
 }
@@ -3961,8 +3862,7 @@ pub struct StatementBlockItemVarDeclaration {
 /// `StatementBlockItem: LetStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockItemLetStatement {
     pub let_statement: Box<LetStatement>,
 }
@@ -3973,8 +3873,7 @@ pub struct StatementBlockItemLetStatement {
 /// `StatementBlockItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockItemConstDeclaration {
     pub const_declaration: Box<ConstDeclaration>,
 }
@@ -3985,8 +3884,7 @@ pub struct StatementBlockItemConstDeclaration {
 /// `StatementBlockItem: Statement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockItemStatement {
     pub statement: Box<Statement>,
 }
@@ -3997,8 +3895,7 @@ pub struct StatementBlockItemStatement {
 /// `Statement: IdentifierStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementIdentifierStatement {
     pub identifier_statement: Box<IdentifierStatement>,
 }
@@ -4009,8 +3906,7 @@ pub struct StatementIdentifierStatement {
 /// `Statement: IfStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementIfStatement {
     pub if_statement: Box<IfStatement>,
 }
@@ -4021,8 +3917,7 @@ pub struct StatementIfStatement {
 /// `Statement: IfResetStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementIfResetStatement {
     pub if_reset_statement: Box<IfResetStatement>,
 }
@@ -4033,8 +3928,7 @@ pub struct StatementIfResetStatement {
 /// `Statement: ReturnStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementReturnStatement {
     pub return_statement: Box<ReturnStatement>,
 }
@@ -4045,8 +3939,7 @@ pub struct StatementReturnStatement {
 /// `Statement: BreakStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBreakStatement {
     pub break_statement: Box<BreakStatement>,
 }
@@ -4057,8 +3950,7 @@ pub struct StatementBreakStatement {
 /// `Statement: ForStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementForStatement {
     pub for_statement: Box<ForStatement>,
 }
@@ -4069,8 +3961,7 @@ pub struct StatementForStatement {
 /// `Statement: CaseStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementCaseStatement {
     pub case_statement: Box<CaseStatement>,
 }
@@ -4081,8 +3972,7 @@ pub struct StatementCaseStatement {
 /// `Statement: SwitchStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementSwitchStatement {
     pub switch_statement: Box<SwitchStatement>,
 }
@@ -4093,8 +3983,7 @@ pub struct StatementSwitchStatement {
 /// `IdentifierStatementGroup: FunctionCall;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierStatementGroupFunctionCall {
     pub function_call: Box<FunctionCall>,
 }
@@ -4105,8 +3994,7 @@ pub struct IdentifierStatementGroupFunctionCall {
 /// `IdentifierStatementGroup: Assignment;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierStatementGroupAssignment {
     pub assignment: Box<Assignment>,
 }
@@ -4117,8 +4005,7 @@ pub struct IdentifierStatementGroupAssignment {
 /// `AssignmentGroup: Equ;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignmentGroupEqu {
     pub equ: Box<Equ>,
 }
@@ -4129,8 +4016,7 @@ pub struct AssignmentGroupEqu {
 /// `AssignmentGroup: AssignmentOperator;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignmentGroupAssignmentOperator {
     pub assignment_operator: Box<AssignmentOperator>,
 }
@@ -4141,8 +4027,7 @@ pub struct AssignmentGroupAssignmentOperator {
 /// `AssignmentGroup: DiamondOperator;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignmentGroupDiamondOperator {
     pub diamond_operator: Box<DiamondOperator>,
 }
@@ -4153,8 +4038,7 @@ pub struct AssignmentGroupDiamondOperator {
 /// `CaseItemGroup0: Statement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseItemGroup0Statement {
     pub statement: Box<Statement>,
 }
@@ -4165,8 +4049,7 @@ pub struct CaseItemGroup0Statement {
 /// `CaseItemGroup0: StatementBlock;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseItemGroup0StatementBlock {
     pub statement_block: Box<StatementBlock>,
 }
@@ -4177,8 +4060,7 @@ pub struct CaseItemGroup0StatementBlock {
 /// `CaseItemGroup: CaseCondition;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseItemGroupCaseCondition {
     pub case_condition: Box<CaseCondition>,
 }
@@ -4189,8 +4071,7 @@ pub struct CaseItemGroupCaseCondition {
 /// `CaseItemGroup: Defaul;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseItemGroupDefaul {
     pub defaul: Box<Defaul>,
 }
@@ -4201,8 +4082,7 @@ pub struct CaseItemGroupDefaul {
 /// `SwitchItemGroup0: Statement;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchItemGroup0Statement {
     pub statement: Box<Statement>,
 }
@@ -4213,8 +4093,7 @@ pub struct SwitchItemGroup0Statement {
 /// `SwitchItemGroup0: StatementBlock;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchItemGroup0StatementBlock {
     pub statement_block: Box<StatementBlock>,
 }
@@ -4225,8 +4104,7 @@ pub struct SwitchItemGroup0StatementBlock {
 /// `SwitchItemGroup: SwitchCondition;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchItemGroupSwitchCondition {
     pub switch_condition: Box<SwitchCondition>,
 }
@@ -4237,8 +4115,7 @@ pub struct SwitchItemGroupSwitchCondition {
 /// `SwitchItemGroup: Defaul;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchItemGroupDefaul {
     pub defaul: Box<Defaul>,
 }
@@ -4249,8 +4126,7 @@ pub struct SwitchItemGroupDefaul {
 /// `AttributeItem: Identifier;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AttributeItemIdentifier {
     pub identifier: Box<Identifier>,
 }
@@ -4261,8 +4137,7 @@ pub struct AttributeItemIdentifier {
 /// `AttributeItem: StringLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AttributeItemStringLiteral {
     pub string_literal: Box<StringLiteral>,
 }
@@ -4273,8 +4148,7 @@ pub struct AttributeItemStringLiteral {
 /// `ConstDeclarationGroup: ArrayType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConstDeclarationGroupArrayType {
     pub array_type: Box<ArrayType>,
 }
@@ -4285,8 +4159,7 @@ pub struct ConstDeclarationGroupArrayType {
 /// `ConstDeclarationGroup: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConstDeclarationGroupType {
     pub r#type: Box<Type>,
 }
@@ -4297,8 +4170,7 @@ pub struct ConstDeclarationGroupType {
 /// `AssignDestination: HierarchicalIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignDestinationHierarchicalIdentifier {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -4309,8 +4181,7 @@ pub struct AssignDestinationHierarchicalIdentifier {
 /// `AssignDestination: LBrace AssignConcatenationList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignDestinationLBraceAssignConcatenationListRBrace {
     pub l_brace: Box<LBrace>,
     pub assign_concatenation_list: Box<AssignConcatenationList>,
@@ -4323,8 +4194,7 @@ pub struct AssignDestinationLBraceAssignConcatenationListRBrace {
 /// `ModportGroupGroup: LBrace ModportList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportGroupGroupLBraceModportListRBrace {
     pub l_brace: Box<LBrace>,
     pub modport_list: Box<ModportList>,
@@ -4337,8 +4207,7 @@ pub struct ModportGroupGroupLBraceModportListRBrace {
 /// `ModportGroupGroup: ModportItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportGroupGroupModportItem {
     pub modport_item: Box<ModportItem>,
 }
@@ -4349,8 +4218,7 @@ pub struct ModportGroupGroupModportItem {
 /// `ModportDefault: Input;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDefaultInput {
     pub input: Box<Input>,
 }
@@ -4361,8 +4229,7 @@ pub struct ModportDefaultInput {
 /// `ModportDefault: Output;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDefaultOutput {
     pub output: Box<Output>,
 }
@@ -4373,8 +4240,7 @@ pub struct ModportDefaultOutput {
 /// `ModportDefault: Same LParen Identifier RParen;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDefaultSameLParenIdentifierRParen {
     pub same: Box<Same>,
     pub l_paren: Box<LParen>,
@@ -4388,8 +4254,7 @@ pub struct ModportDefaultSameLParenIdentifierRParen {
 /// `ModportDefault: Converse LParen Identifier RParen;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDefaultConverseLParenIdentifierRParen {
     pub converse: Box<Converse>,
     pub l_paren: Box<LParen>,
@@ -4403,8 +4268,7 @@ pub struct ModportDefaultConverseLParenIdentifierRParen {
 /// `EnumGroupGroup: LBrace EnumList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumGroupGroupLBraceEnumListRBrace {
     pub l_brace: Box<LBrace>,
     pub enum_list: Box<EnumList>,
@@ -4417,8 +4281,7 @@ pub struct EnumGroupGroupLBraceEnumListRBrace {
 /// `EnumGroupGroup: EnumItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumGroupGroupEnumItem {
     pub enum_item: Box<EnumItem>,
 }
@@ -4429,8 +4292,7 @@ pub struct EnumGroupGroupEnumItem {
 /// `StructUnion: Struct;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionStruct {
     pub r#struct: Box<Struct>,
 }
@@ -4441,8 +4303,7 @@ pub struct StructUnionStruct {
 /// `StructUnion: Union;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionUnion {
     pub r#union: Box<Union>,
 }
@@ -4453,8 +4314,7 @@ pub struct StructUnionUnion {
 /// `StructUnionGroupGroup: LBrace StructUnionList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionGroupGroupLBraceStructUnionListRBrace {
     pub l_brace: Box<LBrace>,
     pub struct_union_list: Box<StructUnionList>,
@@ -4467,8 +4327,7 @@ pub struct StructUnionGroupGroupLBraceStructUnionListRBrace {
 /// `StructUnionGroupGroup: StructUnionItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionGroupGroupStructUnionItem {
     pub struct_union_item: Box<StructUnionItem>,
 }
@@ -4479,8 +4338,7 @@ pub struct StructUnionGroupGroupStructUnionItem {
 /// `InstParameterGroupGroup: LBrace InstParameterList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterGroupGroupLBraceInstParameterListRBrace {
     pub l_brace: Box<LBrace>,
     pub inst_parameter_list: Box<InstParameterList>,
@@ -4493,8 +4351,7 @@ pub struct InstParameterGroupGroupLBraceInstParameterListRBrace {
 /// `InstParameterGroupGroup: InstParameterItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterGroupGroupInstParameterItem {
     pub inst_parameter_item: Box<InstParameterItem>,
 }
@@ -4505,8 +4362,7 @@ pub struct InstParameterGroupGroupInstParameterItem {
 /// `InstPortGroupGroup: LBrace InstPortList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortGroupGroupLBraceInstPortListRBrace {
     pub l_brace: Box<LBrace>,
     pub inst_port_list: Box<InstPortList>,
@@ -4519,8 +4375,7 @@ pub struct InstPortGroupGroupLBraceInstPortListRBrace {
 /// `InstPortGroupGroup: InstPortItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortGroupGroupInstPortItem {
     pub inst_port_item: Box<InstPortItem>,
 }
@@ -4531,8 +4386,7 @@ pub struct InstPortGroupGroupInstPortItem {
 /// `WithParameterGroupGroup: LBrace WithParameterList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterGroupGroupLBraceWithParameterListRBrace {
     pub l_brace: Box<LBrace>,
     pub with_parameter_list: Box<WithParameterList>,
@@ -4545,8 +4399,7 @@ pub struct WithParameterGroupGroupLBraceWithParameterListRBrace {
 /// `WithParameterGroupGroup: WithParameterItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterGroupGroupWithParameterItem {
     pub with_parameter_item: Box<WithParameterItem>,
 }
@@ -4557,8 +4410,7 @@ pub struct WithParameterGroupGroupWithParameterItem {
 /// `WithParameterItemGroup0: ArrayType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterItemGroup0ArrayType {
     pub array_type: Box<ArrayType>,
 }
@@ -4569,8 +4421,7 @@ pub struct WithParameterItemGroup0ArrayType {
 /// `WithParameterItemGroup0: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterItemGroup0Type {
     pub r#type: Box<Type>,
 }
@@ -4581,8 +4432,7 @@ pub struct WithParameterItemGroup0Type {
 /// `WithParameterItemGroup: Param;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterItemGroupParam {
     pub param: Box<Param>,
 }
@@ -4593,129 +4443,118 @@ pub struct WithParameterItemGroupParam {
 /// `WithParameterItemGroup: Const;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterItemGroupConst {
     pub r#const: Box<Const>,
 }
 
 ///
-/// Type derived for production 841
+/// Type derived for production 843
 ///
 /// `GenericBound: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenericBoundType {
     pub r#type: Box<Type>,
 }
 
 ///
-/// Type derived for production 842
+/// Type derived for production 844
 ///
 /// `GenericBound: Inst ScopedIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenericBoundInstScopedIdentifier {
     pub inst: Box<Inst>,
     pub scoped_identifier: Box<ScopedIdentifier>,
 }
 
 ///
-/// Type derived for production 843
+/// Type derived for production 845
 ///
 /// `GenericBound: GenericProtoBound;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenericBoundGenericProtoBound {
     pub generic_proto_bound: Box<GenericProtoBound>,
 }
 
 ///
-/// Type derived for production 853
+/// Type derived for production 855
 ///
 /// `GenericProtoBound: ScopedIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenericProtoBoundScopedIdentifier {
     pub scoped_identifier: Box<ScopedIdentifier>,
 }
 
 ///
-/// Type derived for production 854
+/// Type derived for production 856
 ///
 /// `GenericProtoBound: FixedType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenericProtoBoundFixedType {
-    pub fixed_type: Box<FixedType>,
-}
-
-///
-/// Type derived for production 863
-///
-/// `WithGenericArgumentItem: ExpressionIdentifier;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithGenericArgumentItemExpressionIdentifier {
-    pub expression_identifier: Box<ExpressionIdentifier>,
-}
-
-///
-/// Type derived for production 864
-///
-/// `WithGenericArgumentItem: FixedType;`
-///
-#[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithGenericArgumentItemFixedType {
     pub fixed_type: Box<FixedType>,
 }
 
 ///
 /// Type derived for production 865
 ///
-/// `WithGenericArgumentItem: Number;`
+/// `WithGenericArgumentItem: ExpressionIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
-pub struct WithGenericArgumentItemNumber {
-    pub number: Box<Number>,
+#[derive(Debug, Clone)]
+pub struct WithGenericArgumentItemExpressionIdentifier {
+    pub expression_identifier: Box<ExpressionIdentifier>,
 }
 
 ///
 /// Type derived for production 866
 ///
+/// `WithGenericArgumentItem: FixedType;`
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct WithGenericArgumentItemFixedType {
+    pub fixed_type: Box<FixedType>,
+}
+
+///
+/// Type derived for production 867
+///
+/// `WithGenericArgumentItem: Number;`
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct WithGenericArgumentItemNumber {
+    pub number: Box<Number>,
+}
+
+///
+/// Type derived for production 868
+///
 /// `WithGenericArgumentItem: BooleanLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericArgumentItemBooleanLiteral {
     pub boolean_literal: Box<BooleanLiteral>,
 }
 
 ///
-/// Type derived for production 876
+/// Type derived for production 878
 ///
 /// `PortDeclarationGroupGroup: LBrace PortDeclarationList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationGroupGroupLBracePortDeclarationListRBrace {
     pub l_brace: Box<LBrace>,
     pub port_declaration_list: Box<PortDeclarationList>,
@@ -4723,109 +4562,100 @@ pub struct PortDeclarationGroupGroupLBracePortDeclarationListRBrace {
 }
 
 ///
-/// Type derived for production 877
+/// Type derived for production 879
 ///
 /// `PortDeclarationGroupGroup: PortDeclarationItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationGroupGroupPortDeclarationItem {
     pub port_declaration_item: Box<PortDeclarationItem>,
 }
 
 ///
-/// Type derived for production 881
+/// Type derived for production 883
 ///
 /// `PortDeclarationItemGroup: PortTypeConcrete;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationItemGroupPortTypeConcrete {
     pub port_type_concrete: Box<PortTypeConcrete>,
 }
 
 ///
-/// Type derived for production 882
+/// Type derived for production 884
 ///
 /// `PortDeclarationItemGroup: PortTypeAbstract;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationItemGroupPortTypeAbstract {
     pub port_type_abstract: Box<PortTypeAbstract>,
 }
 
 ///
-/// Type derived for production 896
+/// Type derived for production 898
 ///
 /// `Direction: Input;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DirectionInput {
     pub input: Box<Input>,
 }
 
 ///
-/// Type derived for production 897
+/// Type derived for production 899
 ///
 /// `Direction: Output;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DirectionOutput {
     pub output: Box<Output>,
 }
 
 ///
-/// Type derived for production 898
+/// Type derived for production 900
 ///
 /// `Direction: Inout;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DirectionInout {
     pub inout: Box<Inout>,
 }
 
 ///
-/// Type derived for production 899
+/// Type derived for production 901
 ///
 /// `Direction: Modport;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DirectionModport {
     pub modport: Box<Modport>,
 }
 
 ///
-/// Type derived for production 900
+/// Type derived for production 902
 ///
 /// `Direction: Import;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DirectionImport {
     pub import: Box<Import>,
 }
 
 ///
-/// Type derived for production 926
+/// Type derived for production 928
 ///
 /// `ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleGroupGroupLBraceModuleGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub module_group_group_list: Vec<ModuleGroupGroupList>,
@@ -4833,25 +4663,23 @@ pub struct ModuleGroupGroupLBraceModuleGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 929
+/// Type derived for production 931
 ///
 /// `ModuleGroupGroup: ModuleItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleGroupGroupModuleItem {
     pub module_item: Box<ModuleItem>,
 }
 
 ///
-/// Type derived for production 943
+/// Type derived for production 945
 ///
 /// `InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub interface_group_group_list: Vec<InterfaceGroupGroupList>,
@@ -4859,49 +4687,45 @@ pub struct InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 946
+/// Type derived for production 948
 ///
 /// `InterfaceGroupGroup: InterfaceItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceGroupGroupInterfaceItem {
     pub interface_item: Box<InterfaceItem>,
 }
 
 ///
-/// Type derived for production 949
+/// Type derived for production 951
 ///
 /// `InterfaceItem: GenerateItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceItemGenerateItem {
     pub generate_item: Box<GenerateItem>,
 }
 
 ///
-/// Type derived for production 950
+/// Type derived for production 952
 ///
 /// `InterfaceItem: ModportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceItemModportDeclaration {
     pub modport_declaration: Box<ModportDeclaration>,
 }
 
 ///
-/// Type derived for production 969
+/// Type derived for production 971
 ///
 /// `GenerateGroupGroup: LBrace GenerateGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateGroupGroupLBraceGenerateGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub generate_group_group_list: Vec<GenerateGroupGroupList>,
@@ -4909,277 +4733,254 @@ pub struct GenerateGroupGroupLBraceGenerateGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 972
+/// Type derived for production 974
 ///
 /// `GenerateGroupGroup: GenerateItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateGroupGroupGenerateItem {
     pub generate_item: Box<GenerateItem>,
 }
 
 ///
-/// Type derived for production 975
+/// Type derived for production 977
 ///
 /// `GenerateItem: LetDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemLetDeclaration {
     pub let_declaration: Box<LetDeclaration>,
 }
 
 ///
-/// Type derived for production 976
+/// Type derived for production 978
 ///
 /// `GenerateItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemVarDeclaration {
     pub var_declaration: Box<VarDeclaration>,
 }
 
 ///
-/// Type derived for production 977
+/// Type derived for production 979
 ///
 /// `GenerateItem: InstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemInstDeclaration {
     pub inst_declaration: Box<InstDeclaration>,
 }
 
 ///
-/// Type derived for production 978
+/// Type derived for production 980
 ///
 /// `GenerateItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemConstDeclaration {
     pub const_declaration: Box<ConstDeclaration>,
 }
 
 ///
-/// Type derived for production 979
+/// Type derived for production 981
 ///
 /// `GenerateItem: AlwaysFfDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemAlwaysFfDeclaration {
     pub always_ff_declaration: Box<AlwaysFfDeclaration>,
 }
 
 ///
-/// Type derived for production 980
+/// Type derived for production 982
 ///
 /// `GenerateItem: AlwaysCombDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemAlwaysCombDeclaration {
     pub always_comb_declaration: Box<AlwaysCombDeclaration>,
 }
 
 ///
-/// Type derived for production 981
+/// Type derived for production 983
 ///
 /// `GenerateItem: AssignDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemAssignDeclaration {
     pub assign_declaration: Box<AssignDeclaration>,
 }
 
 ///
-/// Type derived for production 982
+/// Type derived for production 984
 ///
 /// `GenerateItem: ConnectDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemConnectDeclaration {
     pub connect_declaration: Box<ConnectDeclaration>,
 }
 
 ///
-/// Type derived for production 983
+/// Type derived for production 985
 ///
 /// `GenerateItem: FunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
 
 ///
-/// Type derived for production 984
+/// Type derived for production 986
 ///
 /// `GenerateItem: GenerateIfDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemGenerateIfDeclaration {
     pub generate_if_declaration: Box<GenerateIfDeclaration>,
 }
 
 ///
-/// Type derived for production 985
+/// Type derived for production 987
 ///
 /// `GenerateItem: GenerateForDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemGenerateForDeclaration {
     pub generate_for_declaration: Box<GenerateForDeclaration>,
 }
 
 ///
-/// Type derived for production 986
+/// Type derived for production 988
 ///
 /// `GenerateItem: GenerateBlockDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemGenerateBlockDeclaration {
     pub generate_block_declaration: Box<GenerateBlockDeclaration>,
 }
 
 ///
-/// Type derived for production 987
+/// Type derived for production 989
 ///
 /// `GenerateItem: TypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemTypeDefDeclaration {
     pub type_def_declaration: Box<TypeDefDeclaration>,
 }
 
 ///
-/// Type derived for production 988
+/// Type derived for production 990
 ///
 /// `GenerateItem: EnumDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemEnumDeclaration {
     pub enum_declaration: Box<EnumDeclaration>,
 }
 
 ///
-/// Type derived for production 989
+/// Type derived for production 991
 ///
 /// `GenerateItem: StructUnionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemStructUnionDeclaration {
     pub struct_union_declaration: Box<StructUnionDeclaration>,
 }
 
 ///
-/// Type derived for production 990
+/// Type derived for production 992
 ///
 /// `GenerateItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
 
 ///
-/// Type derived for production 991
+/// Type derived for production 993
 ///
 /// `GenerateItem: AliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemAliasDeclaration {
     pub alias_declaration: Box<AliasDeclaration>,
 }
 
 ///
-/// Type derived for production 992
+/// Type derived for production 994
 ///
 /// `GenerateItem: InitialDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemInitialDeclaration {
     pub initial_declaration: Box<InitialDeclaration>,
 }
 
 ///
-/// Type derived for production 993
+/// Type derived for production 995
 ///
 /// `GenerateItem: FinalDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemFinalDeclaration {
     pub final_declaration: Box<FinalDeclaration>,
 }
 
 ///
-/// Type derived for production 994
+/// Type derived for production 996
 ///
 /// `GenerateItem: UnsafeBlock;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemUnsafeBlock {
     pub unsafe_block: Box<UnsafeBlock>,
 }
 
 ///
-/// Type derived for production 995
+/// Type derived for production 997
 ///
 /// `GenerateItem: EmbedDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateItemEmbedDeclaration {
     pub embed_declaration: Box<EmbedDeclaration>,
 }
 
 ///
-/// Type derived for production 1004
+/// Type derived for production 1006
 ///
 /// `PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageGroupGroupLBracePackageGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub package_group_group_list: Vec<PackageGroupGroupList>,
@@ -5187,421 +4988,386 @@ pub struct PackageGroupGroupLBracePackageGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 1007
+/// Type derived for production 1009
 ///
 /// `PackageGroupGroup: PackageItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageGroupGroupPackageItem {
     pub package_item: Box<PackageItem>,
 }
 
 ///
-/// Type derived for production 1010
+/// Type derived for production 1012
 ///
 /// `PackageItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemConstDeclaration {
     pub const_declaration: Box<ConstDeclaration>,
 }
 
 ///
-/// Type derived for production 1011
+/// Type derived for production 1013
 ///
 /// `PackageItem: TypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemTypeDefDeclaration {
     pub type_def_declaration: Box<TypeDefDeclaration>,
 }
 
 ///
-/// Type derived for production 1012
+/// Type derived for production 1014
 ///
 /// `PackageItem: EnumDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemEnumDeclaration {
     pub enum_declaration: Box<EnumDeclaration>,
 }
 
 ///
-/// Type derived for production 1013
+/// Type derived for production 1015
 ///
 /// `PackageItem: StructUnionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemStructUnionDeclaration {
     pub struct_union_declaration: Box<StructUnionDeclaration>,
 }
 
 ///
-/// Type derived for production 1014
+/// Type derived for production 1016
 ///
 /// `PackageItem: FunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
 
 ///
-/// Type derived for production 1015
+/// Type derived for production 1017
 ///
 /// `PackageItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
 
 ///
-/// Type derived for production 1016
+/// Type derived for production 1018
 ///
 /// `PackageItem: AliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemAliasDeclaration {
     pub alias_declaration: Box<AliasDeclaration>,
 }
 
 ///
-/// Type derived for production 1017
+/// Type derived for production 1019
 ///
 /// `PackageItem: EmbedDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageItemEmbedDeclaration {
     pub embed_declaration: Box<EmbedDeclaration>,
 }
 
 ///
-/// Type derived for production 1019
+/// Type derived for production 1021
 ///
 /// `AliasDeclarationGroup: Module;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AliasDeclarationGroupModule {
     pub module: Box<Module>,
 }
 
 ///
-/// Type derived for production 1020
+/// Type derived for production 1022
 ///
 /// `AliasDeclarationGroup: Interface;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AliasDeclarationGroupInterface {
     pub interface: Box<Interface>,
 }
 
 ///
-/// Type derived for production 1021
+/// Type derived for production 1023
 ///
 /// `AliasDeclarationGroup: Package;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AliasDeclarationGroupPackage {
     pub package: Box<Package>,
 }
 
 ///
-/// Type derived for production 1023
+/// Type derived for production 1025
 ///
 /// `ProtoDeclarationGroup: ProtoModuleDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoDeclarationGroupProtoModuleDeclaration {
     pub proto_module_declaration: Box<ProtoModuleDeclaration>,
 }
 
 ///
-/// Type derived for production 1024
+/// Type derived for production 1026
 ///
 /// `ProtoDeclarationGroup: ProtoInterfaceDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoDeclarationGroupProtoInterfaceDeclaration {
     pub proto_interface_declaration: Box<ProtoInterfaceDeclaration>,
 }
 
 ///
-/// Type derived for production 1025
+/// Type derived for production 1027
 ///
 /// `ProtoDeclarationGroup: ProtoPackageDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoDeclarationGroupProtoPackageDeclaration {
     pub proto_package_declaration: Box<ProtoPackageDeclaration>,
 }
 
 ///
-/// Type derived for production 1036
+/// Type derived for production 1038
 ///
 /// `ProtoInterfaceItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemVarDeclaration {
     pub var_declaration: Box<VarDeclaration>,
 }
 
 ///
-/// Type derived for production 1037
+/// Type derived for production 1039
 ///
 /// `ProtoInterfaceItem: ProtoConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemProtoConstDeclaration {
     pub proto_const_declaration: Box<ProtoConstDeclaration>,
 }
 
 ///
-/// Type derived for production 1038
+/// Type derived for production 1040
 ///
 /// `ProtoInterfaceItem: ProtoFunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemProtoFunctionDeclaration {
     pub proto_function_declaration: Box<ProtoFunctionDeclaration>,
 }
 
 ///
-/// Type derived for production 1039
+/// Type derived for production 1041
 ///
 /// `ProtoInterfaceItem: ProtoTypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemProtoTypeDefDeclaration {
     pub proto_type_def_declaration: Box<ProtoTypeDefDeclaration>,
 }
 
 ///
-/// Type derived for production 1040
+/// Type derived for production 1042
 ///
 /// `ProtoInterfaceItem: ProtoAliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemProtoAliasDeclaration {
     pub proto_alias_declaration: Box<ProtoAliasDeclaration>,
 }
 
 ///
-/// Type derived for production 1041
+/// Type derived for production 1043
 ///
 /// `ProtoInterfaceItem: ModportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemModportDeclaration {
     pub modport_declaration: Box<ModportDeclaration>,
 }
 
 ///
-/// Type derived for production 1042
+/// Type derived for production 1044
 ///
 /// `ProtoInterfaceItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
 
 ///
-/// Type derived for production 1046
+/// Type derived for production 1048
 ///
 /// `ProtoPacakgeItem: ProtoConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemProtoConstDeclaration {
     pub proto_const_declaration: Box<ProtoConstDeclaration>,
 }
 
 ///
-/// Type derived for production 1047
+/// Type derived for production 1049
 ///
 /// `ProtoPacakgeItem: ProtoTypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemProtoTypeDefDeclaration {
     pub proto_type_def_declaration: Box<ProtoTypeDefDeclaration>,
 }
 
 ///
-/// Type derived for production 1048
+/// Type derived for production 1050
 ///
 /// `ProtoPacakgeItem: EnumDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemEnumDeclaration {
     pub enum_declaration: Box<EnumDeclaration>,
 }
 
 ///
-/// Type derived for production 1049
+/// Type derived for production 1051
 ///
 /// `ProtoPacakgeItem: StructUnionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemStructUnionDeclaration {
     pub struct_union_declaration: Box<StructUnionDeclaration>,
 }
 
 ///
-/// Type derived for production 1050
+/// Type derived for production 1052
 ///
 /// `ProtoPacakgeItem: ProtoFunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemProtoFunctionDeclaration {
     pub proto_function_declaration: Box<ProtoFunctionDeclaration>,
 }
 
 ///
-/// Type derived for production 1051
+/// Type derived for production 1053
 ///
 /// `ProtoPacakgeItem: ProtoAliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemProtoAliasDeclaration {
     pub proto_alias_declaration: Box<ProtoAliasDeclaration>,
 }
 
 ///
-/// Type derived for production 1052
+/// Type derived for production 1054
 ///
 /// `ProtoPacakgeItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPacakgeItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
 
 ///
-/// Type derived for production 1054
+/// Type derived for production 1056
 ///
 /// `ProtoConstDeclarationGroup: ArrayType;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoConstDeclarationGroupArrayType {
     pub array_type: Box<ArrayType>,
 }
 
 ///
-/// Type derived for production 1055
+/// Type derived for production 1057
 ///
 /// `ProtoConstDeclarationGroup: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoConstDeclarationGroupType {
     pub r#type: Box<Type>,
 }
 
 ///
-/// Type derived for production 1067
+/// Type derived for production 1069
 ///
 /// `ProtoAliasDeclarationGroup: Module;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoAliasDeclarationGroupModule {
     pub module: Box<Module>,
 }
 
 ///
-/// Type derived for production 1068
+/// Type derived for production 1070
 ///
 /// `ProtoAliasDeclarationGroup: Interface;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoAliasDeclarationGroupInterface {
     pub interface: Box<Interface>,
 }
 
 ///
-/// Type derived for production 1069
+/// Type derived for production 1071
 ///
 /// `ProtoAliasDeclarationGroup: Package;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoAliasDeclarationGroupPackage {
     pub package: Box<Package>,
 }
 
 ///
-/// Type derived for production 1075
+/// Type derived for production 1077
 ///
 /// `EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedItemLBraceTermEmbedItemListRBraceTerm {
     pub l_brace_term: Box<LBraceTerm>,
     pub embed_item_list: Vec<EmbedItemList>,
@@ -5609,25 +5375,23 @@ pub struct EmbedItemLBraceTermEmbedItemListRBraceTerm {
 }
 
 ///
-/// Type derived for production 1078
+/// Type derived for production 1080
 ///
 /// `EmbedItem: AnyTerm;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedItemAnyTerm {
     pub any_term: Box<AnyTerm>,
 }
 
 ///
-/// Type derived for production 1081
+/// Type derived for production 1083
 ///
 /// `DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub description_group_group_list: Vec<DescriptionGroupGroupList>,
@@ -5635,122 +5399,112 @@ pub struct DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace {
 }
 
 ///
-/// Type derived for production 1084
+/// Type derived for production 1086
 ///
 /// `DescriptionGroupGroup: DescriptionItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionGroupGroupDescriptionItem {
     pub description_item: Box<DescriptionItem>,
 }
 
 ///
-/// Type derived for production 1087
+/// Type derived for production 1089
 ///
 /// `DescriptionItem: DescriptionItemOpt /* Option */ PublicDescriptionItem;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionItemDescriptionItemOptPublicDescriptionItem {
     pub description_item_opt: Option<DescriptionItemOpt>,
     pub public_description_item: Box<PublicDescriptionItem>,
 }
 
 ///
-/// Type derived for production 1088
+/// Type derived for production 1090
 ///
 /// `DescriptionItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
 
 ///
-/// Type derived for production 1089
+/// Type derived for production 1091
 ///
 /// `DescriptionItem: EmbedDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionItemEmbedDeclaration {
     pub embed_declaration: Box<EmbedDeclaration>,
 }
 
 ///
-/// Type derived for production 1090
+/// Type derived for production 1092
 ///
 /// `DescriptionItem: IncludeDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionItemIncludeDeclaration {
     pub include_declaration: Box<IncludeDeclaration>,
 }
 
 ///
-/// Type derived for production 1093
+/// Type derived for production 1095
 ///
 /// `PublicDescriptionItem: ModuleDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PublicDescriptionItemModuleDeclaration {
     pub module_declaration: Box<ModuleDeclaration>,
 }
 
 ///
-/// Type derived for production 1094
+/// Type derived for production 1096
 ///
 /// `PublicDescriptionItem: InterfaceDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PublicDescriptionItemInterfaceDeclaration {
     pub interface_declaration: Box<InterfaceDeclaration>,
 }
 
 ///
-/// Type derived for production 1095
+/// Type derived for production 1097
 ///
 /// `PublicDescriptionItem: PackageDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PublicDescriptionItemPackageDeclaration {
     pub package_declaration: Box<PackageDeclaration>,
 }
 
 ///
-/// Type derived for production 1096
+/// Type derived for production 1098
 ///
 /// `PublicDescriptionItem: AliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PublicDescriptionItemAliasDeclaration {
     pub alias_declaration: Box<AliasDeclaration>,
 }
 
 ///
-/// Type derived for production 1097
+/// Type derived for production 1099
 ///
 /// `PublicDescriptionItem: ProtoDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PublicDescriptionItemProtoDeclaration {
     pub proto_declaration: Box<ProtoDeclaration>,
 }
@@ -5764,8 +5518,7 @@ pub struct PublicDescriptionItemProtoDeclaration {
 /// Type derived for non-terminal Alias
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Alias {
     pub alias_token: crate::veryl_token::VerylToken,
 }
@@ -5774,8 +5527,7 @@ pub struct Alias {
 /// Type derived for non-terminal AliasDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AliasDeclaration {
     pub alias: Box<Alias>,
     pub alias_declaration_group: Box<AliasDeclarationGroup>,
@@ -5800,8 +5552,7 @@ pub enum AliasDeclarationGroup {
 /// Type derived for non-terminal AliasTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AliasTerm {
     pub alias_term: crate::veryl_token::Token, /* (?-u:\b)alias(?-u:\b) */
 }
@@ -5810,8 +5561,7 @@ pub struct AliasTerm {
 /// Type derived for non-terminal AliasToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AliasToken {
     pub alias_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -5821,8 +5571,7 @@ pub struct AliasToken {
 /// Type derived for non-terminal AllBit
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AllBit {
     pub all_bit_token: crate::veryl_token::VerylToken,
 }
@@ -5831,8 +5580,7 @@ pub struct AllBit {
 /// Type derived for non-terminal AllBitTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AllBitTerm {
     pub all_bit_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ] */
 }
@@ -5841,8 +5589,7 @@ pub struct AllBitTerm {
 /// Type derived for non-terminal AllBitToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AllBitToken {
     pub all_bit_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -5852,8 +5599,7 @@ pub struct AllBitToken {
 /// Type derived for non-terminal AlwaysComb
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysComb {
     pub always_comb_token: crate::veryl_token::VerylToken,
 }
@@ -5862,8 +5608,7 @@ pub struct AlwaysComb {
 /// Type derived for non-terminal AlwaysCombDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysCombDeclaration {
     pub always_comb: Box<AlwaysComb>,
     pub statement_block: Box<StatementBlock>,
@@ -5873,8 +5618,7 @@ pub struct AlwaysCombDeclaration {
 /// Type derived for non-terminal AlwaysCombTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysCombTerm {
     pub always_comb_term: crate::veryl_token::Token, /* (?-u:\b)always_comb(?-u:\b) */
 }
@@ -5883,8 +5627,7 @@ pub struct AlwaysCombTerm {
 /// Type derived for non-terminal AlwaysCombToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysCombToken {
     pub always_comb_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -5894,8 +5637,7 @@ pub struct AlwaysCombToken {
 /// Type derived for non-terminal AlwaysFf
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFf {
     pub always_ff_token: crate::veryl_token::VerylToken,
 }
@@ -5904,8 +5646,7 @@ pub struct AlwaysFf {
 /// Type derived for non-terminal AlwaysFfClock
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfClock {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -5914,8 +5655,7 @@ pub struct AlwaysFfClock {
 /// Type derived for non-terminal AlwaysFfDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfDeclaration {
     pub always_ff: Box<AlwaysFf>,
     pub always_ff_declaration_opt: Option<AlwaysFfDeclarationOpt>,
@@ -5926,8 +5666,7 @@ pub struct AlwaysFfDeclaration {
 /// Type derived for non-terminal AlwaysFfDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfDeclarationOpt {
     pub always_ff_event_list: Box<AlwaysFfEventList>,
 }
@@ -5936,8 +5675,7 @@ pub struct AlwaysFfDeclarationOpt {
 /// Type derived for non-terminal AlwaysFfEventList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfEventList {
     pub l_paren: Box<LParen>,
     pub always_ff_clock: Box<AlwaysFfClock>,
@@ -5949,8 +5687,7 @@ pub struct AlwaysFfEventList {
 /// Type derived for non-terminal AlwaysFfEventListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfEventListOpt {
     pub comma: Box<Comma>,
     pub always_ff_reset: Box<AlwaysFfReset>,
@@ -5960,8 +5697,7 @@ pub struct AlwaysFfEventListOpt {
 /// Type derived for non-terminal AlwaysFfReset
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfReset {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -5970,8 +5706,7 @@ pub struct AlwaysFfReset {
 /// Type derived for non-terminal AlwaysFfTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfTerm {
     pub always_ff_term: crate::veryl_token::Token, /* (?-u:\b)always_ff(?-u:\b) */
 }
@@ -5980,8 +5715,7 @@ pub struct AlwaysFfTerm {
 /// Type derived for non-terminal AlwaysFfToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AlwaysFfToken {
     pub always_ff_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -5991,8 +5725,7 @@ pub struct AlwaysFfToken {
 /// Type derived for non-terminal AnyTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AnyTerm {
     pub any_term: crate::veryl_token::Token, /* [^{}]+ */
 }
@@ -6001,8 +5734,7 @@ pub struct AnyTerm {
 /// Type derived for non-terminal ArgumentExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArgumentExpression {
     pub expression: Box<Expression>,
 }
@@ -6011,8 +5743,7 @@ pub struct ArgumentExpression {
 /// Type derived for non-terminal ArgumentItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArgumentItem {
     pub argument_expression: Box<ArgumentExpression>,
     pub argument_item_opt: Option<ArgumentItemOpt>,
@@ -6022,8 +5753,7 @@ pub struct ArgumentItem {
 /// Type derived for non-terminal ArgumentItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArgumentItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -6033,8 +5763,7 @@ pub struct ArgumentItemOpt {
 /// Type derived for non-terminal ArgumentList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArgumentList {
     pub argument_item: Box<ArgumentItem>,
     pub argument_list_list: Vec<ArgumentListList>,
@@ -6045,8 +5774,7 @@ pub struct ArgumentList {
 /// Type derived for non-terminal ArgumentListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArgumentListList {
     pub comma: Box<Comma>,
     pub argument_item: Box<ArgumentItem>,
@@ -6056,8 +5784,7 @@ pub struct ArgumentListList {
 /// Type derived for non-terminal ArgumentListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArgumentListOpt {
     pub comma: Box<Comma>,
 }
@@ -6066,8 +5793,7 @@ pub struct ArgumentListOpt {
 /// Type derived for non-terminal Array
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Array {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
@@ -6079,8 +5805,7 @@ pub struct Array {
 /// Type derived for non-terminal ArrayList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayList {
     pub comma: Box<Comma>,
     pub expression: Box<Expression>,
@@ -6090,8 +5815,7 @@ pub struct ArrayList {
 /// Type derived for non-terminal ArrayLiteralItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralItem {
     pub array_literal_item_group: Box<ArrayLiteralItemGroup>,
 }
@@ -6110,8 +5834,7 @@ pub enum ArrayLiteralItemGroup {
 /// Type derived for non-terminal ArrayLiteralItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralItemOpt {
     pub repeat: Box<Repeat>,
     pub expression: Box<Expression>,
@@ -6121,8 +5844,7 @@ pub struct ArrayLiteralItemOpt {
 /// Type derived for non-terminal ArrayLiteralList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralList {
     pub array_literal_item: Box<ArrayLiteralItem>,
     pub array_literal_list_list: Vec<ArrayLiteralListList>,
@@ -6133,8 +5855,7 @@ pub struct ArrayLiteralList {
 /// Type derived for non-terminal ArrayLiteralListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralListList {
     pub comma: Box<Comma>,
     pub array_literal_item: Box<ArrayLiteralItem>,
@@ -6144,8 +5865,7 @@ pub struct ArrayLiteralListList {
 /// Type derived for non-terminal ArrayLiteralListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteralListOpt {
     pub comma: Box<Comma>,
 }
@@ -6154,8 +5874,7 @@ pub struct ArrayLiteralListOpt {
 /// Type derived for non-terminal ArrayType
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayType {
     pub scalar_type: Box<ScalarType>,
     pub array_type_opt: Option<ArrayTypeOpt>,
@@ -6165,8 +5884,7 @@ pub struct ArrayType {
 /// Type derived for non-terminal ArrayTypeOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ArrayTypeOpt {
     pub array: Box<Array>,
 }
@@ -6175,8 +5893,7 @@ pub struct ArrayTypeOpt {
 /// Type derived for non-terminal As
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct As {
     pub as_token: crate::veryl_token::VerylToken,
 }
@@ -6185,8 +5902,7 @@ pub struct As {
 /// Type derived for non-terminal AsTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AsTerm {
     pub as_term: crate::veryl_token::Token, /* (?-u:\b)as(?-u:\b) */
 }
@@ -6195,8 +5911,7 @@ pub struct AsTerm {
 /// Type derived for non-terminal AsToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AsToken {
     pub as_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6206,8 +5921,7 @@ pub struct AsToken {
 /// Type derived for non-terminal Assign
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Assign {
     pub assign_token: crate::veryl_token::VerylToken,
 }
@@ -6216,8 +5930,7 @@ pub struct Assign {
 /// Type derived for non-terminal AssignConcatenationItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignConcatenationItem {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -6226,8 +5939,7 @@ pub struct AssignConcatenationItem {
 /// Type derived for non-terminal AssignConcatenationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignConcatenationList {
     pub assign_concatenation_item: Box<AssignConcatenationItem>,
     pub assign_concatenation_list_list: Vec<AssignConcatenationListList>,
@@ -6238,8 +5950,7 @@ pub struct AssignConcatenationList {
 /// Type derived for non-terminal AssignConcatenationListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignConcatenationListList {
     pub comma: Box<Comma>,
     pub assign_concatenation_item: Box<AssignConcatenationItem>,
@@ -6249,8 +5960,7 @@ pub struct AssignConcatenationListList {
 /// Type derived for non-terminal AssignConcatenationListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignConcatenationListOpt {
     pub comma: Box<Comma>,
 }
@@ -6259,8 +5969,7 @@ pub struct AssignConcatenationListOpt {
 /// Type derived for non-terminal AssignDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignDeclaration {
     pub assign: Box<Assign>,
     pub assign_destination: Box<AssignDestination>,
@@ -6283,8 +5992,7 @@ pub enum AssignDestination {
 /// Type derived for non-terminal AssignTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignTerm {
     pub assign_term: crate::veryl_token::Token, /* (?-u:\b)assign(?-u:\b) */
 }
@@ -6293,8 +6001,7 @@ pub struct AssignTerm {
 /// Type derived for non-terminal AssignToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignToken {
     pub assign_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6304,8 +6011,7 @@ pub struct AssignToken {
 /// Type derived for non-terminal Assignment
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Assignment {
     pub assignment_group: Box<AssignmentGroup>,
     pub expression: Box<Expression>,
@@ -6326,8 +6032,7 @@ pub enum AssignmentGroup {
 /// Type derived for non-terminal AssignmentOperator
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignmentOperator {
     pub assignment_operator_token: crate::veryl_token::VerylToken,
 }
@@ -6336,8 +6041,7 @@ pub struct AssignmentOperator {
 /// Type derived for non-terminal AssignmentOperatorTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignmentOperatorTerm {
     pub assignment_operator_term: crate::veryl_token::Token, /* \+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>= */
 }
@@ -6346,8 +6050,7 @@ pub struct AssignmentOperatorTerm {
 /// Type derived for non-terminal AssignmentOperatorToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AssignmentOperatorToken {
     pub assignment_operator_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6357,8 +6060,7 @@ pub struct AssignmentOperatorToken {
 /// Type derived for non-terminal Attribute
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Attribute {
     pub hash: Box<Hash>,
     pub l_bracket: Box<LBracket>,
@@ -6381,8 +6083,7 @@ pub enum AttributeItem {
 /// Type derived for non-terminal AttributeList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AttributeList {
     pub attribute_item: Box<AttributeItem>,
     pub attribute_list_list: Vec<AttributeListList>,
@@ -6393,8 +6094,7 @@ pub struct AttributeList {
 /// Type derived for non-terminal AttributeListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AttributeListList {
     pub comma: Box<Comma>,
     pub attribute_item: Box<AttributeItem>,
@@ -6404,8 +6104,7 @@ pub struct AttributeListList {
 /// Type derived for non-terminal AttributeListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AttributeListOpt {
     pub comma: Box<Comma>,
 }
@@ -6414,8 +6113,7 @@ pub struct AttributeListOpt {
 /// Type derived for non-terminal AttributeOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct AttributeOpt {
     pub l_paren: Box<LParen>,
     pub attribute_list: Box<AttributeList>,
@@ -6426,8 +6124,7 @@ pub struct AttributeOpt {
 /// Type derived for non-terminal BaseLess
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BaseLess {
     pub base_less_token: crate::veryl_token::VerylToken,
 }
@@ -6436,8 +6133,7 @@ pub struct BaseLess {
 /// Type derived for non-terminal BaseLessTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BaseLessTerm {
     pub base_less_term: crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)* */
 }
@@ -6446,8 +6142,7 @@ pub struct BaseLessTerm {
 /// Type derived for non-terminal BaseLessToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BaseLessToken {
     pub base_less_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6457,8 +6152,7 @@ pub struct BaseLessToken {
 /// Type derived for non-terminal Based
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Based {
     pub based_token: crate::veryl_token::VerylToken,
 }
@@ -6467,8 +6161,7 @@ pub struct Based {
 /// Type derived for non-terminal BasedTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BasedTerm {
     pub based_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
 }
@@ -6477,8 +6170,7 @@ pub struct BasedTerm {
 /// Type derived for non-terminal BasedToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BasedToken {
     pub based_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6488,8 +6180,7 @@ pub struct BasedToken {
 /// Type derived for non-terminal Bit
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Bit {
     pub bit_token: crate::veryl_token::VerylToken,
 }
@@ -6498,8 +6189,7 @@ pub struct Bit {
 /// Type derived for non-terminal BitTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BitTerm {
     pub bit_term: crate::veryl_token::Token, /* (?-u:\b)bit(?-u:\b) */
 }
@@ -6508,8 +6198,7 @@ pub struct BitTerm {
 /// Type derived for non-terminal BitToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BitToken {
     pub bit_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6519,8 +6208,7 @@ pub struct BitToken {
 /// Type derived for non-terminal Bool
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Bool {
     pub bool_token: crate::veryl_token::VerylToken,
 }
@@ -6529,8 +6217,7 @@ pub struct Bool {
 /// Type derived for non-terminal BoolTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BoolTerm {
     pub bool_term: crate::veryl_token::Token, /* (?-u:\b)bool(?-u:\b) */
 }
@@ -6539,8 +6226,7 @@ pub struct BoolTerm {
 /// Type derived for non-terminal BoolToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BoolToken {
     pub bool_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6560,8 +6246,7 @@ pub enum BooleanLiteral {
 /// Type derived for non-terminal Break
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Break {
     pub break_token: crate::veryl_token::VerylToken,
 }
@@ -6570,8 +6255,7 @@ pub struct Break {
 /// Type derived for non-terminal BreakStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BreakStatement {
     pub r#break: Box<Break>,
     pub semicolon: Box<Semicolon>,
@@ -6581,8 +6265,7 @@ pub struct BreakStatement {
 /// Type derived for non-terminal BreakTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BreakTerm {
     pub break_term: crate::veryl_token::Token, /* (?-u:\b)break(?-u:\b) */
 }
@@ -6591,8 +6274,7 @@ pub struct BreakTerm {
 /// Type derived for non-terminal BreakToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct BreakToken {
     pub break_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6602,8 +6284,7 @@ pub struct BreakToken {
 /// Type derived for non-terminal Case
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Case {
     pub case_token: crate::veryl_token::VerylToken,
 }
@@ -6612,8 +6293,7 @@ pub struct Case {
 /// Type derived for non-terminal CaseCondition
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseCondition {
     pub range_item: Box<RangeItem>,
     pub case_condition_list: Vec<CaseConditionList>,
@@ -6623,8 +6303,7 @@ pub struct CaseCondition {
 /// Type derived for non-terminal CaseConditionList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseConditionList {
     pub comma: Box<Comma>,
     pub range_item: Box<RangeItem>,
@@ -6634,8 +6313,7 @@ pub struct CaseConditionList {
 /// Type derived for non-terminal CaseExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseExpression {
     pub case: Box<Case>,
     pub expression: Box<Expression>,
@@ -6656,8 +6334,7 @@ pub struct CaseExpression {
 /// Type derived for non-terminal CaseExpressionList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseExpressionList {
     pub case_condition: Box<CaseCondition>,
     pub colon: Box<Colon>,
@@ -6669,8 +6346,7 @@ pub struct CaseExpressionList {
 /// Type derived for non-terminal CaseExpressionOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseExpressionOpt {
     pub comma: Box<Comma>,
 }
@@ -6679,8 +6355,7 @@ pub struct CaseExpressionOpt {
 /// Type derived for non-terminal CaseItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseItem {
     pub case_item_group: Box<CaseItemGroup>,
     pub colon: Box<Colon>,
@@ -6711,8 +6386,7 @@ pub enum CaseItemGroup0 {
 /// Type derived for non-terminal CaseStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseStatement {
     pub case: Box<Case>,
     pub expression: Box<Expression>,
@@ -6725,8 +6399,7 @@ pub struct CaseStatement {
 /// Type derived for non-terminal CaseStatementList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseStatementList {
     pub case_item: Box<CaseItem>,
 }
@@ -6735,8 +6408,7 @@ pub struct CaseStatementList {
 /// Type derived for non-terminal CaseTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseTerm {
     pub case_term: crate::veryl_token::Token, /* (?-u:\b)case(?-u:\b) */
 }
@@ -6745,8 +6417,7 @@ pub struct CaseTerm {
 /// Type derived for non-terminal CaseToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CaseToken {
     pub case_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6786,8 +6457,7 @@ pub enum CastingType {
 /// Type derived for non-terminal Clock
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Clock {
     pub clock_token: crate::veryl_token::VerylToken,
 }
@@ -6796,8 +6466,7 @@ pub struct Clock {
 /// Type derived for non-terminal ClockDomain
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockDomain {
     pub quote: Box<Quote>,
     pub identifier: Box<Identifier>,
@@ -6807,8 +6476,7 @@ pub struct ClockDomain {
 /// Type derived for non-terminal ClockNegedge
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockNegedge {
     pub clock_negedge_token: crate::veryl_token::VerylToken,
 }
@@ -6817,8 +6485,7 @@ pub struct ClockNegedge {
 /// Type derived for non-terminal ClockNegedgeTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockNegedgeTerm {
     pub clock_negedge_term: crate::veryl_token::Token, /* (?-u:\b)clock_negedge(?-u:\b) */
 }
@@ -6827,8 +6494,7 @@ pub struct ClockNegedgeTerm {
 /// Type derived for non-terminal ClockNegedgeToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockNegedgeToken {
     pub clock_negedge_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6838,8 +6504,7 @@ pub struct ClockNegedgeToken {
 /// Type derived for non-terminal ClockPosedge
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockPosedge {
     pub clock_posedge_token: crate::veryl_token::VerylToken,
 }
@@ -6848,8 +6513,7 @@ pub struct ClockPosedge {
 /// Type derived for non-terminal ClockPosedgeTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockPosedgeTerm {
     pub clock_posedge_term: crate::veryl_token::Token, /* (?-u:\b)clock_posedge(?-u:\b) */
 }
@@ -6858,8 +6522,7 @@ pub struct ClockPosedgeTerm {
 /// Type derived for non-terminal ClockPosedgeToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockPosedgeToken {
     pub clock_posedge_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6869,8 +6532,7 @@ pub struct ClockPosedgeToken {
 /// Type derived for non-terminal ClockTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockTerm {
     pub clock_term: crate::veryl_token::Token, /* (?-u:\b)clock(?-u:\b) */
 }
@@ -6879,8 +6541,7 @@ pub struct ClockTerm {
 /// Type derived for non-terminal ClockToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ClockToken {
     pub clock_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6890,8 +6551,7 @@ pub struct ClockToken {
 /// Type derived for non-terminal Colon
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Colon {
     pub colon_token: crate::veryl_token::VerylToken,
 }
@@ -6900,8 +6560,7 @@ pub struct Colon {
 /// Type derived for non-terminal ColonColon
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonColon {
     pub colon_colon_token: crate::veryl_token::VerylToken,
 }
@@ -6910,8 +6569,7 @@ pub struct ColonColon {
 /// Type derived for non-terminal ColonColonLAngle
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonColonLAngle {
     pub colon_colon_l_angle_token: crate::veryl_token::VerylToken,
 }
@@ -6920,8 +6578,7 @@ pub struct ColonColonLAngle {
 /// Type derived for non-terminal ColonColonLAngleTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonColonLAngleTerm {
     pub colon_colon_l_angle_term: crate::veryl_token::Token, /* ::< */
 }
@@ -6930,8 +6587,7 @@ pub struct ColonColonLAngleTerm {
 /// Type derived for non-terminal ColonColonLAngleToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonColonLAngleToken {
     pub colon_colon_l_angle_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6941,8 +6597,7 @@ pub struct ColonColonLAngleToken {
 /// Type derived for non-terminal ColonColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonColonTerm {
     pub colon_colon_term: crate::veryl_token::Token, /* :: */
 }
@@ -6951,8 +6606,7 @@ pub struct ColonColonTerm {
 /// Type derived for non-terminal ColonColonToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonColonToken {
     pub colon_colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6962,8 +6616,7 @@ pub struct ColonColonToken {
 /// Type derived for non-terminal ColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonTerm {
     pub colon_term: crate::veryl_token::Token, /* : */
 }
@@ -6972,8 +6625,7 @@ pub struct ColonTerm {
 /// Type derived for non-terminal ColonToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ColonToken {
     pub colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6983,8 +6635,7 @@ pub struct ColonToken {
 /// Type derived for non-terminal Comma
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Comma {
     pub comma_token: crate::veryl_token::VerylToken,
 }
@@ -6993,8 +6644,7 @@ pub struct Comma {
 /// Type derived for non-terminal CommaTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CommaTerm {
     pub comma_term: crate::veryl_token::Token, /* , */
 }
@@ -7003,8 +6653,7 @@ pub struct CommaTerm {
 /// Type derived for non-terminal CommaToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CommaToken {
     pub comma_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7014,8 +6663,7 @@ pub struct CommaToken {
 /// Type derived for non-terminal Comments
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Comments {
     pub comments_opt: Option<CommentsOpt>,
 }
@@ -7024,8 +6672,7 @@ pub struct Comments {
 /// Type derived for non-terminal CommentsOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CommentsOpt {
     pub comments_term: Box<CommentsTerm>,
 }
@@ -7034,8 +6681,7 @@ pub struct CommentsOpt {
 /// Type derived for non-terminal CommentsTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct CommentsTerm {
     pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+ */
 }
@@ -7044,8 +6690,7 @@ pub struct CommentsTerm {
 /// Type derived for non-terminal ConcatenationItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConcatenationItem {
     pub expression: Box<Expression>,
     pub concatenation_item_opt: Option<ConcatenationItemOpt>,
@@ -7055,8 +6700,7 @@ pub struct ConcatenationItem {
 /// Type derived for non-terminal ConcatenationItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConcatenationItemOpt {
     pub repeat: Box<Repeat>,
     pub expression: Box<Expression>,
@@ -7066,8 +6710,7 @@ pub struct ConcatenationItemOpt {
 /// Type derived for non-terminal ConcatenationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConcatenationList {
     pub concatenation_item: Box<ConcatenationItem>,
     pub concatenation_list_list: Vec<ConcatenationListList>,
@@ -7078,8 +6721,7 @@ pub struct ConcatenationList {
 /// Type derived for non-terminal ConcatenationListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConcatenationListList {
     pub comma: Box<Comma>,
     pub concatenation_item: Box<ConcatenationItem>,
@@ -7089,8 +6731,7 @@ pub struct ConcatenationListList {
 /// Type derived for non-terminal ConcatenationListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConcatenationListOpt {
     pub comma: Box<Comma>,
 }
@@ -7099,8 +6740,7 @@ pub struct ConcatenationListOpt {
 /// Type derived for non-terminal Connect
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Connect {
     pub connect_token: crate::veryl_token::VerylToken,
 }
@@ -7109,8 +6749,7 @@ pub struct Connect {
 /// Type derived for non-terminal ConnectDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConnectDeclaration {
     pub connect: Box<Connect>,
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
@@ -7123,8 +6762,7 @@ pub struct ConnectDeclaration {
 /// Type derived for non-terminal ConnectTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConnectTerm {
     pub connect_term: crate::veryl_token::Token, /* (?-u:\b)connect(?-u:\b) */
 }
@@ -7133,8 +6771,7 @@ pub struct ConnectTerm {
 /// Type derived for non-terminal ConnectToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConnectToken {
     pub connect_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7144,8 +6781,7 @@ pub struct ConnectToken {
 /// Type derived for non-terminal Const
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Const {
     pub const_token: crate::veryl_token::VerylToken,
 }
@@ -7154,8 +6790,7 @@ pub struct Const {
 /// Type derived for non-terminal ConstDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConstDeclaration {
     pub r#const: Box<Const>,
     pub identifier: Box<Identifier>,
@@ -7180,8 +6815,7 @@ pub enum ConstDeclarationGroup {
 /// Type derived for non-terminal ConstTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConstTerm {
     pub const_term: crate::veryl_token::Token, /* (?-u:\b)const(?-u:\b) */
 }
@@ -7190,8 +6824,7 @@ pub struct ConstTerm {
 /// Type derived for non-terminal ConstToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConstToken {
     pub const_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7201,8 +6834,7 @@ pub struct ConstToken {
 /// Type derived for non-terminal Converse
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Converse {
     pub converse_token: crate::veryl_token::VerylToken,
 }
@@ -7211,8 +6843,7 @@ pub struct Converse {
 /// Type derived for non-terminal ConverseTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConverseTerm {
     pub converse_term: crate::veryl_token::Token, /* (?-u:\b)converse(?-u:\b) */
 }
@@ -7221,8 +6852,7 @@ pub struct ConverseTerm {
 /// Type derived for non-terminal ConverseToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ConverseToken {
     pub converse_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7232,8 +6862,7 @@ pub struct ConverseToken {
 /// Type derived for non-terminal Defaul
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Defaul {
     pub default_token: crate::veryl_token::VerylToken,
 }
@@ -7242,8 +6871,7 @@ pub struct Defaul {
 /// Type derived for non-terminal DefaultTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DefaultTerm {
     pub default_term: crate::veryl_token::Token, /* (?-u:\b)default(?-u:\b) */
 }
@@ -7252,8 +6880,7 @@ pub struct DefaultTerm {
 /// Type derived for non-terminal DefaultToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DefaultToken {
     pub default_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7263,8 +6890,7 @@ pub struct DefaultToken {
 /// Type derived for non-terminal DescriptionGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionGroup {
     pub description_group_list: Vec<DescriptionGroupList>,
     pub description_group_group: Box<DescriptionGroupGroup>,
@@ -7286,8 +6912,7 @@ pub enum DescriptionGroupGroup {
 /// Type derived for non-terminal DescriptionGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionGroupGroupList {
     pub description_group: Box<DescriptionGroup>,
 }
@@ -7296,8 +6921,7 @@ pub struct DescriptionGroupGroupList {
 /// Type derived for non-terminal DescriptionGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -7318,8 +6942,7 @@ pub enum DescriptionItem {
 /// Type derived for non-terminal DescriptionItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DescriptionItemOpt {
     pub r#pub: Box<Pub>,
 }
@@ -7328,8 +6951,7 @@ pub struct DescriptionItemOpt {
 /// Type derived for non-terminal DiamondOperator
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DiamondOperator {
     pub diamond_operator_token: crate::veryl_token::VerylToken,
 }
@@ -7338,8 +6960,7 @@ pub struct DiamondOperator {
 /// Type derived for non-terminal DiamondOperatorTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DiamondOperatorTerm {
     pub diamond_operator_term: crate::veryl_token::Token, /* <> */
 }
@@ -7348,8 +6969,7 @@ pub struct DiamondOperatorTerm {
 /// Type derived for non-terminal DiamondOperatorToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DiamondOperatorToken {
     pub diamond_operator_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7372,8 +6992,7 @@ pub enum Direction {
 /// Type derived for non-terminal DollarIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DollarIdentifier {
     pub dollar_identifier_token: crate::veryl_token::VerylToken,
 }
@@ -7382,8 +7001,7 @@ pub struct DollarIdentifier {
 /// Type derived for non-terminal DollarIdentifierTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DollarIdentifierTerm {
     pub dollar_identifier_term: crate::veryl_token::Token, /* \$[a-zA-Z_][0-9a-zA-Z_$]* */
 }
@@ -7392,8 +7010,7 @@ pub struct DollarIdentifierTerm {
 /// Type derived for non-terminal DollarIdentifierToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DollarIdentifierToken {
     pub dollar_identifier_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7403,8 +7020,7 @@ pub struct DollarIdentifierToken {
 /// Type derived for non-terminal Dot
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Dot {
     pub dot_token: crate::veryl_token::VerylToken,
 }
@@ -7413,8 +7029,7 @@ pub struct Dot {
 /// Type derived for non-terminal DotDot
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotDot {
     pub dot_dot_token: crate::veryl_token::VerylToken,
 }
@@ -7423,8 +7038,7 @@ pub struct DotDot {
 /// Type derived for non-terminal DotDotEqu
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotDotEqu {
     pub dot_dot_equ_token: crate::veryl_token::VerylToken,
 }
@@ -7433,8 +7047,7 @@ pub struct DotDotEqu {
 /// Type derived for non-terminal DotDotEquTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotDotEquTerm {
     pub dot_dot_equ_term: crate::veryl_token::Token, /* ..= */
 }
@@ -7443,8 +7056,7 @@ pub struct DotDotEquTerm {
 /// Type derived for non-terminal DotDotEquToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotDotEquToken {
     pub dot_dot_equ_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7454,8 +7066,7 @@ pub struct DotDotEquToken {
 /// Type derived for non-terminal DotDotTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotDotTerm {
     pub dot_dot_term: crate::veryl_token::Token, /* .. */
 }
@@ -7464,8 +7075,7 @@ pub struct DotDotTerm {
 /// Type derived for non-terminal DotDotToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotDotToken {
     pub dot_dot_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7475,8 +7085,7 @@ pub struct DotDotToken {
 /// Type derived for non-terminal DotTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotTerm {
     pub dot_term: crate::veryl_token::Token, /* . */
 }
@@ -7485,8 +7094,7 @@ pub struct DotTerm {
 /// Type derived for non-terminal DotToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct DotToken {
     pub dot_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7496,8 +7104,7 @@ pub struct DotToken {
 /// Type derived for non-terminal Else
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Else {
     pub else_token: crate::veryl_token::VerylToken,
 }
@@ -7506,8 +7113,7 @@ pub struct Else {
 /// Type derived for non-terminal ElseTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ElseTerm {
     pub else_term: crate::veryl_token::Token, /* (?-u:\b)else(?-u:\b) */
 }
@@ -7516,8 +7122,7 @@ pub struct ElseTerm {
 /// Type derived for non-terminal ElseToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ElseToken {
     pub else_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7527,8 +7132,7 @@ pub struct ElseToken {
 /// Type derived for non-terminal Embed
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Embed {
     pub embed_token: crate::veryl_token::VerylToken,
 }
@@ -7537,8 +7141,7 @@ pub struct Embed {
 /// Type derived for non-terminal EmbedContent
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedContent {
     pub embed_content_token: crate::veryl_token::VerylToken,
 }
@@ -7547,8 +7150,7 @@ pub struct EmbedContent {
 /// Type derived for non-terminal EmbedContentToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedContentToken {
     pub l_brace_term: Box<LBraceTerm>,
     pub l_brace_term0: Box<LBraceTerm>,
@@ -7564,8 +7166,7 @@ pub struct EmbedContentToken {
 /// Type derived for non-terminal EmbedContentTokenList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedContentTokenList {
     pub embed_item: Box<EmbedItem>,
 }
@@ -7574,8 +7175,7 @@ pub struct EmbedContentTokenList {
 /// Type derived for non-terminal EmbedDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedDeclaration {
     pub embed: Box<Embed>,
     pub l_paren: Box<LParen>,
@@ -7599,8 +7199,7 @@ pub enum EmbedItem {
 /// Type derived for non-terminal EmbedItemList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedItemList {
     pub embed_item: Box<EmbedItem>,
 }
@@ -7609,8 +7208,7 @@ pub struct EmbedItemList {
 /// Type derived for non-terminal EmbedTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedTerm {
     pub embed_term: crate::veryl_token::Token, /* (?-u:\b)embed(?-u:\b) */
 }
@@ -7619,8 +7217,7 @@ pub struct EmbedTerm {
 /// Type derived for non-terminal EmbedToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EmbedToken {
     pub embed_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7630,8 +7227,7 @@ pub struct EmbedToken {
 /// Type derived for non-terminal Enum
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Enum {
     pub enum_token: crate::veryl_token::VerylToken,
 }
@@ -7640,8 +7236,7 @@ pub struct Enum {
 /// Type derived for non-terminal EnumDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumDeclaration {
     pub r#enum: Box<Enum>,
     pub identifier: Box<Identifier>,
@@ -7655,8 +7250,7 @@ pub struct EnumDeclaration {
 /// Type derived for non-terminal EnumDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumDeclarationOpt {
     pub colon: Box<Colon>,
     pub scalar_type: Box<ScalarType>,
@@ -7666,8 +7260,7 @@ pub struct EnumDeclarationOpt {
 /// Type derived for non-terminal EnumGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumGroup {
     pub enum_group_list: Vec<EnumGroupList>,
     pub enum_group_group: Box<EnumGroupGroup>,
@@ -7687,8 +7280,7 @@ pub enum EnumGroupGroup {
 /// Type derived for non-terminal EnumGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -7697,8 +7289,7 @@ pub struct EnumGroupList {
 /// Type derived for non-terminal EnumItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumItem {
     pub identifier: Box<Identifier>,
     pub enum_item_opt: Option<EnumItemOpt>,
@@ -7708,8 +7299,7 @@ pub struct EnumItem {
 /// Type derived for non-terminal EnumItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumItemOpt {
     pub equ: Box<Equ>,
     pub expression: Box<Expression>,
@@ -7719,8 +7309,7 @@ pub struct EnumItemOpt {
 /// Type derived for non-terminal EnumList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumList {
     pub enum_group: Box<EnumGroup>,
     pub enum_list_list: Vec<EnumListList>,
@@ -7731,8 +7320,7 @@ pub struct EnumList {
 /// Type derived for non-terminal EnumListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumListList {
     pub comma: Box<Comma>,
     pub enum_group: Box<EnumGroup>,
@@ -7742,8 +7330,7 @@ pub struct EnumListList {
 /// Type derived for non-terminal EnumListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumListOpt {
     pub comma: Box<Comma>,
 }
@@ -7752,8 +7339,7 @@ pub struct EnumListOpt {
 /// Type derived for non-terminal EnumTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumTerm {
     pub enum_term: crate::veryl_token::Token, /* (?-u:\b)enum(?-u:\b) */
 }
@@ -7762,8 +7348,7 @@ pub struct EnumTerm {
 /// Type derived for non-terminal EnumToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EnumToken {
     pub enum_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7773,8 +7358,7 @@ pub struct EnumToken {
 /// Type derived for non-terminal Equ
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Equ {
     pub equ_token: crate::veryl_token::VerylToken,
 }
@@ -7783,8 +7367,7 @@ pub struct Equ {
 /// Type derived for non-terminal EquTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EquTerm {
     pub equ_term: crate::veryl_token::Token, /* = */
 }
@@ -7793,8 +7376,7 @@ pub struct EquTerm {
 /// Type derived for non-terminal EquToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct EquToken {
     pub equ_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7804,8 +7386,7 @@ pub struct EquToken {
 /// Type derived for non-terminal Exponent
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Exponent {
     pub exponent_token: crate::veryl_token::VerylToken,
 }
@@ -7814,8 +7395,7 @@ pub struct Exponent {
 /// Type derived for non-terminal ExponentTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExponentTerm {
     pub exponent_term: crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)* */
 }
@@ -7824,8 +7404,7 @@ pub struct ExponentTerm {
 /// Type derived for non-terminal ExponentToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExponentToken {
     pub exponent_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7835,8 +7414,7 @@ pub struct ExponentToken {
 /// Type derived for non-terminal Expression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression {
     pub if_expression: Box<IfExpression>,
 }
@@ -7845,8 +7423,7 @@ pub struct Expression {
 /// Type derived for non-terminal Expression01
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression01 {
     pub expression02: Box<Expression02>,
     pub expression01_list: Vec<Expression01List>,
@@ -7856,8 +7433,7 @@ pub struct Expression01 {
 /// Type derived for non-terminal Expression01List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression01List {
     pub operator02: Box<Operator02>,
     pub expression02: Box<Expression02>,
@@ -7867,8 +7443,7 @@ pub struct Expression01List {
 /// Type derived for non-terminal Expression02
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression02 {
     pub expression03: Box<Expression03>,
     pub expression02_list: Vec<Expression02List>,
@@ -7878,8 +7453,7 @@ pub struct Expression02 {
 /// Type derived for non-terminal Expression02List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression02List {
     pub operator03: Box<Operator03>,
     pub expression03: Box<Expression03>,
@@ -7889,8 +7463,7 @@ pub struct Expression02List {
 /// Type derived for non-terminal Expression03
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression03 {
     pub expression04: Box<Expression04>,
     pub expression03_list: Vec<Expression03List>,
@@ -7900,8 +7473,7 @@ pub struct Expression03 {
 /// Type derived for non-terminal Expression03List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression03List {
     pub operator04: Box<Operator04>,
     pub expression04: Box<Expression04>,
@@ -7911,8 +7483,7 @@ pub struct Expression03List {
 /// Type derived for non-terminal Expression04
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression04 {
     pub expression05: Box<Expression05>,
     pub expression04_list: Vec<Expression04List>,
@@ -7922,8 +7493,7 @@ pub struct Expression04 {
 /// Type derived for non-terminal Expression04List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression04List {
     pub operator05: Box<Operator05>,
     pub expression05: Box<Expression05>,
@@ -7933,8 +7503,7 @@ pub struct Expression04List {
 /// Type derived for non-terminal Expression05
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression05 {
     pub expression06: Box<Expression06>,
     pub expression05_list: Vec<Expression05List>,
@@ -7944,8 +7513,7 @@ pub struct Expression05 {
 /// Type derived for non-terminal Expression05List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression05List {
     pub operator06: Box<Operator06>,
     pub expression06: Box<Expression06>,
@@ -7955,8 +7523,7 @@ pub struct Expression05List {
 /// Type derived for non-terminal Expression06
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression06 {
     pub expression07: Box<Expression07>,
     pub expression06_list: Vec<Expression06List>,
@@ -7966,8 +7533,7 @@ pub struct Expression06 {
 /// Type derived for non-terminal Expression06List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression06List {
     pub operator07: Box<Operator07>,
     pub expression07: Box<Expression07>,
@@ -7977,8 +7543,7 @@ pub struct Expression06List {
 /// Type derived for non-terminal Expression07
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression07 {
     pub expression08: Box<Expression08>,
     pub expression07_list: Vec<Expression07List>,
@@ -7988,8 +7553,7 @@ pub struct Expression07 {
 /// Type derived for non-terminal Expression07List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression07List {
     pub operator08: Box<Operator08>,
     pub expression08: Box<Expression08>,
@@ -7999,8 +7563,7 @@ pub struct Expression07List {
 /// Type derived for non-terminal Expression08
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression08 {
     pub expression09: Box<Expression09>,
     pub expression08_list: Vec<Expression08List>,
@@ -8010,8 +7573,7 @@ pub struct Expression08 {
 /// Type derived for non-terminal Expression08List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression08List {
     pub operator09: Box<Operator09>,
     pub expression09: Box<Expression09>,
@@ -8021,8 +7583,7 @@ pub struct Expression08List {
 /// Type derived for non-terminal Expression09
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression09 {
     pub expression10: Box<Expression10>,
     pub expression09_list: Vec<Expression09List>,
@@ -8032,8 +7593,7 @@ pub struct Expression09 {
 /// Type derived for non-terminal Expression09List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression09List {
     pub operator10: Box<Operator10>,
     pub expression10: Box<Expression10>,
@@ -8043,8 +7603,7 @@ pub struct Expression09List {
 /// Type derived for non-terminal Expression10
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression10 {
     pub expression11: Box<Expression11>,
     pub expression10_list: Vec<Expression10List>,
@@ -8054,8 +7613,7 @@ pub struct Expression10 {
 /// Type derived for non-terminal Expression10List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression10List {
     pub expression10_list_group: Box<Expression10ListGroup>,
     pub expression11: Box<Expression11>,
@@ -8075,8 +7633,7 @@ pub enum Expression10ListGroup {
 /// Type derived for non-terminal Expression11
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression11 {
     pub expression12: Box<Expression12>,
     pub expression11_list: Vec<Expression11List>,
@@ -8086,8 +7643,7 @@ pub struct Expression11 {
 /// Type derived for non-terminal Expression11List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression11List {
     pub operator12: Box<Operator12>,
     pub expression12: Box<Expression12>,
@@ -8097,8 +7653,7 @@ pub struct Expression11List {
 /// Type derived for non-terminal Expression12
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression12 {
     pub expression13: Box<Expression13>,
     pub expression12_opt: Option<Expression12Opt>,
@@ -8108,8 +7663,7 @@ pub struct Expression12 {
 /// Type derived for non-terminal Expression12Opt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression12Opt {
     pub r#as: Box<As>,
     pub casting_type: Box<CastingType>,
@@ -8119,8 +7673,7 @@ pub struct Expression12Opt {
 /// Type derived for non-terminal Expression13
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13 {
     pub expression13_list: Vec<Expression13List>,
     pub factor: Box<Factor>,
@@ -8130,8 +7683,7 @@ pub struct Expression13 {
 /// Type derived for non-terminal Expression13List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Expression13List {
     pub expression13_list_group: Box<Expression13ListGroup>,
 }
@@ -8153,8 +7705,7 @@ pub enum Expression13ListGroup {
 /// Type derived for non-terminal ExpressionIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExpressionIdentifier {
     pub scoped_identifier: Box<ScopedIdentifier>,
     pub expression_identifier_opt: Option<ExpressionIdentifierOpt>,
@@ -8166,8 +7717,7 @@ pub struct ExpressionIdentifier {
 /// Type derived for non-terminal ExpressionIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExpressionIdentifierList {
     pub select: Box<Select>,
 }
@@ -8176,8 +7726,7 @@ pub struct ExpressionIdentifierList {
 /// Type derived for non-terminal ExpressionIdentifierList0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExpressionIdentifierList0 {
     pub dot: Box<Dot>,
     pub identifier: Box<Identifier>,
@@ -8188,8 +7737,7 @@ pub struct ExpressionIdentifierList0 {
 /// Type derived for non-terminal ExpressionIdentifierList0List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExpressionIdentifierList0List {
     pub select: Box<Select>,
 }
@@ -8198,8 +7746,7 @@ pub struct ExpressionIdentifierList0List {
 /// Type derived for non-terminal ExpressionIdentifierOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ExpressionIdentifierOpt {
     pub width: Box<Width>,
 }
@@ -8208,8 +7755,7 @@ pub struct ExpressionIdentifierOpt {
 /// Type derived for non-terminal F32
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct F32 {
     pub f32_token: crate::veryl_token::VerylToken,
 }
@@ -8218,8 +7764,7 @@ pub struct F32 {
 /// Type derived for non-terminal F32Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct F32Term {
     pub f32_term: crate::veryl_token::Token, /* (?-u:\b)f32(?-u:\b) */
 }
@@ -8228,8 +7773,7 @@ pub struct F32Term {
 /// Type derived for non-terminal F32Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct F32Token {
     pub f32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8239,8 +7783,7 @@ pub struct F32Token {
 /// Type derived for non-terminal F64
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct F64 {
     pub f64_token: crate::veryl_token::VerylToken,
 }
@@ -8249,8 +7792,7 @@ pub struct F64 {
 /// Type derived for non-terminal F64Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct F64Term {
     pub f64_term: crate::veryl_token::Token, /* (?-u:\b)f64(?-u:\b) */
 }
@@ -8259,8 +7801,7 @@ pub struct F64Term {
 /// Type derived for non-terminal F64Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct F64Token {
     pub f64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8302,8 +7843,7 @@ pub enum FactorGroup {
 /// Type derived for non-terminal FactorType
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorType {
     pub factor_type_group: Box<FactorTypeGroup>,
 }
@@ -8312,8 +7852,7 @@ pub struct FactorType {
 /// Type derived for non-terminal FactorTypeFactor
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorTypeFactor {
     pub factor_type_factor_list: Vec<FactorTypeFactorList>,
     pub factor_type: Box<FactorType>,
@@ -8323,8 +7862,7 @@ pub struct FactorTypeFactor {
 /// Type derived for non-terminal FactorTypeFactorList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorTypeFactorList {
     pub type_modifier: Box<TypeModifier>,
 }
@@ -8343,8 +7881,7 @@ pub enum FactorTypeGroup {
 /// Type derived for non-terminal FactorTypeOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FactorTypeOpt {
     pub width: Box<Width>,
 }
@@ -8353,8 +7890,7 @@ pub struct FactorTypeOpt {
 /// Type derived for non-terminal False
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct False {
     pub false_token: crate::veryl_token::VerylToken,
 }
@@ -8363,8 +7899,7 @@ pub struct False {
 /// Type derived for non-terminal FalseTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FalseTerm {
     pub false_term: crate::veryl_token::Token, /* (?-u:\b)false(?-u:\b) */
 }
@@ -8373,8 +7908,7 @@ pub struct FalseTerm {
 /// Type derived for non-terminal FalseToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FalseToken {
     pub false_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8384,8 +7918,7 @@ pub struct FalseToken {
 /// Type derived for non-terminal Final
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Final {
     pub final_token: crate::veryl_token::VerylToken,
 }
@@ -8394,8 +7927,7 @@ pub struct Final {
 /// Type derived for non-terminal FinalDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FinalDeclaration {
     pub r#final: Box<Final>,
     pub statement_block: Box<StatementBlock>,
@@ -8405,8 +7937,7 @@ pub struct FinalDeclaration {
 /// Type derived for non-terminal FinalTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FinalTerm {
     pub final_term: crate::veryl_token::Token, /* (?-u:\b)final(?-u:\b) */
 }
@@ -8415,8 +7946,7 @@ pub struct FinalTerm {
 /// Type derived for non-terminal FinalToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FinalToken {
     pub final_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8426,8 +7956,7 @@ pub struct FinalToken {
 /// Type derived for non-terminal FixedPoint
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedPoint {
     pub fixed_point_token: crate::veryl_token::VerylToken,
 }
@@ -8436,8 +7965,7 @@ pub struct FixedPoint {
 /// Type derived for non-terminal FixedPointTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedPointTerm {
     pub fixed_point_term: crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)* */
 }
@@ -8446,8 +7974,7 @@ pub struct FixedPointTerm {
 /// Type derived for non-terminal FixedPointToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FixedPointToken {
     pub fixed_point_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8477,8 +8004,7 @@ pub enum FixedType {
 /// Type derived for non-terminal For
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct For {
     pub for_token: crate::veryl_token::VerylToken,
 }
@@ -8487,8 +8013,7 @@ pub struct For {
 /// Type derived for non-terminal ForStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ForStatement {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -8504,8 +8029,7 @@ pub struct ForStatement {
 /// Type derived for non-terminal ForStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ForStatementOpt {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -8516,8 +8040,7 @@ pub struct ForStatementOpt {
 /// Type derived for non-terminal ForTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ForTerm {
     pub for_term: crate::veryl_token::Token, /* (?-u:\b)for(?-u:\b) */
 }
@@ -8526,8 +8049,7 @@ pub struct ForTerm {
 /// Type derived for non-terminal ForToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ForToken {
     pub for_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8537,8 +8059,7 @@ pub struct ForToken {
 /// Type derived for non-terminal Function
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub function_token: crate::veryl_token::VerylToken,
 }
@@ -8547,8 +8068,7 @@ pub struct Function {
 /// Type derived for non-terminal FunctionCall
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionCall {
     pub l_paren: Box<LParen>,
     pub function_call_opt: Option<FunctionCallOpt>,
@@ -8559,8 +8079,7 @@ pub struct FunctionCall {
 /// Type derived for non-terminal FunctionCallOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionCallOpt {
     pub argument_list: Box<ArgumentList>,
 }
@@ -8569,8 +8088,7 @@ pub struct FunctionCallOpt {
 /// Type derived for non-terminal FunctionDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionDeclaration {
     pub function: Box<Function>,
     pub identifier: Box<Identifier>,
@@ -8584,8 +8102,7 @@ pub struct FunctionDeclaration {
 /// Type derived for non-terminal FunctionDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -8594,8 +8111,7 @@ pub struct FunctionDeclarationOpt {
 /// Type derived for non-terminal FunctionDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -8604,8 +8120,7 @@ pub struct FunctionDeclarationOpt0 {
 /// Type derived for non-terminal FunctionDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionDeclarationOpt1 {
     pub minus_g_t: Box<MinusGT>,
     pub scalar_type: Box<ScalarType>,
@@ -8615,8 +8130,7 @@ pub struct FunctionDeclarationOpt1 {
 /// Type derived for non-terminal FunctionTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionTerm {
     pub function_term: crate::veryl_token::Token, /* (?-u:\b)function(?-u:\b) */
 }
@@ -8625,8 +8139,7 @@ pub struct FunctionTerm {
 /// Type derived for non-terminal FunctionToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct FunctionToken {
     pub function_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8636,8 +8149,7 @@ pub struct FunctionToken {
 /// Type derived for non-terminal GenerateBlockDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateBlockDeclaration {
     pub generate_named_block: Box<GenerateNamedBlock>,
 }
@@ -8646,8 +8158,7 @@ pub struct GenerateBlockDeclaration {
 /// Type derived for non-terminal GenerateForDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateForDeclaration {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -8661,8 +8172,7 @@ pub struct GenerateForDeclaration {
 /// Type derived for non-terminal GenerateForDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateForDeclarationOpt {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -8673,8 +8183,7 @@ pub struct GenerateForDeclarationOpt {
 /// Type derived for non-terminal GenerateGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateGroup {
     pub generate_group_list: Vec<GenerateGroupList>,
     pub generate_group_group: Box<GenerateGroupGroup>,
@@ -8694,8 +8203,7 @@ pub enum GenerateGroupGroup {
 /// Type derived for non-terminal GenerateGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateGroupGroupList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -8704,8 +8212,7 @@ pub struct GenerateGroupGroupList {
 /// Type derived for non-terminal GenerateGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -8714,8 +8221,7 @@ pub struct GenerateGroupList {
 /// Type derived for non-terminal GenerateIfDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateIfDeclaration {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -8728,8 +8234,7 @@ pub struct GenerateIfDeclaration {
 /// Type derived for non-terminal GenerateIfDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateIfDeclarationList {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -8741,8 +8246,7 @@ pub struct GenerateIfDeclarationList {
 /// Type derived for non-terminal GenerateIfDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateIfDeclarationOpt {
     pub r#else: Box<Else>,
     pub generate_optional_named_block: Box<GenerateOptionalNamedBlock>,
@@ -8781,8 +8285,7 @@ pub enum GenerateItem {
 /// Type derived for non-terminal GenerateNamedBlock
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateNamedBlock {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -8795,8 +8298,7 @@ pub struct GenerateNamedBlock {
 /// Type derived for non-terminal GenerateNamedBlockList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateNamedBlockList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -8805,8 +8307,7 @@ pub struct GenerateNamedBlockList {
 /// Type derived for non-terminal GenerateOptionalNamedBlock
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateOptionalNamedBlock {
     pub generate_optional_named_block_opt: Option<GenerateOptionalNamedBlockOpt>,
     pub l_brace: Box<LBrace>,
@@ -8818,8 +8319,7 @@ pub struct GenerateOptionalNamedBlock {
 /// Type derived for non-terminal GenerateOptionalNamedBlockList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateOptionalNamedBlockList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -8828,8 +8328,7 @@ pub struct GenerateOptionalNamedBlockList {
 /// Type derived for non-terminal GenerateOptionalNamedBlockOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct GenerateOptionalNamedBlockOpt {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -8860,8 +8359,7 @@ pub enum GenericProtoBound {
 /// Type derived for non-terminal Hash
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Hash {
     pub hash_token: crate::veryl_token::VerylToken,
 }
@@ -8870,8 +8368,7 @@ pub struct Hash {
 /// Type derived for non-terminal HashTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct HashTerm {
     pub hash_term: crate::veryl_token::Token, /* # */
 }
@@ -8880,8 +8377,7 @@ pub struct HashTerm {
 /// Type derived for non-terminal HashToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct HashToken {
     pub hash_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8891,8 +8387,7 @@ pub struct HashToken {
 /// Type derived for non-terminal HierarchicalIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct HierarchicalIdentifier {
     pub identifier: Box<Identifier>,
     pub hierarchical_identifier_list: Vec<HierarchicalIdentifierList>,
@@ -8903,8 +8398,7 @@ pub struct HierarchicalIdentifier {
 /// Type derived for non-terminal HierarchicalIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct HierarchicalIdentifierList {
     pub select: Box<Select>,
 }
@@ -8913,8 +8407,7 @@ pub struct HierarchicalIdentifierList {
 /// Type derived for non-terminal HierarchicalIdentifierList0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct HierarchicalIdentifierList0 {
     pub dot: Box<Dot>,
     pub identifier: Box<Identifier>,
@@ -8925,8 +8418,7 @@ pub struct HierarchicalIdentifierList0 {
 /// Type derived for non-terminal HierarchicalIdentifierList0List
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct HierarchicalIdentifierList0List {
     pub select: Box<Select>,
 }
@@ -8935,8 +8427,7 @@ pub struct HierarchicalIdentifierList0List {
 /// Type derived for non-terminal I16
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I16 {
     pub i16_token: crate::veryl_token::VerylToken,
 }
@@ -8945,8 +8436,7 @@ pub struct I16 {
 /// Type derived for non-terminal I16Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I16Term {
     pub i16_term: crate::veryl_token::Token, /* (?-u:\b)i16(?-u:\b) */
 }
@@ -8955,8 +8445,7 @@ pub struct I16Term {
 /// Type derived for non-terminal I16Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I16Token {
     pub i16_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8966,8 +8455,7 @@ pub struct I16Token {
 /// Type derived for non-terminal I32
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I32 {
     pub i32_token: crate::veryl_token::VerylToken,
 }
@@ -8976,8 +8464,7 @@ pub struct I32 {
 /// Type derived for non-terminal I32Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I32Term {
     pub i32_term: crate::veryl_token::Token, /* (?-u:\b)i32(?-u:\b) */
 }
@@ -8986,8 +8473,7 @@ pub struct I32Term {
 /// Type derived for non-terminal I32Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I32Token {
     pub i32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8997,8 +8483,7 @@ pub struct I32Token {
 /// Type derived for non-terminal I64
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I64 {
     pub i64_token: crate::veryl_token::VerylToken,
 }
@@ -9007,8 +8492,7 @@ pub struct I64 {
 /// Type derived for non-terminal I64Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I64Term {
     pub i64_term: crate::veryl_token::Token, /* (?-u:\b)i64(?-u:\b) */
 }
@@ -9017,8 +8501,7 @@ pub struct I64Term {
 /// Type derived for non-terminal I64Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I64Token {
     pub i64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9028,8 +8511,7 @@ pub struct I64Token {
 /// Type derived for non-terminal I8
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I8 {
     pub i8_token: crate::veryl_token::VerylToken,
 }
@@ -9038,8 +8520,7 @@ pub struct I8 {
 /// Type derived for non-terminal I8Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I8Term {
     pub i8_term: crate::veryl_token::Token, /* (?-u:\b)i8(?-u:\b) */
 }
@@ -9048,8 +8529,7 @@ pub struct I8Term {
 /// Type derived for non-terminal I8Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct I8Token {
     pub i8_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9059,8 +8539,7 @@ pub struct I8Token {
 /// Type derived for non-terminal Identifier
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Identifier {
     pub identifier_token: crate::veryl_token::VerylToken,
 }
@@ -9069,8 +8548,7 @@ pub struct Identifier {
 /// Type derived for non-terminal IdentifierFactor
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierFactor {
     pub expression_identifier: Box<ExpressionIdentifier>,
     pub identifier_factor_opt: Option<IdentifierFactorOpt>,
@@ -9080,8 +8558,7 @@ pub struct IdentifierFactor {
 /// Type derived for non-terminal IdentifierFactorOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierFactorOpt {
     pub identifier_factor_opt_group: Box<IdentifierFactorOptGroup>,
 }
@@ -9100,8 +8577,7 @@ pub enum IdentifierFactorOptGroup {
 /// Type derived for non-terminal IdentifierStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierStatement {
     pub expression_identifier: Box<ExpressionIdentifier>,
     pub identifier_statement_group: Box<IdentifierStatementGroup>,
@@ -9122,8 +8598,7 @@ pub enum IdentifierStatementGroup {
 /// Type derived for non-terminal IdentifierTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierTerm {
     pub identifier_term: crate::veryl_token::Token, /* (?:r#)?[a-zA-Z_][0-9a-zA-Z_$]* */
 }
@@ -9132,8 +8607,7 @@ pub struct IdentifierTerm {
 /// Type derived for non-terminal IdentifierToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IdentifierToken {
     pub identifier_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9143,8 +8617,7 @@ pub struct IdentifierToken {
 /// Type derived for non-terminal If
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct If {
     pub if_token: crate::veryl_token::VerylToken,
 }
@@ -9153,8 +8626,7 @@ pub struct If {
 /// Type derived for non-terminal IfExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfExpression {
     pub if_expression_list: Vec<IfExpressionList>,
     pub expression01: Box<Expression01>,
@@ -9164,8 +8636,7 @@ pub struct IfExpression {
 /// Type derived for non-terminal IfExpressionList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfExpressionList {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -9178,8 +8649,7 @@ pub struct IfExpressionList {
 /// Type derived for non-terminal IfReset
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfReset {
     pub if_reset_token: crate::veryl_token::VerylToken,
 }
@@ -9188,8 +8658,7 @@ pub struct IfReset {
 /// Type derived for non-terminal IfResetStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfResetStatement {
     pub if_reset: Box<IfReset>,
     pub statement_block: Box<StatementBlock>,
@@ -9201,8 +8670,7 @@ pub struct IfResetStatement {
 /// Type derived for non-terminal IfResetStatementList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfResetStatementList {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -9214,8 +8682,7 @@ pub struct IfResetStatementList {
 /// Type derived for non-terminal IfResetStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfResetStatementOpt {
     pub r#else: Box<Else>,
     pub statement_block: Box<StatementBlock>,
@@ -9225,8 +8692,7 @@ pub struct IfResetStatementOpt {
 /// Type derived for non-terminal IfResetTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfResetTerm {
     pub if_reset_term: crate::veryl_token::Token, /* (?-u:\b)if_reset(?-u:\b) */
 }
@@ -9235,8 +8701,7 @@ pub struct IfResetTerm {
 /// Type derived for non-terminal IfResetToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfResetToken {
     pub if_reset_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9246,8 +8711,7 @@ pub struct IfResetToken {
 /// Type derived for non-terminal IfStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfStatement {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -9260,8 +8724,7 @@ pub struct IfStatement {
 /// Type derived for non-terminal IfStatementList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfStatementList {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -9273,8 +8736,7 @@ pub struct IfStatementList {
 /// Type derived for non-terminal IfStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfStatementOpt {
     pub r#else: Box<Else>,
     pub statement_block: Box<StatementBlock>,
@@ -9284,8 +8746,7 @@ pub struct IfStatementOpt {
 /// Type derived for non-terminal IfTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfTerm {
     pub if_term: crate::veryl_token::Token, /* (?-u:\b)if(?-u:\b) */
 }
@@ -9294,8 +8755,7 @@ pub struct IfTerm {
 /// Type derived for non-terminal IfToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IfToken {
     pub if_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9305,8 +8765,7 @@ pub struct IfToken {
 /// Type derived for non-terminal Import
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Import {
     pub import_token: crate::veryl_token::VerylToken,
 }
@@ -9315,8 +8774,7 @@ pub struct Import {
 /// Type derived for non-terminal ImportDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ImportDeclaration {
     pub import: Box<Import>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -9328,8 +8786,7 @@ pub struct ImportDeclaration {
 /// Type derived for non-terminal ImportDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ImportDeclarationOpt {
     pub colon_colon: Box<ColonColon>,
     pub star: Box<Star>,
@@ -9339,8 +8796,7 @@ pub struct ImportDeclarationOpt {
 /// Type derived for non-terminal ImportTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ImportTerm {
     pub import_term: crate::veryl_token::Token, /* (?-u:\b)import(?-u:\b) */
 }
@@ -9349,8 +8805,7 @@ pub struct ImportTerm {
 /// Type derived for non-terminal ImportToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ImportToken {
     pub import_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9360,8 +8815,7 @@ pub struct ImportToken {
 /// Type derived for non-terminal In
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct In {
     pub in_token: crate::veryl_token::VerylToken,
 }
@@ -9370,8 +8824,7 @@ pub struct In {
 /// Type derived for non-terminal InTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InTerm {
     pub in_term: crate::veryl_token::Token, /* (?-u:\b)in(?-u:\b) */
 }
@@ -9380,8 +8833,7 @@ pub struct InTerm {
 /// Type derived for non-terminal InToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InToken {
     pub in_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9391,8 +8843,7 @@ pub struct InToken {
 /// Type derived for non-terminal Include
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Include {
     pub include_token: crate::veryl_token::VerylToken,
 }
@@ -9401,8 +8852,7 @@ pub struct Include {
 /// Type derived for non-terminal IncludeDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IncludeDeclaration {
     pub include: Box<Include>,
     pub l_paren: Box<LParen>,
@@ -9417,8 +8867,7 @@ pub struct IncludeDeclaration {
 /// Type derived for non-terminal IncludeTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IncludeTerm {
     pub include_term: crate::veryl_token::Token, /* (?-u:\b)include(?-u:\b) */
 }
@@ -9427,8 +8876,7 @@ pub struct IncludeTerm {
 /// Type derived for non-terminal IncludeToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct IncludeToken {
     pub include_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9438,8 +8886,7 @@ pub struct IncludeToken {
 /// Type derived for non-terminal Initial
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Initial {
     pub initial_token: crate::veryl_token::VerylToken,
 }
@@ -9448,8 +8895,7 @@ pub struct Initial {
 /// Type derived for non-terminal InitialDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InitialDeclaration {
     pub initial: Box<Initial>,
     pub statement_block: Box<StatementBlock>,
@@ -9459,8 +8905,7 @@ pub struct InitialDeclaration {
 /// Type derived for non-terminal InitialTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InitialTerm {
     pub initial_term: crate::veryl_token::Token, /* (?-u:\b)initial(?-u:\b) */
 }
@@ -9469,8 +8914,7 @@ pub struct InitialTerm {
 /// Type derived for non-terminal InitialToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InitialToken {
     pub initial_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9480,8 +8924,7 @@ pub struct InitialToken {
 /// Type derived for non-terminal Inout
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Inout {
     pub inout_token: crate::veryl_token::VerylToken,
 }
@@ -9490,8 +8933,7 @@ pub struct Inout {
 /// Type derived for non-terminal InoutTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InoutTerm {
     pub inout_term: crate::veryl_token::Token, /* (?-u:\b)inout(?-u:\b) */
 }
@@ -9500,8 +8942,7 @@ pub struct InoutTerm {
 /// Type derived for non-terminal InoutToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InoutToken {
     pub inout_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9511,8 +8952,7 @@ pub struct InoutToken {
 /// Type derived for non-terminal Input
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Input {
     pub input_token: crate::veryl_token::VerylToken,
 }
@@ -9521,8 +8961,7 @@ pub struct Input {
 /// Type derived for non-terminal InputTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InputTerm {
     pub input_term: crate::veryl_token::Token, /* (?-u:\b)input(?-u:\b) */
 }
@@ -9531,8 +8970,7 @@ pub struct InputTerm {
 /// Type derived for non-terminal InputToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InputToken {
     pub input_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9542,8 +8980,7 @@ pub struct InputToken {
 /// Type derived for non-terminal Inside
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Inside {
     pub inside_token: crate::veryl_token::VerylToken,
 }
@@ -9552,8 +8989,7 @@ pub struct Inside {
 /// Type derived for non-terminal InsideExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InsideExpression {
     pub inside: Box<Inside>,
     pub expression: Box<Expression>,
@@ -9566,8 +9002,7 @@ pub struct InsideExpression {
 /// Type derived for non-terminal InsideTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InsideTerm {
     pub inside_term: crate::veryl_token::Token, /* (?-u:\b)inside(?-u:\b) */
 }
@@ -9576,8 +9011,7 @@ pub struct InsideTerm {
 /// Type derived for non-terminal InsideToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InsideToken {
     pub inside_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9587,8 +9021,7 @@ pub struct InsideToken {
 /// Type derived for non-terminal Inst
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Inst {
     pub inst_token: crate::veryl_token::VerylToken,
 }
@@ -9597,8 +9030,7 @@ pub struct Inst {
 /// Type derived for non-terminal InstDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstDeclaration {
     pub inst: Box<Inst>,
     pub identifier: Box<Identifier>,
@@ -9615,8 +9047,7 @@ pub struct InstDeclaration {
 /// Type derived for non-terminal InstDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstDeclarationOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -9625,8 +9056,7 @@ pub struct InstDeclarationOpt {
 /// Type derived for non-terminal InstDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstDeclarationOpt0 {
     pub array: Box<Array>,
 }
@@ -9635,8 +9065,7 @@ pub struct InstDeclarationOpt0 {
 /// Type derived for non-terminal InstDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstDeclarationOpt1 {
     pub inst_parameter: Box<InstParameter>,
 }
@@ -9645,8 +9074,7 @@ pub struct InstDeclarationOpt1 {
 /// Type derived for non-terminal InstDeclarationOpt2
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstDeclarationOpt2 {
     pub l_paren: Box<LParen>,
     pub inst_declaration_opt3: Option<InstDeclarationOpt3>,
@@ -9657,8 +9085,7 @@ pub struct InstDeclarationOpt2 {
 /// Type derived for non-terminal InstDeclarationOpt3
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstDeclarationOpt3 {
     pub inst_port_list: Box<InstPortList>,
 }
@@ -9667,8 +9094,7 @@ pub struct InstDeclarationOpt3 {
 /// Type derived for non-terminal InstParameter
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
@@ -9680,8 +9106,7 @@ pub struct InstParameter {
 /// Type derived for non-terminal InstParameterGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterGroup {
     pub inst_parameter_group_list: Vec<InstParameterGroupList>,
     pub inst_parameter_group_group: Box<InstParameterGroupGroup>,
@@ -9701,8 +9126,7 @@ pub enum InstParameterGroupGroup {
 /// Type derived for non-terminal InstParameterGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -9711,8 +9135,7 @@ pub struct InstParameterGroupList {
 /// Type derived for non-terminal InstParameterItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterItem {
     pub identifier: Box<Identifier>,
     pub inst_parameter_item_opt: Option<InstParameterItemOpt>,
@@ -9722,8 +9145,7 @@ pub struct InstParameterItem {
 /// Type derived for non-terminal InstParameterItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -9733,8 +9155,7 @@ pub struct InstParameterItemOpt {
 /// Type derived for non-terminal InstParameterList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterList {
     pub inst_parameter_group: Box<InstParameterGroup>,
     pub inst_parameter_list_list: Vec<InstParameterListList>,
@@ -9745,8 +9166,7 @@ pub struct InstParameterList {
 /// Type derived for non-terminal InstParameterListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterListList {
     pub comma: Box<Comma>,
     pub inst_parameter_group: Box<InstParameterGroup>,
@@ -9756,8 +9176,7 @@ pub struct InstParameterListList {
 /// Type derived for non-terminal InstParameterListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -9766,8 +9185,7 @@ pub struct InstParameterListOpt {
 /// Type derived for non-terminal InstParameterOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstParameterOpt {
     pub inst_parameter_list: Box<InstParameterList>,
 }
@@ -9776,8 +9194,7 @@ pub struct InstParameterOpt {
 /// Type derived for non-terminal InstPortGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortGroup {
     pub inst_port_group_list: Vec<InstPortGroupList>,
     pub inst_port_group_group: Box<InstPortGroupGroup>,
@@ -9797,8 +9214,7 @@ pub enum InstPortGroupGroup {
 /// Type derived for non-terminal InstPortGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -9807,8 +9223,7 @@ pub struct InstPortGroupList {
 /// Type derived for non-terminal InstPortItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortItem {
     pub identifier: Box<Identifier>,
     pub inst_port_item_opt: Option<InstPortItemOpt>,
@@ -9818,8 +9233,7 @@ pub struct InstPortItem {
 /// Type derived for non-terminal InstPortItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -9829,8 +9243,7 @@ pub struct InstPortItemOpt {
 /// Type derived for non-terminal InstPortList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortList {
     pub inst_port_group: Box<InstPortGroup>,
     pub inst_port_list_list: Vec<InstPortListList>,
@@ -9841,8 +9254,7 @@ pub struct InstPortList {
 /// Type derived for non-terminal InstPortListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortListList {
     pub comma: Box<Comma>,
     pub inst_port_group: Box<InstPortGroup>,
@@ -9852,8 +9264,7 @@ pub struct InstPortListList {
 /// Type derived for non-terminal InstPortListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstPortListOpt {
     pub comma: Box<Comma>,
 }
@@ -9862,8 +9273,7 @@ pub struct InstPortListOpt {
 /// Type derived for non-terminal InstTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstTerm {
     pub inst_term: crate::veryl_token::Token, /* (?-u:\b)inst(?-u:\b) */
 }
@@ -9872,8 +9282,7 @@ pub struct InstTerm {
 /// Type derived for non-terminal InstToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InstToken {
     pub inst_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9894,8 +9303,7 @@ pub enum IntegralNumber {
 /// Type derived for non-terminal Interface
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Interface {
     pub interface_token: crate::veryl_token::VerylToken,
 }
@@ -9904,8 +9312,7 @@ pub struct Interface {
 /// Type derived for non-terminal InterfaceDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceDeclaration {
     pub interface: Box<Interface>,
     pub identifier: Box<Identifier>,
@@ -9921,8 +9328,7 @@ pub struct InterfaceDeclaration {
 /// Type derived for non-terminal InterfaceDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceDeclarationList {
     pub interface_group: Box<InterfaceGroup>,
 }
@@ -9931,8 +9337,7 @@ pub struct InterfaceDeclarationList {
 /// Type derived for non-terminal InterfaceDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -9941,8 +9346,7 @@ pub struct InterfaceDeclarationOpt {
 /// Type derived for non-terminal InterfaceDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceDeclarationOpt0 {
     pub r#for: Box<For>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -9952,8 +9356,7 @@ pub struct InterfaceDeclarationOpt0 {
 /// Type derived for non-terminal InterfaceDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceDeclarationOpt1 {
     pub with_parameter: Box<WithParameter>,
 }
@@ -9962,8 +9365,7 @@ pub struct InterfaceDeclarationOpt1 {
 /// Type derived for non-terminal InterfaceGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceGroup {
     pub interface_group_list: Vec<InterfaceGroupList>,
     pub interface_group_group: Box<InterfaceGroupGroup>,
@@ -9983,8 +9385,7 @@ pub enum InterfaceGroupGroup {
 /// Type derived for non-terminal InterfaceGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceGroupGroupList {
     pub interface_group: Box<InterfaceGroup>,
 }
@@ -9993,8 +9394,7 @@ pub struct InterfaceGroupGroupList {
 /// Type derived for non-terminal InterfaceGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -10013,8 +9413,7 @@ pub enum InterfaceItem {
 /// Type derived for non-terminal InterfaceTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceTerm {
     pub interface_term: crate::veryl_token::Token, /* (?-u:\b)interface(?-u:\b) */
 }
@@ -10023,8 +9422,7 @@ pub struct InterfaceTerm {
 /// Type derived for non-terminal InterfaceToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct InterfaceToken {
     pub interface_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10034,8 +9432,7 @@ pub struct InterfaceToken {
 /// Type derived for non-terminal LAngle
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LAngle {
     pub l_angle_token: crate::veryl_token::VerylToken,
 }
@@ -10044,8 +9441,7 @@ pub struct LAngle {
 /// Type derived for non-terminal LAngleTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LAngleTerm {
     pub l_angle_term: crate::veryl_token::Token, /* < */
 }
@@ -10054,8 +9450,7 @@ pub struct LAngleTerm {
 /// Type derived for non-terminal LAngleToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LAngleToken {
     pub l_angle_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10065,8 +9460,7 @@ pub struct LAngleToken {
 /// Type derived for non-terminal LBrace
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LBrace {
     pub l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -10075,8 +9469,7 @@ pub struct LBrace {
 /// Type derived for non-terminal LBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LBraceTerm {
     pub l_brace_term: crate::veryl_token::Token, /* { */
 }
@@ -10085,8 +9478,7 @@ pub struct LBraceTerm {
 /// Type derived for non-terminal LBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LBraceToken {
     pub l_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10096,8 +9488,7 @@ pub struct LBraceToken {
 /// Type derived for non-terminal LBracket
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LBracket {
     pub l_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -10106,8 +9497,7 @@ pub struct LBracket {
 /// Type derived for non-terminal LBracketTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LBracketTerm {
     pub l_bracket_term: crate::veryl_token::Token, /* [ */
 }
@@ -10116,8 +9506,7 @@ pub struct LBracketTerm {
 /// Type derived for non-terminal LBracketToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LBracketToken {
     pub l_bracket_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10127,8 +9516,7 @@ pub struct LBracketToken {
 /// Type derived for non-terminal LParen
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LParen {
     pub l_paren_token: crate::veryl_token::VerylToken,
 }
@@ -10137,8 +9525,7 @@ pub struct LParen {
 /// Type derived for non-terminal LParenTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LParenTerm {
     pub l_paren_term: crate::veryl_token::Token, /* ( */
 }
@@ -10147,8 +9534,7 @@ pub struct LParenTerm {
 /// Type derived for non-terminal LParenToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LParenToken {
     pub l_paren_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10158,8 +9544,7 @@ pub struct LParenToken {
 /// Type derived for non-terminal Let
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Let {
     pub let_token: crate::veryl_token::VerylToken,
 }
@@ -10168,8 +9553,7 @@ pub struct Let {
 /// Type derived for non-terminal LetDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LetDeclaration {
     pub r#let: Box<Let>,
     pub identifier: Box<Identifier>,
@@ -10185,8 +9569,7 @@ pub struct LetDeclaration {
 /// Type derived for non-terminal LetDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LetDeclarationOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -10195,8 +9578,7 @@ pub struct LetDeclarationOpt {
 /// Type derived for non-terminal LetStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LetStatement {
     pub r#let: Box<Let>,
     pub identifier: Box<Identifier>,
@@ -10212,8 +9594,7 @@ pub struct LetStatement {
 /// Type derived for non-terminal LetStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LetStatementOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -10222,8 +9603,7 @@ pub struct LetStatementOpt {
 /// Type derived for non-terminal LetTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LetTerm {
     pub let_term: crate::veryl_token::Token, /* (?-u:\b)let(?-u:\b) */
 }
@@ -10232,8 +9612,7 @@ pub struct LetTerm {
 /// Type derived for non-terminal LetToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LetToken {
     pub let_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10243,8 +9622,7 @@ pub struct LetToken {
 /// Type derived for non-terminal Logic
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Logic {
     pub logic_token: crate::veryl_token::VerylToken,
 }
@@ -10253,8 +9631,7 @@ pub struct Logic {
 /// Type derived for non-terminal LogicTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LogicTerm {
     pub logic_term: crate::veryl_token::Token, /* (?-u:\b)logic(?-u:\b) */
 }
@@ -10263,8 +9640,7 @@ pub struct LogicTerm {
 /// Type derived for non-terminal LogicToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LogicToken {
     pub logic_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10274,8 +9650,7 @@ pub struct LogicToken {
 /// Type derived for non-terminal Lsb
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Lsb {
     pub lsb_token: crate::veryl_token::VerylToken,
 }
@@ -10284,8 +9659,7 @@ pub struct Lsb {
 /// Type derived for non-terminal LsbTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LsbTerm {
     pub lsb_term: crate::veryl_token::Token, /* (?-u:\b)lsb(?-u:\b) */
 }
@@ -10294,8 +9668,7 @@ pub struct LsbTerm {
 /// Type derived for non-terminal LsbToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct LsbToken {
     pub lsb_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10305,8 +9678,7 @@ pub struct LsbToken {
 /// Type derived for non-terminal MinusColon
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MinusColon {
     pub minus_colon_token: crate::veryl_token::VerylToken,
 }
@@ -10315,8 +9687,7 @@ pub struct MinusColon {
 /// Type derived for non-terminal MinusColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MinusColonTerm {
     pub minus_colon_term: crate::veryl_token::Token, /* -: */
 }
@@ -10325,8 +9696,7 @@ pub struct MinusColonTerm {
 /// Type derived for non-terminal MinusColonToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MinusColonToken {
     pub minus_colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10336,8 +9706,7 @@ pub struct MinusColonToken {
 /// Type derived for non-terminal MinusGT
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MinusGT {
     pub minus_g_t_token: crate::veryl_token::VerylToken,
 }
@@ -10346,8 +9715,7 @@ pub struct MinusGT {
 /// Type derived for non-terminal MinusGTTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MinusGTTerm {
     pub minus_g_t_term: crate::veryl_token::Token, /* -> */
 }
@@ -10356,8 +9724,7 @@ pub struct MinusGTTerm {
 /// Type derived for non-terminal MinusGTToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MinusGTToken {
     pub minus_g_t_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10367,8 +9734,7 @@ pub struct MinusGTToken {
 /// Type derived for non-terminal Modport
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Modport {
     pub modport_token: crate::veryl_token::VerylToken,
 }
@@ -10377,8 +9743,7 @@ pub struct Modport {
 /// Type derived for non-terminal ModportDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDeclaration {
     pub modport: Box<Modport>,
     pub identifier: Box<Identifier>,
@@ -10392,8 +9757,7 @@ pub struct ModportDeclaration {
 /// Type derived for non-terminal ModportDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDeclarationOpt {
     pub modport_list: Box<ModportList>,
 }
@@ -10402,8 +9766,7 @@ pub struct ModportDeclarationOpt {
 /// Type derived for non-terminal ModportDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportDeclarationOpt0 {
     pub dot_dot: Box<DotDot>,
     pub modport_default: Box<ModportDefault>,
@@ -10425,8 +9788,7 @@ pub enum ModportDefault {
 /// Type derived for non-terminal ModportGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportGroup {
     pub modport_group_list: Vec<ModportGroupList>,
     pub modport_group_group: Box<ModportGroupGroup>,
@@ -10446,8 +9808,7 @@ pub enum ModportGroupGroup {
 /// Type derived for non-terminal ModportGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -10456,8 +9817,7 @@ pub struct ModportGroupList {
 /// Type derived for non-terminal ModportItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -10468,8 +9828,7 @@ pub struct ModportItem {
 /// Type derived for non-terminal ModportList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportList {
     pub modport_group: Box<ModportGroup>,
     pub modport_list_list: Vec<ModportListList>,
@@ -10480,8 +9839,7 @@ pub struct ModportList {
 /// Type derived for non-terminal ModportListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportListList {
     pub comma: Box<Comma>,
     pub modport_group: Box<ModportGroup>,
@@ -10491,8 +9849,7 @@ pub struct ModportListList {
 /// Type derived for non-terminal ModportListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportListOpt {
     pub comma: Box<Comma>,
 }
@@ -10501,8 +9858,7 @@ pub struct ModportListOpt {
 /// Type derived for non-terminal ModportTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportTerm {
     pub modport_term: crate::veryl_token::Token, /* (?-u:\b)modport(?-u:\b) */
 }
@@ -10511,8 +9867,7 @@ pub struct ModportTerm {
 /// Type derived for non-terminal ModportToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModportToken {
     pub modport_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10522,8 +9877,7 @@ pub struct ModportToken {
 /// Type derived for non-terminal Module
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Module {
     pub module_token: crate::veryl_token::VerylToken,
 }
@@ -10532,8 +9886,7 @@ pub struct Module {
 /// Type derived for non-terminal ModuleDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleDeclaration {
     pub module: Box<Module>,
     pub identifier: Box<Identifier>,
@@ -10550,8 +9903,7 @@ pub struct ModuleDeclaration {
 /// Type derived for non-terminal ModuleDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleDeclarationList {
     pub module_group: Box<ModuleGroup>,
 }
@@ -10560,8 +9912,7 @@ pub struct ModuleDeclarationList {
 /// Type derived for non-terminal ModuleDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -10570,8 +9921,7 @@ pub struct ModuleDeclarationOpt {
 /// Type derived for non-terminal ModuleDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleDeclarationOpt0 {
     pub r#for: Box<For>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -10581,8 +9931,7 @@ pub struct ModuleDeclarationOpt0 {
 /// Type derived for non-terminal ModuleDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleDeclarationOpt1 {
     pub with_parameter: Box<WithParameter>,
 }
@@ -10591,8 +9940,7 @@ pub struct ModuleDeclarationOpt1 {
 /// Type derived for non-terminal ModuleDeclarationOpt2
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleDeclarationOpt2 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -10601,8 +9949,7 @@ pub struct ModuleDeclarationOpt2 {
 /// Type derived for non-terminal ModuleGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleGroup {
     pub module_group_list: Vec<ModuleGroupList>,
     pub module_group_group: Box<ModuleGroupGroup>,
@@ -10622,8 +9969,7 @@ pub enum ModuleGroupGroup {
 /// Type derived for non-terminal ModuleGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleGroupGroupList {
     pub module_group: Box<ModuleGroup>,
 }
@@ -10632,8 +9978,7 @@ pub struct ModuleGroupGroupList {
 /// Type derived for non-terminal ModuleGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -10642,8 +9987,7 @@ pub struct ModuleGroupList {
 /// Type derived for non-terminal ModuleItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleItem {
     pub generate_item: Box<GenerateItem>,
 }
@@ -10652,8 +9996,7 @@ pub struct ModuleItem {
 /// Type derived for non-terminal ModuleTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleTerm {
     pub module_term: crate::veryl_token::Token, /* (?-u:\b)module(?-u:\b) */
 }
@@ -10662,8 +10005,7 @@ pub struct ModuleTerm {
 /// Type derived for non-terminal ModuleToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ModuleToken {
     pub module_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10673,8 +10015,7 @@ pub struct ModuleToken {
 /// Type derived for non-terminal Msb
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Msb {
     pub msb_token: crate::veryl_token::VerylToken,
 }
@@ -10683,8 +10024,7 @@ pub struct Msb {
 /// Type derived for non-terminal MsbTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MsbTerm {
     pub msb_term: crate::veryl_token::Token, /* (?-u:\b)msb(?-u:\b) */
 }
@@ -10693,8 +10033,7 @@ pub struct MsbTerm {
 /// Type derived for non-terminal MsbToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct MsbToken {
     pub msb_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10714,8 +10053,7 @@ pub enum Number {
 /// Type derived for non-terminal Operator02
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator02 {
     pub operator02_token: crate::veryl_token::VerylToken,
 }
@@ -10724,8 +10062,7 @@ pub struct Operator02 {
 /// Type derived for non-terminal Operator02Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator02Term {
     pub operator02_term: crate::veryl_token::Token, /* \|\| */
 }
@@ -10734,8 +10071,7 @@ pub struct Operator02Term {
 /// Type derived for non-terminal Operator02Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator02Token {
     pub operator02_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10745,8 +10081,7 @@ pub struct Operator02Token {
 /// Type derived for non-terminal Operator03
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator03 {
     pub operator03_token: crate::veryl_token::VerylToken,
 }
@@ -10755,8 +10090,7 @@ pub struct Operator03 {
 /// Type derived for non-terminal Operator03Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator03Term {
     pub operator03_term: crate::veryl_token::Token, /* && */
 }
@@ -10765,8 +10099,7 @@ pub struct Operator03Term {
 /// Type derived for non-terminal Operator03Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator03Token {
     pub operator03_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10776,8 +10109,7 @@ pub struct Operator03Token {
 /// Type derived for non-terminal Operator04
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator04 {
     pub operator04_token: crate::veryl_token::VerylToken,
 }
@@ -10786,8 +10118,7 @@ pub struct Operator04 {
 /// Type derived for non-terminal Operator04Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator04Term {
     pub operator04_term: crate::veryl_token::Token, /* \| */
 }
@@ -10796,8 +10127,7 @@ pub struct Operator04Term {
 /// Type derived for non-terminal Operator04Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator04Token {
     pub operator04_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10807,8 +10137,7 @@ pub struct Operator04Token {
 /// Type derived for non-terminal Operator05
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator05 {
     pub operator05_token: crate::veryl_token::VerylToken,
 }
@@ -10817,8 +10146,7 @@ pub struct Operator05 {
 /// Type derived for non-terminal Operator05Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator05Term {
     pub operator05_term: crate::veryl_token::Token, /* \^~|\^|~\^ */
 }
@@ -10827,8 +10155,7 @@ pub struct Operator05Term {
 /// Type derived for non-terminal Operator05Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator05Token {
     pub operator05_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10838,8 +10165,7 @@ pub struct Operator05Token {
 /// Type derived for non-terminal Operator06
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator06 {
     pub operator06_token: crate::veryl_token::VerylToken,
 }
@@ -10848,8 +10174,7 @@ pub struct Operator06 {
 /// Type derived for non-terminal Operator06Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator06Term {
     pub operator06_term: crate::veryl_token::Token, /* & */
 }
@@ -10858,8 +10183,7 @@ pub struct Operator06Term {
 /// Type derived for non-terminal Operator06Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator06Token {
     pub operator06_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10869,8 +10193,7 @@ pub struct Operator06Token {
 /// Type derived for non-terminal Operator07
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator07 {
     pub operator07_token: crate::veryl_token::VerylToken,
 }
@@ -10879,8 +10202,7 @@ pub struct Operator07 {
 /// Type derived for non-terminal Operator07Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator07Term {
     pub operator07_term: crate::veryl_token::Token, /* ===|==\?|!==|!=\?|==|!= */
 }
@@ -10889,8 +10211,7 @@ pub struct Operator07Term {
 /// Type derived for non-terminal Operator07Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator07Token {
     pub operator07_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10900,8 +10221,7 @@ pub struct Operator07Token {
 /// Type derived for non-terminal Operator08
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator08 {
     pub operator08_token: crate::veryl_token::VerylToken,
 }
@@ -10910,8 +10230,7 @@ pub struct Operator08 {
 /// Type derived for non-terminal Operator08Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator08Term {
     pub operator08_term: crate::veryl_token::Token, /* <=|>=|<:|>: */
 }
@@ -10920,8 +10239,7 @@ pub struct Operator08Term {
 /// Type derived for non-terminal Operator08Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator08Token {
     pub operator08_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10931,8 +10249,7 @@ pub struct Operator08Token {
 /// Type derived for non-terminal Operator09
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator09 {
     pub operator09_token: crate::veryl_token::VerylToken,
 }
@@ -10941,8 +10258,7 @@ pub struct Operator09 {
 /// Type derived for non-terminal Operator09Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator09Term {
     pub operator09_term: crate::veryl_token::Token, /* <<<|>>>|<<|>> */
 }
@@ -10951,8 +10267,7 @@ pub struct Operator09Term {
 /// Type derived for non-terminal Operator09Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator09Token {
     pub operator09_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10962,8 +10277,7 @@ pub struct Operator09Token {
 /// Type derived for non-terminal Operator10
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator10 {
     pub operator10_token: crate::veryl_token::VerylToken,
 }
@@ -10972,8 +10286,7 @@ pub struct Operator10 {
 /// Type derived for non-terminal Operator10Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator10Term {
     pub operator10_term: crate::veryl_token::Token, /* \+|- */
 }
@@ -10982,8 +10295,7 @@ pub struct Operator10Term {
 /// Type derived for non-terminal Operator10Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator10Token {
     pub operator10_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10993,8 +10305,7 @@ pub struct Operator10Token {
 /// Type derived for non-terminal Operator11
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator11 {
     pub operator11_token: crate::veryl_token::VerylToken,
 }
@@ -11003,8 +10314,7 @@ pub struct Operator11 {
 /// Type derived for non-terminal Operator11Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator11Term {
     pub operator11_term: crate::veryl_token::Token, /* /|% */
 }
@@ -11013,8 +10323,7 @@ pub struct Operator11Term {
 /// Type derived for non-terminal Operator11Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator11Token {
     pub operator11_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11024,8 +10333,7 @@ pub struct Operator11Token {
 /// Type derived for non-terminal Operator12
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator12 {
     pub operator12_token: crate::veryl_token::VerylToken,
 }
@@ -11034,8 +10342,7 @@ pub struct Operator12 {
 /// Type derived for non-terminal Operator12Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator12Term {
     pub operator12_term: crate::veryl_token::Token, /* \*\* */
 }
@@ -11044,8 +10351,7 @@ pub struct Operator12Term {
 /// Type derived for non-terminal Operator12Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Operator12Token {
     pub operator12_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11055,8 +10361,7 @@ pub struct Operator12Token {
 /// Type derived for non-terminal Output
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Output {
     pub output_token: crate::veryl_token::VerylToken,
 }
@@ -11065,8 +10370,7 @@ pub struct Output {
 /// Type derived for non-terminal OutputTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct OutputTerm {
     pub output_term: crate::veryl_token::Token, /* (?-u:\b)output(?-u:\b) */
 }
@@ -11075,8 +10379,7 @@ pub struct OutputTerm {
 /// Type derived for non-terminal OutputToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct OutputToken {
     pub output_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11086,8 +10389,7 @@ pub struct OutputToken {
 /// Type derived for non-terminal Outside
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Outside {
     pub outside_token: crate::veryl_token::VerylToken,
 }
@@ -11096,8 +10398,7 @@ pub struct Outside {
 /// Type derived for non-terminal OutsideExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct OutsideExpression {
     pub outside: Box<Outside>,
     pub expression: Box<Expression>,
@@ -11110,8 +10411,7 @@ pub struct OutsideExpression {
 /// Type derived for non-terminal OutsideTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct OutsideTerm {
     pub outside_term: crate::veryl_token::Token, /* (?-u:\b)outside(?-u:\b) */
 }
@@ -11120,8 +10420,7 @@ pub struct OutsideTerm {
 /// Type derived for non-terminal OutsideToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct OutsideToken {
     pub outside_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11131,8 +10430,7 @@ pub struct OutsideToken {
 /// Type derived for non-terminal Package
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Package {
     pub package_token: crate::veryl_token::VerylToken,
 }
@@ -11141,8 +10439,7 @@ pub struct Package {
 /// Type derived for non-terminal PackageDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageDeclaration {
     pub package: Box<Package>,
     pub identifier: Box<Identifier>,
@@ -11157,8 +10454,7 @@ pub struct PackageDeclaration {
 /// Type derived for non-terminal PackageDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageDeclarationList {
     pub package_group: Box<PackageGroup>,
 }
@@ -11167,8 +10463,7 @@ pub struct PackageDeclarationList {
 /// Type derived for non-terminal PackageDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -11177,8 +10472,7 @@ pub struct PackageDeclarationOpt {
 /// Type derived for non-terminal PackageDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageDeclarationOpt0 {
     pub r#for: Box<For>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -11188,8 +10482,7 @@ pub struct PackageDeclarationOpt0 {
 /// Type derived for non-terminal PackageGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageGroup {
     pub package_group_list: Vec<PackageGroupList>,
     pub package_group_group: Box<PackageGroupGroup>,
@@ -11209,8 +10502,7 @@ pub enum PackageGroupGroup {
 /// Type derived for non-terminal PackageGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageGroupGroupList {
     pub package_group: Box<PackageGroup>,
 }
@@ -11219,8 +10511,7 @@ pub struct PackageGroupGroupList {
 /// Type derived for non-terminal PackageGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -11245,8 +10536,7 @@ pub enum PackageItem {
 /// Type derived for non-terminal PackageTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageTerm {
     pub package_term: crate::veryl_token::Token, /* (?-u:\b)package(?-u:\b) */
 }
@@ -11255,8 +10545,7 @@ pub struct PackageTerm {
 /// Type derived for non-terminal PackageToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PackageToken {
     pub package_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11266,8 +10555,7 @@ pub struct PackageToken {
 /// Type derived for non-terminal Param
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Param {
     pub param_token: crate::veryl_token::VerylToken,
 }
@@ -11276,8 +10564,7 @@ pub struct Param {
 /// Type derived for non-terminal ParamTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ParamTerm {
     pub param_term: crate::veryl_token::Token, /* (?-u:\b)param(?-u:\b) */
 }
@@ -11286,8 +10573,7 @@ pub struct ParamTerm {
 /// Type derived for non-terminal ParamToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ParamToken {
     pub param_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11297,8 +10583,7 @@ pub struct ParamToken {
 /// Type derived for non-terminal PlusColon
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PlusColon {
     pub plus_colon_token: crate::veryl_token::VerylToken,
 }
@@ -11307,8 +10592,7 @@ pub struct PlusColon {
 /// Type derived for non-terminal PlusColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PlusColonTerm {
     pub plus_colon_term: crate::veryl_token::Token, /* +: */
 }
@@ -11317,8 +10601,7 @@ pub struct PlusColonTerm {
 /// Type derived for non-terminal PlusColonToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PlusColonToken {
     pub plus_colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11328,8 +10611,7 @@ pub struct PlusColonToken {
 /// Type derived for non-terminal PortDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclaration {
     pub l_paren: Box<LParen>,
     pub port_declaration_opt: Option<PortDeclarationOpt>,
@@ -11340,8 +10622,7 @@ pub struct PortDeclaration {
 /// Type derived for non-terminal PortDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationGroup {
     pub port_declaration_group_list: Vec<PortDeclarationGroupList>,
     pub port_declaration_group_group: Box<PortDeclarationGroupGroup>,
@@ -11361,8 +10642,7 @@ pub enum PortDeclarationGroupGroup {
 /// Type derived for non-terminal PortDeclarationGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -11371,8 +10651,7 @@ pub struct PortDeclarationGroupList {
 /// Type derived for non-terminal PortDeclarationItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -11393,8 +10672,7 @@ pub enum PortDeclarationItemGroup {
 /// Type derived for non-terminal PortDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationList {
     pub port_declaration_group: Box<PortDeclarationGroup>,
     pub port_declaration_list_list: Vec<PortDeclarationListList>,
@@ -11405,8 +10683,7 @@ pub struct PortDeclarationList {
 /// Type derived for non-terminal PortDeclarationListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationListList {
     pub comma: Box<Comma>,
     pub port_declaration_group: Box<PortDeclarationGroup>,
@@ -11416,8 +10693,7 @@ pub struct PortDeclarationListList {
 /// Type derived for non-terminal PortDeclarationListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationListOpt {
     pub comma: Box<Comma>,
 }
@@ -11426,8 +10702,7 @@ pub struct PortDeclarationListOpt {
 /// Type derived for non-terminal PortDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDeclarationOpt {
     pub port_declaration_list: Box<PortDeclarationList>,
 }
@@ -11436,8 +10711,7 @@ pub struct PortDeclarationOpt {
 /// Type derived for non-terminal PortDefaultValue
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortDefaultValue {
     pub expression: Box<Expression>,
 }
@@ -11446,8 +10720,7 @@ pub struct PortDefaultValue {
 /// Type derived for non-terminal PortTypeAbstract
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeAbstract {
     pub port_type_abstract_opt: Option<PortTypeAbstractOpt>,
     pub interface: Box<Interface>,
@@ -11459,8 +10732,7 @@ pub struct PortTypeAbstract {
 /// Type derived for non-terminal PortTypeAbstractOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeAbstractOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -11469,8 +10741,7 @@ pub struct PortTypeAbstractOpt {
 /// Type derived for non-terminal PortTypeAbstractOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeAbstractOpt0 {
     pub colon_colon: Box<ColonColon>,
     pub identifier: Box<Identifier>,
@@ -11480,8 +10751,7 @@ pub struct PortTypeAbstractOpt0 {
 /// Type derived for non-terminal PortTypeAbstractOpt1
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeAbstractOpt1 {
     pub array: Box<Array>,
 }
@@ -11490,8 +10760,7 @@ pub struct PortTypeAbstractOpt1 {
 /// Type derived for non-terminal PortTypeConcrete
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeConcrete {
     pub direction: Box<Direction>,
     pub port_type_concrete_opt: Option<PortTypeConcreteOpt>,
@@ -11503,8 +10772,7 @@ pub struct PortTypeConcrete {
 /// Type derived for non-terminal PortTypeConcreteOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeConcreteOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -11513,8 +10781,7 @@ pub struct PortTypeConcreteOpt {
 /// Type derived for non-terminal PortTypeConcreteOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PortTypeConcreteOpt0 {
     pub equ: Box<Equ>,
     pub port_default_value: Box<PortDefaultValue>,
@@ -11524,8 +10791,7 @@ pub struct PortTypeConcreteOpt0 {
 /// Type derived for non-terminal Proto
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Proto {
     pub proto_token: crate::veryl_token::VerylToken,
 }
@@ -11534,8 +10800,7 @@ pub struct Proto {
 /// Type derived for non-terminal ProtoAliasDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoAliasDeclaration {
     pub alias: Box<Alias>,
     pub proto_alias_declaration_group: Box<ProtoAliasDeclarationGroup>,
@@ -11560,8 +10825,7 @@ pub enum ProtoAliasDeclarationGroup {
 /// Type derived for non-terminal ProtoConstDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoConstDeclaration {
     pub r#const: Box<Const>,
     pub identifier: Box<Identifier>,
@@ -11584,8 +10848,7 @@ pub enum ProtoConstDeclarationGroup {
 /// Type derived for non-terminal ProtoDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoDeclaration {
     pub proto: Box<Proto>,
     pub proto_declaration_group: Box<ProtoDeclarationGroup>,
@@ -11606,8 +10869,7 @@ pub enum ProtoDeclarationGroup {
 /// Type derived for non-terminal ProtoFunctionDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoFunctionDeclaration {
     pub function: Box<Function>,
     pub identifier: Box<Identifier>,
@@ -11621,8 +10883,7 @@ pub struct ProtoFunctionDeclaration {
 /// Type derived for non-terminal ProtoFunctionDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoFunctionDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -11631,8 +10892,7 @@ pub struct ProtoFunctionDeclarationOpt {
 /// Type derived for non-terminal ProtoFunctionDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoFunctionDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -11641,8 +10901,7 @@ pub struct ProtoFunctionDeclarationOpt0 {
 /// Type derived for non-terminal ProtoFunctionDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoFunctionDeclarationOpt1 {
     pub minus_g_t: Box<MinusGT>,
     pub scalar_type: Box<ScalarType>,
@@ -11652,8 +10911,7 @@ pub struct ProtoFunctionDeclarationOpt1 {
 /// Type derived for non-terminal ProtoInterfaceDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceDeclaration {
     pub interface: Box<Interface>,
     pub identifier: Box<Identifier>,
@@ -11667,8 +10925,7 @@ pub struct ProtoInterfaceDeclaration {
 /// Type derived for non-terminal ProtoInterfaceDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceDeclarationList {
     pub proto_interface_item: Box<ProtoInterfaceItem>,
 }
@@ -11677,8 +10934,7 @@ pub struct ProtoInterfaceDeclarationList {
 /// Type derived for non-terminal ProtoInterfaceDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoInterfaceDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -11702,8 +10958,7 @@ pub enum ProtoInterfaceItem {
 /// Type derived for non-terminal ProtoModuleDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoModuleDeclaration {
     pub module: Box<Module>,
     pub identifier: Box<Identifier>,
@@ -11716,8 +10971,7 @@ pub struct ProtoModuleDeclaration {
 /// Type derived for non-terminal ProtoModuleDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoModuleDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -11726,8 +10980,7 @@ pub struct ProtoModuleDeclarationOpt {
 /// Type derived for non-terminal ProtoModuleDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoModuleDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -11751,8 +11004,7 @@ pub enum ProtoPacakgeItem {
 /// Type derived for non-terminal ProtoPackageDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPackageDeclaration {
     pub package: Box<Package>,
     pub identifier: Box<Identifier>,
@@ -11765,8 +11017,7 @@ pub struct ProtoPackageDeclaration {
 /// Type derived for non-terminal ProtoPackageDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoPackageDeclarationList {
     pub proto_pacakge_item: Box<ProtoPacakgeItem>,
 }
@@ -11775,8 +11026,7 @@ pub struct ProtoPackageDeclarationList {
 /// Type derived for non-terminal ProtoTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoTerm {
     pub proto_term: crate::veryl_token::Token, /* (?-u:\b)proto(?-u:\b) */
 }
@@ -11785,8 +11035,7 @@ pub struct ProtoTerm {
 /// Type derived for non-terminal ProtoToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoToken {
     pub proto_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11796,8 +11045,7 @@ pub struct ProtoToken {
 /// Type derived for non-terminal ProtoTypeDefDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoTypeDefDeclaration {
     pub r#type: Box<Type>,
     pub identifier: Box<Identifier>,
@@ -11809,8 +11057,7 @@ pub struct ProtoTypeDefDeclaration {
 /// Type derived for non-terminal ProtoTypeDefDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ProtoTypeDefDeclarationOpt {
     pub equ: Box<Equ>,
     pub array_type: Box<ArrayType>,
@@ -11820,8 +11067,7 @@ pub struct ProtoTypeDefDeclarationOpt {
 /// Type derived for non-terminal Pub
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Pub {
     pub pub_token: crate::veryl_token::VerylToken,
 }
@@ -11830,8 +11076,7 @@ pub struct Pub {
 /// Type derived for non-terminal PubTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PubTerm {
     pub pub_term: crate::veryl_token::Token, /* (?-u:\b)pub(?-u:\b) */
 }
@@ -11840,8 +11085,7 @@ pub struct PubTerm {
 /// Type derived for non-terminal PubToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct PubToken {
     pub pub_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11864,8 +11108,7 @@ pub enum PublicDescriptionItem {
 /// Type derived for non-terminal Question
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Question {
     pub question_token: crate::veryl_token::VerylToken,
 }
@@ -11874,8 +11117,7 @@ pub struct Question {
 /// Type derived for non-terminal QuestionTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuestionTerm {
     pub question_term: crate::veryl_token::Token, /* ? */
 }
@@ -11884,8 +11126,7 @@ pub struct QuestionTerm {
 /// Type derived for non-terminal QuestionToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuestionToken {
     pub question_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11895,8 +11136,7 @@ pub struct QuestionToken {
 /// Type derived for non-terminal Quote
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Quote {
     pub quote_token: crate::veryl_token::VerylToken,
 }
@@ -11905,8 +11145,7 @@ pub struct Quote {
 /// Type derived for non-terminal QuoteLBrace
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuoteLBrace {
     pub quote_l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -11915,8 +11154,7 @@ pub struct QuoteLBrace {
 /// Type derived for non-terminal QuoteLBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuoteLBraceTerm {
     pub quote_l_brace_term: crate::veryl_token::Token, /* '\{ */
 }
@@ -11925,8 +11163,7 @@ pub struct QuoteLBraceTerm {
 /// Type derived for non-terminal QuoteLBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuoteLBraceToken {
     pub quote_l_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11936,8 +11173,7 @@ pub struct QuoteLBraceToken {
 /// Type derived for non-terminal QuoteTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuoteTerm {
     pub quote_term: crate::veryl_token::Token, /* ' */
 }
@@ -11946,8 +11182,7 @@ pub struct QuoteTerm {
 /// Type derived for non-terminal QuoteToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct QuoteToken {
     pub quote_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11957,8 +11192,7 @@ pub struct QuoteToken {
 /// Type derived for non-terminal RAngle
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RAngle {
     pub r_angle_token: crate::veryl_token::VerylToken,
 }
@@ -11967,8 +11201,7 @@ pub struct RAngle {
 /// Type derived for non-terminal RAngleTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RAngleTerm {
     pub r_angle_term: crate::veryl_token::Token, /* > */
 }
@@ -11977,8 +11210,7 @@ pub struct RAngleTerm {
 /// Type derived for non-terminal RAngleToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RAngleToken {
     pub r_angle_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11988,8 +11220,7 @@ pub struct RAngleToken {
 /// Type derived for non-terminal RBrace
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RBrace {
     pub r_brace_token: crate::veryl_token::VerylToken,
 }
@@ -11998,8 +11229,7 @@ pub struct RBrace {
 /// Type derived for non-terminal RBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RBraceTerm {
     pub r_brace_term: crate::veryl_token::Token, /* } */
 }
@@ -12008,8 +11238,7 @@ pub struct RBraceTerm {
 /// Type derived for non-terminal RBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RBraceToken {
     pub r_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12019,8 +11248,7 @@ pub struct RBraceToken {
 /// Type derived for non-terminal RBracket
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RBracket {
     pub r_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -12029,8 +11257,7 @@ pub struct RBracket {
 /// Type derived for non-terminal RBracketTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RBracketTerm {
     pub r_bracket_term: crate::veryl_token::Token, /* ] */
 }
@@ -12039,8 +11266,7 @@ pub struct RBracketTerm {
 /// Type derived for non-terminal RBracketToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RBracketToken {
     pub r_bracket_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12050,8 +11276,7 @@ pub struct RBracketToken {
 /// Type derived for non-terminal RParen
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RParen {
     pub r_paren_token: crate::veryl_token::VerylToken,
 }
@@ -12060,8 +11285,7 @@ pub struct RParen {
 /// Type derived for non-terminal RParenTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RParenTerm {
     pub r_paren_term: crate::veryl_token::Token, /* ) */
 }
@@ -12070,8 +11294,7 @@ pub struct RParenTerm {
 /// Type derived for non-terminal RParenToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RParenToken {
     pub r_paren_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12081,8 +11304,7 @@ pub struct RParenToken {
 /// Type derived for non-terminal Range
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Range {
     pub expression: Box<Expression>,
     pub range_opt: Option<RangeOpt>,
@@ -12092,8 +11314,7 @@ pub struct Range {
 /// Type derived for non-terminal RangeItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeItem {
     pub range: Box<Range>,
 }
@@ -12102,8 +11323,7 @@ pub struct RangeItem {
 /// Type derived for non-terminal RangeList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeList {
     pub range_item: Box<RangeItem>,
     pub range_list_list: Vec<RangeListList>,
@@ -12114,8 +11334,7 @@ pub struct RangeList {
 /// Type derived for non-terminal RangeListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeListList {
     pub comma: Box<Comma>,
     pub range_item: Box<RangeItem>,
@@ -12125,8 +11344,7 @@ pub struct RangeListList {
 /// Type derived for non-terminal RangeListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeListOpt {
     pub comma: Box<Comma>,
 }
@@ -12145,8 +11363,7 @@ pub enum RangeOperator {
 /// Type derived for non-terminal RangeOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RangeOpt {
     pub range_operator: Box<RangeOperator>,
     pub expression: Box<Expression>,
@@ -12166,8 +11383,7 @@ pub enum RealNumber {
 /// Type derived for non-terminal Repeat
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Repeat {
     pub repeat_token: crate::veryl_token::VerylToken,
 }
@@ -12176,8 +11392,7 @@ pub struct Repeat {
 /// Type derived for non-terminal RepeatTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RepeatTerm {
     pub repeat_term: crate::veryl_token::Token, /* (?-u:\b)repeat(?-u:\b) */
 }
@@ -12186,8 +11401,7 @@ pub struct RepeatTerm {
 /// Type derived for non-terminal RepeatToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct RepeatToken {
     pub repeat_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12197,8 +11411,7 @@ pub struct RepeatToken {
 /// Type derived for non-terminal Reset
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Reset {
     pub reset_token: crate::veryl_token::VerylToken,
 }
@@ -12207,8 +11420,7 @@ pub struct Reset {
 /// Type derived for non-terminal ResetAsyncHigh
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetAsyncHigh {
     pub reset_async_high_token: crate::veryl_token::VerylToken,
 }
@@ -12217,8 +11429,7 @@ pub struct ResetAsyncHigh {
 /// Type derived for non-terminal ResetAsyncHighTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetAsyncHighTerm {
     pub reset_async_high_term: crate::veryl_token::Token, /* (?-u:\b)reset_async_high(?-u:\b) */
 }
@@ -12227,8 +11438,7 @@ pub struct ResetAsyncHighTerm {
 /// Type derived for non-terminal ResetAsyncHighToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetAsyncHighToken {
     pub reset_async_high_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12238,8 +11448,7 @@ pub struct ResetAsyncHighToken {
 /// Type derived for non-terminal ResetAsyncLow
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetAsyncLow {
     pub reset_async_low_token: crate::veryl_token::VerylToken,
 }
@@ -12248,8 +11457,7 @@ pub struct ResetAsyncLow {
 /// Type derived for non-terminal ResetAsyncLowTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetAsyncLowTerm {
     pub reset_async_low_term: crate::veryl_token::Token, /* (?-u:\b)reset_async_low(?-u:\b) */
 }
@@ -12258,8 +11466,7 @@ pub struct ResetAsyncLowTerm {
 /// Type derived for non-terminal ResetAsyncLowToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetAsyncLowToken {
     pub reset_async_low_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12269,8 +11476,7 @@ pub struct ResetAsyncLowToken {
 /// Type derived for non-terminal ResetSyncHigh
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetSyncHigh {
     pub reset_sync_high_token: crate::veryl_token::VerylToken,
 }
@@ -12279,8 +11485,7 @@ pub struct ResetSyncHigh {
 /// Type derived for non-terminal ResetSyncHighTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetSyncHighTerm {
     pub reset_sync_high_term: crate::veryl_token::Token, /* (?-u:\b)reset_sync_high(?-u:\b) */
 }
@@ -12289,8 +11494,7 @@ pub struct ResetSyncHighTerm {
 /// Type derived for non-terminal ResetSyncHighToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetSyncHighToken {
     pub reset_sync_high_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12300,8 +11504,7 @@ pub struct ResetSyncHighToken {
 /// Type derived for non-terminal ResetSyncLow
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetSyncLow {
     pub reset_sync_low_token: crate::veryl_token::VerylToken,
 }
@@ -12310,8 +11513,7 @@ pub struct ResetSyncLow {
 /// Type derived for non-terminal ResetSyncLowTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetSyncLowTerm {
     pub reset_sync_low_term: crate::veryl_token::Token, /* (?-u:\b)reset_sync_low(?-u:\b) */
 }
@@ -12320,8 +11522,7 @@ pub struct ResetSyncLowTerm {
 /// Type derived for non-terminal ResetSyncLowToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetSyncLowToken {
     pub reset_sync_low_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12331,8 +11532,7 @@ pub struct ResetSyncLowToken {
 /// Type derived for non-terminal ResetTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetTerm {
     pub reset_term: crate::veryl_token::Token, /* (?-u:\b)reset(?-u:\b) */
 }
@@ -12341,8 +11541,7 @@ pub struct ResetTerm {
 /// Type derived for non-terminal ResetToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ResetToken {
     pub reset_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12352,8 +11551,7 @@ pub struct ResetToken {
 /// Type derived for non-terminal Return
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Return {
     pub return_token: crate::veryl_token::VerylToken,
 }
@@ -12362,8 +11560,7 @@ pub struct Return {
 /// Type derived for non-terminal ReturnStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ReturnStatement {
     pub r#return: Box<Return>,
     pub expression: Box<Expression>,
@@ -12374,8 +11571,7 @@ pub struct ReturnStatement {
 /// Type derived for non-terminal ReturnTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ReturnTerm {
     pub return_term: crate::veryl_token::Token, /* (?-u:\b)return(?-u:\b) */
 }
@@ -12384,8 +11580,7 @@ pub struct ReturnTerm {
 /// Type derived for non-terminal ReturnToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ReturnToken {
     pub return_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12395,8 +11590,7 @@ pub struct ReturnToken {
 /// Type derived for non-terminal Same
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Same {
     pub same_token: crate::veryl_token::VerylToken,
 }
@@ -12405,8 +11599,7 @@ pub struct Same {
 /// Type derived for non-terminal SameTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SameTerm {
     pub same_term: crate::veryl_token::Token, /* (?-u:\b)same(?-u:\b) */
 }
@@ -12415,8 +11608,7 @@ pub struct SameTerm {
 /// Type derived for non-terminal SameToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SameToken {
     pub same_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12426,8 +11618,7 @@ pub struct SameToken {
 /// Type derived for non-terminal ScalarType
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScalarType {
     pub scalar_type_list: Vec<ScalarTypeList>,
     pub scalar_type_group: Box<ScalarTypeGroup>,
@@ -12447,8 +11638,7 @@ pub enum ScalarTypeGroup {
 /// Type derived for non-terminal ScalarTypeList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScalarTypeList {
     pub type_modifier: Box<TypeModifier>,
 }
@@ -12457,8 +11647,7 @@ pub struct ScalarTypeList {
 /// Type derived for non-terminal ScalarTypeOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScalarTypeOpt {
     pub width: Box<Width>,
 }
@@ -12467,8 +11656,7 @@ pub struct ScalarTypeOpt {
 /// Type derived for non-terminal ScopedIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScopedIdentifier {
     pub scoped_identifier_group: Box<ScopedIdentifierGroup>,
     pub scoped_identifier_list: Vec<ScopedIdentifierList>,
@@ -12488,8 +11676,7 @@ pub enum ScopedIdentifierGroup {
 /// Type derived for non-terminal ScopedIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScopedIdentifierList {
     pub colon_colon: Box<ColonColon>,
     pub identifier: Box<Identifier>,
@@ -12500,8 +11687,7 @@ pub struct ScopedIdentifierList {
 /// Type derived for non-terminal ScopedIdentifierOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScopedIdentifierOpt {
     pub with_generic_argument: Box<WithGenericArgument>,
 }
@@ -12510,8 +11696,7 @@ pub struct ScopedIdentifierOpt {
 /// Type derived for non-terminal ScopedIdentifierOpt0
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct ScopedIdentifierOpt0 {
     pub with_generic_argument: Box<WithGenericArgument>,
 }
@@ -12520,8 +11705,7 @@ pub struct ScopedIdentifierOpt0 {
 /// Type derived for non-terminal Select
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Select {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
@@ -12545,8 +11729,7 @@ pub enum SelectOperator {
 /// Type derived for non-terminal SelectOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SelectOpt {
     pub select_operator: Box<SelectOperator>,
     pub expression: Box<Expression>,
@@ -12556,8 +11739,7 @@ pub struct SelectOpt {
 /// Type derived for non-terminal Semicolon
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Semicolon {
     pub semicolon_token: crate::veryl_token::VerylToken,
 }
@@ -12566,8 +11748,7 @@ pub struct Semicolon {
 /// Type derived for non-terminal SemicolonTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SemicolonTerm {
     pub semicolon_term: crate::veryl_token::Token, /* ; */
 }
@@ -12576,8 +11757,7 @@ pub struct SemicolonTerm {
 /// Type derived for non-terminal SemicolonToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SemicolonToken {
     pub semicolon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12587,8 +11767,7 @@ pub struct SemicolonToken {
 /// Type derived for non-terminal Signed
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Signed {
     pub signed_token: crate::veryl_token::VerylToken,
 }
@@ -12597,8 +11776,7 @@ pub struct Signed {
 /// Type derived for non-terminal SignedTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SignedTerm {
     pub signed_term: crate::veryl_token::Token, /* (?-u:\b)signed(?-u:\b) */
 }
@@ -12607,8 +11785,7 @@ pub struct SignedTerm {
 /// Type derived for non-terminal SignedToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SignedToken {
     pub signed_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12618,8 +11795,7 @@ pub struct SignedToken {
 /// Type derived for non-terminal Star
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Star {
     pub star_token: crate::veryl_token::VerylToken,
 }
@@ -12628,8 +11804,7 @@ pub struct Star {
 /// Type derived for non-terminal StarTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StarTerm {
     pub star_term: crate::veryl_token::Token, /* * */
 }
@@ -12638,8 +11813,7 @@ pub struct StarTerm {
 /// Type derived for non-terminal StarToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StarToken {
     pub star_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12649,8 +11823,7 @@ pub struct StarToken {
 /// Type derived for non-terminal Start
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Start {
     pub start_token: crate::veryl_token::VerylToken,
 }
@@ -12659,8 +11832,7 @@ pub struct Start {
 /// Type derived for non-terminal StartToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StartToken {
     pub comments: Box<Comments>,
 }
@@ -12685,8 +11857,7 @@ pub enum Statement {
 /// Type derived for non-terminal StatementBlock
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlock {
     pub l_brace: Box<LBrace>,
     pub statement_block_list: Vec<StatementBlockList>,
@@ -12697,8 +11868,7 @@ pub struct StatementBlock {
 /// Type derived for non-terminal StatementBlockGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockGroup {
     pub statement_block_group_list: Vec<StatementBlockGroupList>,
     pub statement_block_group_group: Box<StatementBlockGroupGroup>,
@@ -12720,8 +11890,7 @@ pub enum StatementBlockGroupGroup {
 /// Type derived for non-terminal StatementBlockGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockGroupGroupList {
     pub statement_block_group: Box<StatementBlockGroup>,
 }
@@ -12730,8 +11899,7 @@ pub struct StatementBlockGroupGroupList {
 /// Type derived for non-terminal StatementBlockGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -12752,8 +11920,7 @@ pub enum StatementBlockItem {
 /// Type derived for non-terminal StatementBlockList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StatementBlockList {
     pub statement_block_group: Box<StatementBlockGroup>,
 }
@@ -12762,8 +11929,7 @@ pub struct StatementBlockList {
 /// Type derived for non-terminal Step
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Step {
     pub step_token: crate::veryl_token::VerylToken,
 }
@@ -12772,8 +11938,7 @@ pub struct Step {
 /// Type derived for non-terminal StepTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StepTerm {
     pub step_term: crate::veryl_token::Token, /* (?-u:\b)step(?-u:\b) */
 }
@@ -12782,8 +11947,7 @@ pub struct StepTerm {
 /// Type derived for non-terminal StepToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StepToken {
     pub step_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12793,8 +11957,7 @@ pub struct StepToken {
 /// Type derived for non-terminal Strin
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Strin {
     pub string_token: crate::veryl_token::VerylToken,
 }
@@ -12803,8 +11966,7 @@ pub struct Strin {
 /// Type derived for non-terminal StringLiteral
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StringLiteral {
     pub string_literal_token: crate::veryl_token::VerylToken,
 }
@@ -12813,8 +11975,7 @@ pub struct StringLiteral {
 /// Type derived for non-terminal StringLiteralTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StringLiteralTerm {
     pub string_literal_term: crate::veryl_token::Token, /* \u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022} */
 }
@@ -12823,8 +11984,7 @@ pub struct StringLiteralTerm {
 /// Type derived for non-terminal StringLiteralToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StringLiteralToken {
     pub string_literal_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12834,8 +11994,7 @@ pub struct StringLiteralToken {
 /// Type derived for non-terminal StringTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StringTerm {
     pub string_term: crate::veryl_token::Token, /* (?-u:\b)string(?-u:\b) */
 }
@@ -12844,8 +12003,7 @@ pub struct StringTerm {
 /// Type derived for non-terminal StringToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StringToken {
     pub string_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12855,8 +12013,7 @@ pub struct StringToken {
 /// Type derived for non-terminal Struct
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Struct {
     pub struct_token: crate::veryl_token::VerylToken,
 }
@@ -12865,8 +12022,7 @@ pub struct Struct {
 /// Type derived for non-terminal StructConstructor
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructConstructor {
     pub quote_l_brace: Box<QuoteLBrace>,
     pub struct_constructor_list: Box<StructConstructorList>,
@@ -12878,8 +12034,7 @@ pub struct StructConstructor {
 /// Type derived for non-terminal StructConstructorItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructConstructorItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -12890,8 +12045,7 @@ pub struct StructConstructorItem {
 /// Type derived for non-terminal StructConstructorList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructConstructorList {
     pub struct_constructor_item: Box<StructConstructorItem>,
     pub struct_constructor_list_list: Vec<StructConstructorListList>,
@@ -12902,8 +12056,7 @@ pub struct StructConstructorList {
 /// Type derived for non-terminal StructConstructorListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructConstructorListList {
     pub comma: Box<Comma>,
     pub struct_constructor_item: Box<StructConstructorItem>,
@@ -12913,8 +12066,7 @@ pub struct StructConstructorListList {
 /// Type derived for non-terminal StructConstructorListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructConstructorListOpt {
     pub comma: Box<Comma>,
 }
@@ -12923,8 +12075,7 @@ pub struct StructConstructorListOpt {
 /// Type derived for non-terminal StructConstructorOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructConstructorOpt {
     pub dot_dot: Box<DotDot>,
     pub defaul: Box<Defaul>,
@@ -12937,8 +12088,7 @@ pub struct StructConstructorOpt {
 /// Type derived for non-terminal StructTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructTerm {
     pub struct_term: crate::veryl_token::Token, /* (?-u:\b)struct(?-u:\b) */
 }
@@ -12947,8 +12097,7 @@ pub struct StructTerm {
 /// Type derived for non-terminal StructToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructToken {
     pub struct_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12968,8 +12117,7 @@ pub enum StructUnion {
 /// Type derived for non-terminal StructUnionDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionDeclaration {
     pub struct_union: Box<StructUnion>,
     pub identifier: Box<Identifier>,
@@ -12983,8 +12131,7 @@ pub struct StructUnionDeclaration {
 /// Type derived for non-terminal StructUnionDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -12993,8 +12140,7 @@ pub struct StructUnionDeclarationOpt {
 /// Type derived for non-terminal StructUnionGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionGroup {
     pub struct_union_group_list: Vec<StructUnionGroupList>,
     pub struct_union_group_group: Box<StructUnionGroupGroup>,
@@ -13014,8 +12160,7 @@ pub enum StructUnionGroupGroup {
 /// Type derived for non-terminal StructUnionGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -13024,8 +12169,7 @@ pub struct StructUnionGroupList {
 /// Type derived for non-terminal StructUnionItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -13036,8 +12180,7 @@ pub struct StructUnionItem {
 /// Type derived for non-terminal StructUnionList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionList {
     pub struct_union_group: Box<StructUnionGroup>,
     pub struct_union_list_list: Vec<StructUnionListList>,
@@ -13048,8 +12191,7 @@ pub struct StructUnionList {
 /// Type derived for non-terminal StructUnionListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionListList {
     pub comma: Box<Comma>,
     pub struct_union_group: Box<StructUnionGroup>,
@@ -13059,8 +12201,7 @@ pub struct StructUnionListList {
 /// Type derived for non-terminal StructUnionListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct StructUnionListOpt {
     pub comma: Box<Comma>,
 }
@@ -13069,8 +12210,7 @@ pub struct StructUnionListOpt {
 /// Type derived for non-terminal Switch
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Switch {
     pub switch_token: crate::veryl_token::VerylToken,
 }
@@ -13079,8 +12219,7 @@ pub struct Switch {
 /// Type derived for non-terminal SwitchCondition
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchCondition {
     pub expression: Box<Expression>,
     pub switch_condition_list: Vec<SwitchConditionList>,
@@ -13090,8 +12229,7 @@ pub struct SwitchCondition {
 /// Type derived for non-terminal SwitchConditionList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchConditionList {
     pub comma: Box<Comma>,
     pub expression: Box<Expression>,
@@ -13101,8 +12239,7 @@ pub struct SwitchConditionList {
 /// Type derived for non-terminal SwitchExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchExpression {
     pub switch: Box<Switch>,
     pub l_brace: Box<LBrace>,
@@ -13122,8 +12259,7 @@ pub struct SwitchExpression {
 /// Type derived for non-terminal SwitchExpressionList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchExpressionList {
     pub switch_condition: Box<SwitchCondition>,
     pub colon: Box<Colon>,
@@ -13135,8 +12271,7 @@ pub struct SwitchExpressionList {
 /// Type derived for non-terminal SwitchExpressionOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchExpressionOpt {
     pub comma: Box<Comma>,
 }
@@ -13145,8 +12280,7 @@ pub struct SwitchExpressionOpt {
 /// Type derived for non-terminal SwitchItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchItem {
     pub switch_item_group: Box<SwitchItemGroup>,
     pub colon: Box<Colon>,
@@ -13177,8 +12311,7 @@ pub enum SwitchItemGroup0 {
 /// Type derived for non-terminal SwitchStatement
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchStatement {
     pub switch: Box<Switch>,
     pub l_brace: Box<LBrace>,
@@ -13190,8 +12323,7 @@ pub struct SwitchStatement {
 /// Type derived for non-terminal SwitchStatementList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchStatementList {
     pub switch_item: Box<SwitchItem>,
 }
@@ -13200,8 +12332,7 @@ pub struct SwitchStatementList {
 /// Type derived for non-terminal SwitchTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchTerm {
     pub switch_term: crate::veryl_token::Token, /* (?-u:\b)switch(?-u:\b) */
 }
@@ -13210,8 +12341,7 @@ pub struct SwitchTerm {
 /// Type derived for non-terminal SwitchToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct SwitchToken {
     pub switch_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13221,8 +12351,7 @@ pub struct SwitchToken {
 /// Type derived for non-terminal Tri
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Tri {
     pub tri_token: crate::veryl_token::VerylToken,
 }
@@ -13231,8 +12360,7 @@ pub struct Tri {
 /// Type derived for non-terminal TriTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TriTerm {
     pub tri_term: crate::veryl_token::Token, /* (?-u:\b)tri(?-u:\b) */
 }
@@ -13241,8 +12369,7 @@ pub struct TriTerm {
 /// Type derived for non-terminal TriToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TriToken {
     pub tri_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13252,8 +12379,7 @@ pub struct TriToken {
 /// Type derived for non-terminal True
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct True {
     pub true_token: crate::veryl_token::VerylToken,
 }
@@ -13262,8 +12388,7 @@ pub struct True {
 /// Type derived for non-terminal TrueTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TrueTerm {
     pub true_term: crate::veryl_token::Token, /* (?-u:\b)true(?-u:\b) */
 }
@@ -13272,8 +12397,7 @@ pub struct TrueTerm {
 /// Type derived for non-terminal TrueToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TrueToken {
     pub true_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13283,8 +12407,7 @@ pub struct TrueToken {
 /// Type derived for non-terminal Type
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Type {
     pub type_token: crate::veryl_token::VerylToken,
 }
@@ -13293,8 +12416,7 @@ pub struct Type {
 /// Type derived for non-terminal TypeDefDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeDefDeclaration {
     pub r#type: Box<Type>,
     pub identifier: Box<Identifier>,
@@ -13307,8 +12429,7 @@ pub struct TypeDefDeclaration {
 /// Type derived for non-terminal TypeExpression
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeExpression {
     pub r#type: Box<Type>,
     pub l_paren: Box<LParen>,
@@ -13331,8 +12452,7 @@ pub enum TypeModifier {
 /// Type derived for non-terminal TypeTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeTerm {
     pub type_term: crate::veryl_token::Token, /* (?-u:\b)type(?-u:\b) */
 }
@@ -13341,8 +12461,7 @@ pub struct TypeTerm {
 /// Type derived for non-terminal TypeToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct TypeToken {
     pub type_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13352,8 +12471,7 @@ pub struct TypeToken {
 /// Type derived for non-terminal U16
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U16 {
     pub u16_token: crate::veryl_token::VerylToken,
 }
@@ -13362,8 +12480,7 @@ pub struct U16 {
 /// Type derived for non-terminal U16Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U16Term {
     pub u16_term: crate::veryl_token::Token, /* (?-u:\b)u16(?-u:\b) */
 }
@@ -13372,8 +12489,7 @@ pub struct U16Term {
 /// Type derived for non-terminal U16Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U16Token {
     pub u16_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13383,8 +12499,7 @@ pub struct U16Token {
 /// Type derived for non-terminal U32
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U32 {
     pub u32_token: crate::veryl_token::VerylToken,
 }
@@ -13393,8 +12508,7 @@ pub struct U32 {
 /// Type derived for non-terminal U32Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U32Term {
     pub u32_term: crate::veryl_token::Token, /* (?-u:\b)u32(?-u:\b) */
 }
@@ -13403,8 +12517,7 @@ pub struct U32Term {
 /// Type derived for non-terminal U32Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U32Token {
     pub u32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13414,8 +12527,7 @@ pub struct U32Token {
 /// Type derived for non-terminal U64
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U64 {
     pub u64_token: crate::veryl_token::VerylToken,
 }
@@ -13424,8 +12536,7 @@ pub struct U64 {
 /// Type derived for non-terminal U64Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U64Term {
     pub u64_term: crate::veryl_token::Token, /* (?-u:\b)u64(?-u:\b) */
 }
@@ -13434,8 +12545,7 @@ pub struct U64Term {
 /// Type derived for non-terminal U64Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U64Token {
     pub u64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13445,8 +12555,7 @@ pub struct U64Token {
 /// Type derived for non-terminal U8
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U8 {
     pub u8_token: crate::veryl_token::VerylToken,
 }
@@ -13455,8 +12564,7 @@ pub struct U8 {
 /// Type derived for non-terminal U8Term
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U8Term {
     pub u8_term: crate::veryl_token::Token, /* (?-u:\b)u8(?-u:\b) */
 }
@@ -13465,8 +12573,7 @@ pub struct U8Term {
 /// Type derived for non-terminal U8Token
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct U8Token {
     pub u8_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13476,8 +12583,7 @@ pub struct U8Token {
 /// Type derived for non-terminal UnaryOperator
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnaryOperator {
     pub unary_operator_token: crate::veryl_token::VerylToken,
 }
@@ -13486,8 +12592,7 @@ pub struct UnaryOperator {
 /// Type derived for non-terminal UnaryOperatorTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnaryOperatorTerm {
     pub unary_operator_term: crate::veryl_token::Token, /* ~&|~\||!|~ */
 }
@@ -13496,8 +12601,7 @@ pub struct UnaryOperatorTerm {
 /// Type derived for non-terminal UnaryOperatorToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnaryOperatorToken {
     pub unary_operator_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13507,8 +12611,7 @@ pub struct UnaryOperatorToken {
 /// Type derived for non-terminal Union
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Union {
     pub union_token: crate::veryl_token::VerylToken,
 }
@@ -13517,8 +12620,7 @@ pub struct Union {
 /// Type derived for non-terminal UnionTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnionTerm {
     pub union_term: crate::veryl_token::Token, /* (?-u:\b)union(?-u:\b) */
 }
@@ -13527,8 +12629,7 @@ pub struct UnionTerm {
 /// Type derived for non-terminal UnionToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnionToken {
     pub union_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13538,8 +12639,7 @@ pub struct UnionToken {
 /// Type derived for non-terminal Unsafe
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Unsafe {
     pub unsafe_token: crate::veryl_token::VerylToken,
 }
@@ -13548,8 +12648,7 @@ pub struct Unsafe {
 /// Type derived for non-terminal UnsafeBlock
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnsafeBlock {
     pub r#unsafe: Box<Unsafe>,
     pub l_paren: Box<LParen>,
@@ -13564,8 +12663,7 @@ pub struct UnsafeBlock {
 /// Type derived for non-terminal UnsafeBlockList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnsafeBlockList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -13574,8 +12672,7 @@ pub struct UnsafeBlockList {
 /// Type derived for non-terminal UnsafeTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnsafeTerm {
     pub unsafe_term: crate::veryl_token::Token, /* (?-u:\b)unsafe(?-u:\b) */
 }
@@ -13584,8 +12681,7 @@ pub struct UnsafeTerm {
 /// Type derived for non-terminal UnsafeToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UnsafeToken {
     pub unsafe_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13595,8 +12691,7 @@ pub struct UnsafeToken {
 /// Type derived for non-terminal UserDefinedType
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct UserDefinedType {
     pub scoped_identifier: Box<ScopedIdentifier>,
 }
@@ -13605,8 +12700,7 @@ pub struct UserDefinedType {
 /// Type derived for non-terminal Var
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Var {
     pub var_token: crate::veryl_token::VerylToken,
 }
@@ -13615,8 +12709,7 @@ pub struct Var {
 /// Type derived for non-terminal VarDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VarDeclaration {
     pub var: Box<Var>,
     pub identifier: Box<Identifier>,
@@ -13630,8 +12723,7 @@ pub struct VarDeclaration {
 /// Type derived for non-terminal VarDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VarDeclarationOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -13640,8 +12732,7 @@ pub struct VarDeclarationOpt {
 /// Type derived for non-terminal VarTerm
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VarTerm {
     pub var_term: crate::veryl_token::Token, /* (?-u:\b)var(?-u:\b) */
 }
@@ -13650,8 +12741,7 @@ pub struct VarTerm {
 /// Type derived for non-terminal VarToken
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VarToken {
     pub var_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13679,8 +12769,7 @@ pub enum VariableType {
 /// Type derived for non-terminal Veryl
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Veryl {
     pub start: Box<Start>,
     pub veryl_list: Vec<VerylList>,
@@ -13690,8 +12779,7 @@ pub struct Veryl {
 /// Type derived for non-terminal VerylList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct VerylList {
     pub description_group: Box<DescriptionGroup>,
 }
@@ -13700,8 +12788,7 @@ pub struct VerylList {
 /// Type derived for non-terminal Width
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct Width {
     pub l_angle: Box<LAngle>,
     pub expression: Box<Expression>,
@@ -13713,8 +12800,7 @@ pub struct Width {
 /// Type derived for non-terminal WidthList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WidthList {
     pub comma: Box<Comma>,
     pub expression: Box<Expression>,
@@ -13724,8 +12810,7 @@ pub struct WidthList {
 /// Type derived for non-terminal WithGenericArgument
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericArgument {
     pub colon_colon_l_angle: Box<ColonColonLAngle>,
     pub with_generic_argument_opt: Option<WithGenericArgumentOpt>,
@@ -13748,8 +12833,7 @@ pub enum WithGenericArgumentItem {
 /// Type derived for non-terminal WithGenericArgumentList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericArgumentList {
     pub with_generic_argument_item: Box<WithGenericArgumentItem>,
     pub with_generic_argument_list_list: Vec<WithGenericArgumentListList>,
@@ -13760,8 +12844,7 @@ pub struct WithGenericArgumentList {
 /// Type derived for non-terminal WithGenericArgumentListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericArgumentListList {
     pub comma: Box<Comma>,
     pub with_generic_argument_item: Box<WithGenericArgumentItem>,
@@ -13771,8 +12854,7 @@ pub struct WithGenericArgumentListList {
 /// Type derived for non-terminal WithGenericArgumentListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericArgumentListOpt {
     pub comma: Box<Comma>,
 }
@@ -13781,8 +12863,7 @@ pub struct WithGenericArgumentListOpt {
 /// Type derived for non-terminal WithGenericArgumentOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericArgumentOpt {
     pub with_generic_argument_list: Box<WithGenericArgumentList>,
 }
@@ -13791,8 +12872,7 @@ pub struct WithGenericArgumentOpt {
 /// Type derived for non-terminal WithGenericParameter
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericParameter {
     pub colon_colon_l_angle: Box<ColonColonLAngle>,
     pub with_generic_parameter_list: Box<WithGenericParameterList>,
@@ -13803,8 +12883,7 @@ pub struct WithGenericParameter {
 /// Type derived for non-terminal WithGenericParameterItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericParameterItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -13816,8 +12895,7 @@ pub struct WithGenericParameterItem {
 /// Type derived for non-terminal WithGenericParameterItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericParameterItemOpt {
     pub equ: Box<Equ>,
     pub with_generic_argument_item: Box<WithGenericArgumentItem>,
@@ -13827,8 +12905,7 @@ pub struct WithGenericParameterItemOpt {
 /// Type derived for non-terminal WithGenericParameterList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericParameterList {
     pub with_generic_parameter_item: Box<WithGenericParameterItem>,
     pub with_generic_parameter_list_list: Vec<WithGenericParameterListList>,
@@ -13839,8 +12916,7 @@ pub struct WithGenericParameterList {
 /// Type derived for non-terminal WithGenericParameterListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericParameterListList {
     pub comma: Box<Comma>,
     pub with_generic_parameter_item: Box<WithGenericParameterItem>,
@@ -13850,8 +12926,7 @@ pub struct WithGenericParameterListList {
 /// Type derived for non-terminal WithGenericParameterListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithGenericParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -13860,8 +12935,7 @@ pub struct WithGenericParameterListOpt {
 /// Type derived for non-terminal WithParameter
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
@@ -13873,8 +12947,7 @@ pub struct WithParameter {
 /// Type derived for non-terminal WithParameterGroup
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterGroup {
     pub with_parameter_group_list: Vec<WithParameterGroupList>,
     pub with_parameter_group_group: Box<WithParameterGroupGroup>,
@@ -13894,8 +12967,7 @@ pub enum WithParameterGroupGroup {
 /// Type derived for non-terminal WithParameterGroupList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -13904,15 +12976,13 @@ pub struct WithParameterGroupList {
 /// Type derived for non-terminal WithParameterItem
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterItem {
     pub with_parameter_item_group: Box<WithParameterItemGroup>,
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
     pub with_parameter_item_group0: Box<WithParameterItemGroup0>,
-    pub equ: Box<Equ>,
-    pub expression: Box<Expression>,
+    pub with_parameter_item_opt: Option<WithParameterItemOpt>,
 }
 
 ///
@@ -13936,11 +13006,20 @@ pub enum WithParameterItemGroup0 {
 }
 
 ///
+/// Type derived for non-terminal WithParameterItemOpt
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct WithParameterItemOpt {
+    pub equ: Box<Equ>,
+    pub expression: Box<Expression>,
+}
+
+///
 /// Type derived for non-terminal WithParameterList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterList {
     pub with_parameter_group: Box<WithParameterGroup>,
     pub with_parameter_list_list: Vec<WithParameterListList>,
@@ -13951,8 +13030,7 @@ pub struct WithParameterList {
 /// Type derived for non-terminal WithParameterListList
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterListList {
     pub comma: Box<Comma>,
     pub with_parameter_group: Box<WithParameterGroup>,
@@ -13962,8 +13040,7 @@ pub struct WithParameterListList {
 /// Type derived for non-terminal WithParameterListOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -13972,8 +13049,7 @@ pub struct WithParameterListOpt {
 /// Type derived for non-terminal WithParameterOpt
 ///
 #[allow(dead_code)]
-#[derive(Builder, Debug, Clone)]
-#[builder(crate = "parol_runtime::derive_builder")]
+#[derive(Debug, Clone)]
 pub struct WithParameterOpt {
     pub with_parameter_list: Box<WithParameterList>,
 }
@@ -14733,11 +13809,14 @@ pub enum ASTType {
     WithParameterItem(WithParameterItem),
     WithParameterItemGroup(WithParameterItemGroup),
     WithParameterItemGroup0(WithParameterItemGroup0),
+    WithParameterItemOpt(Option<WithParameterItemOpt>),
     WithParameterList(WithParameterList),
     WithParameterListList(Vec<WithParameterListList>),
     WithParameterListOpt(Option<WithParameterListOpt>),
     WithParameterOpt(Option<WithParameterOpt>),
 }
+
+// -------------------------------------------------------------------------------------------------
 
 /// Auto-implemented adapter grammar
 ///
@@ -33433,7 +32512,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 836:
     ///
-    /// `WithParameterItem: WithParameterItemGroup Identifier Colon WithParameterItemGroup0 Equ Expression;`
+    /// `WithParameterItem: WithParameterItemGroup Identifier Colon WithParameterItemGroup0 WithParameterItemOpt /* Option */;`
     ///
     #[parol_runtime::function_name::named]
     fn with_parameter_item(
@@ -33442,13 +32521,12 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         _identifier: &ParseTreeType<'t>,
         _colon: &ParseTreeType<'t>,
         _with_parameter_item_group0: &ParseTreeType<'t>,
-        _equ: &ParseTreeType<'t>,
-        _expression: &ParseTreeType<'t>,
+        _with_parameter_item_opt: &ParseTreeType<'t>,
     ) -> Result<()> {
         let context = function_name!();
         trace!("{}", self.trace_item_stack(context));
-        let expression = pop_item!(self, expression, Expression, context);
-        let equ = pop_item!(self, equ, Equ, context);
+        let with_parameter_item_opt =
+            pop_item!(self, with_parameter_item_opt, WithParameterItemOpt, context);
         let with_parameter_item_group0 = pop_item!(
             self,
             with_parameter_item_group0,
@@ -33468,8 +32546,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
             identifier: Box::new(identifier),
             colon: Box::new(colon),
             with_parameter_item_group0: Box::new(with_parameter_item_group0),
-            equ: Box::new(equ),
-            expression: Box::new(expression),
+            with_parameter_item_opt,
         };
         // Calling user action here
         self.user_grammar
@@ -33567,6 +32644,43 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 841:
     ///
+    /// `WithParameterItemOpt /* Option<T>::Some */: Equ Expression;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn with_parameter_item_opt_0(
+        &mut self,
+        _equ: &ParseTreeType<'t>,
+        _expression: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let expression = pop_item!(self, expression, Expression, context);
+        let equ = pop_item!(self, equ, Equ, context);
+        let with_parameter_item_opt_0_built = WithParameterItemOpt {
+            equ: Box::new(equ),
+            expression: Box::new(expression),
+        };
+        self.push(
+            ASTType::WithParameterItemOpt(Some(with_parameter_item_opt_0_built)),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 842:
+    ///
+    /// `WithParameterItemOpt /* Option<T>::None */: ;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn with_parameter_item_opt_1(&mut self) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        self.push(ASTType::WithParameterItemOpt(None), context);
+        Ok(())
+    }
+
+    /// Semantic action for production 843:
+    ///
     /// `GenericBound: Type;`
     ///
     #[parol_runtime::function_name::named]
@@ -33584,7 +32698,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 842:
+    /// Semantic action for production 844:
     ///
     /// `GenericBound: Inst ScopedIdentifier;`
     ///
@@ -33609,7 +32723,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 843:
+    /// Semantic action for production 845:
     ///
     /// `GenericBound: GenericProtoBound;`
     ///
@@ -33628,7 +32742,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 844:
+    /// Semantic action for production 846:
     ///
     /// `WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;`
     ///
@@ -33664,7 +32778,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 845:
+    /// Semantic action for production 847:
     ///
     /// `WithGenericParameterList: WithGenericParameterItem WithGenericParameterListList /* Vec */ WithGenericParameterListOpt /* Option */;`
     ///
@@ -33710,7 +32824,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 846:
+    /// Semantic action for production 848:
     ///
     /// `WithGenericParameterListList /* Vec<T>::Push */: Comma WithGenericParameterItem WithGenericParameterListList;`
     ///
@@ -33749,7 +32863,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 847:
+    /// Semantic action for production 849:
     ///
     /// `WithGenericParameterListList /* Vec<T>::New */: ;`
     ///
@@ -33765,7 +32879,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 848:
+    /// Semantic action for production 850:
     ///
     /// `WithGenericParameterListOpt /* Option<T>::Some */: Comma;`
     ///
@@ -33784,7 +32898,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 849:
+    /// Semantic action for production 851:
     ///
     /// `WithGenericParameterListOpt /* Option<T>::None */: ;`
     ///
@@ -33796,7 +32910,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 850:
+    /// Semantic action for production 852:
     ///
     /// `WithGenericParameterItem: Identifier Colon GenericBound WithGenericParameterItemOpt /* Option */;`
     ///
@@ -33835,7 +32949,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 851:
+    /// Semantic action for production 853:
     ///
     /// `WithGenericParameterItemOpt /* Option<T>::Some */: Equ WithGenericArgumentItem;`
     ///
@@ -33865,7 +32979,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 852:
+    /// Semantic action for production 854:
     ///
     /// `WithGenericParameterItemOpt /* Option<T>::None */: ;`
     ///
@@ -33877,7 +32991,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 853:
+    /// Semantic action for production 855:
     ///
     /// `GenericProtoBound: ScopedIdentifier;`
     ///
@@ -33901,7 +33015,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 854:
+    /// Semantic action for production 856:
     ///
     /// `GenericProtoBound: FixedType;`
     ///
@@ -33924,7 +33038,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 855:
+    /// Semantic action for production 857:
     ///
     /// `WithGenericArgument: ColonColonLAngle %push(Generic) WithGenericArgumentOpt /* Option */ RAngle %pop();`
     ///
@@ -33960,7 +33074,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 856:
+    /// Semantic action for production 858:
     ///
     /// `WithGenericArgumentOpt /* Option<T>::Some */: WithGenericArgumentList;`
     ///
@@ -33987,7 +33101,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 857:
+    /// Semantic action for production 859:
     ///
     /// `WithGenericArgumentOpt /* Option<T>::None */: ;`
     ///
@@ -33999,7 +33113,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 858:
+    /// Semantic action for production 860:
     ///
     /// `WithGenericArgumentList: WithGenericArgumentItem WithGenericArgumentListList /* Vec */ WithGenericArgumentListOpt /* Option */;`
     ///
@@ -34045,7 +33159,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 859:
+    /// Semantic action for production 861:
     ///
     /// `WithGenericArgumentListList /* Vec<T>::Push */: Comma WithGenericArgumentItem WithGenericArgumentListList;`
     ///
@@ -34084,7 +33198,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 860:
+    /// Semantic action for production 862:
     ///
     /// `WithGenericArgumentListList /* Vec<T>::New */: ;`
     ///
@@ -34100,7 +33214,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 861:
+    /// Semantic action for production 863:
     ///
     /// `WithGenericArgumentListOpt /* Option<T>::Some */: Comma;`
     ///
@@ -34119,7 +33233,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 862:
+    /// Semantic action for production 864:
     ///
     /// `WithGenericArgumentListOpt /* Option<T>::None */: ;`
     ///
@@ -34131,7 +33245,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 863:
+    /// Semantic action for production 865:
     ///
     /// `WithGenericArgumentItem: ExpressionIdentifier;`
     ///
@@ -34159,7 +33273,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 864:
+    /// Semantic action for production 866:
     ///
     /// `WithGenericArgumentItem: FixedType;`
     ///
@@ -34183,7 +33297,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 865:
+    /// Semantic action for production 867:
     ///
     /// `WithGenericArgumentItem: Number;`
     ///
@@ -34207,7 +33321,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 866:
+    /// Semantic action for production 868:
     ///
     /// `WithGenericArgumentItem: BooleanLiteral;`
     ///
@@ -34231,7 +33345,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 867:
+    /// Semantic action for production 869:
     ///
     /// `PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;`
     ///
@@ -34260,7 +33374,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 868:
+    /// Semantic action for production 870:
     ///
     /// `PortDeclarationOpt /* Option<T>::Some */: PortDeclarationList;`
     ///
@@ -34280,7 +33394,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 869:
+    /// Semantic action for production 871:
     ///
     /// `PortDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -34292,7 +33406,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 870:
+    /// Semantic action for production 872:
     ///
     /// `PortDeclarationList: PortDeclarationGroup PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;`
     ///
@@ -34334,7 +33448,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 871:
+    /// Semantic action for production 873:
     ///
     /// `PortDeclarationListList /* Vec<T>::Push */: Comma PortDeclarationGroup PortDeclarationListList;`
     ///
@@ -34369,7 +33483,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 872:
+    /// Semantic action for production 874:
     ///
     /// `PortDeclarationListList /* Vec<T>::New */: ;`
     ///
@@ -34385,7 +33499,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 873:
+    /// Semantic action for production 875:
     ///
     /// `PortDeclarationListOpt /* Option<T>::Some */: Comma;`
     ///
@@ -34404,7 +33518,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 874:
+    /// Semantic action for production 876:
     ///
     /// `PortDeclarationListOpt /* Option<T>::None */: ;`
     ///
@@ -34416,7 +33530,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 875:
+    /// Semantic action for production 877:
     ///
     /// `PortDeclarationGroup: PortDeclarationGroupList /* Vec */ PortDeclarationGroupGroup;`
     ///
@@ -34454,7 +33568,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 876:
+    /// Semantic action for production 878:
     ///
     /// `PortDeclarationGroupGroup: LBrace PortDeclarationList RBrace;`
     ///
@@ -34488,7 +33602,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 877:
+    /// Semantic action for production 879:
     ///
     /// `PortDeclarationGroupGroup: PortDeclarationItem;`
     ///
@@ -34513,7 +33627,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 878:
+    /// Semantic action for production 880:
     ///
     /// `PortDeclarationGroupList /* Vec<T>::Push */: Attribute PortDeclarationGroupList;`
     ///
@@ -34544,7 +33658,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 879:
+    /// Semantic action for production 881:
     ///
     /// `PortDeclarationGroupList /* Vec<T>::New */: ;`
     ///
@@ -34560,7 +33674,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 880:
+    /// Semantic action for production 882:
     ///
     /// `PortDeclarationItem: Identifier %push(ClockDomain) Colon PortDeclarationItemGroup;`
     ///
@@ -34596,7 +33710,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 881:
+    /// Semantic action for production 883:
     ///
     /// `PortDeclarationItemGroup: PortTypeConcrete;`
     ///
@@ -34620,7 +33734,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 882:
+    /// Semantic action for production 884:
     ///
     /// `PortDeclarationItemGroup: PortTypeAbstract;`
     ///
@@ -34644,7 +33758,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 883:
+    /// Semantic action for production 885:
     ///
     /// `PortTypeConcrete: Direction PortTypeConcreteOpt /* Option */ %pop() ArrayType PortTypeConcreteOpt0 /* Option */;`
     ///
@@ -34677,7 +33791,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 884:
+    /// Semantic action for production 886:
     ///
     /// `PortTypeConcreteOpt0 /* Option<T>::Some */: Equ PortDefaultValue;`
     ///
@@ -34702,7 +33816,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 885:
+    /// Semantic action for production 887:
     ///
     /// `PortTypeConcreteOpt0 /* Option<T>::None */: ;`
     ///
@@ -34714,7 +33828,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 886:
+    /// Semantic action for production 888:
     ///
     /// `PortTypeConcreteOpt /* Option<T>::Some */: ClockDomain;`
     ///
@@ -34733,7 +33847,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 887:
+    /// Semantic action for production 889:
     ///
     /// `PortTypeConcreteOpt /* Option<T>::None */: ;`
     ///
@@ -34745,7 +33859,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 888:
+    /// Semantic action for production 890:
     ///
     /// `PortDefaultValue: Expression;`
     ///
@@ -34764,7 +33878,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 889:
+    /// Semantic action for production 891:
     ///
     /// `PortTypeAbstract: PortTypeAbstractOpt /* Option */ %pop() Interface PortTypeAbstractOpt0 /* Option */ PortTypeAbstractOpt1 /* Option */;`
     ///
@@ -34798,7 +33912,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 890:
+    /// Semantic action for production 892:
     ///
     /// `PortTypeAbstractOpt1 /* Option<T>::Some */: Array;`
     ///
@@ -34817,7 +33931,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 891:
+    /// Semantic action for production 893:
     ///
     /// `PortTypeAbstractOpt1 /* Option<T>::None */: ;`
     ///
@@ -34829,7 +33943,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 892:
+    /// Semantic action for production 894:
     ///
     /// `PortTypeAbstractOpt0 /* Option<T>::Some */: ColonColon Identifier;`
     ///
@@ -34854,7 +33968,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 893:
+    /// Semantic action for production 895:
     ///
     /// `PortTypeAbstractOpt0 /* Option<T>::None */: ;`
     ///
@@ -34866,7 +33980,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 894:
+    /// Semantic action for production 896:
     ///
     /// `PortTypeAbstractOpt /* Option<T>::Some */: ClockDomain;`
     ///
@@ -34885,7 +33999,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 895:
+    /// Semantic action for production 897:
     ///
     /// `PortTypeAbstractOpt /* Option<T>::None */: ;`
     ///
@@ -34897,7 +34011,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 896:
+    /// Semantic action for production 898:
     ///
     /// `Direction: Input;`
     ///
@@ -34916,7 +34030,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 897:
+    /// Semantic action for production 899:
     ///
     /// `Direction: Output;`
     ///
@@ -34935,7 +34049,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 898:
+    /// Semantic action for production 900:
     ///
     /// `Direction: Inout;`
     ///
@@ -34954,7 +34068,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 899:
+    /// Semantic action for production 901:
     ///
     /// `Direction: Modport;`
     ///
@@ -34973,7 +34087,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 900:
+    /// Semantic action for production 902:
     ///
     /// `Direction: Import;`
     ///
@@ -34992,7 +34106,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 901:
+    /// Semantic action for production 903:
     ///
     /// `FunctionDeclaration: Function Identifier FunctionDeclarationOpt /* Option */ FunctionDeclarationOpt0 /* Option */ FunctionDeclarationOpt1 /* Option */ StatementBlock;`
     ///
@@ -35047,7 +34161,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 902:
+    /// Semantic action for production 904:
     ///
     /// `FunctionDeclarationOpt1 /* Option<T>::Some */: MinusGT ScalarType;`
     ///
@@ -35072,7 +34186,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 903:
+    /// Semantic action for production 905:
     ///
     /// `FunctionDeclarationOpt1 /* Option<T>::None */: ;`
     ///
@@ -35084,7 +34198,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 904:
+    /// Semantic action for production 906:
     ///
     /// `FunctionDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;`
     ///
@@ -35103,7 +34217,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 905:
+    /// Semantic action for production 907:
     ///
     /// `FunctionDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -35115,7 +34229,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 906:
+    /// Semantic action for production 908:
     ///
     /// `FunctionDeclarationOpt /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -35138,7 +34252,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 907:
+    /// Semantic action for production 909:
     ///
     /// `FunctionDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -35150,7 +34264,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 908:
+    /// Semantic action for production 910:
     ///
     /// `ImportDeclaration: Import ScopedIdentifier ImportDeclarationOpt /* Option */ Semicolon;`
     ///
@@ -35185,7 +34299,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 909:
+    /// Semantic action for production 911:
     ///
     /// `ImportDeclarationOpt /* Option<T>::Some */: ColonColon Star;`
     ///
@@ -35210,7 +34324,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 910:
+    /// Semantic action for production 912:
     ///
     /// `ImportDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -35222,7 +34336,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 911:
+    /// Semantic action for production 913:
     ///
     /// `UnsafeBlock: Unsafe LParen Identifier RParen LBrace UnsafeBlockList /* Vec */ RBrace;`
     ///
@@ -35262,7 +34376,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 912:
+    /// Semantic action for production 914:
     ///
     /// `UnsafeBlockList /* Vec<T>::Push */: GenerateGroup UnsafeBlockList;`
     ///
@@ -35285,7 +34399,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 913:
+    /// Semantic action for production 915:
     ///
     /// `UnsafeBlockList /* Vec<T>::New */: ;`
     ///
@@ -35298,7 +34412,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 914:
+    /// Semantic action for production 916:
     ///
     /// `ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ ModuleDeclarationOpt1 /* Option */ ModuleDeclarationOpt2 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;`
     ///
@@ -35368,7 +34482,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 915:
+    /// Semantic action for production 917:
     ///
     /// `ModuleDeclarationList /* Vec<T>::Push */: ModuleGroup ModuleDeclarationList;`
     ///
@@ -35399,7 +34513,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 916:
+    /// Semantic action for production 918:
     ///
     /// `ModuleDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -35415,7 +34529,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 917:
+    /// Semantic action for production 919:
     ///
     /// `ModuleDeclarationOpt2 /* Option<T>::Some */: PortDeclaration;`
     ///
@@ -35434,7 +34548,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 918:
+    /// Semantic action for production 920:
     ///
     /// `ModuleDeclarationOpt2 /* Option<T>::None */: ;`
     ///
@@ -35446,7 +34560,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 919:
+    /// Semantic action for production 921:
     ///
     /// `ModuleDeclarationOpt1 /* Option<T>::Some */: WithParameter;`
     ///
@@ -35465,7 +34579,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 920:
+    /// Semantic action for production 922:
     ///
     /// `ModuleDeclarationOpt1 /* Option<T>::None */: ;`
     ///
@@ -35477,7 +34591,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 921:
+    /// Semantic action for production 923:
     ///
     /// `ModuleDeclarationOpt0 /* Option<T>::Some */: For ScopedIdentifier;`
     ///
@@ -35502,7 +34616,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 922:
+    /// Semantic action for production 924:
     ///
     /// `ModuleDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -35514,7 +34628,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 923:
+    /// Semantic action for production 925:
     ///
     /// `ModuleDeclarationOpt /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -35537,7 +34651,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 924:
+    /// Semantic action for production 926:
     ///
     /// `ModuleDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -35549,7 +34663,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 925:
+    /// Semantic action for production 927:
     ///
     /// `ModuleGroup: ModuleGroupList /* Vec */ ModuleGroupGroup;`
     ///
@@ -35574,7 +34688,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 926:
+    /// Semantic action for production 928:
     ///
     /// `ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;`
     ///
@@ -35605,7 +34719,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 927:
+    /// Semantic action for production 929:
     ///
     /// `ModuleGroupGroupList /* Vec<T>::Push */: ModuleGroup ModuleGroupGroupList;`
     ///
@@ -35632,7 +34746,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 928:
+    /// Semantic action for production 930:
     ///
     /// `ModuleGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -35648,7 +34762,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 929:
+    /// Semantic action for production 931:
     ///
     /// `ModuleGroupGroup: ModuleItem;`
     ///
@@ -35668,7 +34782,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 930:
+    /// Semantic action for production 932:
     ///
     /// `ModuleGroupList /* Vec<T>::Push */: Attribute ModuleGroupList;`
     ///
@@ -35691,7 +34805,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 931:
+    /// Semantic action for production 933:
     ///
     /// `ModuleGroupList /* Vec<T>::New */: ;`
     ///
@@ -35704,7 +34818,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 932:
+    /// Semantic action for production 934:
     ///
     /// `ModuleItem: GenerateItem;`
     ///
@@ -35722,7 +34836,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 933:
+    /// Semantic action for production 935:
     ///
     /// `InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ InterfaceDeclarationOpt0 /* Option */ InterfaceDeclarationOpt1 /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;`
     ///
@@ -35788,7 +34902,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 934:
+    /// Semantic action for production 936:
     ///
     /// `InterfaceDeclarationList /* Vec<T>::Push */: InterfaceGroup InterfaceDeclarationList;`
     ///
@@ -35819,7 +34933,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 935:
+    /// Semantic action for production 937:
     ///
     /// `InterfaceDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -35835,7 +34949,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 936:
+    /// Semantic action for production 938:
     ///
     /// `InterfaceDeclarationOpt1 /* Option<T>::Some */: WithParameter;`
     ///
@@ -35854,7 +34968,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 937:
+    /// Semantic action for production 939:
     ///
     /// `InterfaceDeclarationOpt1 /* Option<T>::None */: ;`
     ///
@@ -35866,7 +34980,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 938:
+    /// Semantic action for production 940:
     ///
     /// `InterfaceDeclarationOpt0 /* Option<T>::Some */: For ScopedIdentifier;`
     ///
@@ -35891,7 +35005,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 939:
+    /// Semantic action for production 941:
     ///
     /// `InterfaceDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -35903,7 +35017,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 940:
+    /// Semantic action for production 942:
     ///
     /// `InterfaceDeclarationOpt /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -35926,7 +35040,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 941:
+    /// Semantic action for production 943:
     ///
     /// `InterfaceDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -35938,7 +35052,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 942:
+    /// Semantic action for production 944:
     ///
     /// `InterfaceGroup: InterfaceGroupList /* Vec */ InterfaceGroupGroup;`
     ///
@@ -35964,7 +35078,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 943:
+    /// Semantic action for production 945:
     ///
     /// `InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;`
     ///
@@ -36000,7 +35114,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 944:
+    /// Semantic action for production 946:
     ///
     /// `InterfaceGroupGroupList /* Vec<T>::Push */: InterfaceGroup InterfaceGroupGroupList;`
     ///
@@ -36031,7 +35145,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 945:
+    /// Semantic action for production 947:
     ///
     /// `InterfaceGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -36047,7 +35161,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 946:
+    /// Semantic action for production 948:
     ///
     /// `InterfaceGroupGroup: InterfaceItem;`
     ///
@@ -36068,7 +35182,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 947:
+    /// Semantic action for production 949:
     ///
     /// `InterfaceGroupList /* Vec<T>::Push */: Attribute InterfaceGroupList;`
     ///
@@ -36092,7 +35206,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 948:
+    /// Semantic action for production 950:
     ///
     /// `InterfaceGroupList /* Vec<T>::New */: ;`
     ///
@@ -36108,7 +35222,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 949:
+    /// Semantic action for production 951:
     ///
     /// `InterfaceItem: GenerateItem;`
     ///
@@ -36127,7 +35241,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 950:
+    /// Semantic action for production 952:
     ///
     /// `InterfaceItem: ModportDeclaration;`
     ///
@@ -36146,7 +35260,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 951:
+    /// Semantic action for production 953:
     ///
     /// `GenerateIfDeclaration: If Expression GenerateNamedBlock GenerateIfDeclarationList /* Vec */ GenerateIfDeclarationOpt /* Option */;`
     ///
@@ -36194,7 +35308,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 952:
+    /// Semantic action for production 954:
     ///
     /// `GenerateIfDeclarationList /* Vec<T>::Push */: Else If Expression GenerateOptionalNamedBlock GenerateIfDeclarationList;`
     ///
@@ -36239,7 +35353,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 953:
+    /// Semantic action for production 955:
     ///
     /// `GenerateIfDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -36255,7 +35369,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 954:
+    /// Semantic action for production 956:
     ///
     /// `GenerateIfDeclarationOpt /* Option<T>::Some */: Else GenerateOptionalNamedBlock;`
     ///
@@ -36285,7 +35399,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 955:
+    /// Semantic action for production 957:
     ///
     /// `GenerateIfDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -36297,7 +35411,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 956:
+    /// Semantic action for production 958:
     ///
     /// `GenerateForDeclaration: For Identifier In Range GenerateForDeclarationOpt /* Option */ GenerateNamedBlock;`
     ///
@@ -36343,7 +35457,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 957:
+    /// Semantic action for production 959:
     ///
     /// `GenerateForDeclarationOpt /* Option<T>::Some */: Step AssignmentOperator Expression;`
     ///
@@ -36371,7 +35485,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 958:
+    /// Semantic action for production 960:
     ///
     /// `GenerateForDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -36383,7 +35497,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 959:
+    /// Semantic action for production 961:
     ///
     /// `GenerateBlockDeclaration: GenerateNamedBlock;`
     ///
@@ -36409,7 +35523,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 960:
+    /// Semantic action for production 962:
     ///
     /// `GenerateNamedBlock: Colon Identifier LBrace GenerateNamedBlockList /* Vec */ RBrace;`
     ///
@@ -36451,7 +35565,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 961:
+    /// Semantic action for production 963:
     ///
     /// `GenerateNamedBlockList /* Vec<T>::Push */: GenerateGroup GenerateNamedBlockList;`
     ///
@@ -36482,7 +35596,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 962:
+    /// Semantic action for production 964:
     ///
     /// `GenerateNamedBlockList /* Vec<T>::New */: ;`
     ///
@@ -36498,7 +35612,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 963:
+    /// Semantic action for production 965:
     ///
     /// `GenerateOptionalNamedBlock: GenerateOptionalNamedBlockOpt /* Option */ LBrace GenerateOptionalNamedBlockList /* Vec */ RBrace;`
     ///
@@ -36542,7 +35656,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 964:
+    /// Semantic action for production 966:
     ///
     /// `GenerateOptionalNamedBlockList /* Vec<T>::Push */: GenerateGroup GenerateOptionalNamedBlockList;`
     ///
@@ -36573,7 +35687,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 965:
+    /// Semantic action for production 967:
     ///
     /// `GenerateOptionalNamedBlockList /* Vec<T>::New */: ;`
     ///
@@ -36589,7 +35703,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 966:
+    /// Semantic action for production 968:
     ///
     /// `GenerateOptionalNamedBlockOpt /* Option<T>::Some */: Colon Identifier;`
     ///
@@ -36614,7 +35728,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 967:
+    /// Semantic action for production 969:
     ///
     /// `GenerateOptionalNamedBlockOpt /* Option<T>::None */: ;`
     ///
@@ -36626,7 +35740,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 968:
+    /// Semantic action for production 970:
     ///
     /// `GenerateGroup: GenerateGroupList /* Vec */ GenerateGroupGroup;`
     ///
@@ -36652,7 +35766,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 969:
+    /// Semantic action for production 971:
     ///
     /// `GenerateGroupGroup: LBrace GenerateGroupGroupList /* Vec */ RBrace;`
     ///
@@ -36687,7 +35801,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 970:
+    /// Semantic action for production 972:
     ///
     /// `GenerateGroupGroupList /* Vec<T>::Push */: GenerateGroup GenerateGroupGroupList;`
     ///
@@ -36718,7 +35832,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 971:
+    /// Semantic action for production 973:
     ///
     /// `GenerateGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -36734,7 +35848,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 972:
+    /// Semantic action for production 974:
     ///
     /// `GenerateGroupGroup: GenerateItem;`
     ///
@@ -36755,7 +35869,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 973:
+    /// Semantic action for production 975:
     ///
     /// `GenerateGroupList /* Vec<T>::Push */: Attribute GenerateGroupList;`
     ///
@@ -36779,7 +35893,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 974:
+    /// Semantic action for production 976:
     ///
     /// `GenerateGroupList /* Vec<T>::New */: ;`
     ///
@@ -36795,7 +35909,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 975:
+    /// Semantic action for production 977:
     ///
     /// `GenerateItem: LetDeclaration;`
     ///
@@ -36814,7 +35928,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 976:
+    /// Semantic action for production 978:
     ///
     /// `GenerateItem: VarDeclaration;`
     ///
@@ -36833,7 +35947,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 977:
+    /// Semantic action for production 979:
     ///
     /// `GenerateItem: InstDeclaration;`
     ///
@@ -36852,7 +35966,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 978:
+    /// Semantic action for production 980:
     ///
     /// `GenerateItem: ConstDeclaration;`
     ///
@@ -36871,7 +35985,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 979:
+    /// Semantic action for production 981:
     ///
     /// `GenerateItem: AlwaysFfDeclaration;`
     ///
@@ -36891,7 +36005,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 980:
+    /// Semantic action for production 982:
     ///
     /// `GenerateItem: AlwaysCombDeclaration;`
     ///
@@ -36915,7 +36029,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 981:
+    /// Semantic action for production 983:
     ///
     /// `GenerateItem: AssignDeclaration;`
     ///
@@ -36934,7 +36048,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 982:
+    /// Semantic action for production 984:
     ///
     /// `GenerateItem: ConnectDeclaration;`
     ///
@@ -36953,7 +36067,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 983:
+    /// Semantic action for production 985:
     ///
     /// `GenerateItem: FunctionDeclaration;`
     ///
@@ -36973,7 +36087,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 984:
+    /// Semantic action for production 986:
     ///
     /// `GenerateItem: GenerateIfDeclaration;`
     ///
@@ -36997,7 +36111,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 985:
+    /// Semantic action for production 987:
     ///
     /// `GenerateItem: GenerateForDeclaration;`
     ///
@@ -37021,7 +36135,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 986:
+    /// Semantic action for production 988:
     ///
     /// `GenerateItem: GenerateBlockDeclaration;`
     ///
@@ -37045,7 +36159,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 987:
+    /// Semantic action for production 989:
     ///
     /// `GenerateItem: TypeDefDeclaration;`
     ///
@@ -37065,7 +36179,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 988:
+    /// Semantic action for production 990:
     ///
     /// `GenerateItem: EnumDeclaration;`
     ///
@@ -37084,7 +36198,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 989:
+    /// Semantic action for production 991:
     ///
     /// `GenerateItem: StructUnionDeclaration;`
     ///
@@ -37108,7 +36222,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 990:
+    /// Semantic action for production 992:
     ///
     /// `GenerateItem: ImportDeclaration;`
     ///
@@ -37127,7 +36241,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 991:
+    /// Semantic action for production 993:
     ///
     /// `GenerateItem: AliasDeclaration;`
     ///
@@ -37146,7 +36260,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 992:
+    /// Semantic action for production 994:
     ///
     /// `GenerateItem: InitialDeclaration;`
     ///
@@ -37165,7 +36279,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 993:
+    /// Semantic action for production 995:
     ///
     /// `GenerateItem: FinalDeclaration;`
     ///
@@ -37184,7 +36298,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 994:
+    /// Semantic action for production 996:
     ///
     /// `GenerateItem: UnsafeBlock;`
     ///
@@ -37203,7 +36317,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 995:
+    /// Semantic action for production 997:
     ///
     /// `GenerateItem: EmbedDeclaration;`
     ///
@@ -37222,7 +36336,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 996:
+    /// Semantic action for production 998:
     ///
     /// `PackageDeclaration: Package Identifier PackageDeclarationOpt /* Option */ PackageDeclarationOpt0 /* Option */ LBrace PackageDeclarationList /* Vec */ RBrace;`
     ///
@@ -37280,7 +36394,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 997:
+    /// Semantic action for production 999:
     ///
     /// `PackageDeclarationList /* Vec<T>::Push */: PackageGroup PackageDeclarationList;`
     ///
@@ -37311,7 +36425,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 998:
+    /// Semantic action for production 1000:
     ///
     /// `PackageDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -37327,7 +36441,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 999:
+    /// Semantic action for production 1001:
     ///
     /// `PackageDeclarationOpt0 /* Option<T>::Some */: For ScopedIdentifier;`
     ///
@@ -37352,7 +36466,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1000:
+    /// Semantic action for production 1002:
     ///
     /// `PackageDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -37364,7 +36478,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1001:
+    /// Semantic action for production 1003:
     ///
     /// `PackageDeclarationOpt /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -37387,7 +36501,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1002:
+    /// Semantic action for production 1004:
     ///
     /// `PackageDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -37399,7 +36513,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1003:
+    /// Semantic action for production 1005:
     ///
     /// `PackageGroup: PackageGroupList /* Vec */ PackageGroupGroup;`
     ///
@@ -37424,7 +36538,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1004:
+    /// Semantic action for production 1006:
     ///
     /// `PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;`
     ///
@@ -37459,7 +36573,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1005:
+    /// Semantic action for production 1007:
     ///
     /// `PackageGroupGroupList /* Vec<T>::Push */: PackageGroup PackageGroupGroupList;`
     ///
@@ -37490,7 +36604,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1006:
+    /// Semantic action for production 1008:
     ///
     /// `PackageGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -37506,7 +36620,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1007:
+    /// Semantic action for production 1009:
     ///
     /// `PackageGroupGroup: PackageItem;`
     ///
@@ -37527,7 +36641,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1008:
+    /// Semantic action for production 1010:
     ///
     /// `PackageGroupList /* Vec<T>::Push */: Attribute PackageGroupList;`
     ///
@@ -37550,7 +36664,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1009:
+    /// Semantic action for production 1011:
     ///
     /// `PackageGroupList /* Vec<T>::New */: ;`
     ///
@@ -37566,7 +36680,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1010:
+    /// Semantic action for production 1012:
     ///
     /// `PackageItem: ConstDeclaration;`
     ///
@@ -37585,7 +36699,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1011:
+    /// Semantic action for production 1013:
     ///
     /// `PackageItem: TypeDefDeclaration;`
     ///
@@ -37605,7 +36719,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1012:
+    /// Semantic action for production 1014:
     ///
     /// `PackageItem: EnumDeclaration;`
     ///
@@ -37624,7 +36738,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1013:
+    /// Semantic action for production 1015:
     ///
     /// `PackageItem: StructUnionDeclaration;`
     ///
@@ -37648,7 +36762,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1014:
+    /// Semantic action for production 1016:
     ///
     /// `PackageItem: FunctionDeclaration;`
     ///
@@ -37668,7 +36782,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1015:
+    /// Semantic action for production 1017:
     ///
     /// `PackageItem: ImportDeclaration;`
     ///
@@ -37687,7 +36801,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1016:
+    /// Semantic action for production 1018:
     ///
     /// `PackageItem: AliasDeclaration;`
     ///
@@ -37706,7 +36820,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1017:
+    /// Semantic action for production 1019:
     ///
     /// `PackageItem: EmbedDeclaration;`
     ///
@@ -37725,7 +36839,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1018:
+    /// Semantic action for production 1020:
     ///
     /// `AliasDeclaration: Alias AliasDeclarationGroup Identifier Equ ScopedIdentifier Semicolon;`
     ///
@@ -37767,7 +36881,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1019:
+    /// Semantic action for production 1021:
     ///
     /// `AliasDeclarationGroup: Module;`
     ///
@@ -37788,7 +36902,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1020:
+    /// Semantic action for production 1022:
     ///
     /// `AliasDeclarationGroup: Interface;`
     ///
@@ -37809,7 +36923,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1021:
+    /// Semantic action for production 1023:
     ///
     /// `AliasDeclarationGroup: Package;`
     ///
@@ -37830,7 +36944,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1022:
+    /// Semantic action for production 1024:
     ///
     /// `ProtoDeclaration: Proto ProtoDeclarationGroup;`
     ///
@@ -37860,7 +36974,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1023:
+    /// Semantic action for production 1025:
     ///
     /// `ProtoDeclarationGroup: ProtoModuleDeclaration;`
     ///
@@ -37889,7 +37003,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1024:
+    /// Semantic action for production 1026:
     ///
     /// `ProtoDeclarationGroup: ProtoInterfaceDeclaration;`
     ///
@@ -37918,7 +37032,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1025:
+    /// Semantic action for production 1027:
     ///
     /// `ProtoDeclarationGroup: ProtoPackageDeclaration;`
     ///
@@ -37947,7 +37061,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1026:
+    /// Semantic action for production 1028:
     ///
     /// `ProtoModuleDeclaration: Module Identifier ProtoModuleDeclarationOpt /* Option */ ProtoModuleDeclarationOpt0 /* Option */ Semicolon;`
     ///
@@ -37994,7 +37108,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1027:
+    /// Semantic action for production 1029:
     ///
     /// `ProtoModuleDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;`
     ///
@@ -38016,7 +37130,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1028:
+    /// Semantic action for production 1030:
     ///
     /// `ProtoModuleDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -38028,7 +37142,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1029:
+    /// Semantic action for production 1031:
     ///
     /// `ProtoModuleDeclarationOpt /* Option<T>::Some */: WithParameter;`
     ///
@@ -38050,7 +37164,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1030:
+    /// Semantic action for production 1032:
     ///
     /// `ProtoModuleDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -38062,7 +37176,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1031:
+    /// Semantic action for production 1033:
     ///
     /// `ProtoInterfaceDeclaration: Interface Identifier ProtoInterfaceDeclarationOpt /* Option */ LBrace ProtoInterfaceDeclarationList /* Vec */ RBrace;`
     ///
@@ -38112,7 +37226,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1032:
+    /// Semantic action for production 1034:
     ///
     /// `ProtoInterfaceDeclarationList /* Vec<T>::Push */: ProtoInterfaceItem ProtoInterfaceDeclarationList;`
     ///
@@ -38144,7 +37258,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1033:
+    /// Semantic action for production 1035:
     ///
     /// `ProtoInterfaceDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -38160,7 +37274,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1034:
+    /// Semantic action for production 1036:
     ///
     /// `ProtoInterfaceDeclarationOpt /* Option<T>::Some */: WithParameter;`
     ///
@@ -38182,7 +37296,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1035:
+    /// Semantic action for production 1037:
     ///
     /// `ProtoInterfaceDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -38194,7 +37308,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1036:
+    /// Semantic action for production 1038:
     ///
     /// `ProtoInterfaceItem: VarDeclaration;`
     ///
@@ -38218,7 +37332,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1037:
+    /// Semantic action for production 1039:
     ///
     /// `ProtoInterfaceItem: ProtoConstDeclaration;`
     ///
@@ -38250,7 +37364,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1038:
+    /// Semantic action for production 1040:
     ///
     /// `ProtoInterfaceItem: ProtoFunctionDeclaration;`
     ///
@@ -38282,7 +37396,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1039:
+    /// Semantic action for production 1041:
     ///
     /// `ProtoInterfaceItem: ProtoTypeDefDeclaration;`
     ///
@@ -38314,7 +37428,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1040:
+    /// Semantic action for production 1042:
     ///
     /// `ProtoInterfaceItem: ProtoAliasDeclaration;`
     ///
@@ -38346,7 +37460,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1041:
+    /// Semantic action for production 1043:
     ///
     /// `ProtoInterfaceItem: ModportDeclaration;`
     ///
@@ -38370,7 +37484,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1042:
+    /// Semantic action for production 1044:
     ///
     /// `ProtoInterfaceItem: ImportDeclaration;`
     ///
@@ -38394,7 +37508,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1043:
+    /// Semantic action for production 1045:
     ///
     /// `ProtoPackageDeclaration: Package Identifier LBrace ProtoPackageDeclarationList /* Vec */ RBrace;`
     ///
@@ -38436,7 +37550,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1044:
+    /// Semantic action for production 1046:
     ///
     /// `ProtoPackageDeclarationList /* Vec<T>::Push */: ProtoPacakgeItem ProtoPackageDeclarationList;`
     ///
@@ -38467,7 +37581,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1045:
+    /// Semantic action for production 1047:
     ///
     /// `ProtoPackageDeclarationList /* Vec<T>::New */: ;`
     ///
@@ -38483,7 +37597,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1046:
+    /// Semantic action for production 1048:
     ///
     /// `ProtoPacakgeItem: ProtoConstDeclaration;`
     ///
@@ -38512,7 +37626,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1047:
+    /// Semantic action for production 1049:
     ///
     /// `ProtoPacakgeItem: ProtoTypeDefDeclaration;`
     ///
@@ -38544,7 +37658,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1048:
+    /// Semantic action for production 1050:
     ///
     /// `ProtoPacakgeItem: EnumDeclaration;`
     ///
@@ -38568,7 +37682,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1049:
+    /// Semantic action for production 1051:
     ///
     /// `ProtoPacakgeItem: StructUnionDeclaration;`
     ///
@@ -38600,7 +37714,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1050:
+    /// Semantic action for production 1052:
     ///
     /// `ProtoPacakgeItem: ProtoFunctionDeclaration;`
     ///
@@ -38632,7 +37746,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1051:
+    /// Semantic action for production 1053:
     ///
     /// `ProtoPacakgeItem: ProtoAliasDeclaration;`
     ///
@@ -38661,7 +37775,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1052:
+    /// Semantic action for production 1054:
     ///
     /// `ProtoPacakgeItem: ImportDeclaration;`
     ///
@@ -38685,7 +37799,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1053:
+    /// Semantic action for production 1055:
     ///
     /// `ProtoConstDeclaration: Const Identifier Colon ProtoConstDeclarationGroup Semicolon;`
     ///
@@ -38727,7 +37841,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1054:
+    /// Semantic action for production 1056:
     ///
     /// `ProtoConstDeclarationGroup: ArrayType;`
     ///
@@ -38748,7 +37862,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1055:
+    /// Semantic action for production 1057:
     ///
     /// `ProtoConstDeclarationGroup: Type;`
     ///
@@ -38769,7 +37883,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1056:
+    /// Semantic action for production 1058:
     ///
     /// `ProtoTypeDefDeclaration: Type Identifier ProtoTypeDefDeclarationOpt /* Option */ Semicolon;`
     ///
@@ -38808,7 +37922,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1057:
+    /// Semantic action for production 1059:
     ///
     /// `ProtoTypeDefDeclarationOpt /* Option<T>::Some */: Equ ArrayType;`
     ///
@@ -38833,7 +37947,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1058:
+    /// Semantic action for production 1060:
     ///
     /// `ProtoTypeDefDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -38845,7 +37959,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1059:
+    /// Semantic action for production 1061:
     ///
     /// `ProtoFunctionDeclaration: Function Identifier ProtoFunctionDeclarationOpt /* Option */ ProtoFunctionDeclarationOpt0 /* Option */ ProtoFunctionDeclarationOpt1 /* Option */ Semicolon;`
     ///
@@ -38900,7 +38014,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1060:
+    /// Semantic action for production 1062:
     ///
     /// `ProtoFunctionDeclarationOpt1 /* Option<T>::Some */: MinusGT ScalarType;`
     ///
@@ -38925,7 +38039,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1061:
+    /// Semantic action for production 1063:
     ///
     /// `ProtoFunctionDeclarationOpt1 /* Option<T>::None */: ;`
     ///
@@ -38937,7 +38051,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1062:
+    /// Semantic action for production 1064:
     ///
     /// `ProtoFunctionDeclarationOpt0 /* Option<T>::Some */: PortDeclaration;`
     ///
@@ -38959,7 +38073,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1063:
+    /// Semantic action for production 1065:
     ///
     /// `ProtoFunctionDeclarationOpt0 /* Option<T>::None */: ;`
     ///
@@ -38971,7 +38085,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1064:
+    /// Semantic action for production 1066:
     ///
     /// `ProtoFunctionDeclarationOpt /* Option<T>::Some */: WithGenericParameter;`
     ///
@@ -38994,7 +38108,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1065:
+    /// Semantic action for production 1067:
     ///
     /// `ProtoFunctionDeclarationOpt /* Option<T>::None */: ;`
     ///
@@ -39006,7 +38120,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1066:
+    /// Semantic action for production 1068:
     ///
     /// `ProtoAliasDeclaration: Alias ProtoAliasDeclarationGroup Identifier Colon ScopedIdentifier Semicolon;`
     ///
@@ -39051,7 +38165,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1067:
+    /// Semantic action for production 1069:
     ///
     /// `ProtoAliasDeclarationGroup: Module;`
     ///
@@ -39072,7 +38186,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1068:
+    /// Semantic action for production 1070:
     ///
     /// `ProtoAliasDeclarationGroup: Interface;`
     ///
@@ -39093,7 +38207,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1069:
+    /// Semantic action for production 1071:
     ///
     /// `ProtoAliasDeclarationGroup: Package;`
     ///
@@ -39114,7 +38228,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1070:
+    /// Semantic action for production 1072:
     ///
     /// `EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;`
     ///
@@ -39151,7 +38265,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1071:
+    /// Semantic action for production 1073:
     ///
     /// `EmbedContent: EmbedContentToken : VerylToken;`
     ///
@@ -39171,7 +38285,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1072:
+    /// Semantic action for production 1074:
     ///
     /// `EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm EmbedContentTokenList /* Vec */ RBraceTerm RBraceTerm RBraceTerm %pop() Comments;`
     ///
@@ -39222,7 +38336,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1073:
+    /// Semantic action for production 1075:
     ///
     /// `EmbedContentTokenList /* Vec<T>::Push */: EmbedItem EmbedContentTokenList;`
     ///
@@ -39253,7 +38367,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1074:
+    /// Semantic action for production 1076:
     ///
     /// `EmbedContentTokenList /* Vec<T>::New */: ;`
     ///
@@ -39269,7 +38383,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1075:
+    /// Semantic action for production 1077:
     ///
     /// `EmbedItem: LBraceTerm EmbedItemList /* Vec */ RBraceTerm;`
     ///
@@ -39297,7 +38411,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1076:
+    /// Semantic action for production 1078:
     ///
     /// `EmbedItemList /* Vec<T>::Push */: EmbedItem EmbedItemList;`
     ///
@@ -39320,7 +38434,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1077:
+    /// Semantic action for production 1079:
     ///
     /// `EmbedItemList /* Vec<T>::New */: ;`
     ///
@@ -39333,7 +38447,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1078:
+    /// Semantic action for production 1080:
     ///
     /// `EmbedItem: AnyTerm;`
     ///
@@ -39352,7 +38466,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1079:
+    /// Semantic action for production 1081:
     ///
     /// `IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicolon;`
     ///
@@ -39395,7 +38509,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1080:
+    /// Semantic action for production 1082:
     ///
     /// `DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;`
     ///
@@ -39426,7 +38540,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1081:
+    /// Semantic action for production 1083:
     ///
     /// `DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;`
     ///
@@ -39464,7 +38578,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1082:
+    /// Semantic action for production 1084:
     ///
     /// `DescriptionGroupGroupList /* Vec<T>::Push */: DescriptionGroup DescriptionGroupGroupList;`
     ///
@@ -39495,7 +38609,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1083:
+    /// Semantic action for production 1085:
     ///
     /// `DescriptionGroupGroupList /* Vec<T>::New */: ;`
     ///
@@ -39511,7 +38625,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1084:
+    /// Semantic action for production 1086:
     ///
     /// `DescriptionGroupGroup: DescriptionItem;`
     ///
@@ -39532,7 +38646,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1085:
+    /// Semantic action for production 1087:
     ///
     /// `DescriptionGroupList /* Vec<T>::Push */: Attribute DescriptionGroupList;`
     ///
@@ -39559,7 +38673,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1086:
+    /// Semantic action for production 1088:
     ///
     /// `DescriptionGroupList /* Vec<T>::New */: ;`
     ///
@@ -39575,7 +38689,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1087:
+    /// Semantic action for production 1089:
     ///
     /// `DescriptionItem: DescriptionItemOpt /* Option */ PublicDescriptionItem;`
     ///
@@ -39608,7 +38722,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1088:
+    /// Semantic action for production 1090:
     ///
     /// `DescriptionItem: ImportDeclaration;`
     ///
@@ -39628,7 +38742,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1089:
+    /// Semantic action for production 1091:
     ///
     /// `DescriptionItem: EmbedDeclaration;`
     ///
@@ -39648,7 +38762,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1090:
+    /// Semantic action for production 1092:
     ///
     /// `DescriptionItem: IncludeDeclaration;`
     ///
@@ -39669,7 +38783,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1091:
+    /// Semantic action for production 1093:
     ///
     /// `DescriptionItemOpt /* Option<T>::Some */: Pub;`
     ///
@@ -39688,7 +38802,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1092:
+    /// Semantic action for production 1094:
     ///
     /// `DescriptionItemOpt /* Option<T>::None */: ;`
     ///
@@ -39700,7 +38814,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1093:
+    /// Semantic action for production 1095:
     ///
     /// `PublicDescriptionItem: ModuleDeclaration;`
     ///
@@ -39724,7 +38838,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1094:
+    /// Semantic action for production 1096:
     ///
     /// `PublicDescriptionItem: InterfaceDeclaration;`
     ///
@@ -39752,7 +38866,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1095:
+    /// Semantic action for production 1097:
     ///
     /// `PublicDescriptionItem: PackageDeclaration;`
     ///
@@ -39779,7 +38893,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1096:
+    /// Semantic action for production 1098:
     ///
     /// `PublicDescriptionItem: AliasDeclaration;`
     ///
@@ -39803,7 +38917,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1097:
+    /// Semantic action for production 1099:
     ///
     /// `PublicDescriptionItem: ProtoDeclaration;`
     ///
@@ -39827,7 +38941,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1098:
+    /// Semantic action for production 1100:
     ///
     /// `Veryl: Start VerylList /* Vec */;`
     ///
@@ -39847,7 +38961,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1099:
+    /// Semantic action for production 1101:
     ///
     /// `VerylList /* Vec<T>::Push */: DescriptionGroup VerylList;`
     ///
@@ -39870,7 +38984,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1100:
+    /// Semantic action for production 1102:
     ///
     /// `VerylList /* Vec<T>::New */: ;`
     ///
@@ -40940,80 +40054,81 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[2],
                 &children[3],
                 &children[4],
-                &children[5],
             ),
             837 => self.with_parameter_item_group0_0(&children[0]),
             838 => self.with_parameter_item_group0_1(&children[0]),
             839 => self.with_parameter_item_group_0(&children[0]),
             840 => self.with_parameter_item_group_1(&children[0]),
-            841 => self.generic_bound_0(&children[0]),
-            842 => self.generic_bound_1(&children[0], &children[1]),
-            843 => self.generic_bound_2(&children[0]),
-            844 => self.with_generic_parameter(&children[0], &children[1], &children[2]),
-            845 => self.with_generic_parameter_list(&children[0], &children[1], &children[2]),
-            846 => {
+            841 => self.with_parameter_item_opt_0(&children[0], &children[1]),
+            842 => self.with_parameter_item_opt_1(),
+            843 => self.generic_bound_0(&children[0]),
+            844 => self.generic_bound_1(&children[0], &children[1]),
+            845 => self.generic_bound_2(&children[0]),
+            846 => self.with_generic_parameter(&children[0], &children[1], &children[2]),
+            847 => self.with_generic_parameter_list(&children[0], &children[1], &children[2]),
+            848 => {
                 self.with_generic_parameter_list_list_0(&children[0], &children[1], &children[2])
             }
-            847 => self.with_generic_parameter_list_list_1(),
-            848 => self.with_generic_parameter_list_opt_0(&children[0]),
-            849 => self.with_generic_parameter_list_opt_1(),
-            850 => self.with_generic_parameter_item(
+            849 => self.with_generic_parameter_list_list_1(),
+            850 => self.with_generic_parameter_list_opt_0(&children[0]),
+            851 => self.with_generic_parameter_list_opt_1(),
+            852 => self.with_generic_parameter_item(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
             ),
-            851 => self.with_generic_parameter_item_opt_0(&children[0], &children[1]),
-            852 => self.with_generic_parameter_item_opt_1(),
-            853 => self.generic_proto_bound_0(&children[0]),
-            854 => self.generic_proto_bound_1(&children[0]),
-            855 => self.with_generic_argument(&children[0], &children[1], &children[2]),
-            856 => self.with_generic_argument_opt_0(&children[0]),
-            857 => self.with_generic_argument_opt_1(),
-            858 => self.with_generic_argument_list(&children[0], &children[1], &children[2]),
-            859 => self.with_generic_argument_list_list_0(&children[0], &children[1], &children[2]),
-            860 => self.with_generic_argument_list_list_1(),
-            861 => self.with_generic_argument_list_opt_0(&children[0]),
-            862 => self.with_generic_argument_list_opt_1(),
-            863 => self.with_generic_argument_item_0(&children[0]),
-            864 => self.with_generic_argument_item_1(&children[0]),
-            865 => self.with_generic_argument_item_2(&children[0]),
-            866 => self.with_generic_argument_item_3(&children[0]),
-            867 => self.port_declaration(&children[0], &children[1], &children[2]),
-            868 => self.port_declaration_opt_0(&children[0]),
-            869 => self.port_declaration_opt_1(),
-            870 => self.port_declaration_list(&children[0], &children[1], &children[2]),
-            871 => self.port_declaration_list_list_0(&children[0], &children[1], &children[2]),
-            872 => self.port_declaration_list_list_1(),
-            873 => self.port_declaration_list_opt_0(&children[0]),
-            874 => self.port_declaration_list_opt_1(),
-            875 => self.port_declaration_group(&children[0], &children[1]),
-            876 => self.port_declaration_group_group_0(&children[0], &children[1], &children[2]),
-            877 => self.port_declaration_group_group_1(&children[0]),
-            878 => self.port_declaration_group_list_0(&children[0], &children[1]),
-            879 => self.port_declaration_group_list_1(),
-            880 => self.port_declaration_item(&children[0], &children[1], &children[2]),
-            881 => self.port_declaration_item_group_0(&children[0]),
-            882 => self.port_declaration_item_group_1(&children[0]),
-            883 => self.port_type_concrete(&children[0], &children[1], &children[2], &children[3]),
-            884 => self.port_type_concrete_opt0_0(&children[0], &children[1]),
-            885 => self.port_type_concrete_opt0_1(),
-            886 => self.port_type_concrete_opt_0(&children[0]),
-            887 => self.port_type_concrete_opt_1(),
-            888 => self.port_default_value(&children[0]),
-            889 => self.port_type_abstract(&children[0], &children[1], &children[2], &children[3]),
-            890 => self.port_type_abstract_opt1_0(&children[0]),
-            891 => self.port_type_abstract_opt1_1(),
-            892 => self.port_type_abstract_opt0_0(&children[0], &children[1]),
-            893 => self.port_type_abstract_opt0_1(),
-            894 => self.port_type_abstract_opt_0(&children[0]),
-            895 => self.port_type_abstract_opt_1(),
-            896 => self.direction_0(&children[0]),
-            897 => self.direction_1(&children[0]),
-            898 => self.direction_2(&children[0]),
-            899 => self.direction_3(&children[0]),
-            900 => self.direction_4(&children[0]),
-            901 => self.function_declaration(
+            853 => self.with_generic_parameter_item_opt_0(&children[0], &children[1]),
+            854 => self.with_generic_parameter_item_opt_1(),
+            855 => self.generic_proto_bound_0(&children[0]),
+            856 => self.generic_proto_bound_1(&children[0]),
+            857 => self.with_generic_argument(&children[0], &children[1], &children[2]),
+            858 => self.with_generic_argument_opt_0(&children[0]),
+            859 => self.with_generic_argument_opt_1(),
+            860 => self.with_generic_argument_list(&children[0], &children[1], &children[2]),
+            861 => self.with_generic_argument_list_list_0(&children[0], &children[1], &children[2]),
+            862 => self.with_generic_argument_list_list_1(),
+            863 => self.with_generic_argument_list_opt_0(&children[0]),
+            864 => self.with_generic_argument_list_opt_1(),
+            865 => self.with_generic_argument_item_0(&children[0]),
+            866 => self.with_generic_argument_item_1(&children[0]),
+            867 => self.with_generic_argument_item_2(&children[0]),
+            868 => self.with_generic_argument_item_3(&children[0]),
+            869 => self.port_declaration(&children[0], &children[1], &children[2]),
+            870 => self.port_declaration_opt_0(&children[0]),
+            871 => self.port_declaration_opt_1(),
+            872 => self.port_declaration_list(&children[0], &children[1], &children[2]),
+            873 => self.port_declaration_list_list_0(&children[0], &children[1], &children[2]),
+            874 => self.port_declaration_list_list_1(),
+            875 => self.port_declaration_list_opt_0(&children[0]),
+            876 => self.port_declaration_list_opt_1(),
+            877 => self.port_declaration_group(&children[0], &children[1]),
+            878 => self.port_declaration_group_group_0(&children[0], &children[1], &children[2]),
+            879 => self.port_declaration_group_group_1(&children[0]),
+            880 => self.port_declaration_group_list_0(&children[0], &children[1]),
+            881 => self.port_declaration_group_list_1(),
+            882 => self.port_declaration_item(&children[0], &children[1], &children[2]),
+            883 => self.port_declaration_item_group_0(&children[0]),
+            884 => self.port_declaration_item_group_1(&children[0]),
+            885 => self.port_type_concrete(&children[0], &children[1], &children[2], &children[3]),
+            886 => self.port_type_concrete_opt0_0(&children[0], &children[1]),
+            887 => self.port_type_concrete_opt0_1(),
+            888 => self.port_type_concrete_opt_0(&children[0]),
+            889 => self.port_type_concrete_opt_1(),
+            890 => self.port_default_value(&children[0]),
+            891 => self.port_type_abstract(&children[0], &children[1], &children[2], &children[3]),
+            892 => self.port_type_abstract_opt1_0(&children[0]),
+            893 => self.port_type_abstract_opt1_1(),
+            894 => self.port_type_abstract_opt0_0(&children[0], &children[1]),
+            895 => self.port_type_abstract_opt0_1(),
+            896 => self.port_type_abstract_opt_0(&children[0]),
+            897 => self.port_type_abstract_opt_1(),
+            898 => self.direction_0(&children[0]),
+            899 => self.direction_1(&children[0]),
+            900 => self.direction_2(&children[0]),
+            901 => self.direction_3(&children[0]),
+            902 => self.direction_4(&children[0]),
+            903 => self.function_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41021,16 +40136,16 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            902 => self.function_declaration_opt1_0(&children[0], &children[1]),
-            903 => self.function_declaration_opt1_1(),
-            904 => self.function_declaration_opt0_0(&children[0]),
-            905 => self.function_declaration_opt0_1(),
-            906 => self.function_declaration_opt_0(&children[0]),
-            907 => self.function_declaration_opt_1(),
-            908 => self.import_declaration(&children[0], &children[1], &children[2], &children[3]),
-            909 => self.import_declaration_opt_0(&children[0], &children[1]),
-            910 => self.import_declaration_opt_1(),
-            911 => self.unsafe_block(
+            904 => self.function_declaration_opt1_0(&children[0], &children[1]),
+            905 => self.function_declaration_opt1_1(),
+            906 => self.function_declaration_opt0_0(&children[0]),
+            907 => self.function_declaration_opt0_1(),
+            908 => self.function_declaration_opt_0(&children[0]),
+            909 => self.function_declaration_opt_1(),
+            910 => self.import_declaration(&children[0], &children[1], &children[2], &children[3]),
+            911 => self.import_declaration_opt_0(&children[0], &children[1]),
+            912 => self.import_declaration_opt_1(),
+            913 => self.unsafe_block(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41039,9 +40154,9 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
             ),
-            912 => self.unsafe_block_list_0(&children[0], &children[1]),
-            913 => self.unsafe_block_list_1(),
-            914 => self.module_declaration(
+            914 => self.unsafe_block_list_0(&children[0], &children[1]),
+            915 => self.unsafe_block_list_1(),
+            916 => self.module_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41052,25 +40167,25 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[7],
                 &children[8],
             ),
-            915 => self.module_declaration_list_0(&children[0], &children[1]),
-            916 => self.module_declaration_list_1(),
-            917 => self.module_declaration_opt2_0(&children[0]),
-            918 => self.module_declaration_opt2_1(),
-            919 => self.module_declaration_opt1_0(&children[0]),
-            920 => self.module_declaration_opt1_1(),
-            921 => self.module_declaration_opt0_0(&children[0], &children[1]),
-            922 => self.module_declaration_opt0_1(),
-            923 => self.module_declaration_opt_0(&children[0]),
-            924 => self.module_declaration_opt_1(),
-            925 => self.module_group(&children[0], &children[1]),
-            926 => self.module_group_group_0(&children[0], &children[1], &children[2]),
-            927 => self.module_group_group_list_0(&children[0], &children[1]),
-            928 => self.module_group_group_list_1(),
-            929 => self.module_group_group_1(&children[0]),
-            930 => self.module_group_list_0(&children[0], &children[1]),
-            931 => self.module_group_list_1(),
-            932 => self.module_item(&children[0]),
-            933 => self.interface_declaration(
+            917 => self.module_declaration_list_0(&children[0], &children[1]),
+            918 => self.module_declaration_list_1(),
+            919 => self.module_declaration_opt2_0(&children[0]),
+            920 => self.module_declaration_opt2_1(),
+            921 => self.module_declaration_opt1_0(&children[0]),
+            922 => self.module_declaration_opt1_1(),
+            923 => self.module_declaration_opt0_0(&children[0], &children[1]),
+            924 => self.module_declaration_opt0_1(),
+            925 => self.module_declaration_opt_0(&children[0]),
+            926 => self.module_declaration_opt_1(),
+            927 => self.module_group(&children[0], &children[1]),
+            928 => self.module_group_group_0(&children[0], &children[1], &children[2]),
+            929 => self.module_group_group_list_0(&children[0], &children[1]),
+            930 => self.module_group_group_list_1(),
+            931 => self.module_group_group_1(&children[0]),
+            932 => self.module_group_list_0(&children[0], &children[1]),
+            933 => self.module_group_list_1(),
+            934 => self.module_item(&children[0]),
+            935 => self.interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41080,41 +40195,41 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 &children[7],
             ),
-            934 => self.interface_declaration_list_0(&children[0], &children[1]),
-            935 => self.interface_declaration_list_1(),
-            936 => self.interface_declaration_opt1_0(&children[0]),
-            937 => self.interface_declaration_opt1_1(),
-            938 => self.interface_declaration_opt0_0(&children[0], &children[1]),
-            939 => self.interface_declaration_opt0_1(),
-            940 => self.interface_declaration_opt_0(&children[0]),
-            941 => self.interface_declaration_opt_1(),
-            942 => self.interface_group(&children[0], &children[1]),
-            943 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
-            944 => self.interface_group_group_list_0(&children[0], &children[1]),
-            945 => self.interface_group_group_list_1(),
-            946 => self.interface_group_group_1(&children[0]),
-            947 => self.interface_group_list_0(&children[0], &children[1]),
-            948 => self.interface_group_list_1(),
-            949 => self.interface_item_0(&children[0]),
-            950 => self.interface_item_1(&children[0]),
-            951 => self.generate_if_declaration(
+            936 => self.interface_declaration_list_0(&children[0], &children[1]),
+            937 => self.interface_declaration_list_1(),
+            938 => self.interface_declaration_opt1_0(&children[0]),
+            939 => self.interface_declaration_opt1_1(),
+            940 => self.interface_declaration_opt0_0(&children[0], &children[1]),
+            941 => self.interface_declaration_opt0_1(),
+            942 => self.interface_declaration_opt_0(&children[0]),
+            943 => self.interface_declaration_opt_1(),
+            944 => self.interface_group(&children[0], &children[1]),
+            945 => self.interface_group_group_0(&children[0], &children[1], &children[2]),
+            946 => self.interface_group_group_list_0(&children[0], &children[1]),
+            947 => self.interface_group_group_list_1(),
+            948 => self.interface_group_group_1(&children[0]),
+            949 => self.interface_group_list_0(&children[0], &children[1]),
+            950 => self.interface_group_list_1(),
+            951 => self.interface_item_0(&children[0]),
+            952 => self.interface_item_1(&children[0]),
+            953 => self.generate_if_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            952 => self.generate_if_declaration_list_0(
+            954 => self.generate_if_declaration_list_0(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            953 => self.generate_if_declaration_list_1(),
-            954 => self.generate_if_declaration_opt_0(&children[0], &children[1]),
-            955 => self.generate_if_declaration_opt_1(),
-            956 => self.generate_for_declaration(
+            955 => self.generate_if_declaration_list_1(),
+            956 => self.generate_if_declaration_opt_0(&children[0], &children[1]),
+            957 => self.generate_if_declaration_opt_1(),
+            958 => self.generate_for_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41122,57 +40237,57 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            957 => self.generate_for_declaration_opt_0(&children[0], &children[1], &children[2]),
-            958 => self.generate_for_declaration_opt_1(),
-            959 => self.generate_block_declaration(&children[0]),
-            960 => self.generate_named_block(
+            959 => self.generate_for_declaration_opt_0(&children[0], &children[1], &children[2]),
+            960 => self.generate_for_declaration_opt_1(),
+            961 => self.generate_block_declaration(&children[0]),
+            962 => self.generate_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            961 => self.generate_named_block_list_0(&children[0], &children[1]),
-            962 => self.generate_named_block_list_1(),
-            963 => self.generate_optional_named_block(
+            963 => self.generate_named_block_list_0(&children[0], &children[1]),
+            964 => self.generate_named_block_list_1(),
+            965 => self.generate_optional_named_block(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
             ),
-            964 => self.generate_optional_named_block_list_0(&children[0], &children[1]),
-            965 => self.generate_optional_named_block_list_1(),
-            966 => self.generate_optional_named_block_opt_0(&children[0], &children[1]),
-            967 => self.generate_optional_named_block_opt_1(),
-            968 => self.generate_group(&children[0], &children[1]),
-            969 => self.generate_group_group_0(&children[0], &children[1], &children[2]),
-            970 => self.generate_group_group_list_0(&children[0], &children[1]),
-            971 => self.generate_group_group_list_1(),
-            972 => self.generate_group_group_1(&children[0]),
-            973 => self.generate_group_list_0(&children[0], &children[1]),
-            974 => self.generate_group_list_1(),
-            975 => self.generate_item_0(&children[0]),
-            976 => self.generate_item_1(&children[0]),
-            977 => self.generate_item_2(&children[0]),
-            978 => self.generate_item_3(&children[0]),
-            979 => self.generate_item_4(&children[0]),
-            980 => self.generate_item_5(&children[0]),
-            981 => self.generate_item_6(&children[0]),
-            982 => self.generate_item_7(&children[0]),
-            983 => self.generate_item_8(&children[0]),
-            984 => self.generate_item_9(&children[0]),
-            985 => self.generate_item_10(&children[0]),
-            986 => self.generate_item_11(&children[0]),
-            987 => self.generate_item_12(&children[0]),
-            988 => self.generate_item_13(&children[0]),
-            989 => self.generate_item_14(&children[0]),
-            990 => self.generate_item_15(&children[0]),
-            991 => self.generate_item_16(&children[0]),
-            992 => self.generate_item_17(&children[0]),
-            993 => self.generate_item_18(&children[0]),
-            994 => self.generate_item_19(&children[0]),
-            995 => self.generate_item_20(&children[0]),
-            996 => self.package_declaration(
+            966 => self.generate_optional_named_block_list_0(&children[0], &children[1]),
+            967 => self.generate_optional_named_block_list_1(),
+            968 => self.generate_optional_named_block_opt_0(&children[0], &children[1]),
+            969 => self.generate_optional_named_block_opt_1(),
+            970 => self.generate_group(&children[0], &children[1]),
+            971 => self.generate_group_group_0(&children[0], &children[1], &children[2]),
+            972 => self.generate_group_group_list_0(&children[0], &children[1]),
+            973 => self.generate_group_group_list_1(),
+            974 => self.generate_group_group_1(&children[0]),
+            975 => self.generate_group_list_0(&children[0], &children[1]),
+            976 => self.generate_group_list_1(),
+            977 => self.generate_item_0(&children[0]),
+            978 => self.generate_item_1(&children[0]),
+            979 => self.generate_item_2(&children[0]),
+            980 => self.generate_item_3(&children[0]),
+            981 => self.generate_item_4(&children[0]),
+            982 => self.generate_item_5(&children[0]),
+            983 => self.generate_item_6(&children[0]),
+            984 => self.generate_item_7(&children[0]),
+            985 => self.generate_item_8(&children[0]),
+            986 => self.generate_item_9(&children[0]),
+            987 => self.generate_item_10(&children[0]),
+            988 => self.generate_item_11(&children[0]),
+            989 => self.generate_item_12(&children[0]),
+            990 => self.generate_item_13(&children[0]),
+            991 => self.generate_item_14(&children[0]),
+            992 => self.generate_item_15(&children[0]),
+            993 => self.generate_item_16(&children[0]),
+            994 => self.generate_item_17(&children[0]),
+            995 => self.generate_item_18(&children[0]),
+            996 => self.generate_item_19(&children[0]),
+            997 => self.generate_item_20(&children[0]),
+            998 => self.package_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41181,28 +40296,28 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
             ),
-            997 => self.package_declaration_list_0(&children[0], &children[1]),
-            998 => self.package_declaration_list_1(),
-            999 => self.package_declaration_opt0_0(&children[0], &children[1]),
-            1000 => self.package_declaration_opt0_1(),
-            1001 => self.package_declaration_opt_0(&children[0]),
-            1002 => self.package_declaration_opt_1(),
-            1003 => self.package_group(&children[0], &children[1]),
-            1004 => self.package_group_group_0(&children[0], &children[1], &children[2]),
-            1005 => self.package_group_group_list_0(&children[0], &children[1]),
-            1006 => self.package_group_group_list_1(),
-            1007 => self.package_group_group_1(&children[0]),
-            1008 => self.package_group_list_0(&children[0], &children[1]),
-            1009 => self.package_group_list_1(),
-            1010 => self.package_item_0(&children[0]),
-            1011 => self.package_item_1(&children[0]),
-            1012 => self.package_item_2(&children[0]),
-            1013 => self.package_item_3(&children[0]),
-            1014 => self.package_item_4(&children[0]),
-            1015 => self.package_item_5(&children[0]),
-            1016 => self.package_item_6(&children[0]),
-            1017 => self.package_item_7(&children[0]),
-            1018 => self.alias_declaration(
+            999 => self.package_declaration_list_0(&children[0], &children[1]),
+            1000 => self.package_declaration_list_1(),
+            1001 => self.package_declaration_opt0_0(&children[0], &children[1]),
+            1002 => self.package_declaration_opt0_1(),
+            1003 => self.package_declaration_opt_0(&children[0]),
+            1004 => self.package_declaration_opt_1(),
+            1005 => self.package_group(&children[0], &children[1]),
+            1006 => self.package_group_group_0(&children[0], &children[1], &children[2]),
+            1007 => self.package_group_group_list_0(&children[0], &children[1]),
+            1008 => self.package_group_group_list_1(),
+            1009 => self.package_group_group_1(&children[0]),
+            1010 => self.package_group_list_0(&children[0], &children[1]),
+            1011 => self.package_group_list_1(),
+            1012 => self.package_item_0(&children[0]),
+            1013 => self.package_item_1(&children[0]),
+            1014 => self.package_item_2(&children[0]),
+            1015 => self.package_item_3(&children[0]),
+            1016 => self.package_item_4(&children[0]),
+            1017 => self.package_item_5(&children[0]),
+            1018 => self.package_item_6(&children[0]),
+            1019 => self.package_item_7(&children[0]),
+            1020 => self.alias_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41210,77 +40325,25 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            1019 => self.alias_declaration_group_0(&children[0]),
-            1020 => self.alias_declaration_group_1(&children[0]),
-            1021 => self.alias_declaration_group_2(&children[0]),
-            1022 => self.proto_declaration(&children[0], &children[1]),
-            1023 => self.proto_declaration_group_0(&children[0]),
-            1024 => self.proto_declaration_group_1(&children[0]),
-            1025 => self.proto_declaration_group_2(&children[0]),
-            1026 => self.proto_module_declaration(
+            1021 => self.alias_declaration_group_0(&children[0]),
+            1022 => self.alias_declaration_group_1(&children[0]),
+            1023 => self.alias_declaration_group_2(&children[0]),
+            1024 => self.proto_declaration(&children[0], &children[1]),
+            1025 => self.proto_declaration_group_0(&children[0]),
+            1026 => self.proto_declaration_group_1(&children[0]),
+            1027 => self.proto_declaration_group_2(&children[0]),
+            1028 => self.proto_module_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
                 &children[3],
                 &children[4],
             ),
-            1027 => self.proto_module_declaration_opt0_0(&children[0]),
-            1028 => self.proto_module_declaration_opt0_1(),
-            1029 => self.proto_module_declaration_opt_0(&children[0]),
-            1030 => self.proto_module_declaration_opt_1(),
-            1031 => self.proto_interface_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-                &children[5],
-            ),
-            1032 => self.proto_interface_declaration_list_0(&children[0], &children[1]),
-            1033 => self.proto_interface_declaration_list_1(),
-            1034 => self.proto_interface_declaration_opt_0(&children[0]),
-            1035 => self.proto_interface_declaration_opt_1(),
-            1036 => self.proto_interface_item_0(&children[0]),
-            1037 => self.proto_interface_item_1(&children[0]),
-            1038 => self.proto_interface_item_2(&children[0]),
-            1039 => self.proto_interface_item_3(&children[0]),
-            1040 => self.proto_interface_item_4(&children[0]),
-            1041 => self.proto_interface_item_5(&children[0]),
-            1042 => self.proto_interface_item_6(&children[0]),
-            1043 => self.proto_package_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            1044 => self.proto_package_declaration_list_0(&children[0], &children[1]),
-            1045 => self.proto_package_declaration_list_1(),
-            1046 => self.proto_pacakge_item_0(&children[0]),
-            1047 => self.proto_pacakge_item_1(&children[0]),
-            1048 => self.proto_pacakge_item_2(&children[0]),
-            1049 => self.proto_pacakge_item_3(&children[0]),
-            1050 => self.proto_pacakge_item_4(&children[0]),
-            1051 => self.proto_pacakge_item_5(&children[0]),
-            1052 => self.proto_pacakge_item_6(&children[0]),
-            1053 => self.proto_const_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-                &children[4],
-            ),
-            1054 => self.proto_const_declaration_group_0(&children[0]),
-            1055 => self.proto_const_declaration_group_1(&children[0]),
-            1056 => self.proto_type_def_declaration(
-                &children[0],
-                &children[1],
-                &children[2],
-                &children[3],
-            ),
-            1057 => self.proto_type_def_declaration_opt_0(&children[0], &children[1]),
-            1058 => self.proto_type_def_declaration_opt_1(),
-            1059 => self.proto_function_declaration(
+            1029 => self.proto_module_declaration_opt0_0(&children[0]),
+            1030 => self.proto_module_declaration_opt0_1(),
+            1031 => self.proto_module_declaration_opt_0(&children[0]),
+            1032 => self.proto_module_declaration_opt_1(),
+            1033 => self.proto_interface_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41288,13 +40351,51 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            1060 => self.proto_function_declaration_opt1_0(&children[0], &children[1]),
-            1061 => self.proto_function_declaration_opt1_1(),
-            1062 => self.proto_function_declaration_opt0_0(&children[0]),
-            1063 => self.proto_function_declaration_opt0_1(),
-            1064 => self.proto_function_declaration_opt_0(&children[0]),
-            1065 => self.proto_function_declaration_opt_1(),
-            1066 => self.proto_alias_declaration(
+            1034 => self.proto_interface_declaration_list_0(&children[0], &children[1]),
+            1035 => self.proto_interface_declaration_list_1(),
+            1036 => self.proto_interface_declaration_opt_0(&children[0]),
+            1037 => self.proto_interface_declaration_opt_1(),
+            1038 => self.proto_interface_item_0(&children[0]),
+            1039 => self.proto_interface_item_1(&children[0]),
+            1040 => self.proto_interface_item_2(&children[0]),
+            1041 => self.proto_interface_item_3(&children[0]),
+            1042 => self.proto_interface_item_4(&children[0]),
+            1043 => self.proto_interface_item_5(&children[0]),
+            1044 => self.proto_interface_item_6(&children[0]),
+            1045 => self.proto_package_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+            ),
+            1046 => self.proto_package_declaration_list_0(&children[0], &children[1]),
+            1047 => self.proto_package_declaration_list_1(),
+            1048 => self.proto_pacakge_item_0(&children[0]),
+            1049 => self.proto_pacakge_item_1(&children[0]),
+            1050 => self.proto_pacakge_item_2(&children[0]),
+            1051 => self.proto_pacakge_item_3(&children[0]),
+            1052 => self.proto_pacakge_item_4(&children[0]),
+            1053 => self.proto_pacakge_item_5(&children[0]),
+            1054 => self.proto_pacakge_item_6(&children[0]),
+            1055 => self.proto_const_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+            ),
+            1056 => self.proto_const_declaration_group_0(&children[0]),
+            1057 => self.proto_const_declaration_group_1(&children[0]),
+            1058 => self.proto_type_def_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+            ),
+            1059 => self.proto_type_def_declaration_opt_0(&children[0], &children[1]),
+            1060 => self.proto_type_def_declaration_opt_1(),
+            1061 => self.proto_function_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41302,10 +40403,13 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            1067 => self.proto_alias_declaration_group_0(&children[0]),
-            1068 => self.proto_alias_declaration_group_1(&children[0]),
-            1069 => self.proto_alias_declaration_group_2(&children[0]),
-            1070 => self.embed_declaration(
+            1062 => self.proto_function_declaration_opt1_0(&children[0], &children[1]),
+            1063 => self.proto_function_declaration_opt1_1(),
+            1064 => self.proto_function_declaration_opt0_0(&children[0]),
+            1065 => self.proto_function_declaration_opt0_1(),
+            1066 => self.proto_function_declaration_opt_0(&children[0]),
+            1067 => self.proto_function_declaration_opt_1(),
+            1068 => self.proto_alias_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41313,8 +40417,19 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
             ),
-            1071 => self.embed_content(&children[0]),
-            1072 => self.embed_content_token(
+            1069 => self.proto_alias_declaration_group_0(&children[0]),
+            1070 => self.proto_alias_declaration_group_1(&children[0]),
+            1071 => self.proto_alias_declaration_group_2(&children[0]),
+            1072 => self.embed_declaration(
+                &children[0],
+                &children[1],
+                &children[2],
+                &children[3],
+                &children[4],
+                &children[5],
+            ),
+            1073 => self.embed_content(&children[0]),
+            1074 => self.embed_content_token(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41324,13 +40439,13 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[6],
                 &children[7],
             ),
-            1073 => self.embed_content_token_list_0(&children[0], &children[1]),
-            1074 => self.embed_content_token_list_1(),
-            1075 => self.embed_item_0(&children[0], &children[1], &children[2]),
-            1076 => self.embed_item_list_0(&children[0], &children[1]),
-            1077 => self.embed_item_list_1(),
-            1078 => self.embed_item_1(&children[0]),
-            1079 => self.include_declaration(
+            1075 => self.embed_content_token_list_0(&children[0], &children[1]),
+            1076 => self.embed_content_token_list_1(),
+            1077 => self.embed_item_0(&children[0], &children[1], &children[2]),
+            1078 => self.embed_item_list_0(&children[0], &children[1]),
+            1079 => self.embed_item_list_1(),
+            1080 => self.embed_item_1(&children[0]),
+            1081 => self.include_declaration(
                 &children[0],
                 &children[1],
                 &children[2],
@@ -41339,27 +40454,27 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[5],
                 &children[6],
             ),
-            1080 => self.description_group(&children[0], &children[1]),
-            1081 => self.description_group_group_0(&children[0], &children[1], &children[2]),
-            1082 => self.description_group_group_list_0(&children[0], &children[1]),
-            1083 => self.description_group_group_list_1(),
-            1084 => self.description_group_group_1(&children[0]),
-            1085 => self.description_group_list_0(&children[0], &children[1]),
-            1086 => self.description_group_list_1(),
-            1087 => self.description_item_0(&children[0], &children[1]),
-            1088 => self.description_item_1(&children[0]),
-            1089 => self.description_item_2(&children[0]),
-            1090 => self.description_item_3(&children[0]),
-            1091 => self.description_item_opt_0(&children[0]),
-            1092 => self.description_item_opt_1(),
-            1093 => self.public_description_item_0(&children[0]),
-            1094 => self.public_description_item_1(&children[0]),
-            1095 => self.public_description_item_2(&children[0]),
-            1096 => self.public_description_item_3(&children[0]),
-            1097 => self.public_description_item_4(&children[0]),
-            1098 => self.veryl(&children[0], &children[1]),
-            1099 => self.veryl_list_0(&children[0], &children[1]),
-            1100 => self.veryl_list_1(),
+            1082 => self.description_group(&children[0], &children[1]),
+            1083 => self.description_group_group_0(&children[0], &children[1], &children[2]),
+            1084 => self.description_group_group_list_0(&children[0], &children[1]),
+            1085 => self.description_group_group_list_1(),
+            1086 => self.description_group_group_1(&children[0]),
+            1087 => self.description_group_list_0(&children[0], &children[1]),
+            1088 => self.description_group_list_1(),
+            1089 => self.description_item_0(&children[0], &children[1]),
+            1090 => self.description_item_1(&children[0]),
+            1091 => self.description_item_2(&children[0]),
+            1092 => self.description_item_3(&children[0]),
+            1093 => self.description_item_opt_0(&children[0]),
+            1094 => self.description_item_opt_1(),
+            1095 => self.public_description_item_0(&children[0]),
+            1096 => self.public_description_item_1(&children[0]),
+            1097 => self.public_description_item_2(&children[0]),
+            1098 => self.public_description_item_3(&children[0]),
+            1099 => self.public_description_item_4(&children[0]),
+            1100 => self.veryl(&children[0], &children[1]),
+            1101 => self.veryl_list_0(&children[0], &children[1]),
+            1102 => self.veryl_list_1(),
             _ => Err(ParserError::InternalError(format!(
                 "Unhandled production number: {}",
                 prod_num
