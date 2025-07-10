@@ -39,6 +39,10 @@ fn trace_type(r#type: &SymType) -> Vec<(SymType, Option<SymbolKind>)> {
             ret.last_mut().unwrap().1 = Some(symbol.kind.clone());
             if let SymbolKind::TypeDef(ref x) = symbol.kind {
                 ret.append(&mut trace_type(&x.r#type));
+            } else if let SymbolKind::ProtoTypeDef(ref x) = symbol.kind {
+                if let Some(ref r#type) = x.r#type {
+                    ret.append(&mut trace_type(r#type));
+                }
             }
         }
     }
