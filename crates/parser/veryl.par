@@ -769,7 +769,7 @@ WithParameterList: WithParameterGroup { Comma WithParameterGroup } [ Comma ];
 
 WithParameterGroup: { Attribute } ( LBrace WithParameterList RBrace | WithParameterItem );
 
-WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) Equ Expression;
+WithParameterItem: ( Param | Const ) Identifier Colon ( ArrayType | Type ) [ Equ Expression ];
 
 // ----------------------------------------------------------------------------
 // WithGenericParameter

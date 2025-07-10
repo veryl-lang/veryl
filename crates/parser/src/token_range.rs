@@ -1076,11 +1076,18 @@ impl From<&WithParameterItem> for TokenRange {
             WithParameterItemGroup::Param(x) => x.param.as_ref().into(),
             WithParameterItemGroup::Const(x) => x.r#const.as_ref().into(),
         };
-        ret.set_end(value.expression.as_ref().into());
+
+        if let Some(x) = &value.with_parameter_item_opt {
+            ret.set_end(x.expression.as_ref().into());
+        } else {
+            ret.set_end(value.with_parameter_item_group0.as_ref().into());
+        }
+
         ret
     }
 }
 impl_token_ext!(WithParameterItem);
+impl_token_range_enum!(WithParameterItemGroup0, array_type, r#type);
 
 // ----------------------------------------------------------------------------
 // WithGenericParameter
