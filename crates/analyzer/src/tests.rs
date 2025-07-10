@@ -4281,6 +4281,40 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package FooPkg {
+        struct Foo {
+            foo: logic,
+        }
+    }
+    package BarPkg {
+        type Foo = FooPkg::Foo;
+    }
+    module ModuleA {
+        let _foo: BarPkg::Foo = BarPkg::Foo'{ foo: 0 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package FooPkg {
+        struct Foo {
+            foo: logic,
+        }
+    }
+    proto package BarProtoPkg {
+        type Foo = FooPkg::Foo;
+    }
+    module ModuleA::<PKG: BarProtoPkg> {
+        let _foo: PKG::Foo = PKG::Foo'{ foo: 0 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
