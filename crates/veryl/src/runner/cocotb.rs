@@ -21,7 +21,7 @@ enum State {
 }
 
 pub enum CocotbSource {
-    Embed(StrId),
+    Embed(String),
     Include(StrId),
 }
 
@@ -151,19 +151,15 @@ impl Runner for Cocotb {
             }
         }
 
-        match self.source {
+        match &self.source {
             CocotbSource::Embed(x) => {
-                let src_text = x.to_string();
-                let src_text = src_text.strip_prefix("{{{").unwrap();
-                let src_text = src_text.strip_suffix("}}}").unwrap();
-
                 let mut file = OpenOptions::new()
                     .create(true)
                     .write(true)
                     .truncate(true)
                     .open(&src_path)
                     .into_diagnostic()?;
-                file.write_all(src_text.as_bytes()).into_diagnostic()?;
+                file.write_all(x.as_bytes()).into_diagnostic()?;
                 file.flush().into_diagnostic()?;
             }
             CocotbSource::Include(x) => {
