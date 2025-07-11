@@ -434,7 +434,7 @@ impl VerylGrammarTrait for CheckExpression {
                     // TODO type check
                 }
 
-                if let Some(x) = &arg.for_statement_opt {
+                if let Some(x) = &arg.for_statement_opt0 {
                     let exp = self.evaluator.expression(&x.expression);
                     self.evaluated_error(&exp.errors);
 
@@ -793,7 +793,7 @@ impl VerylGrammarTrait for CheckExpression {
                     // TODO type check
                 }
 
-                if let Some(x) = &arg.generate_for_declaration_opt {
+                if let Some(x) = &arg.generate_for_declaration_opt0 {
                     let exp = self.evaluator.expression(&x.expression);
                     self.evaluated_error(&exp.errors);
 
