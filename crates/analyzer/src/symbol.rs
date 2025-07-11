@@ -1176,6 +1176,13 @@ impl Type {
                 SymbolKind::TypeDef(x) => {
                     return x.r#type.trace_user_defined(&symbol.found.namespace);
                 }
+                SymbolKind::ProtoTypeDef(ref x) => {
+                    if let Some(r#type) = &x.r#type {
+                        return r#type.trace_user_defined(&symbol.found.namespace);
+                    } else {
+                        return Some((self.clone(), Some(symbol.found)));
+                    }
+                }
                 SymbolKind::Module(_)
                 | SymbolKind::ProtoModule(_)
                 | SymbolKind::Interface(_)

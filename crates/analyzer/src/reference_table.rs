@@ -462,7 +462,7 @@ impl ReferenceTable {
                 }
                 ReferenceCandidate::StructConstructorItem { arg, r#type } => {
                     if let Ok(symbol) = symbol_table::resolve(r#type) {
-                        let namespace = symbol.found.inner_namespace();
+                        let namespace = Self::get_struct_namespace(&symbol.found);
                         let symbol_path: SymbolPath = arg.identifier.as_ref().into();
 
                         match symbol_table::resolve((&symbol_path, &namespace)) {
@@ -511,6 +511,25 @@ impl ReferenceTable {
         }
 
         self.errors.drain(0..).collect()
+    }
+
+    fn get_struct_namespace(symbol: &Symbol) -> Namespace {
+        match &symbol.kind {
+            SymbolKind::TypeDef(x) => {
+                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(&symbol.namespace) {
+                    return Self::get_struct_namespace(&symbol);
+                }
+            }
+            SymbolKind::ProtoTypeDef(x) => {
+                if let Some(r#type) = &x.r#type {
+                    if let Some((_, Some(symbol))) = r#type.trace_user_defined(&symbol.namespace) {
+                        return Self::get_struct_namespace(&symbol);
+                    }
+                }
+            }
+            _ => {}
+        }
+        symbol.inner_namespace()
     }
 }
 
