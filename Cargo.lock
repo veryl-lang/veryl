@@ -521,12 +521,13 @@ checksum = "cbd0f76e066e64fdc5631e3bb46381254deab9ef1158292f27c8c57e3bf3fe59"
 
 [[package]]
 name = "codespan-reporting"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3538270d33cc669650c4b093848450d380def10c331d38c768e34cac80576e6e"
+checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
 dependencies = [
+ "serde",
  "termcolor",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.1",
 ]
 
 [[package]]
@@ -3436,9 +3437,9 @@ checksum = "54ec451836679aaa55158b454b441e21446a111ea34aa1917eba29245bafe4b8"
 
 [[package]]
 name = "parol_runtime"
-version = "3.0.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db1507710485db70e78648a985b8a7029793597832dae09304aec5e9a4b1b8fa"
+checksum = "082b278f4794a512259823cbf8dd31c6a25cc65825ce1f64e04239ca0f5231ee"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -3447,7 +3448,7 @@ dependencies = [
  "log",
  "once_cell",
  "parol-macros",
- "petgraph 0.6.5",
+ "petgraph 0.8.2",
  "scnr",
  "serde_json",
  "syntree",
@@ -3536,6 +3537,7 @@ dependencies = [
  "fixedbitset 0.5.7",
  "hashbrown 0.15.4",
  "indexmap",
+ "serde",
 ]
 
 [[package]]
