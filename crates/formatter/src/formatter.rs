@@ -1282,9 +1282,13 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
+        if let Some(ref x) = arg.for_statement_opt {
+            self.rev(&x.rev);
+            self.space(1);
+        }
         self.range(&arg.range);
         self.space(1);
-        if let Some(ref x) = arg.for_statement_opt {
+        if let Some(ref x) = arg.for_statement_opt0 {
             self.step(&x.step);
             self.space(1);
             self.assignment_operator(&x.assignment_operator);
@@ -2484,9 +2488,13 @@ impl VerylWalker for Formatter {
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);
+        if let Some(ref x) = arg.generate_for_declaration_opt {
+            self.rev(&x.rev);
+            self.space(1);
+        }
         self.range(&arg.range);
         self.space(1);
-        if let Some(ref x) = arg.generate_for_declaration_opt {
+        if let Some(ref x) = arg.generate_for_declaration_opt0 {
             self.step(&x.step);
             self.space(1);
             self.assignment_operator(&x.assignment_operator);

@@ -759,6 +759,13 @@ pub trait VerylWalker {
         after!(self, r#return, arg);
     }
 
+    /// Semantic action for non-terminal 'Rev'
+    fn rev(&mut self, arg: &Rev) {
+        before!(self, rev, arg);
+        self.veryl_token(&arg.rev_token);
+        after!(self, rev, arg);
+    }
+
     /// Semantic action for non-terminal 'Break'
     fn r#break(&mut self, arg: &Break) {
         before!(self, r#break, arg);
@@ -1870,8 +1877,11 @@ pub trait VerylWalker {
         self.colon(&arg.colon);
         self.scalar_type(&arg.scalar_type);
         self.r#in(&arg.r#in);
-        self.range(&arg.range);
         if let Some(ref x) = arg.for_statement_opt {
+            self.rev(&x.rev);
+        }
+        self.range(&arg.range);
+        if let Some(ref x) = arg.for_statement_opt0 {
             self.step(&x.step);
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
@@ -2974,8 +2984,11 @@ pub trait VerylWalker {
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
         self.r#in(&arg.r#in);
-        self.range(&arg.range);
         if let Some(ref x) = arg.generate_for_declaration_opt {
+            self.rev(&x.rev);
+        }
+        self.range(&arg.range);
+        if let Some(ref x) = arg.generate_for_declaration_opt0 {
             self.step(&x.step);
             self.assignment_operator(&x.assignment_operator);
             self.expression(&x.expression);
