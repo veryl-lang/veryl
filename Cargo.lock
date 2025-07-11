@@ -804,7 +804,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "804169db156b21258a2545757336922d93dfa229892c75911a0ad141aa0ff241"
 dependencies = [
- "petgraph 0.8.2",
+ "petgraph",
 ]
 
 [[package]]
@@ -1210,12 +1210,6 @@ dependencies = [
  "libc",
  "winapi",
 ]
-
-[[package]]
-name = "fixedbitset"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "fixedbitset"
@@ -2036,17 +2030,6 @@ dependencies = [
  "log",
  "regex-automata",
  "regex-syntax",
-]
-
-[[package]]
-name = "graph-cycles"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a6ad932c6dd3cfaf16b66754a42f87bbeefd591530c4b6a8334270a7df3e853"
-dependencies = [
- "ahash",
- "petgraph 0.6.5",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3393,9 +3376,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "3.0.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77e7b73dba2c72e5192f8e3d1a87459890538fa330d3c16bf6cb71522a71d858"
+checksum = "ab6ec35871704794d7cf081463092cde3584c3546156fee32112883aa0c4d16e"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3405,13 +3388,12 @@ dependencies = [
  "derive_builder",
  "env_logger",
  "function_name",
- "graph-cycles",
  "lalry",
  "num_cpus",
  "owo-colors",
  "parol-macros",
  "parol_runtime",
- "petgraph 0.6.5",
+ "petgraph",
  "rand 0.9.1",
  "rand_regex",
  "rayon",
@@ -3448,7 +3430,7 @@ dependencies = [
  "log",
  "once_cell",
  "parol-macros",
- "petgraph 0.8.2",
+ "petgraph",
  "scnr",
  "serde_json",
  "syntree",
@@ -3520,21 +3502,11 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
-dependencies = [
- "fixedbitset 0.4.2",
- "indexmap",
-]
-
-[[package]]
-name = "petgraph"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54acf3a685220b533e437e264e4d932cfbdc4cc7ec0cd232ed73c08d03b8a7ca"
 dependencies = [
- "fixedbitset 0.5.7",
+ "fixedbitset",
  "hashbrown 0.15.4",
  "indexmap",
  "serde",
@@ -5080,20 +5052,19 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ts-rs"
-version = "10.1.0"
+version = "11.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
+checksum = "6ef1b7a6d914a34127ed8e1fa927eb7088903787bcded4fa3eef8f85ee1568be"
 dependencies = [
- "lazy_static",
  "thiserror 2.0.12",
  "ts-rs-macros",
 ]
 
 [[package]]
 name = "ts-rs-macros"
-version = "10.1.0"
+version = "11.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e9d8656589772eeec2cf7a8264d9cda40fb28b9bc53118ceb9e8c07f8f38730"
+checksum = "e9d4ed7b4c18cc150a6a0a1e9ea1ecfa688791220781af6e119f9599a8502a0a"
 dependencies = [
  "proc-macro2",
  "quote",
