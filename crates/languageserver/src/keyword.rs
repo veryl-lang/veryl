@@ -57,6 +57,7 @@ pub const KEYWORDS: &[&str] = &[
     "reset_sync_high",
     "reset_sync_low",
     "return",
+    "rev",
     "break",
     "same",
     "signed",

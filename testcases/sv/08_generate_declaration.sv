@@ -34,8 +34,16 @@ module veryl_testcase_Module08;
         end
     end
 
+    // for declaration in descending order
+    for (genvar i = 10 - 1; i >= 0; i--) begin :label3
+        logic a;
+        always_ff @ (posedge i_clk) begin
+            a <= i;
+        end
+    end
+
     // for declaration with custom step
-    for (genvar i = 0; i < 10; i += 2) begin :label3
+    for (genvar i = 0; i < 10; i += 2) begin :label4
         logic a;
         always_ff @ (posedge i_clk) begin
             a <= i;

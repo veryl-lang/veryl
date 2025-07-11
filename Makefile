@@ -1,7 +1,7 @@
 PKG_VERSION = $(patsubst "%",%, $(word 3, $(shell grep version ./crates/veryl/Cargo.toml)))
 BUILD_DATE = $(shell date +"%Y-%m-%d")
 GIT_REVISION = $(shell git log -1 --format="%h")
-CHANNEL ?= 
+CHANNEL ?=
 VERSION = $(PKG_VERSION)$(CHANNEL) ($(GIT_REVISION) $(BUILD_DATE))
 ZIP_NAME = veryl
 BIN_NAMES = veryl veryl-ls
@@ -66,6 +66,9 @@ install:
 
 gen_sv:
 	cargo run --bin veryl -- build
+
+fmt_veryl:
+	cargo run --bin veryl -- fmt
 
 flamegraph:
 	cargo bench --bench benchmark -- --profile-time=5
