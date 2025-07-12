@@ -5,8 +5,9 @@
 // ---------------------------------------------------------
 
 use parol_runtime::once_cell::sync::Lazy;
+use parol_runtime::parser::parse_tree_type::TreeConstruct;
 #[allow(unused_imports)]
-use parol_runtime::parser::{LLKParser, LookaheadDFA, ParseTreeType, ParseType, Production, Trans};
+use parol_runtime::parser::{LLKParser, LookaheadDFA, ParseType, Production, Trans};
 use parol_runtime::{ParolError, ParseTree, TerminalIndex};
 use parol_runtime::{ScannerConfig, TokenStream, Tokenizer};
 use std::path::Path;
@@ -38843,6 +38844,23 @@ pub fn parse<T>(
 where
     T: AsRef<Path>,
 {
+    use parol_runtime::parser::parse_tree_type::SynTree;
+    use parol_runtime::parser::parser_types::SynTreeFlavor;
+    use parol_runtime::syntree::Builder;
+    let mut builder = Builder::<SynTree, SynTreeFlavor>::new_with();
+    parse_into(input, &mut builder, file_name, user_actions)?;
+    Ok(builder.build()?)
+}
+#[allow(dead_code)]
+pub fn parse_into<'t, T: TreeConstruct<'t>>(
+    input: &'t str,
+    tree_builder: &mut T,
+    file_name: impl AsRef<Path>,
+    user_actions: &mut VerylGrammar,
+) -> Result<(), ParolError>
+where
+    ParolError: From<T::Error>,
+{
     let mut llk_parser = LLKParser::new(
         724,
         LOOKAHEAD_AUTOMATA,
@@ -38854,7 +38872,8 @@ where
 
     // Initialize wrapper
     let mut user_actions = VerylGrammarAuto::new(user_actions);
-    llk_parser.parse(
+    llk_parser.parse_into::<T>(
+        tree_builder,
         TokenStream::new(input, file_name, &SCANNERS, MAX_K).unwrap(),
         &mut user_actions,
     )
