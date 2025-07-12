@@ -2098,12 +2098,15 @@ impl VerylWalker for Formatter {
                 self.align_finish(align_kind::TYPE);
             }
         }
-        self.space(1);
-        self.equ(&arg.equ);
-        self.space(1);
-        self.align_start(align_kind::EXPRESSION);
-        self.expression(&arg.expression);
-        self.align_finish(align_kind::EXPRESSION);
+
+        if let Some(ref x) = arg.with_parameter_item_opt {
+            self.space(1);
+            self.equ(&x.equ);
+            self.space(1);
+            self.align_start(align_kind::EXPRESSION);
+            self.expression(&x.expression);
+            self.align_finish(align_kind::EXPRESSION);
+        }
     }
 
     /// Semantic action for non-terminal 'WithGenericParameterList'

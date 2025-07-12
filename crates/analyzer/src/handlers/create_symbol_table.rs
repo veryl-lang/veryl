@@ -954,7 +954,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
             HandlerPoint::After => {
                 let token = arg.identifier.identifier_token.token;
-                let value = *arg.expression.clone();
+                let value = Some(*arg.expression.clone());
                 let property = match &*arg.const_declaration_group {
                     ConstDeclarationGroup::ArrayType(x) => {
                         let r#type: SymType = x.array_type.as_ref().into();
@@ -1385,7 +1385,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 WithParameterItemGroup::Param(_) => ParameterKind::Param,
                 WithParameterItemGroup::Const(_) => ParameterKind::Const,
             };
-            let value = *arg.expression.clone();
+            let value = arg
+                .with_parameter_item_opt
+                .as_ref()
+                .map(|x| x.expression.as_ref().clone());
             let property = match &*arg.with_parameter_item_group0 {
                 WithParameterItemGroup0::ArrayType(x) => {
                     let r#type: SymType = x.array_type.as_ref().into();

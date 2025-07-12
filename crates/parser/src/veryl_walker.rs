@@ -2570,8 +2570,10 @@ pub trait VerylWalker {
                 self.r#type(&x.r#type);
             }
         }
-        self.equ(&arg.equ);
-        self.expression(&arg.expression);
+        if let Some(ref x) = arg.with_parameter_item_opt {
+            self.equ(&x.equ);
+            self.expression(&x.expression);
+        }
         after!(self, with_parameter_item, arg);
     }
 
