@@ -2192,15 +2192,6 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
         let list_len = &arg.hierarchical_identifier_list0.len();
-        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
-            match &found.found.kind {
-                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
-                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
-                _ => (None, None),
-            }
-        } else {
-            unreachable!()
-        };
         let array_size = if self.build_opt.flatten_array_interface
             && !arg.hierarchical_identifier_list.is_empty()
         {
@@ -2210,11 +2201,8 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            self.identifier(&identifier_with_prefix_suffix(
-                &arg.identifier,
-                &prefix,
-                &suffix,
-            ));
+            let namespace = symbol_table::resolve(arg).map(|x| x.found.namespace).ok();
+            self.emit_identifier(&arg.identifier, namespace);
         } else {
             self.identifier(&arg.identifier);
         }
@@ -2235,11 +2223,8 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                self.identifier(&identifier_with_prefix_suffix(
-                    &x.identifier,
-                    &prefix,
-                    &suffix,
-                ));
+                let namespace = symbol_table::resolve(arg).map(|x| x.found.namespace).ok();
+                self.emit_identifier(&x.identifier, namespace);
             } else {
                 self.identifier(&x.identifier);
             }
@@ -2342,7 +2327,12 @@ impl VerylWalker for Emitter {
             if i > 0 || expanded_modport.is_none() {
                 self.dot(&x.dot);
                 self.push_resolved_identifier(".");
-                self.identifier(&x.identifier);
+                if (i + 1) < arg.expression_identifier_list0.len() {
+                    self.identifier(&x.identifier);
+                } else {
+                    let namespace = symbol_table::resolve(arg).map(|x| x.found.namespace).ok();
+                    self.emit_identifier(&x.identifier, namespace);
+                }
             }
 
             for x in &x.expression_identifier_list0_list {
