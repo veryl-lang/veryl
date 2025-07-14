@@ -71,8 +71,9 @@ pub struct Emitter {
     signed: bool,
     default_clock: Option<SymbolId>,
     default_reset: Option<SymbolId>,
-    reset_signal: Option<String>,
-    default_block: Option<Identifier>,
+    reset_signal: Option<VerylToken>,
+    reset_active_low: bool,
+    default_block: Option<VerylToken>,
     enum_width: usize,
     enum_type: Option<ScalarType>,
     emit_enum_implicit_valiant: bool,
@@ -121,6 +122,7 @@ impl Default for Emitter {
             default_clock: None,
             default_reset: None,
             reset_signal: None,
+            reset_active_low: false,
             default_block: None,
             enum_width: 0,
             enum_type: None,
@@ -543,7 +545,7 @@ impl Emitter {
         self.align_finish(align_kind::WIDTH);
     }
 
-    fn emit_identifier(&mut self, arg: &Identifier, namespace: Option<Namespace>) {
+    fn emit_identifier(&mut self, arg: &Identifier, symbol: Option<&Symbol>) {
         let align = !self.align_any()
             && !self.in_attribute
             && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
@@ -551,7 +553,7 @@ impl Emitter {
             self.align_start(align_kind::IDENTIFIER);
         }
 
-        let text = emitting_identifier(arg, namespace).identifier_token;
+        let text = emitting_identifier_token(&arg.identifier_token, symbol);
         self.veryl_token(&text);
         self.push_resolved_identifier(&text.to_string());
 
@@ -815,48 +817,39 @@ impl Emitter {
 
     fn always_ff_implicit_reset_event(&mut self) {
         let symbol = symbol_table::get(self.default_reset.unwrap()).unwrap();
-        let (reset_kind, prefix, suffix) = match symbol.kind {
-            SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
-            SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
-            _ => unreachable!(),
-        };
-        let reset_type = match reset_kind {
-            TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
-            TypeKind::ResetAsyncLow => ResetType::AsyncLow,
-            TypeKind::ResetSyncHigh => ResetType::SyncHigh,
-            TypeKind::ResetSyncLow => ResetType::SyncLow,
-            TypeKind::Reset => self.build_opt.reset_type,
-            _ => unreachable!(),
-        };
+        let reset_type = get_variable_type_kind(&symbol)
+            .map(|x| match x {
+                TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
+                TypeKind::ResetAsyncLow => ResetType::AsyncLow,
+                TypeKind::ResetSyncHigh => ResetType::SyncHigh,
+                TypeKind::ResetSyncLow => ResetType::SyncLow,
+                TypeKind::Reset => self.build_opt.reset_type,
+                _ => unreachable!(),
+            })
+            .unwrap();
 
-        let token = if prefix.is_some() || suffix.is_some() {
-            VerylToken::new(symbol.token).append(&prefix, &suffix).token
-        } else {
-            symbol.token
-        };
+        let token = emitting_identifier_token(&VerylToken::new(symbol.token), Some(&symbol));
 
-        let prefix_op = match reset_type {
+        match reset_type {
             ResetType::AsyncHigh => {
                 self.str(",");
                 self.space(1);
                 self.str("posedge");
                 self.space(1);
-                self.str(&token.to_string());
-                ""
+                self.duplicated_token(&token);
             }
             ResetType::AsyncLow => {
                 self.str(",");
                 self.space(1);
                 self.str("negedge");
                 self.space(1);
-                self.str(&token.to_string());
-                "!"
+                self.duplicated_token(&token);
             }
-            ResetType::SyncHigh => "",
-            ResetType::SyncLow => "!",
+            _ => {}
         };
 
-        self.reset_signal = Some(format!("{prefix_op}{token}"));
+        self.reset_signal = Some(token);
+        self.reset_active_low = matches!(reset_type, ResetType::AsyncLow | ResetType::SyncLow);
     }
 
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
@@ -949,7 +942,10 @@ impl Emitter {
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
-        self.default_block = Some(emitting_identifier(arg.identifier.as_ref(), None));
+        self.default_block = Some(emitting_identifier_token(
+            &arg.identifier.identifier_token,
+            None,
+        ));
         self.token_will_push(&arg.l_brace.l_brace_token.replace(&format!("{prefix}begin")));
         self.space(1);
         self.colon(&arg.colon);
@@ -1311,8 +1307,13 @@ impl Emitter {
     }
 
     fn emit_port_identifier(&mut self, identifier: &Identifier) {
-        let namespace = self.inst_module_namespace.clone();
-        self.emit_identifier(identifier, namespace);
+        let path: SymbolPathNamespace = if let Some(namespace) = &self.inst_module_namespace {
+            SymbolPathNamespace(identifier.into(), namespace.clone())
+        } else {
+            identifier.into()
+        };
+        let symbol = symbol_table::resolve(path).map(|x| x.found).ok();
+        self.emit_identifier(identifier, symbol.as_ref());
     }
 
     fn emit_inst_unconnected_port(
@@ -2171,7 +2172,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        self.emit_identifier(arg, None);
+        let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+        self.emit_identifier(arg, symbol.as_ref());
     }
 
     /// Semantic action for non-terminal 'Number'
@@ -2192,15 +2194,6 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'HierarchicalIdentifier'
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) {
         let list_len = &arg.hierarchical_identifier_list0.len();
-        let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(arg) {
-            match &found.found.kind {
-                SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
-                SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
-                _ => (None, None),
-            }
-        } else {
-            unreachable!()
-        };
         let array_size = if self.build_opt.flatten_array_interface
             && !arg.hierarchical_identifier_list.is_empty()
         {
@@ -2210,11 +2203,8 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            self.identifier(&identifier_with_prefix_suffix(
-                &arg.identifier,
-                &prefix,
-                &suffix,
-            ));
+            let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+            self.emit_identifier(&arg.identifier, symbol.as_ref());
         } else {
             self.identifier(&arg.identifier);
         }
@@ -2235,11 +2225,8 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                self.identifier(&identifier_with_prefix_suffix(
-                    &x.identifier,
-                    &prefix,
-                    &suffix,
-                ));
+                let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+                self.emit_identifier(&x.identifier, symbol.as_ref());
             } else {
                 self.identifier(&x.identifier);
             }
@@ -2342,7 +2329,12 @@ impl VerylWalker for Emitter {
             if i > 0 || expanded_modport.is_none() {
                 self.dot(&x.dot);
                 self.push_resolved_identifier(".");
-                self.identifier(&x.identifier);
+                if (i + 1) < arg.expression_identifier_list0.len() {
+                    self.identifier(&x.identifier);
+                } else {
+                    let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+                    self.emit_identifier(&x.identifier, symbol.as_ref());
+                }
             }
 
             for x in &x.expression_identifier_list0_list {
@@ -3159,7 +3151,7 @@ impl VerylWalker for Emitter {
         //self.str(";");
         //self.newline();
         self.align_start(align_kind::IDENTIFIER);
-        self.identifier(&emitting_identifier(arg.identifier.as_ref(), None));
+        self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.equ(&arg.equ);
@@ -3308,8 +3300,10 @@ impl VerylWalker for Emitter {
         );
         self.space(1);
         self.str("(");
-        let reset_signal = self.reset_signal.clone().unwrap();
-        self.str(&reset_signal);
+        if self.reset_active_low {
+            self.str("!");
+        }
+        self.duplicated_token(&self.reset_signal.clone().unwrap());
         self.str(")");
         self.space(1);
         self.statement_block(&arg.statement_block);
@@ -3569,7 +3563,7 @@ impl VerylWalker for Emitter {
             self.str("always_comb");
         }
         self.space(1);
-        self.identifier(&emitting_identifier(arg.identifier.as_ref(), None));
+        self.identifier(&arg.identifier);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -3687,26 +3681,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'AlwaysFfClock'
     fn always_ff_clock(&mut self, arg: &AlwaysFfClock) {
-        if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-            let clock = match found.found.kind {
-                SymbolKind::Port(x) => x.r#type.kind,
-                SymbolKind::Variable(x) => x.r#type.kind,
-                SymbolKind::ModportVariableMember(x) => {
-                    let symbol = symbol_table::get(x.variable).unwrap();
-                    if let SymbolKind::Variable(x) = symbol.kind {
-                        x.r#type.kind
-                    } else {
-                        unreachable!();
-                    }
-                }
-                _ => unreachable!(),
-            };
-            let clock_type = match clock {
-                TypeKind::ClockPosedge => ClockType::PosEdge,
-                TypeKind::ClockNegedge => ClockType::NegEdge,
-                TypeKind::Clock => self.build_opt.clock_type,
-                _ => unreachable!(),
-            };
+        if let Ok(symbol) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
+            let clock_type = get_variable_type_kind(&symbol.found)
+                .map(|x| match x {
+                    TypeKind::ClockPosedge => ClockType::PosEdge,
+                    TypeKind::ClockNegedge => ClockType::NegEdge,
+                    TypeKind::Clock => self.build_opt.clock_type,
+                    _ => unreachable!(),
+                })
+                .unwrap();
 
             match clock_type {
                 ClockType::PosEdge => self.str("posedge"),
@@ -3722,51 +3705,41 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'AlwaysFfReset'
     fn always_ff_reset(&mut self, arg: &AlwaysFfReset) {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-            let (reset_kind, prefix, suffix) = match found.found.kind {
-                SymbolKind::Port(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
-                SymbolKind::Variable(x) => (x.r#type.kind, x.prefix.clone(), x.suffix.clone()),
-                SymbolKind::ModportVariableMember(x) => {
-                    let symbol = symbol_table::get(x.variable).unwrap();
-                    if let SymbolKind::Variable(x) = symbol.kind {
-                        (x.r#type.kind, x.prefix.clone(), x.suffix.clone())
-                    } else {
-                        unreachable!();
-                    }
-                }
-                _ => unreachable!(),
-            };
-            let reset_type = match reset_kind {
-                TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
-                TypeKind::ResetAsyncLow => ResetType::AsyncLow,
-                TypeKind::ResetSyncHigh => ResetType::SyncHigh,
-                TypeKind::ResetSyncLow => ResetType::SyncLow,
-                TypeKind::Reset => self.build_opt.reset_type,
-                _ => unreachable!(),
-            };
-            let prefix_op = match reset_type {
+            let reset_type = get_variable_type_kind(&found.found)
+                .map(|x| match x {
+                    TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
+                    TypeKind::ResetAsyncLow => ResetType::AsyncLow,
+                    TypeKind::ResetSyncHigh => ResetType::SyncHigh,
+                    TypeKind::ResetSyncLow => ResetType::SyncLow,
+                    TypeKind::Reset => self.build_opt.reset_type,
+                    _ => unreachable!(),
+                })
+                .unwrap();
+
+            match reset_type {
                 ResetType::AsyncHigh => {
                     self.str("posedge");
                     self.space(1);
                     self.hierarchical_identifier(&arg.hierarchical_identifier);
-                    ""
                 }
                 ResetType::AsyncLow => {
                     self.str("negedge");
                     self.space(1);
                     self.hierarchical_identifier(&arg.hierarchical_identifier);
-                    "!"
                 }
-                ResetType::SyncHigh => "",
-                ResetType::SyncLow => "!",
+                _ => {}
             };
 
             let mut stringifier = Stringifier::new();
-            stringifier.hierarchical_identifier_with_prefix_suffix(
-                &arg.hierarchical_identifier,
-                &prefix,
-                &suffix,
-            );
-            self.reset_signal = Some(format!("{}{}", prefix_op, stringifier.as_str()));
+            stringifier.hierarchical_identifier(&arg.hierarchical_identifier);
+            let token = arg
+                .hierarchical_identifier
+                .identifier
+                .identifier_token
+                .replace(stringifier.as_str());
+
+            self.reset_signal = Some(emitting_identifier_token(&token, Some(&found.found)));
+            self.reset_active_low = matches!(reset_type, ResetType::AsyncLow | ResetType::SyncLow);
         } else {
             unreachable!()
         }
@@ -4157,11 +4130,12 @@ impl VerylWalker for Emitter {
             unreachable!();
         };
 
-        self.identifier(&identifier_with_prefix_suffix(
-            &arg.identifier,
+        let token = identifier_token_with_prefix_suffix(
+            &arg.identifier.identifier_token,
             &Some(format!("{prefix}_")),
             &None,
-        ));
+        );
+        self.veryl_token(&token);
         if let Some(ref x) = arg.enum_item_opt {
             self.space(1);
             self.equ(&x.equ);
@@ -5189,8 +5163,7 @@ impl VerylWalker for Emitter {
         } else {
             self.space(1);
             self.str(":");
-            let name = self.default_block.clone().unwrap();
-            self.identifier(&name);
+            self.veryl_token(&self.default_block.clone().unwrap());
         }
         self.token_will_push(&arg.l_brace.l_brace_token.replace(""));
         for (i, x) in arg.generate_optional_named_block_list.iter().enumerate() {
@@ -5730,39 +5703,50 @@ pub fn symbol_string(
     ret.replace("$std_", "__std_")
 }
 
-pub fn identifier_with_prefix_suffix(
-    identifier: &Identifier,
-    prefix: &Option<String>,
-    suffix: &Option<String>,
-) -> Identifier {
-    let token = if prefix.is_some() || suffix.is_some() {
-        let token = &identifier.identifier_token.strip_prefix("r#");
-        token.append(prefix, suffix)
-    } else {
-        identifier.identifier_token.strip_prefix("r#")
-    };
-    Identifier {
-        identifier_token: token,
+fn get_variable_type_kind(symbol: &Symbol) -> Option<TypeKind> {
+    match &symbol.kind {
+        SymbolKind::Port(x) => Some(x.r#type.kind.clone()),
+        SymbolKind::Variable(x) => Some(x.r#type.kind.clone()),
+        SymbolKind::ModportVariableMember(x) => {
+            let symbol = symbol_table::get(x.variable).unwrap();
+            get_variable_type_kind(&symbol)
+        }
+        _ => None,
     }
 }
 
-pub fn emitting_identifier(arg: &Identifier, namespace: Option<Namespace>) -> Identifier {
-    let path_namespace = if let Some(x) = namespace {
-        SymbolPathNamespace(arg.into(), x)
-    } else {
-        arg.into()
-    };
-
-    let (prefix, suffix) = if let Ok(found) = symbol_table::resolve(path_namespace) {
-        match &found.found.kind {
-            SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
-            SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
-            _ => (None, None),
+fn get_variable_prefix_suffix(symbol: &Symbol) -> (Option<String>, Option<String>) {
+    match &symbol.kind {
+        SymbolKind::Port(x) => (x.prefix.clone(), x.suffix.clone()),
+        SymbolKind::Variable(x) => (x.prefix.clone(), x.suffix.clone()),
+        SymbolKind::ModportVariableMember(x) => {
+            let symbol = symbol_table::get(x.variable).unwrap();
+            get_variable_prefix_suffix(&symbol)
         }
+        _ => (None, None),
+    }
+}
+
+fn identifier_token_with_prefix_suffix(
+    token: &VerylToken,
+    prefix: &Option<String>,
+    suffix: &Option<String>,
+) -> VerylToken {
+    if prefix.is_some() || suffix.is_some() {
+        let token = token.strip_prefix("r#");
+        token.append(prefix, suffix)
+    } else {
+        token.strip_prefix("r#")
+    }
+}
+
+fn emitting_identifier_token(token: &VerylToken, symbol: Option<&Symbol>) -> VerylToken {
+    let (prefix, suffix) = if let Some(symbol) = symbol {
+        get_variable_prefix_suffix(symbol)
     } else {
         (None, None)
     };
-    identifier_with_prefix_suffix(arg, &prefix, &suffix)
+    identifier_token_with_prefix_suffix(token, &prefix, &suffix)
 }
 
 pub fn resolve_generic_path(

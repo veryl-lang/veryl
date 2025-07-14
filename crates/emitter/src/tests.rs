@@ -234,6 +234,56 @@ endmodule
 }
 
 #[test]
+fn hierarchical_referenced_clock_reset_signals() {
+    let code = r#"interface FooIF {
+    var clk: clock;
+    var rst: reset;
+}
+module ModuleA (
+    i_clk: input clock,
+    i_rst: input reset,
+) {
+    inst foo_if: FooIF;
+    always_comb {
+        foo_if.clk = i_clk;
+        foo_if.rst = i_rst;
+    }
+}
+"#;
+
+    let expect = r#"interface prj_FooIF;
+    logic clk_p;
+    logic rst_x;
+endinterface
+module prj_ModuleA (
+    input var logic i_clk_p,
+    input var logic i_rst_x
+);
+    prj_FooIF foo_if ();
+    always_comb begin
+        foo_if.clk_p = i_clk_p;
+        foo_if.rst_x = i_rst_x;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.build.clock_posedge_suffix = Some("_p".to_string());
+    metadata.build.reset_low_suffix = Some("_x".to_string());
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn omit_project_prefix() {
     let code = r#"module ModuleA {
     inst u: InterfaceB::<10>;
