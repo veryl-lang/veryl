@@ -40,7 +40,7 @@ similar         = {workspace = true}
 tempfile        = {workspace = true}
 thiserror       = {workspace = true}
 tokio           = {workspace = true}
-tokio-util      = "0.7.15"
+tokio-util      = {version = "0.7.15", features = ["codec"]}
 veryl-analyzer  = {version = "0.16.2", path = "../analyzer"}
 veryl-emitter   = {version = "0.16.2", path = "../emitter"}
 veryl-formatter = {version = "0.16.2", path = "../formatter"}
