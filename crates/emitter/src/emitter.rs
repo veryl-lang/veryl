@@ -13,7 +13,9 @@ use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
-use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
+use veryl_analyzer::symbol_path::{
+    GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
+};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
@@ -2266,9 +2268,13 @@ impl VerylWalker for Emitter {
                 }
                 (Err(_), path) if !path.is_resolvable() => {
                     // emit literal by generics
-                    let text = path.base_path(0).0[0].to_string();
+                    let text = if let GenericSymbolPathKind::Boolean(x) = path.kind {
+                        if x { "1'b1" } else { "1'b0" }
+                    } else {
+                        &path.base_path(0).0[0].to_string()
+                    };
                     self.identifier(&Identifier {
-                        identifier_token: arg.identifier().replace(&text),
+                        identifier_token: arg.identifier().replace(text),
                     });
                 }
                 _ => {}
