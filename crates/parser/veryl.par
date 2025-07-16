@@ -131,6 +131,7 @@ ResetAsyncLowTerm     : <INITIAL, Generic,              ClockDomain>/(?-u:\b)res
 ResetSyncHighTerm     : <INITIAL, Generic,              ClockDomain>/(?-u:\b)reset_sync_high(?-u:\b)/                                                     : Token;
 ResetSyncLowTerm      : <INITIAL, Generic,              ClockDomain>/(?-u:\b)reset_sync_low(?-u:\b)/                                                      : Token;
 ReturnTerm            : <INITIAL, Generic,              ClockDomain>/(?-u:\b)return(?-u:\b)/                                                              : Token;
+RevTerm               : <INITIAL, Generic,              ClockDomain>/(?-u:\b)rev(?-u:\b)/                                                                 : Token;
 BreakTerm             : <INITIAL, Generic,              ClockDomain>/(?-u:\b)break(?-u:\b)/                                                               : Token;
 SameTerm              : <INITIAL, Generic,              ClockDomain>/(?-u:\b)same(?-u:\b)/                                                                : Token;
 SignedTerm            : <INITIAL, Generic,              ClockDomain>/(?-u:\b)signed(?-u:\b)/                                                              : Token;
@@ -267,6 +268,7 @@ ResetAsyncLowToken : ResetAsyncLowTerm : Token Comments;
 ResetSyncHighToken : ResetSyncHighTerm : Token Comments;
 ResetSyncLowToken  : ResetSyncLowTerm  : Token Comments;
 ReturnToken        : ReturnTerm        : Token Comments;
+RevToken           : RevTerm           : Token Comments;
 BreakToken         : BreakTerm         : Token Comments;
 SameToken          : SameTerm          : Token Comments;
 SignedToken        : SignedTerm        : Token Comments;
@@ -408,6 +410,7 @@ ResetAsyncLow : ResetAsyncLowToken : VerylToken;
 ResetSyncHigh : ResetSyncHighToken : VerylToken;
 ResetSyncLow  : ResetSyncLowToken  : VerylToken;
 Return        : ReturnToken        : VerylToken;
+Rev           : RevToken           : VerylToken;
 Same          : SameToken          : VerylToken;
 Signed        : SignedToken        : VerylToken;
 Step          : StepToken          : VerylToken;
@@ -645,7 +648,7 @@ ReturnStatement: Return Expression Semicolon;
 
 BreakStatement: Break Semicolon;
 
-ForStatement: For Identifier Colon ScalarType In Range [ Step AssignmentOperator Expression ] StatementBlock;
+ForStatement: For Identifier Colon ScalarType In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
@@ -862,7 +865,7 @@ InterfaceItem: GenerateItem | ModportDeclaration;
 
 GenerateIfDeclaration: If Expression GenerateNamedBlock { Else If Expression GenerateOptionalNamedBlock } [ Else GenerateOptionalNamedBlock ];
 
-GenerateForDeclaration: For Identifier In Range [ Step AssignmentOperator Expression ] GenerateNamedBlock;
+GenerateForDeclaration: For Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ] GenerateNamedBlock;
 
 GenerateBlockDeclaration: GenerateNamedBlock;
 
