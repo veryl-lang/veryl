@@ -2104,3 +2104,40 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn boolean_literal_as_generic_arg() {
+    let code = r#"module ModuleA::<A: bool> {
+    let _a: bool = A;
+}
+module ModuleB {
+    inst u0: ModuleA::<true> ;
+    inst u1: ModuleA::<false>;
+}
+"#;
+
+    let expect = r#"module prj___ModuleA__true;
+    logic _a; always_comb _a = 1'b1;
+endmodule
+module prj___ModuleA__false;
+    logic _a; always_comb _a = 1'b0;
+endmodule
+module prj_ModuleB;
+    prj___ModuleA__true u0 ();
+    prj___ModuleA__false u1 ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

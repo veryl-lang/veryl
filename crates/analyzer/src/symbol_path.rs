@@ -238,7 +238,7 @@ pub enum GenericSymbolPathKind {
     IntegerAllBit,
     RealExponent,
     RealFixedPoint,
-    Boolean,
+    Boolean(bool),
 }
 
 impl fmt::Display for GenericSymbolPathKind {
@@ -251,7 +251,7 @@ impl fmt::Display for GenericSymbolPathKind {
             GenericSymbolPathKind::IntegerAllBit => "integer all bit".to_string(),
             GenericSymbolPathKind::RealExponent => "real exponent".to_string(),
             GenericSymbolPathKind::RealFixedPoint => "read fixed point".to_string(),
-            GenericSymbolPathKind::Boolean => "boolean".to_string(),
+            GenericSymbolPathKind::Boolean(x) => format!("{x}"),
         };
         text.fmt(f)
     }
@@ -621,16 +621,16 @@ impl From<&syntax_tree::Number> for GenericSymbolPath {
 
 impl From<&syntax_tree::BooleanLiteral> for GenericSymbolPath {
     fn from(value: &syntax_tree::BooleanLiteral) -> Self {
-        let token = match value {
-            syntax_tree::BooleanLiteral::True(x) => x.r#true.true_token.token,
-            syntax_tree::BooleanLiteral::False(x) => x.r#false.false_token.token,
+        let (token, value) = match value {
+            syntax_tree::BooleanLiteral::True(x) => (x.r#true.true_token.token, true),
+            syntax_tree::BooleanLiteral::False(x) => (x.r#false.false_token.token, false),
         };
         GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: token,
                 arguments: Vec::new(),
             }],
-            kind: GenericSymbolPathKind::Boolean,
+            kind: GenericSymbolPathKind::Boolean(value),
             range: token.into(),
         }
     }
