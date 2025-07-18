@@ -441,11 +441,9 @@ impl Lockfile {
                     let path = if path.is_absolute() {
                         path.clone()
                     } else {
-                        diff_paths(
-                            metadata.metadata_path.parent().unwrap().join(path),
-                            root_metadata.project_path(),
-                        )
-                        .unwrap()
+                        let base = root_metadata.project_path();
+                        let path = base.join(metadata.project_path()).join(path);
+                        diff_paths(path.canonicalize().unwrap(), base).unwrap()
                     };
                     LockSource::Path(path)
                 } else {
