@@ -1069,6 +1069,16 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(private_namespace), help(""), url(""))]
+    #[error("\"{name}\" is private namespace")]
+    PrivateNamespace {
+        name: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(unknown_msb),
@@ -1940,6 +1950,14 @@ impl AnalyzerError {
 
     pub fn private_member(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::PrivateMember {
+            name: name.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn private_namespace(name: &str, token: &TokenRange) -> Self {
+        AnalyzerError::PrivateNamespace {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),

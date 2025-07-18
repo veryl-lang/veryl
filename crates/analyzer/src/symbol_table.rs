@@ -76,7 +76,7 @@ impl SymbolTable {
                 &token,
                 SymbolKind::Namespace,
                 &namespace,
-                false,
+                true,
                 DocComment::default(),
             );
             let _ = ret.insert(&token, symbol);
@@ -359,6 +359,7 @@ impl SymbolTable {
             | SymbolKind::Package(_)
             | SymbolKind::ProtoPackage(_)
             | SymbolKind::AliasPackage(_) => !context.other_prj || found.public,
+            SymbolKind::Namespace => context.other_prj || found.public,
             _ => true,
         }
     }
