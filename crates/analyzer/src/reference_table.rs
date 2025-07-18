@@ -144,8 +144,13 @@ impl ReferenceTable {
                     }
                 }
                 ResolveErrorCause::Private => {
-                    self.errors
-                        .push(AnalyzerError::private_member(&name, token));
+                    if matches!(last_found.kind, SymbolKind::Namespace) {
+                        self.errors
+                            .push(AnalyzerError::private_namespace(&name, token));
+                    } else {
+                        self.errors
+                            .push(AnalyzerError::private_member(&name, token));
+                    }
                 }
                 ResolveErrorCause::Invisible => {
                     self.errors
