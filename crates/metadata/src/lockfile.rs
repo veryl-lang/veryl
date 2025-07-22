@@ -38,6 +38,8 @@ pub struct Lock {
     pub name: String,
     pub source: LockSource,
     pub dependencies: Vec<LockDependency>,
+    #[serde(skip)]
+    pub visible: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -132,7 +134,7 @@ impl Lockfile {
     pub fn load(metadata: &Metadata) -> Result<Self, MetadataError> {
         let path = metadata.lockfile_path.canonicalize()?;
         let text = fs::read_to_string(&path)?;
-        let mut ret = LockfileCompat::load(&text, &path, &metadata.metadata_path)?;
+        let mut ret = LockfileCompat::load(&text, &path, metadata)?;
         ret.metadata_path = metadata.metadata_path.clone();
 
         let mut locks = Vec::new();
@@ -375,6 +377,7 @@ impl Lockfile {
                     name: name.clone(),
                     source: dependency.source.clone(),
                     dependencies,
+                    visible: root,
                 };
 
                 ret.push(lock);
@@ -661,24 +664,30 @@ impl LockfileCompat {
     pub fn load(
         text: &str,
         lockfile_path: &Path,
-        metadata_path: &Path,
+        metadata: &Metadata,
     ) -> Result<Lockfile, MetadataError> {
         let compat: LockfileCompat = toml::from_str(text)?;
         let version = compat.version.unwrap_or(0);
-        match version {
+        let mut lockfile = match version {
             0 => {
                 info!(
                     "Migrating lockfile to v1 ({})",
                     lockfile_path.to_string_lossy()
                 );
                 let lockfile: lockfile_compat::v0::Lockfile = toml::from_str(text)?;
-                let mut lockfile = Lockfile::from_v0(lockfile, metadata_path)?;
+                let mut lockfile = Lockfile::from_v0(lockfile, &metadata.metadata_path)?;
                 lockfile.save(lockfile_path)?;
-                Ok(lockfile)
+                lockfile
             }
-            1 => Ok(toml::from_str(text)?),
+            1 => toml::from_str(text)?,
             _ => unreachable!(),
+        };
+
+        for lock in lockfile.projects.iter_mut() {
+            lock.visible = metadata.dependencies.contains_key(&lock.name);
         }
+
+        Ok(lockfile)
     }
 }
 
@@ -740,6 +749,7 @@ impl Lockfile {
                 name: lock.name,
                 source,
                 dependencies,
+                visible: false,
             };
 
             projects.push(new_lock);

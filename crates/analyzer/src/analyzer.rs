@@ -290,13 +290,13 @@ pub struct AnalyzerPass3Info {
     var_refs: HashMap<VarRefAffiliation, Vec<VarRef>>,
 }
 
-fn new_namespace(name: &str) -> (Token, Symbol) {
+fn new_namespace(name: &str, public: bool) -> (Token, Symbol) {
     let token = Token::new(name, 0, 0, 0, 0, TokenSource::External);
     let symbol = Symbol::new(
         &token,
         SymbolKind::Namespace,
         &Namespace::new(),
-        false,
+        public,
         DocComment::default(),
     );
     (token, symbol)
@@ -307,7 +307,7 @@ impl Analyzer {
         for locks in metadata.lockfile.lock_table.values() {
             for lock in locks {
                 let prj = resource_table::insert_str(&lock.name);
-                let (token, symbol) = new_namespace(&lock.name);
+                let (token, symbol) = new_namespace(&lock.name, lock.visible);
                 symbol_table::insert(&token, symbol);
                 for lock_dep in &lock.dependencies {
                     let from = resource_table::insert_str(&lock_dep.name);
@@ -318,7 +318,7 @@ impl Analyzer {
                         .unwrap();
                     let to = to.iter().find(|x| x.source == lock_dep.source).unwrap();
 
-                    let (token, symbol) = new_namespace(&to.name);
+                    let (token, symbol) = new_namespace(&to.name, to.visible);
                     symbol_table::insert(&token, symbol);
 
                     let to = resource_table::insert_str(&to.name);
