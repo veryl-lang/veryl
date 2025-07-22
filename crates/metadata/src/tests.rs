@@ -36,6 +36,7 @@ sub2   = {git = "file://{}/sub2", version = "0.1.0"}
 sub3_2 = {git = "file://{}/sub3", project = "sub3", version = "0.2.0"}
 sub3_3 = {git = "file://{}/sub3", project = "sub3", version = "1.0.0"}
 sub4   = {path = "../sub4"}
+sub6   = {path = "../sub6"}
 "#;
 
 const SUB1_TOML: &'static str = r#"
@@ -85,12 +86,23 @@ publish_commit = true
 
 [dependencies]
 sub5 = {path = "./sub5"}
+sub6 = {path = "../sub6"}
 "#;
 
 const SUB5_TOML: &'static str = r#"
 [project]
 name = "sub5"
 version = "0.5.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+"#;
+
+const SUB6_TOML: &'static str = r#"
+[project]
+name = "sub6"
+version = "0.6.0"
 
 [publish]
 bump_commit = true
@@ -112,6 +124,7 @@ fn create_metadata_multi() -> (Metadata, TempDir) {
     create_project(tempdir.path(), "sub3", SUB3_TOML, true);
     create_project(tempdir.path(), "sub4", SUB4_TOML, true);
     create_project(&tempdir.path().join("sub4"), "sub5", SUB5_TOML, true);
+    create_project(tempdir.path(), "sub6", SUB6_TOML, true);
 
     (metadata, tempdir)
 }
@@ -267,6 +280,9 @@ fn lockfile() {
     let sub1 = tbl
         .iter()
         .find_map(|(_, x)| x.iter().find(|x| x.name == "sub1"));
+    let sub1_0 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub1_0"));
     let sub2 = tbl
         .iter()
         .find_map(|(_, x)| x.iter().find(|x| x.name == "sub2"));
@@ -285,13 +301,22 @@ fn lockfile() {
     let sub5 = tbl
         .iter()
         .find_map(|(_, x)| x.iter().find(|x| x.name == "sub5"));
+    let sub6 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub6"));
+    let sub6_0 = tbl
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub6_0"));
     assert!(sub1.is_some());
+    assert!(sub1_0.is_none());
     assert!(sub2.is_some());
     assert!(sub2_0.is_some());
     assert!(sub3_2.is_some());
     assert!(sub3_3.is_some());
     assert!(sub4.is_some());
     assert!(sub5.is_some());
+    assert!(sub6.is_some());
+    assert!(sub6_0.is_none());
     assert_eq!(
         sub1.unwrap().source.get_version(),
         Some(&Version::parse("0.1.1").unwrap())
