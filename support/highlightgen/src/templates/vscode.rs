@@ -1,4 +1,8 @@
-{
+use crate::templates::Template;
+use handlebars::Handlebars;
+use std::path::PathBuf;
+
+const TMPL: &str = r###"{
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
 	"name": "Veryl",
 	"fileTypes" : [
@@ -26,11 +30,11 @@
 			"patterns": [
 				{
 					"name": "keyword.control.veryl",
-					"match": "\\b(case|default|else|if_reset|if|inside|outside|switch|for|in|repeat|rev|step)\\b"
+					"match": "\\b({{#each conditional}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}}|{{#each repeat}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\\b"
 				},
 				{
 					"name": "keyword.other.veryl",
-					"match": "\\b(embed|enum|function|include|interface|modport|module|package|proto|pub|struct|union|unsafe|alias|always_comb|always_ff|assign|as|connect|const|final|import|initial|inst|let|param|return|break|type|var|false|lsb|msb|true)\\b"
+					"match": "\\b({{#each structure}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}}|{{#each statement}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}}|{{#each literal}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\\b"
 				}
 			]
 		},
@@ -38,11 +42,11 @@
 			"patterns": [
 				{
 					"name": "storage.type.veryl",
-					"match": "\\b(bit|bool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|u8|u16|u32|u64)\\b"
+					"match": "\\b({{#each type}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\\b"
 				},
 				{
 					"name": "storage.modifier.veryl",
-					"match": "\\b(converse|inout|input|output|same)\\b"
+					"match": "\\b({{#each direction}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\\b"
 				}
 			]
 		},
@@ -96,4 +100,19 @@
 		}
 	},
 	"scopeName": "source.veryl"
+}
+"###;
+
+pub struct Vscode;
+
+impl Template for Vscode {
+    fn apply(&self, keywords: &crate::keywords::Keywords) -> String {
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
+        handlebars.render_template(TMPL, &keywords).unwrap()
+    }
+
+    fn path(&self) -> PathBuf {
+        PathBuf::from("support/vscode/syntaxes/veryl.tmLanguage.json")
+    }
 }

@@ -89,3 +89,14 @@ jobs:
       - name: Test
         run: veryl test --sim verilator
         working-directory: crates/std/veryl
+
+  highlightgen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run highlightgen
+        run: cargo run --bin highlightgen -- check
