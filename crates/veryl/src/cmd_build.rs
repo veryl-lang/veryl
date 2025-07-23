@@ -27,7 +27,7 @@ impl CmdBuild {
     }
 
     pub fn exec(&self, metadata: &mut Metadata, include_tests: bool, quiet: bool) -> Result<bool> {
-        let paths = metadata.paths(&self.opt.files, true)?;
+        let paths = metadata.paths(&self.opt.files, true, true)?;
 
         let mut check_error = CheckError::default();
         let mut contexts = Vec::new();

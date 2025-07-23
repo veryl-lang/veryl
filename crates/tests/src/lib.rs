@@ -31,7 +31,7 @@ mod analyzer {
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
         if crate::DEPENDENCY_TESTS.contains(&name) {
-            let paths = metadata.paths::<&str>(&[], false).unwrap();
+            let paths = metadata.paths::<&str>(&[], false, true).unwrap();
             let cache_path = veryl_path::cache_path().canonicalize().unwrap();
             for path in paths {
                 if path.src.starts_with(&cache_path) {
@@ -123,7 +123,7 @@ mod emitter {
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
         if crate::DEPENDENCY_TESTS.contains(&name) {
-            let paths = metadata.paths::<&str>(&[], false).unwrap();
+            let paths = metadata.paths::<&str>(&[], false, true).unwrap();
             let cache_path = veryl_path::cache_path().canonicalize().unwrap();
             for path in paths {
                 if path.src.starts_with(&cache_path) {
@@ -176,7 +176,7 @@ mod path {
 
     fn path_test(mut metadata: Metadata, src_exp: &str, dst_exp: &str, map_exp: &str) {
         let base = metadata.project_path();
-        let paths = metadata.paths::<PathBuf>(&[], false).unwrap();
+        let paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
 
         for path in paths {
             if path.src.file_name().unwrap() == "01_number.veryl" {
@@ -376,7 +376,7 @@ mod filelist {
         let path = path.join("../../testcases/filelist");
         let metadata_path = Metadata::search_from(path).unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
-        let paths = metadata.paths::<PathBuf>(&[], false).unwrap();
+        let paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
 
         let mut contexts = Vec::new();
 

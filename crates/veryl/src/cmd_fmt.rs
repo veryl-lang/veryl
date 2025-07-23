@@ -19,7 +19,7 @@ impl CmdFmt {
     }
 
     pub fn exec(&self, metadata: &mut Metadata, quiet: bool) -> Result<bool> {
-        let paths = metadata.paths(&self.opt.files, true)?;
+        let paths = metadata.paths(&self.opt.files, true, false)?;
 
         let mut all_pass = true;
         for path in &paths {
