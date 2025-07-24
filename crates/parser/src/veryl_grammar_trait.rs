@@ -1,5 +1,5 @@
 pub use crate::generated::veryl_grammar_trait::*;
-use crate::veryl_token::is_anonymous_token;
+use crate::veryl_token::{VerylToken, is_anonymous_token};
 use paste::paste;
 use std::fmt;
 
@@ -614,5 +614,64 @@ impl AlwaysFfDeclaration {
         }
 
         None
+    }
+}
+
+impl ProtoDeclaration {
+    pub fn identifier_token(&self) -> VerylToken {
+        match &*self.proto_declaration_group {
+            ProtoDeclarationGroup::ProtoModuleDeclaration(x) => x
+                .proto_module_declaration
+                .identifier
+                .identifier_token
+                .clone(),
+            ProtoDeclarationGroup::ProtoInterfaceDeclaration(x) => x
+                .proto_interface_declaration
+                .identifier
+                .identifier_token
+                .clone(),
+            ProtoDeclarationGroup::ProtoPackageDeclaration(x) => x
+                .proto_package_declaration
+                .identifier
+                .identifier_token
+                .clone(),
+        }
+    }
+}
+
+impl PublicDescriptionItem {
+    pub fn identifier_token(&self) -> VerylToken {
+        match self {
+            PublicDescriptionItem::ModuleDeclaration(x) => {
+                x.module_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::InterfaceDeclaration(x) => {
+                x.interface_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::PackageDeclaration(x) => {
+                x.package_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::AliasDeclaration(x) => {
+                x.alias_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::ProtoDeclaration(x) => x.proto_declaration.identifier_token(),
+        }
+    }
+}
+
+impl DescriptionItem {
+    pub fn identifier_token(&self) -> Option<VerylToken> {
+        match self {
+            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                Some(x.public_description_item.identifier_token())
+            }
+            DescriptionItem::ImportDeclaration(_) => None,
+            DescriptionItem::EmbedDeclaration(x) => {
+                Some(x.embed_declaration.identifier.identifier_token.clone())
+            }
+            DescriptionItem::IncludeDeclaration(x) => {
+                Some(x.include_declaration.identifier.identifier_token.clone())
+            }
+        }
     }
 }

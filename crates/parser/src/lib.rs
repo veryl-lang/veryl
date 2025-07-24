@@ -6,6 +6,7 @@ pub mod parser_error;
 pub mod resource_table;
 pub mod stringifier;
 pub mod text_table;
+pub mod token_collector;
 pub mod token_range;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;
@@ -17,5 +18,7 @@ pub use parol_runtime::ParolError;
 pub use parser::Parser;
 pub use parser_error::ParserError;
 pub use stringifier::Stringifier;
+pub use token_collector::TokenCollector;
+
 #[cfg(test)]
 mod tests;

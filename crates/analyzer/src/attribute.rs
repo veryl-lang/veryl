@@ -183,6 +183,7 @@ struct Pattern {
     pub identifier: StrId,
     pub fmt: StrId,
     pub compact: StrId,
+    pub skip: StrId,
     pub expand: StrId,
     pub modport: StrId,
 }
@@ -215,6 +216,7 @@ impl Pattern {
             identifier: resource_table::insert_str("identifier"),
             fmt: resource_table::insert_str("fmt"),
             compact: resource_table::insert_str("compact"),
+            skip: resource_table::insert_str("skip"),
             expand: resource_table::insert_str("expand"),
             modport: resource_table::insert_str("modport"),
         }
@@ -364,6 +366,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 for arg in &args {
                     match arg.text {
                         x if x == pat.compact => items.push(FormatItem::Compact),
+                        x if x == pat.skip => items.push(FormatItem::Skip),
                         _ => return Err(err),
                     }
                 }
@@ -474,12 +477,14 @@ impl fmt::Display for AlignItem {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FormatItem {
     Compact,
+    Skip,
 }
 
 impl fmt::Display for FormatItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
             FormatItem::Compact => "compact",
+            FormatItem::Skip => "skip",
         };
         text.fmt(f)
     }

@@ -125,3 +125,42 @@ module ModuleB {
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn skip_formatting() {
+    let code = r#"#[fmt(skip)]
+module ModuleA {
+    let _a: logic = 0;
+}
+
+#[fmt(skip)]
+interface InterfaceA {
+    var a: logic;
+
+    modport mp {
+        a: input
+    }
+}
+
+#[fmt(skip)]
+package PackageA {
+    const A: u32 = 0;
+
+    function FuncA(
+        a: input u32,
+        b: input u32
+    ) -> u32 {
+        return a + b;
+    }
+}
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.format.indent_width = 2;
+
+    let ret = format(&metadata, &code);
+
+    println!("ret\n{}\nexp\n{}", ret, code);
+    assert_eq!(ret, code);
+}

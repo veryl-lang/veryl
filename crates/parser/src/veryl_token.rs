@@ -104,6 +104,23 @@ impl Token {
             source: TokenSource::Generated(path),
         }
     }
+
+    pub fn end_line(&self) -> u32 {
+        let text = self.to_string();
+        self.line + text.matches('\n').count() as u32
+    }
+
+    pub fn end_column(&self) -> u32 {
+        let text = self.to_string();
+        if text.matches('\n').count() > 0 {
+            text.split('\n')
+                .next_back()
+                .map(|x| x.len() as u32)
+                .unwrap()
+        } else {
+            self.column + self.length - 1
+        }
+    }
 }
 
 pub fn is_anonymous_text(text: StrId) -> bool {
