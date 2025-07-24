@@ -71,6 +71,14 @@ module veryl_testcase_Module07;
                 end
             end
         end
+
+        for (int unsigned i = 10 - 1; i >= 0; i--) begin
+            a  = i;
+            aa = i + 1;
+            if (i == 9) begin
+                break;
+            end
+        end
     end
 
     always_ff @ (posedge clk) begin

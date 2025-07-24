@@ -3358,6 +3358,22 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ForStatement'
     fn for_statement(&mut self, arg: &ForStatement) {
+        let ascending_order = arg.for_statement_opt.is_none();
+        let include_end = if let Some(x) = &arg.range.range_opt {
+            matches!(*x.range_operator, RangeOperator::DotDotEqu(_))
+        } else {
+            true
+        };
+        let (beg, end) = if let Some(x) = &arg.range.range_opt {
+            if ascending_order {
+                (&arg.range.expression, &x.expression)
+            } else {
+                (&x.expression, &arg.range.expression)
+            }
+        } else {
+            (&arg.range.expression, &arg.range.expression)
+        };
+
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
@@ -3367,28 +3383,24 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.range.expression);
+        self.expression(beg);
+        if !ascending_order && !include_end {
+            self.str(" - 1");
+        }
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        if let Some(ref x) = arg.range.range_opt {
-            match &*x.range_operator {
-                RangeOperator::DotDot(_) => self.str("<"),
-                RangeOperator::DotDotEqu(_) => self.str("<="),
-            }
-        } else {
-            self.str("<=");
+        match (ascending_order, include_end) {
+            (true, true) => self.str("<="),
+            (true, false) => self.str("<"),
+            _ => self.str(">="),
         }
         self.space(1);
-        if let Some(ref x) = arg.range.range_opt {
-            self.expression(&x.expression);
-        } else {
-            self.expression(&arg.range.expression);
-        }
+        self.expression(end);
         self.str(";");
         self.space(1);
-        if let Some(ref x) = arg.for_statement_opt {
+        if let Some(ref x) = arg.for_statement_opt0 {
             self.identifier(&arg.identifier);
             self.space(1);
             self.assignment_operator(&x.assignment_operator);
@@ -3396,7 +3408,11 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
         } else {
             self.identifier(&arg.identifier);
-            self.str("++");
+            if ascending_order {
+                self.str("++");
+            } else {
+                self.str("--");
+            }
         }
         self.str(")");
         self.space(1);
@@ -5107,6 +5123,22 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'GenerateForDeclaration'
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) {
+        let ascending_order = arg.generate_for_declaration_opt.is_none();
+        let include_end = if let Some(x) = &arg.range.range_opt {
+            matches!(*x.range_operator, RangeOperator::DotDotEqu(_))
+        } else {
+            true
+        };
+        let (beg, end) = if let Some(x) = &arg.range.range_opt {
+            if ascending_order {
+                (&arg.range.expression, &x.expression)
+            } else {
+                (&x.expression, &arg.range.expression)
+            }
+        } else {
+            (&arg.range.expression, &arg.range.expression)
+        };
+
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
@@ -5116,28 +5148,24 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(&arg.range.expression);
+        self.expression(beg);
+        if !ascending_order && !include_end {
+            self.str(" - 1");
+        }
         self.str(";");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);
-        if let Some(ref x) = arg.range.range_opt {
-            match &*x.range_operator {
-                RangeOperator::DotDot(_) => self.str("<"),
-                RangeOperator::DotDotEqu(_) => self.str("<="),
-            }
-        } else {
-            self.str("<=");
+        match (ascending_order, include_end) {
+            (true, true) => self.str("<="),
+            (true, false) => self.str("<"),
+            _ => self.str(">="),
         }
         self.space(1);
-        if let Some(ref x) = arg.range.range_opt {
-            self.expression(&x.expression);
-        } else {
-            self.expression(&arg.range.expression);
-        }
+        self.expression(end);
         self.str(";");
         self.space(1);
-        if let Some(ref x) = arg.generate_for_declaration_opt {
+        if let Some(ref x) = arg.generate_for_declaration_opt0 {
             self.identifier(&arg.identifier);
             self.space(1);
             self.assignment_operator(&x.assignment_operator);
@@ -5145,7 +5173,11 @@ impl VerylWalker for Emitter {
             self.expression(&x.expression);
         } else {
             self.identifier(&arg.identifier);
-            self.str("++");
+            if ascending_order {
+                self.str("++");
+            } else {
+                self.str("--");
+            }
         }
         self.str(")");
         self.space(1);
