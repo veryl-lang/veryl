@@ -14,7 +14,8 @@ edition.workspace     = true
 tag = true
 tag-name = "v{{version}}"
 pre-release-replacements = [
-    {file="../../support/vscode/package.json", search = "\"version\": \"[0-9\\.]+\",", replace = "\"version\": \"{{version}}\"," },
+    {file="../../support/vscode/package.json"      , search = "\"version\": \"[0-9\\.]+\",", replace = "\"version\": \"{{version}}\"," },
+    {file="../../support/highlightjs//package.json", search = "\"version\": \"[0-9\\.]+\",", replace = "\"version\": \"{{version}}\"," },
 ]
 pre-release-hook = ["../../support/scripts/tag_submodule.sh", "{{version}}"]
 
@@ -24,10 +25,10 @@ pre-release-hook = ["../../support/scripts/tag_submodule.sh", "{{version}}"]
 anstyle         = "1.0"
 clap            = {workspace = true}
 clap_complete   = "4.5"
-console         = "0.16.0"
+console         = {workspace = true}
 fern            = "0.7.0"
 futures         = {workspace = true}
-handlebars      = "6.3"
+handlebars      = {workspace = true}
 log             = {workspace = true}
 once_cell       = {workspace = true}
 mdbook          = {workspace = true}

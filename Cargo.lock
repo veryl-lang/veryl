@@ -2231,6 +2231,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "highlightgen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "console",
+ "handlebars",
+ "serde",
+ "similar",
+ "tempfile",
+]
+
+[[package]]
 name = "home"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

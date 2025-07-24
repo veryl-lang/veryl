@@ -1,4 +1,8 @@
-/**
+use crate::templates::Template;
+use handlebars::Handlebars;
+use std::path::PathBuf;
+
+const TMPL: &str = r###"/**
  * Language: Veryl
  * Contributors:
  *   Naoya Hatta <dalance@gmail.com>
@@ -13,7 +17,7 @@ module.exports = function (hljs)
     case_insensitive: false,
     keywords:
       {
-        keyword: 'case default else if_reset if inside outside switch converse inout input output same false lsb msb true for in repeat rev step alias always_comb always_ff assign as connect const final import initial inst let param return break type var embed enum function include interface modport module package proto pub struct union unsafe bit bool clock clock_posedge clock_negedge f32 f64 i8 i16 i32 i64 logic reset reset_async_high reset_async_low reset_sync_high reset_sync_low signed string tri u8 u16 u32 u64',
+        keyword: '{{#each this}}{{#each this}}{{{this}}}{{#unless @last}} {{/unless}}{{/each}}{{#unless @last}} {{/unless}}{{/each}}',
         literal: ''
       },
     contains:
@@ -35,4 +39,19 @@ module.exports = function (hljs)
         }
       ]
   }
+}
+"###;
+
+pub struct Highlightjs;
+
+impl Template for Highlightjs {
+    fn apply(&self, keywords: &crate::keywords::Keywords) -> String {
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
+        handlebars.render_template(TMPL, &keywords).unwrap()
+    }
+
+    fn path(&self) -> PathBuf {
+        PathBuf::from("support/highlightjs/src/languages/veryl.js")
+    }
 }

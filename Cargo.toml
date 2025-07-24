@@ -15,6 +15,7 @@ members = [
     "crates/std",
     "crates/tests",
     "crates/veryl",
+    "support/highlightgen",
 ]
 exclude = [
     "support/sourcemap-resolver",
@@ -34,8 +35,10 @@ edition     = "2024"
 [workspace.dependencies]
 anyhow          = "1.0"
 clap            = {version = "4.5.41", features = ["derive"]}
+console         = "0.16.0"
 futures         = "0.3.31"
 fxhash          = "0.2.1"
+handlebars      = "6.3"
 log             = "0.4.27"
 mdbook          = "0.4.51"
 miette          = {version = "7.6"}
