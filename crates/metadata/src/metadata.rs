@@ -268,6 +268,7 @@ impl Metadata {
         &mut self,
         files: &[T],
         symlink: bool,
+        include_dependencies: bool,
     ) -> Result<Vec<PathSet>, MetadataError> {
         let sources = if self.build.source.iter().count() > 0 {
             warn!(
@@ -336,15 +337,17 @@ impl Metadata {
             ignore_already_exists(fs::create_dir(&base_dst))?;
         }
 
-        if !self.build.exclude_std {
-            veryl_std::expand()?;
-            ret.append(&mut veryl_std::paths(&base_dst)?);
+        if include_dependencies {
+            if !self.build.exclude_std {
+                veryl_std::expand()?;
+                ret.append(&mut veryl_std::paths(&base_dst)?);
+            }
+
+            self.update_lockfile()?;
+
+            let mut deps = self.lockfile.paths(&base_dst)?;
+            ret.append(&mut deps);
         }
-
-        self.update_lockfile()?;
-
-        let mut deps = self.lockfile.paths(&base_dst)?;
-        ret.append(&mut deps);
 
         Ok(ret)
     }

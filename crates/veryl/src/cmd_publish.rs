@@ -17,8 +17,8 @@ impl CmdPublish {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        let paths = metadata.paths::<&str>(&[], false)?;
-        let paths_symlink = metadata.paths::<&str>(&[], true)?;
+        let paths = metadata.paths::<&str>(&[], false, true)?;
+        let paths_symlink = metadata.paths::<&str>(&[], true, true)?;
 
         for path in &paths_symlink {
             if paths.iter().all(|x| x.src != path.src) {

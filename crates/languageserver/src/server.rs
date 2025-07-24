@@ -223,7 +223,7 @@ impl Server {
 
             if let Some(path) = url.to_file_path() {
                 if !path.starts_with(&self.cache_dir) {
-                    if let Ok(paths) = metadata.paths::<&str>(&[], true) {
+                    if let Ok(paths) = metadata.paths::<&str>(&[], true, true) {
                         let total = paths.len();
                         let task = BackgroundTask {
                             metadata,
@@ -262,7 +262,7 @@ impl Server {
 
         self.background_done = false;
         if let Some(mut metadata) = self.get_metadata(&new_path) {
-            if let Ok(paths) = metadata.paths::<&str>(&[], true) {
+            if let Ok(paths) = metadata.paths::<&str>(&[], true, true) {
                 let total = paths.len();
                 let task = BackgroundTask {
                     metadata,
