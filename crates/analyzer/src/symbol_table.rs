@@ -359,7 +359,7 @@ impl SymbolTable {
             | SymbolKind::Package(_)
             | SymbolKind::ProtoPackage(_)
             | SymbolKind::AliasPackage(_) => !context.other_prj || found.public,
-            SymbolKind::Namespace => context.other_prj || found.public,
+            SymbolKind::Namespace => !context.root_prj || found.public,
             _ => true,
         }
     }
@@ -485,6 +485,7 @@ impl SymbolTable {
         let prj = context.namespace.paths[0];
         let path_head = path.0[0];
         if let Some(map) = self.project_local_table.get(&prj) {
+            context.root_prj = false;
             if let Some(id) = map.get(&path_head) {
                 path.0[0] = *id;
             }
@@ -1144,6 +1145,7 @@ struct ResolveContext<'a> {
     generic_tables: GenericTables,
     inner: bool,
     other_prj: bool,
+    root_prj: bool,
     sv_member: bool,
     imported: bool,
     depth: usize,
@@ -1161,6 +1163,7 @@ impl ResolveContext<'_> {
             generic_tables: GenericTables::default(),
             inner: false,
             other_prj: false,
+            root_prj: true,
             sv_member: false,
             imported: false,
             depth: 0,
