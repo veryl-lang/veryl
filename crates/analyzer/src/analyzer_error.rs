@@ -1319,6 +1319,20 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Warning),
+        code(unsigned_loop_variable_in_descending_order_for_loop),
+        help("use singed type as loop variable"),
+        url("")
+    )]
+    #[error("use of unsigned loop variable in descending order for loop may cause infinite loop")]
+    UnsignedLoopVariableInDescendingOrderForLoop {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 fn source(token: &TokenRange) -> MultiSources {
@@ -2088,6 +2102,13 @@ impl AnalyzerError {
 
     pub fn last_item_with_define(token: &TokenRange) -> Self {
         AnalyzerError::LastItemWithDefine {
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn unsigned_loop_variable_in_descending_order_for_loop(token: &TokenRange) -> Self {
+        AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
             input: source(token),
             error_location: token.into(),
         }
