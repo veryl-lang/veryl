@@ -3,6 +3,7 @@ use veryl_analyzer::attribute::{AlignItem, FormatItem};
 use veryl_analyzer::attribute_table;
 use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
+use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::token_range::TokenExt;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
@@ -366,6 +367,44 @@ impl Formatter {
 
     fn multi_line(&self) -> bool {
         !self.multi_line.is_empty()
+    }
+
+    fn unformat_description_item(&mut self, arg: &DescriptionItem) {
+        let mut token_collector = TokenCollector::default();
+        token_collector.description_item(arg);
+
+        let mut string = String::new();
+        for (i, token) in token_collector.tokens.iter().enumerate() {
+            let (delta_line, delta_column) = if i > 0 {
+                let last_token = token_collector.tokens[i - 1];
+                let last_line = last_token.end_line();
+                if token.line == last_line {
+                    let last_column = last_token.end_column();
+                    let delat_column = token.column - last_column - 1;
+                    (0, delat_column)
+                } else {
+                    let delta_line = token.line - last_line;
+                    (delta_line, token.column - 1)
+                }
+            } else {
+                (0, token.column - 1)
+            };
+
+            for _ in 0..delta_line {
+                string.push_str(NEWLINE);
+            }
+            for _ in 0..delta_column {
+                string.push(' ');
+            }
+
+            string.push_str(&token.to_string());
+        }
+
+        let mut token = *token_collector.tokens.first().unwrap();
+        token.text = resource_table::insert_str(&string);
+        token.length = string.len() as u32;
+
+        self.push_token(&token);
     }
 }
 
@@ -2835,20 +2874,28 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'DescriptionItem'
     fn description_item(&mut self, arg: &DescriptionItem) {
-        match arg {
-            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
-                if let Some(ref x) = x.description_item_opt {
-                    self.r#pub(&x.r#pub);
-                    self.space(1);
+        if !skip_formatting(arg) {
+            match arg {
+                DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                    if let Some(ref x) = x.description_item_opt {
+                        self.r#pub(&x.r#pub);
+                        self.space(1);
+                    }
+                    self.public_description_item(&x.public_description_item);
                 }
-                self.public_description_item(&x.public_description_item);
-            }
-            DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
-            DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
-            DescriptionItem::IncludeDeclaration(x) => {
-                self.include_declaration(&x.include_declaration)
-            }
-        };
+                DescriptionItem::ImportDeclaration(x) => {
+                    self.import_declaration(&x.import_declaration)
+                }
+                DescriptionItem::EmbedDeclaration(x) => {
+                    self.embed_declaration(&x.embed_declaration)
+                }
+                DescriptionItem::IncludeDeclaration(x) => {
+                    self.include_declaration(&x.include_declaration)
+                }
+            };
+        } else {
+            self.unformat_description_item(arg);
+        }
     }
 
     /// Semantic action for non-terminal 'Veryl'
@@ -2882,4 +2929,11 @@ fn is_single_line_inst_declaration(arg: &InstDeclaration) -> bool {
     }
 
     true
+}
+
+fn skip_formatting(arg: &DescriptionItem) -> bool {
+    let Some(identifier) = arg.identifier_token() else {
+        return false;
+    };
+    attribute_table::is_format(&identifier.token, FormatItem::Skip)
 }
