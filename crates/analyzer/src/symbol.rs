@@ -1153,7 +1153,11 @@ impl Type {
     }
 
     pub fn is_signed(&self) -> bool {
-        self.has_modifier(&TypeModifierKind::Signed)
+        if self.kind.is_fixed() {
+            self.kind.is_signed()
+        } else {
+            self.has_modifier(&TypeModifierKind::Signed)
+        }
     }
 
     pub fn can_be_default_clock(&self) -> bool {
@@ -1274,6 +1278,36 @@ impl TypeKind {
 
     pub fn is_4state(&self) -> bool {
         self.is_clock() | self.is_reset() | (*self == TypeKind::Logic)
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        matches!(
+            self,
+            TypeKind::U8
+                | TypeKind::U16
+                | TypeKind::U32
+                | TypeKind::U64
+                | TypeKind::I8
+                | TypeKind::I16
+                | TypeKind::I32
+                | TypeKind::I64
+                | TypeKind::F32
+                | TypeKind::F64
+                | TypeKind::Bool
+                | TypeKind::String
+        )
+    }
+
+    pub fn is_signed(&self) -> bool {
+        matches!(
+            self,
+            TypeKind::I8
+                | TypeKind::I16
+                | TypeKind::I32
+                | TypeKind::I64
+                | TypeKind::F32
+                | TypeKind::F64
+        )
     }
 }
 

@@ -4,7 +4,7 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind, Type as SymType};
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPathNamespace};
 use crate::symbol_table;
 use veryl_parser::resource_table;
@@ -563,6 +563,27 @@ impl VerylGrammarTrait for CheckType {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if arg.for_statement_opt.is_some() {
+                let namespace =
+                    namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
+                if let Some((r#type, _)) =
+                    SymType::from(arg.scalar_type.as_ref()).trace_user_defined(&namespace)
+                {
+                    if !r#type.is_signed() {
+                        self.errors.push(
+                            AnalyzerError::unsigned_loop_variable_in_descending_order_for_loop(
+                                &arg.scalar_type.as_ref().into(),
+                            ),
+                        );
                     }
                 }
             }

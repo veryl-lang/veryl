@@ -72,7 +72,7 @@ module Module07 {
             }
         }
 
-        for i: u32 in rev 0..10 {
+        for i: i32 in rev 0..10 {
             a  = i;
             aa = i + 1;
             if i == 9 {

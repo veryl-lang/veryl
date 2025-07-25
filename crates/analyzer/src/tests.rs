@@ -7175,3 +7175,72 @@ fn recursive_module_instance() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 }
+
+#[test]
+fn unsigned_loop_variable_in_descending_order_for_loop() {
+    let code = r#"
+    module ModuleA {
+        var _a: logic<10>;
+        always_comb {
+            for i: u32 in rev 0..10 {
+                _a += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        type my_type = logic<4>;
+
+        var _a: logic<10>;
+        always_comb {
+            for i: my_type in rev 0..10 {
+                _a += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var _a: logic<10>;
+        always_comb {
+            for i: i32 in rev 0..10 {
+                _a += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        type my_type = signed logic<4>;
+
+        var _a: logic<10>;
+        always_comb {
+            for i: my_type in rev 0..10 {
+                _a += i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
