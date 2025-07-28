@@ -7,3 +7,6 @@
 [submodule "support/sourcemap-resolver"]
 	path = support/sourcemap-resolver
 	url = https://github.com/veryl-lang/sourcemap-resolver
+[submodule "support/rouge"]
+	path = support/rouge
+	url = https://github.com/veryl-lang/rouge
