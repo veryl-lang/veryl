@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use templates::{Ace, Highlightjs, Template, Vim, Vscode};
+use templates::{Ace, Highlightjs, Rouge, Template, Vim, Vscode};
 
 #[derive(Parser)]
 struct Opt {
@@ -26,19 +26,20 @@ enum Commands {
 fn main() -> Result<ExitCode> {
     let opt = Opt::parse();
 
-    let keywords = Keywords::load();
+    let mut root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    root_dir.pop();
+    root_dir.pop();
+
+    let keywords = Keywords::load(&root_dir);
     let templates: Vec<Box<dyn Template>> = vec![
         Box::new(Ace),
         Box::new(Highlightjs),
+        Box::new(Rouge),
         Box::new(Vim),
         Box::new(Vscode),
     ];
 
     let mut pass = true;
-    let mut root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root_dir.pop();
-    root_dir.pop();
-
     for tmpl in templates {
         let path = root_dir.join(tmpl.path());
         let new = tmpl.apply(&keywords);

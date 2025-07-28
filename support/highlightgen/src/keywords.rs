@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::fs;
+use std::path::Path;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Keywords {
@@ -13,8 +14,9 @@ pub struct Keywords {
 }
 
 impl Keywords {
-    pub fn load() -> Self {
-        let text = fs::read_to_string("./crates/parser/veryl.par").unwrap();
+    pub fn load(root: &Path) -> Self {
+        let path = root.join("./crates/parser/veryl.par");
+        let text = fs::read_to_string(path).unwrap();
 
         let mut conditional = vec![];
         let mut direction = vec![];
