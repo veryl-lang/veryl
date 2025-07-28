@@ -4,7 +4,9 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind, Type as SymType};
+use crate::symbol::{
+    GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind, Type as SymType, TypeModifierKind,
+};
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPathNamespace};
 use crate::symbol_table;
 use veryl_parser::resource_table;
@@ -197,7 +199,7 @@ fn check_generic_proto_arg(
             proto_symbol
         } else if let Some(r#type) = x.found.kind.get_type() {
             r#type
-                .trace_user_defined(&x.found.namespace)
+                .trace_user_defined(Some(&x.found.namespace))
                 .map(|(_, x)| x)
                 .unwrap_or(None)
         } else {
@@ -570,13 +572,28 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
+    fn scalar_type(&mut self, arg: &ScalarType) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let r#type: SymType = arg.into();
+            if let Some(modifier) = r#type.find_modifier(&TypeModifierKind::Signed) {
+                if let Some((atom_type, _)) = r#type.trace_user_defined(None) {
+                    if atom_type.kind.is_fixed() {
+                        self.errors
+                            .push(AnalyzerError::fixed_type_with_signed_modifier(
+                                &modifier.token.token.into(),
+                            ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if arg.for_statement_opt.is_some() {
-                let namespace =
-                    namespace_table::get(arg.identifier.identifier_token.token.id).unwrap();
                 if let Some((r#type, _)) =
-                    SymType::from(arg.scalar_type.as_ref()).trace_user_defined(&namespace)
+                    SymType::from(arg.scalar_type.as_ref()).trace_user_defined(None)
                 {
                     if !r#type.is_signed() {
                         self.errors.push(

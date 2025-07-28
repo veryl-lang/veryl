@@ -406,7 +406,7 @@ fn collect_modports(ports: &[Port], namespace: &Namespace) -> Vec<(Symbol, Port,
         .enumerate()
         .filter_map(|(i, port)| {
             let property = port.property();
-            if let Some((_, Some(symbol))) = property.r#type.trace_user_defined(namespace) {
+            if let Some((_, Some(symbol))) = property.r#type.trace_user_defined(Some(namespace)) {
                 if matches!(symbol.kind, SymbolKind::Modport(_)) {
                     Some((symbol, port.clone(), i))
                 } else {
@@ -492,7 +492,7 @@ fn resolve_interface(
     generic_map: &[GenericMap],
 ) -> Option<(Symbol, Vec<SymbolId>, GenericTables)> {
     let property = port.property();
-    let (user_defined, _) = property.r#type.trace_user_defined(namespace)?;
+    let (user_defined, _) = property.r#type.trace_user_defined(Some(namespace))?;
 
     let mut path = user_defined.get_user_defined()?.path.clone();
     path.paths.pop(); // remove modport path
