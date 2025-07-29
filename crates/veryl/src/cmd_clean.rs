@@ -14,7 +14,7 @@ impl CmdClean {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        for path in metadata.build_info.generated_files.iter() {
+        for path in metadata.build_info.generated_files.keys() {
             if path.exists() {
                 info!("Removing file ({})", path.to_string_lossy());
                 fs::remove_file(path).into_diagnostic()?;

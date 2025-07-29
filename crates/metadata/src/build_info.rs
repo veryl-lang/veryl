@@ -1,14 +1,15 @@
 use crate::MetadataError;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::SystemTime;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildInfo {
-    pub generated_files: BTreeSet<PathBuf>,
+    pub generated_files: BTreeMap<PathBuf, SystemTime>,
 }
 
 impl BuildInfo {
