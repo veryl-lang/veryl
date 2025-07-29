@@ -5,6 +5,7 @@ use crate::evaluator::{
     Evaluated, EvaluatedError, EvaluatedTypeClockKind, EvaluatedTypeResetKind, Evaluator,
 };
 use crate::namespace::Namespace;
+use crate::namespace_table;
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
 use crate::symbol_table;
 use std::cell::RefCell;
@@ -700,7 +701,8 @@ impl Symbol {
         match &self.kind {
             SymbolKind::Struct(_) => true,
             SymbolKind::TypeDef(x) => {
-                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(&self.namespace) {
+                let namespace = Some(&self.namespace);
+                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(namespace) {
                     symbol.is_struct()
                 } else {
                     false
@@ -714,7 +716,8 @@ impl Symbol {
         match &self.kind {
             SymbolKind::Union(_) => true,
             SymbolKind::TypeDef(x) => {
-                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(&self.namespace) {
+                let namespace = Some(&self.namespace);
+                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(namespace) {
                     symbol.is_union()
                 } else {
                     false
@@ -1176,16 +1179,24 @@ impl Type {
         None
     }
 
-    pub fn trace_user_defined(&self, namespace: &Namespace) -> Option<(Type, Option<Symbol>)> {
+    pub fn trace_user_defined(
+        &self,
+        namespace: Option<&Namespace>,
+    ) -> Option<(Type, Option<Symbol>)> {
         if let TypeKind::UserDefined(x) = &self.kind {
-            let symbol = symbol_table::resolve((&x.path.generic_path(), namespace)).ok()?;
+            let symbol = if let Some(namespace) = namespace {
+                symbol_table::resolve((&x.path.generic_path(), namespace)).ok()?
+            } else {
+                let namespace = namespace_table::get(x.path.paths[0].base.id).unwrap();
+                symbol_table::resolve((&x.path.generic_path(), &namespace)).ok()?
+            };
             match symbol.found.kind {
                 SymbolKind::TypeDef(x) => {
-                    return x.r#type.trace_user_defined(&symbol.found.namespace);
+                    return x.r#type.trace_user_defined(Some(&symbol.found.namespace));
                 }
                 SymbolKind::ProtoTypeDef(ref x) => {
                     if let Some(r#type) = &x.r#type {
-                        return r#type.trace_user_defined(&symbol.found.namespace);
+                        return r#type.trace_user_defined(Some(&symbol.found.namespace));
                     } else {
                         return Some((self.clone(), Some(symbol.found)));
                     }
@@ -1317,8 +1328,9 @@ pub struct UserDefinedType {
     pub symbol: Option<SymbolId>,
 }
 
-impl UserDefinedType {
-    fn new(path: GenericSymbolPath) -> Self {
+impl From<&syntax_tree::ScopedIdentifier> for UserDefinedType {
+    fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
+        let path: GenericSymbolPath = value.into();
         Self { path, symbol: None }
     }
 }
@@ -1536,8 +1548,7 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                         return Err(());
                     }
 
-                    let path: GenericSymbolPath = x.scoped_identifier.as_ref().into();
-                    let r#type = UserDefinedType::new(path);
+                    let r#type: UserDefinedType = x.scoped_identifier.as_ref().into();
                     let kind = TypeKind::UserDefined(r#type);
                     let width: Vec<syntax_tree::Expression> =
                         if let Some(ref x) = x.expression_identifier_opt {
@@ -1659,8 +1670,7 @@ impl From<&syntax_tree::ScalarType> for Type {
 
         match &*value.scalar_type_group {
             syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
-                let path: GenericSymbolPath = x.user_defined_type.scoped_identifier.as_ref().into();
-                let r#type = UserDefinedType::new(path);
+                let r#type: UserDefinedType = x.user_defined_type.scoped_identifier.as_ref().into();
                 let kind = TypeKind::UserDefined(r#type);
                 let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.scalar_type_opt {
                     x.width.as_ref().into()
@@ -1714,7 +1724,7 @@ impl From<&syntax_tree::ArrayType> for Type {
 
 impl From<&syntax_tree::ScopedIdentifier> for Type {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let r#type = UserDefinedType::new(value.into());
+        let r#type: UserDefinedType = value.into();
         let kind = TypeKind::UserDefined(r#type);
         Type {
             kind,
@@ -2184,7 +2194,7 @@ impl GenericBoundKind {
             return None;
         };
 
-        let (r#type, symbol) = proto.trace_user_defined(namespace)?;
+        let (r#type, symbol) = proto.trace_user_defined(Some(namespace))?;
         if symbol.is_none() {
             return Some(ProtoBound::FactorType(r#type));
         }

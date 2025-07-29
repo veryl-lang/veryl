@@ -521,13 +521,15 @@ impl ReferenceTable {
     fn get_struct_namespace(symbol: &Symbol) -> Namespace {
         match &symbol.kind {
             SymbolKind::TypeDef(x) => {
-                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(&symbol.namespace) {
+                let namespace = Some(&symbol.namespace);
+                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(namespace) {
                     return Self::get_struct_namespace(&symbol);
                 }
             }
             SymbolKind::ProtoTypeDef(x) => {
                 if let Some(r#type) = &x.r#type {
-                    if let Some((_, Some(symbol))) = r#type.trace_user_defined(&symbol.namespace) {
+                    let namespace = Some(&symbol.namespace);
+                    if let Some((_, Some(symbol))) = r#type.trace_user_defined(namespace) {
                         return Self::get_struct_namespace(&symbol);
                     }
                 }

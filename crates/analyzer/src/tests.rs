@@ -7244,3 +7244,57 @@ fn unsigned_loop_variable_in_descending_order_for_loop() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 }
+
+#[test]
+fn fixed_type_with_signed_modifier() {
+    let code = r#"
+    module ModuleA {
+        let _a: signed u32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::FixedTypeWithSignedModifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        type my_type = signed u32;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::FixedTypeWithSignedModifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        type my_type = u32;
+        let _a: signed my_type = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::FixedTypeWithSignedModifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        type my_type_0 = u32;
+        type my_type_1 = my_type_0;
+        let _a: signed my_type_1 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::FixedTypeWithSignedModifier { .. }
+    ));
+}

@@ -1333,6 +1333,20 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(fixed_type_with_signed_modifier),
+        help("remove 'signed` modifier"),
+        url("")
+    )]
+    #[error("'signed' modifier can't be used with fixed type")]
+    FixedTypeWithSignedModifier {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
 }
 
 fn source(token: &TokenRange) -> MultiSources {
@@ -2109,6 +2123,13 @@ impl AnalyzerError {
 
     pub fn unsigned_loop_variable_in_descending_order_for_loop(token: &TokenRange) -> Self {
         AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn fixed_type_with_signed_modifier(token: &TokenRange) -> Self {
+        AnalyzerError::FixedTypeWithSignedModifier {
             input: source(token),
             error_location: token.into(),
         }
