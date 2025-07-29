@@ -8,6 +8,7 @@ use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
@@ -125,7 +126,8 @@ impl CmdBuild {
                     debug!("Output file ({})", dst.to_string_lossy());
                 }
 
-                metadata.build_info.generated_files.insert(dst);
+                let now = SystemTime::now();
+                metadata.build_info.generated_files.insert(dst, now);
 
                 if metadata.build.sourcemap_target != SourceMapTarget::None {
                     let source_map = emitter.source_map();
@@ -142,7 +144,8 @@ impl CmdBuild {
                         debug!("Output map ({})", map.to_string_lossy());
                     }
 
-                    metadata.build_info.generated_files.insert(map);
+                    let now = SystemTime::now();
+                    metadata.build_info.generated_files.insert(map, now);
                 }
             }
         }
@@ -198,10 +201,11 @@ impl CmdBuild {
                 debug!("Output file ({})", target_path.to_string_lossy());
             }
 
+            let now = SystemTime::now();
             metadata
                 .build_info
                 .generated_files
-                .insert(target_path.clone());
+                .insert(target_path.clone(), now);
 
             self.gen_filelist_line(metadata, &target_path)?
         } else {
@@ -216,7 +220,11 @@ impl CmdBuild {
         utils::write_file_if_changed(&filelist_path, text.as_bytes())?;
 
         info!("Output filelist ({})", filelist_path.to_string_lossy());
-        metadata.build_info.generated_files.insert(filelist_path);
+        let now = SystemTime::now();
+        metadata
+            .build_info
+            .generated_files
+            .insert(filelist_path, now);
 
         Ok(())
     }

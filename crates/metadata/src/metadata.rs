@@ -135,7 +135,11 @@ impl Metadata {
 
         let build_info = metadata.project_build_info_path();
         if build_info.exists() {
-            metadata.build_info = BuildInfo::load(&build_info)?;
+            if let Ok(info) = BuildInfo::load(&build_info) {
+                metadata.build_info = info;
+            } else {
+                // ignore failure of loading BuildInfo
+            }
         }
 
         debug!(
