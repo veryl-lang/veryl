@@ -251,6 +251,10 @@ pub struct OptDump {
     #[arg(long)]
     pub type_dag: bool,
 
+    /// output file dag
+    #[arg(long)]
+    pub file_dag: bool,
+
     /// output attribute table
     #[arg(long)]
     pub attribute_table: bool,

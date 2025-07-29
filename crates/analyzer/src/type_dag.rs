@@ -7,8 +7,9 @@ use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
-use daggy::{Dag, Walker, petgraph::algo};
+use daggy::{Dag, NodeIndex, Walker, petgraph::algo};
 use std::cell::RefCell;
+use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::Token;
 
 #[allow(clippy::large_enum_variant)]
@@ -53,6 +54,8 @@ pub struct TypeDag {
     candidates: Vec<TypeDagCandidate>,
     errors: Vec<DagError>,
     dag_owned: HashMap<u32, Vec<u32>>,
+    file_dag: Dag<(), (), u32>,
+    file_nodes: BiMap<PathId, u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -110,6 +113,8 @@ impl TypeDag {
             candidates: Vec::new(),
             errors: Vec::new(),
             dag_owned: HashMap::default(),
+            file_dag: Dag::new(),
+            file_nodes: BiMap::new(),
         }
     }
 
@@ -344,6 +349,11 @@ impl TypeDag {
         if let Some(node_index) = self.nodes.get_by_left(&symbol_id) {
             Ok(*node_index)
         } else {
+            if let Some(path) = symbol.token.source.get_path() {
+                let file_node = self.file_dag.add_node(()).index() as u32;
+                self.file_nodes.insert(path, file_node);
+            }
+
             let node_index = self.dag.add_node(()).index() as u32;
             self.insert_edge(self.source, node_index, Context::Irrelevant)?;
             self.nodes.insert(symbol_id, node_index);
@@ -364,7 +374,10 @@ impl TypeDag {
 
     fn insert_edge(&mut self, start: u32, end: u32, edge: Context) -> Result<(), DagError> {
         match self.dag.add_edge(start.into(), end.into(), edge) {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                self.insert_file_edge(start, end);
+                Ok(())
+            }
             Err(_) => {
                 // Direct recursion of module/interface/function is allowed
                 let is_allowed_direct_recursion = matches!(
@@ -377,6 +390,26 @@ impl TypeDag {
                     let ssym = self.get_symbol(start);
                     let esym = self.get_symbol(end);
                     Err(DagError::Cyclic(ssym, esym))
+                }
+            }
+        }
+    }
+
+    fn insert_file_edge(&mut self, start: u32, end: u32) {
+        if start != self.source {
+            let start = self.get_symbol(start);
+            let end = self.get_symbol(end);
+            if let (Some(start), Some(end)) =
+                (start.token.source.get_path(), end.token.source.get_path())
+            {
+                let start = self.file_nodes.get_by_left(&start).unwrap();
+                let end = self.file_nodes.get_by_left(&end).unwrap();
+                let start: NodeIndex = (*start).into();
+                let end: NodeIndex = (*end).into();
+                if start != end && self.file_dag.find_edge(start, end).is_none() {
+                    let err = self.file_dag.add_edge(start, end, ());
+                    // cyclic error should be caught by dag
+                    err.unwrap();
                 }
             }
         }
@@ -488,6 +521,25 @@ impl TypeDag {
         ret
     }
 
+    fn dump_file(&self) -> String {
+        let nodes = algo::toposort(self.file_dag.graph(), None).unwrap();
+        let mut ret = "".to_string();
+
+        for node in &nodes {
+            let idx = node.index() as u32;
+            if let Some(path) = self.file_nodes.get_by_right(&idx) {
+                ret.push_str(&format!("{path}\n"));
+                for parent in self.file_dag.parents(*node).iter(&self.file_dag) {
+                    let idx = parent.1.index() as u32;
+                    if let Some(path) = self.file_nodes.get_by_right(&idx) {
+                        ret.push_str(&format!(" |- {path}\n"));
+                    }
+                }
+            }
+        }
+        ret
+    }
+
     fn clear(&mut self) {
         self.clone_from(&Self::new());
     }
@@ -513,6 +565,10 @@ pub fn connected_components() -> Vec<Vec<Symbol>> {
 
 pub fn dump() -> String {
     TYPE_DAG.with(|f| f.borrow().dump())
+}
+
+pub fn dump_file() -> String {
+    TYPE_DAG.with(|f| f.borrow().dump_file())
 }
 
 pub fn clear() {

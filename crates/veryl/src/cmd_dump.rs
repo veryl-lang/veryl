@@ -61,6 +61,10 @@ impl CmdDump {
             println!("{}", veryl_analyzer::type_dag::dump());
         }
 
+        if self.opt.file_dag {
+            println!("{}", veryl_analyzer::type_dag::dump_file());
+        }
+
         if self.opt.attribute_table {
             println!("{}", veryl_analyzer::attribute_table::dump());
         }
