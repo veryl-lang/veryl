@@ -21,7 +21,7 @@ pub module async_handshake::<S: synchronizer> #(
     id_rst  : input  'd reset, /// dst reset
     od_valid: output 'd logic, /// dst data is valid
     id_ready: input  'd logic, /// dst data is acceptable
-    od_data : output 'd TYPE, /// dst data
+    od_data : output 'd TYPE , /// dst data
 ) {
     var srst        : 's reset;
     var src_state_s : 's logic;

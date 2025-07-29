@@ -248,18 +248,18 @@ pub trait VerylWalker {
         after!(self, question, arg);
     }
 
-    /// Semantic action for non-terminal 'Quote'
-    fn quote(&mut self, arg: &Quote) {
-        before!(self, quote, arg);
-        self.veryl_token(&arg.quote_token);
-        after!(self, quote, arg);
-    }
-
     /// Semantic action for non-terminal 'QuoteLBrace'
     fn quote_l_brace(&mut self, arg: &QuoteLBrace) {
         before!(self, quote_l_brace, arg);
         self.veryl_token(&arg.quote_l_brace_token);
         after!(self, quote_l_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'Quote'
+    fn quote(&mut self, arg: &Quote) {
+        before!(self, quote, arg);
+        self.veryl_token(&arg.quote_token);
+        after!(self, quote, arg);
     }
 
     /// Semantic action for non-terminal 'LAngle'
