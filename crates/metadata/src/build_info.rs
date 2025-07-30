@@ -9,6 +9,7 @@ use std::time::SystemTime;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildInfo {
+    pub veryl_version: Option<String>,
     pub generated_files: BTreeMap<PathBuf, SystemTime>,
 }
 

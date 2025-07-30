@@ -37,6 +37,7 @@ impl CmdClean {
         }
 
         metadata.build_info.generated_files.clear();
+        metadata.build_info.veryl_version = None;
         metadata.save_build_info()?;
 
         Ok(true)

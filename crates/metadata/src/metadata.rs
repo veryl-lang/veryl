@@ -139,6 +139,7 @@ impl Metadata {
                 metadata.build_info = info;
             } else {
                 // ignore failure of loading BuildInfo
+                info!("Discarded incompatible .build/info.toml");
             }
         }
 
