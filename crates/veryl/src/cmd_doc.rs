@@ -1,4 +1,5 @@
 use crate::OptDoc;
+use crate::context::Context;
 use crate::doc::{DocBuilder, TopLevelItem};
 use log::info;
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -34,19 +35,26 @@ impl CmdDoc {
             let analyzer = Analyzer::new(metadata);
             analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
 
-            contexts.push((path, input, parser, analyzer));
+            let context = Context::new(path.clone(), input, parser, analyzer)?;
+            contexts.push(context);
         }
 
         Analyzer::analyze_post_pass1();
 
-        for (path, _, parser, analyzer) in &contexts {
-            analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
+        for context in &contexts {
+            let path = &context.path;
+            context
+                .analyzer
+                .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
         }
 
         let info = Analyzer::analyze_post_pass2();
 
-        for (path, _, parser, analyzer) in &contexts {
-            analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
+        for context in &contexts {
+            let path = &context.path;
+            context
+                .analyzer
+                .analyze_pass3(&path.prj, &path.src, &context.parser.veryl, &info);
         }
 
         let mut modules = BTreeMap::new();

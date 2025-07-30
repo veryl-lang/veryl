@@ -1,5 +1,6 @@
 use crate::OptPublish;
 use crate::cmd_check::CheckError;
+use crate::context::Context;
 use log::{info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr, bail};
 use std::fs;
@@ -55,21 +56,30 @@ impl CmdPublish {
             let mut errors = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
 
-            contexts.push((path, input, parser, analyzer));
+            let context = Context::new(path.clone(), input, parser, analyzer)?;
+            contexts.push(context);
         }
 
         let mut errors = Analyzer::analyze_post_pass1();
         check_error = check_error.append(&mut errors).check_err()?;
 
-        for (path, _, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
+        for context in &contexts {
+            let path = &context.path;
+            let mut errors =
+                context
+                    .analyzer
+                    .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
         let info = Analyzer::analyze_post_pass2();
 
-        for (path, _, parser, analyzer) in &contexts {
-            let mut errors = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
+        for context in &contexts {
+            let path = &context.path;
+            let mut errors =
+                context
+                    .analyzer
+                    .analyze_pass3(&path.prj, &path.src, &context.parser.veryl, &info);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 

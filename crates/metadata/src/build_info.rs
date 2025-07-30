@@ -28,6 +28,13 @@ impl BuildInfo {
         fs::write(&path, text.as_bytes())?;
         Ok(())
     }
+
+    pub fn veryl_version_match(&self) -> bool {
+        match &self.veryl_version {
+            Some(x) => x == crate::VERYL_VERSION,
+            None => false,
+        }
+    }
 }
 
 impl FromStr for BuildInfo {
