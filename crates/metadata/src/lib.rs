@@ -30,3 +30,5 @@ pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;
 pub use test::{SimType, Test, WaveFormFormat, WaveFormTarget};
+
+include!(concat!(env!("OUT_DIR"), "/veryl_version.rs"));

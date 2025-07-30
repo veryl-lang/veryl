@@ -28,8 +28,8 @@ pub use stopwatch::StopWatch;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
-#[clap(version(option_env!("VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))))]
-#[clap(long_version(option_env!("VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))))]
+#[clap(version(veryl_metadata::VERYL_VERSION))]
+#[clap(long_version(veryl_metadata::VERYL_VERSION))]
 pub struct Opt {
     /// No output printed to stdout
     #[arg(long, global = true)]

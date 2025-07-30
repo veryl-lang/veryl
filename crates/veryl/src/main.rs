@@ -97,6 +97,7 @@ fn main() -> Result<ExitCode> {
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata)?,
         Commands::Build(x) => {
             let ret = cmd_build::CmdBuild::new(x).exec(&mut metadata, false, opt.quiet);
+            metadata.build_info.veryl_version = Some(veryl_metadata::VERYL_VERSION.to_string());
             metadata.save_build_info()?;
             ret?
         }
