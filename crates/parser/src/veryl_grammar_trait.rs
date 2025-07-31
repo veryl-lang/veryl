@@ -659,6 +659,33 @@ impl PublicDescriptionItem {
     }
 }
 
+impl fmt::Display for EmbedContent {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut ret = String::new();
+        for x in &self.embed_content_list {
+            ret.push_str(&x.embed_item.to_string());
+        }
+        ret.fmt(f)
+    }
+}
+
+impl fmt::Display for EmbedItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            EmbedItem::EmbedLBraceEmbedItemListEmbedRBrace(x) => {
+                let mut ret = String::new();
+                ret.push_str(&x.embed_l_brace.embed_l_brace_token.to_string());
+                for x in &x.embed_item_list {
+                    ret.push_str(&x.embed_item.to_string());
+                }
+                ret.push_str(&x.embed_r_brace.embed_r_brace_token.to_string());
+                ret.fmt(f)
+            }
+            EmbedItem::Any(x) => x.any.any_token.fmt(f),
+        }
+    }
+}
+
 impl DescriptionItem {
     pub fn identifier_token(&self) -> Option<VerylToken> {
         match self {

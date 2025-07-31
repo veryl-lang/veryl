@@ -18,10 +18,8 @@ fn main() {
     let text = fs::read_to_string(par_file).unwrap();
     let mut keywords = "pub const KEYWORDS: &[&str] = &[\n".to_string();
     for line in text.lines() {
-        if line.contains("(?-u:\\b)") {
-            let keyword = line.split('/').nth(1).unwrap();
-            let keyword = keyword.replace("(?-u:\\b)", "");
-            let keyword = keyword.replace("(?-u:\\b)", "");
+        if line.contains("Keyword:") {
+            let keyword = line.split("'").nth(1).unwrap();
             keywords.push_str(&format!("    \"{keyword}\",\n"));
         }
     }

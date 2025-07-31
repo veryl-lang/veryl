@@ -62,6 +62,7 @@ pub struct Emitter {
     single_line: Vec<()>,
     multi_line: Vec<()>,
     adjust_line: bool,
+    keep_tail_newline: bool,
     in_always_ff: bool,
     in_direction_modport: bool,
     in_direction_with_var: bool,
@@ -112,6 +113,7 @@ impl Default for Emitter {
             single_line: Vec::new(),
             multi_line: Vec::new(),
             adjust_line: false,
+            keep_tail_newline: false,
             in_always_ff: false,
             in_direction_modport: false,
             in_direction_with_var: false,
@@ -334,7 +336,7 @@ impl Emitter {
     fn push_token(&mut self, x: &Token) {
         self.consume_adjust_line(x);
         let text = resource_table::get_str_value(x.text).unwrap();
-        let text = if text.ends_with('\n') {
+        let text = if !self.keep_tail_newline && text.ends_with('\n') {
             self.consumed_next_newline = true;
             text.trim_end()
         } else {
@@ -3523,7 +3525,7 @@ impl VerylWalker for Emitter {
                             self.project_name.unwrap(),
                             test_name
                         );
-                        self.token(&arg.hash.hash_token.replace(&text));
+                        self.token(&arg.hash_l_bracket.hash_l_bracket_token.replace(&text));
                         self.newline();
                         let mut wavedump = format!(
                             r##"    `ifdef __veryl_wavedump_{}_{}__
@@ -5316,18 +5318,31 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EmbedDeclaration'
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) {
         if arg.identifier.identifier_token.to_string() == "inline" {
-            let text = arg.embed_content.embed_content_token.to_string();
-            let text = if arg.identifier0.identifier_token.to_string() == "sv" {
-                &text
-                    .replace("{{{", "`ifndef SYNTHESIS")
-                    .replace("}}}", "`endif")
-            } else {
-                text.strip_prefix("{{{")
-                    .unwrap()
-                    .strip_prefix("}}}")
-                    .unwrap()
-            };
-            self.veryl_token(&arg.embed_content.embed_content_token.replace(text));
+            let is_sv = arg.identifier0.identifier_token.to_string() == "sv";
+
+            if is_sv {
+                self.veryl_token(
+                    &arg.embed_content
+                        .triple_l_brace
+                        .triple_l_brace_token
+                        .replace("`ifndef SYNTHESIS"),
+                );
+            }
+
+            self.keep_tail_newline = true;
+            for x in &arg.embed_content.embed_content_list {
+                self.embed_item(&x.embed_item);
+            }
+            self.keep_tail_newline = false;
+
+            if is_sv {
+                self.veryl_token(
+                    &arg.embed_content
+                        .triple_r_brace
+                        .triple_r_brace_token
+                        .replace("`endif"),
+                );
+            }
         }
     }
 

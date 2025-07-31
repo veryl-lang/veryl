@@ -33,6 +33,7 @@ pub struct Formatter {
     single_line: Vec<()>,
     multi_line: Vec<()>,
     adjust_line: bool,
+    keep_tail_newline: bool,
     in_scalar_type: bool,
     in_expression: Vec<()>,
     in_attribute: bool,
@@ -54,6 +55,7 @@ impl Default for Formatter {
             single_line: Vec::new(),
             multi_line: Vec::new(),
             adjust_line: false,
+            keep_tail_newline: false,
             in_scalar_type: false,
             in_expression: Vec::new(),
             in_attribute: false,
@@ -215,7 +217,7 @@ impl Formatter {
     fn push_token(&mut self, x: &Token) {
         self.consume_adjust_line(x);
         let text = resource_table::get_str_value(x.text).unwrap();
-        let text = if text.ends_with('\n') {
+        let text = if !self.keep_tail_newline && text.ends_with('\n') {
             self.consumed_next_newline = true;
             text.trim_end()
         } else {
@@ -1444,8 +1446,7 @@ impl VerylWalker for Formatter {
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
         self.in_attribute = true;
-        self.hash(&arg.hash);
-        self.l_bracket(&arg.l_bracket);
+        self.hash_l_bracket(&arg.hash_l_bracket);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.attribute_opt {
             self.l_paren(&x.l_paren);
@@ -2834,6 +2835,26 @@ impl VerylWalker for Formatter {
         self.identifier(&arg.identifier0);
 
         self.embed_content(&arg.embed_content);
+    }
+
+    /// Semantic action for non-terminal 'EmbedContent'
+    fn embed_content(&mut self, arg: &EmbedContent) {
+        self.triple_l_brace(&arg.triple_l_brace);
+        self.keep_tail_newline = true;
+        for x in &arg.embed_content_list {
+            self.embed_item(&x.embed_item);
+        }
+        self.keep_tail_newline = false;
+        if !self
+            .string
+            .chars()
+            .last()
+            .map(|c| c.is_ascii_whitespace())
+            .unwrap_or(false)
+        {
+            self.newline();
+        }
+        self.triple_r_brace(&arg.triple_r_brace);
     }
 
     /// Semantic action for non-terminal 'IncludeDeclaration'
