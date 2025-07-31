@@ -3287,40 +3287,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b7a8e9be5e039e2ff869df49155f1c06bd01ade2117ec783e56ab0932b67a8f"
-dependencies = [
- "num-bigint",
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
-name = "num-bigint"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f6f7833f2cbf2360a6cfd58cd41a53aa7a90bd4c202f5b1c7dd2ed73c57b2c3"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-complex"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "747d632c0c558b87dbabbe6a82f3b4ae03720d0646ac5b7b4dae89394be5f2c5"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "num-conv"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3337,26 +3303,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-integer"
-version = "0.1.46"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-iter"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
 name = "num-modular"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3369,18 +3315,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "537b596b97c40fcf8056d153049eb22f481c17ebce72a513ec9286e4986d1bb6"
 dependencies = [
  "num-modular",
-]
-
-[[package]]
-name = "num-rational"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12ac428b1cb17fce6f731001d307d351ec70a6d202fc2e60f7d4c5e42d8f4f07"
-dependencies = [
- "autocfg",
- "num-bigint",
- "num-integer",
- "num-traits",
 ]
 
 [[package]]
@@ -3498,9 +3432,9 @@ dependencies = [
 
 [[package]]
 name = "parol"
-version = "3.1.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab6ec35871704794d7cf081463092cde3584c3546156fee32112883aa0c4d16e"
+checksum = "6097691ff358675375ad8df7dcc4f9e1c5d8586c27a87bf51272715e38cbebab"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3514,7 +3448,7 @@ dependencies = [
  "num_cpus",
  "owo-colors",
  "parol-macros",
- "parol_runtime",
+ "parol_runtime 4.0.0",
  "petgraph",
  "rand 0.9.2",
  "rand_regex",
@@ -3522,6 +3456,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "rustc-hash",
+ "scnr2",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -3554,6 +3489,27 @@ dependencies = [
  "parol-macros",
  "petgraph",
  "scnr",
+ "serde_json",
+ "syntree",
+ "syntree_layout",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "parol_runtime"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9265d9528f1a29ce2b378e6e5aadf76b8617665c3e1782d19e0d94fe244bb002"
+dependencies = [
+ "anyhow",
+ "codespan-reporting",
+ "derive_builder",
+ "function_name",
+ "log",
+ "once_cell",
+ "parol-macros",
+ "petgraph",
+ "scnr2",
  "serde_json",
  "syntree",
  "syntree_layout",
@@ -4327,8 +4283,40 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
- "seshat-unicode",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "scnr2"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2930f7bd5cbe25a3cb01318fa91ac64b10681181d215d4d28c19e0f6b0562242"
+dependencies = [
+ "log",
+ "scnr2_macro",
+]
+
+[[package]]
+name = "scnr2_generate"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5629f9816637dde778b45aba9d00962ae7c42a1ba6d759178e465a0c119e4705"
+dependencies = [
+ "log",
+ "proc-macro2",
+ "quote",
+ "regex-syntax",
+ "rustc-hash",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "scnr2_macro"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b8a786bcf92dcd1c0b27d6a995e5a2743a77b05377ad411ea5bfbe559c138c6"
+dependencies = [
+ "scnr2_generate",
 ]
 
 [[package]]
@@ -4438,15 +4426,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "seshat-unicode"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c383601b899fbb8a859ae943fe23eb0385b7cd30ebd6d24e6827bc786635c48"
-dependencies = [
- "num",
 ]
 
 [[package]]
@@ -5507,7 +5486,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 3.1.0",
  "paste",
  "regex",
  "thiserror 2.0.12",
@@ -5524,7 +5503,7 @@ dependencies = [
  "miette",
  "once_cell",
  "parol",
- "parol_runtime",
+ "parol_runtime 3.1.0",
  "paste",
  "regex",
  "thiserror 2.0.12",
