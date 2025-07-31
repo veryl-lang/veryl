@@ -14,6 +14,7 @@ pub mod cmd_new;
 pub mod cmd_publish;
 pub mod cmd_test;
 pub mod cmd_update;
+pub mod context;
 pub mod diff;
 pub mod doc;
 pub mod runner;

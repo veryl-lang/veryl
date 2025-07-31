@@ -46,6 +46,8 @@ pub struct Build {
     pub flatten_array_interface: bool,
     #[serde(default)]
     pub hashed_mangled_name: bool,
+    #[serde(default = "default_incremental")]
+    pub incremental: bool,
 }
 
 fn default_source() -> PathBuf {
@@ -62,6 +64,11 @@ fn default_instance_depth_limit() -> usize {
 
 fn default_instance_total_limit() -> usize {
     1024 * 1024
+}
+
+fn default_incremental() -> bool {
+    // TODO false by default until stabilizing incremental
+    false
 }
 
 impl Default for Build {

@@ -463,6 +463,31 @@ impl TypeDag {
         ret
     }
 
+    fn dependent_files(&self) -> HashMap<PathId, Vec<PathId>> {
+        let mut ret = HashMap::default();
+        let graph = self.file_dag.graph().clone();
+
+        for node in self.file_nodes.right_values() {
+            let mut dependents = Vec::new();
+            let mut dfs = Dfs::new(&graph, (*node).into());
+            while let Some(x) = dfs.next(&graph) {
+                let index = x.index() as u32;
+                if index != *node {
+                    if let Some(x) = self.file_nodes.get_by_right(&index) {
+                        dependents.push(*x);
+                    }
+                }
+            }
+            if !dependents.is_empty() {
+                if let Some(x) = self.file_nodes.get_by_right(node) {
+                    ret.insert(*x, dependents);
+                }
+            }
+        }
+
+        ret
+    }
+
     fn dump(&self) -> String {
         let mut nodes = algo::toposort(self.dag.graph(), None).unwrap();
         let mut ret = "".to_string();
@@ -561,6 +586,10 @@ pub fn toposort() -> Vec<Symbol> {
 
 pub fn connected_components() -> Vec<Vec<Symbol>> {
     TYPE_DAG.with(|f| f.borrow().connected_components())
+}
+
+pub fn dependent_files() -> HashMap<PathId, Vec<PathId>> {
+    TYPE_DAG.with(|f| f.borrow().dependent_files())
 }
 
 pub fn dump() -> String {
