@@ -1,11 +1,13 @@
 mod ace;
 mod highlightjs;
 mod rouge;
+mod sublime;
 mod vim;
 mod vscode;
 pub use ace::Ace;
 pub use highlightjs::Highlightjs;
 pub use rouge::Rouge;
+pub use sublime::Sublime;
 pub use vim::Vim;
 pub use vscode::Vscode;
 
