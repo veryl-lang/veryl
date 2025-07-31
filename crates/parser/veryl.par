@@ -5,15 +5,33 @@
 %user_type VerylToken = crate::veryl_token::VerylToken
 %user_type Token = crate::veryl_token::Token
 
+%on HashLBracketTerm %push Attr
+%on ColonColonLAngleTerm %push Generic
+%on TripleLBraceTerm %push Embed
+
 %scanner Embed {
     %auto_newline_off
     %auto_ws_off
+
+    %on LBraceTerm %push EmbedInner
+    %on TripleRBraceTerm %pop
+}
+
+%scanner EmbedInner {
+    %auto_newline_off
+    %auto_ws_off
+
+    %on LBraceTerm %push EmbedInner
+    %on RBraceTerm %pop
 }
 
 %scanner Generic {
+    %on ColonColonLAngleTerm %push Generic
+    %on RAngleTerm %pop
 }
 
 %scanner Attr {
+    %on RBracketTerm %pop
 }
 
 %%
@@ -24,135 +42,138 @@
 
 // Longest match should be first
 
-CommentsTerm          : <INITIAL, Generic,        Attr>"(?:(?:(?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))\s*)+"                     : Token;
-StringLiteralTerm     : <INITIAL, Generic,        Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
-ExponentTerm          : <INITIAL, Generic             >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
-FixedPointTerm        : <INITIAL, Generic             >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
-BasedTerm             : <INITIAL, Generic             >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/              : Token;
-AllBitTerm            : <INITIAL, Generic             >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
-BaseLessTerm          : <INITIAL, Generic             >/[0-9]+(?:_[0-9]+)*/                                                                  : Token;
-MinusColonTerm        : <INITIAL                      >'-:'                                                                                  : Token;
-MinusGTTerm           : <INITIAL                      >'->'                                                                                  : Token;
-PlusColonTerm         : <INITIAL                      >'+:'                                                                                  : Token;
-AssignmentOperatorTerm: <INITIAL                      >"\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                                       : Token;
-DiamondOperatorTerm   : <INITIAL                      >'<>'                                                                                  : Token;
-Operator12Term        : <INITIAL                      >"\*\*"                                                                                : Token;
-Operator11Term        : <INITIAL                      >"/|%"                                                                                 : Token;
-Operator10Term        : <INITIAL                      >"\+|-"                                                                                : Token;
-Operator09Term        : <INITIAL                      >"<<<|>>>|<<|>>"                                                                       : Token;
-Operator08Term        : <INITIAL                      >"<=|>=|<:|>:"                                                                         : Token;
-Operator07Term        : <INITIAL                      >"===|==\?|!==|!=\?|==|!="                                                             : Token;
-Operator03Term        : <INITIAL                      >"&&"                                                                                  : Token;
-Operator02Term        : <INITIAL                      >"\|\|"                                                                                : Token;
-Operator06Term        : <INITIAL                      >"&"                                                                                   : Token;
-Operator05Term        : <INITIAL                      >"\^~|\^|~\^"                                                                          : Token;
-Operator04Term        : <INITIAL                      >"\|"                                                                                  : Token;
-UnaryOperatorTerm     : <INITIAL                      >"~&|~\||!|~"                                                                          : Token;
-ColonColonLAngleTerm  : <INITIAL, Generic             >'::<'                                                                                 : Token;
-ColonColonTerm        : <INITIAL, Generic             >'::'                                                                                  : Token;
-ColonTerm             : <INITIAL, Generic             >':'                                                                                   : Token;
-CommaTerm             : <INITIAL, Generic,        Attr>','                                                                                   : Token;
-DotDotEquTerm         : <INITIAL, Generic             >'..='                                                                                 : Token;
-DotDotTerm            : <INITIAL, Generic             >'..'                                                                                  : Token;
-DotTerm               : <INITIAL, Generic             >'.'                                                                                   : Token;
-EquTerm               : <INITIAL, Generic             >'='                                                                                   : Token;
-HashTerm              : <INITIAL, Generic,        Attr>'#'                                                                                   : Token;
-LAngleTerm            : <INITIAL, Generic             >'<'                                                                                   : Token;
-QuestionTerm          : <INITIAL                      >'?'                                                                                   : Token;
-QuoteLBraceTerm       : <INITIAL, Generic             >"'\{"                                                                                 : Token;
-QuoteTerm             : <INITIAL                      >"'"                                                                                   : Token;
-LBraceTerm            : <INITIAL, Generic, Embed, Attr>'{'                                                                                   : Token;
-LBracketTerm          : <INITIAL, Generic,        Attr>'['                                                                                   : Token;
-LParenTerm            : <INITIAL, Generic,        Attr>'('                                                                                   : Token;
-RAngleTerm            : <INITIAL, Generic             >'>'                                                                                   : Token;
-RBraceTerm            : <INITIAL, Generic, Embed, Attr>'}'                                                                                   : Token;
-RBracketTerm          : <INITIAL, Generic,        Attr>']'                                                                                   : Token;
-RParenTerm            : <INITIAL, Generic,        Attr>')'                                                                                   : Token;
-SemicolonTerm         : <INITIAL, Generic             >';'                                                                                   : Token;
-StarTerm              : <INITIAL, Generic             >'*'                                                                                   : Token;
+CommentsTerm          : <INITIAL, Generic,                    Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+"                 : Token;
+StringLiteralTerm     : <INITIAL, Generic,                    Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
+ExponentTerm          : <INITIAL, Generic                         >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
+FixedPointTerm        : <INITIAL, Generic                         >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
+BasedTerm             : <INITIAL, Generic                         >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/              : Token;
+AllBitTerm            : <INITIAL, Generic                         >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
+BaseLessTerm          : <INITIAL, Generic                         >/[0-9]+(?:_[0-9]+)*/                                                                  : Token;
+MinusColonTerm        : <INITIAL                                  >'-:'                                                                                  : Token;
+MinusGTTerm           : <INITIAL                                  >'->'                                                                                  : Token;
+PlusColonTerm         : <INITIAL                                  >'+:'                                                                                  : Token;
+AssignmentOperatorTerm: <INITIAL                                  >"\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                                       : Token;
+DiamondOperatorTerm   : <INITIAL                                  >'<>'                                                                                  : Token;
+Operator12Term        : <INITIAL                                  >"\*\*"                                                                                : Token;
+Operator11Term        : <INITIAL                                  >"/|%"                                                                                 : Token;
+Operator10Term        : <INITIAL                                  >"\+|-"                                                                                : Token;
+Operator09Term        : <INITIAL                                  >"<<<|>>>|<<|>>"                                                                       : Token;
+Operator08Term        : <INITIAL                                  >"<=|>=|<:|>:"                                                                         : Token;
+Operator07Term        : <INITIAL                                  >"===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator03Term        : <INITIAL                                  >"&&"                                                                                  : Token;
+Operator02Term        : <INITIAL                                  >"\|\|"                                                                                : Token;
+Operator06Term        : <INITIAL                                  >"&"                                                                                   : Token;
+Operator05Term        : <INITIAL                                  >"\^~|\^|~\^"                                                                          : Token;
+Operator04Term        : <INITIAL                                  >"\|"                                                                                  : Token;
+UnaryOperatorTerm     : <INITIAL                                  >"~&|~\||!|~"                                                                          : Token;
+ColonColonLAngleTerm  : <INITIAL, Generic                         >'::<'                                                                                 : Token;
+ColonColonTerm        : <INITIAL, Generic                         >'::'                                                                                  : Token;
+ColonTerm             : <INITIAL, Generic                         >':'                                                                                   : Token;
+CommaTerm             : <INITIAL, Generic,                    Attr>','                                                                                   : Token;
+DotDotEquTerm         : <INITIAL, Generic                         >'..='                                                                                 : Token;
+DotDotTerm            : <INITIAL, Generic                         >'..'                                                                                  : Token;
+DotTerm               : <INITIAL, Generic                         >'.'                                                                                   : Token;
+EquTerm               : <INITIAL, Generic                         >'='                                                                                   : Token;
+HashLBracketTerm      : <INITIAL                                  >'#['                                                                                  : Token;
+HashTerm              : <INITIAL, Generic                         >'#'                                                                                   : Token;
+LAngleTerm            : <INITIAL, Generic                         >'<'                                                                                   : Token;
+QuestionTerm          : <INITIAL                                  >'?'                                                                                   : Token;
+QuoteLBraceTerm       : <INITIAL, Generic                         >"'\{"                                                                                 : Token;
+QuoteTerm             : <INITIAL                                  >"'"                                                                                   : Token;
+TripleLBraceTerm      : <INITIAL                                  >'{{{'                                                                                 : Token;
+LBraceTerm            : <INITIAL, Generic, Embed, EmbedInner, Attr>'{'                                                                                   : Token;
+LBracketTerm          : <INITIAL, Generic,                    Attr>'['                                                                                   : Token;
+LParenTerm            : <INITIAL, Generic,                    Attr>'('                                                                                   : Token;
+RAngleTerm            : <INITIAL, Generic                         >'>'                                                                                   : Token;
+TripleRBraceTerm      : <                  Embed                  >'}}}'                                                                                 : Token;
+RBraceTerm            : <INITIAL, Generic,        EmbedInner, Attr>'}'                                                                                   : Token;
+RBracketTerm          : <INITIAL, Generic,                    Attr>']'                                                                                   : Token;
+RParenTerm            : <INITIAL, Generic,                    Attr>')'                                                                                   : Token;
+SemicolonTerm         : <INITIAL, Generic                         >';'                                                                                   : Token;
+StarTerm              : <INITIAL, Generic                         >'*'                                                                                   : Token;
 
 // Keywords are reflected to syntax highlight definitions through highlightgen tool.
 // Please refer support/highlightgen/README.md if you want to add a keyword.
 
-AliasTerm             : <INITIAL, Generic             >/(?-u:\b)alias(?-u:\b)/                                                               : Token; // Keyword: Statement
-AlwaysCombTerm        : <INITIAL, Generic             >/(?-u:\b)always_comb(?-u:\b)/                                                         : Token; // Keyword: Statement
-AlwaysFfTerm          : <INITIAL, Generic             >/(?-u:\b)always_ff(?-u:\b)/                                                           : Token; // Keyword: Statement
-AssignTerm            : <INITIAL, Generic             >/(?-u:\b)assign(?-u:\b)/                                                              : Token; // Keyword: Statement
-AsTerm                : <INITIAL, Generic             >/(?-u:\b)as(?-u:\b)/                                                                  : Token; // Keyword: Statement
-BitTerm               : <INITIAL, Generic             >/(?-u:\b)bit(?-u:\b)/                                                                 : Token; // Keyword: Type
-BoolTerm              : <INITIAL, Generic             >/(?-u:\b)bool(?-u:\b)/                                                                : Token; // Keyword: Type
-CaseTerm              : <INITIAL, Generic             >/(?-u:\b)case(?-u:\b)/                                                                : Token; // Keyword: Conditional
-ClockTerm             : <INITIAL, Generic             >/(?-u:\b)clock(?-u:\b)/                                                               : Token; // Keyword: Type
-ClockPosedgeTerm      : <INITIAL, Generic             >/(?-u:\b)clock_posedge(?-u:\b)/                                                       : Token; // Keyword: Type
-ClockNegedgeTerm      : <INITIAL, Generic             >/(?-u:\b)clock_negedge(?-u:\b)/                                                       : Token; // Keyword: Type
-ConnectTerm           : <INITIAL, Generic             >/(?-u:\b)connect(?-u:\b)/                                                             : Token; // Keyword: Statement
-ConstTerm             : <INITIAL, Generic             >/(?-u:\b)const(?-u:\b)/                                                               : Token; // Keyword: Statement
-ConverseTerm          : <INITIAL, Generic             >/(?-u:\b)converse(?-u:\b)/                                                            : Token; // Keyword: Direction
-DefaultTerm           : <INITIAL, Generic             >/(?-u:\b)default(?-u:\b)/                                                             : Token; // Keyword: Conditional
-ElseTerm              : <INITIAL, Generic             >/(?-u:\b)else(?-u:\b)/                                                                : Token; // Keyword: Conditional
-EmbedTerm             : <INITIAL, Generic             >/(?-u:\b)embed(?-u:\b)/                                                               : Token; // Keyword: Structure
-EnumTerm              : <INITIAL, Generic             >/(?-u:\b)enum(?-u:\b)/                                                                : Token; // Keyword: Structure
-F32Term               : <INITIAL, Generic             >/(?-u:\b)f32(?-u:\b)/                                                                 : Token; // Keyword: Type
-F64Term               : <INITIAL, Generic             >/(?-u:\b)f64(?-u:\b)/                                                                 : Token; // Keyword: Type
-FalseTerm             : <INITIAL, Generic             >/(?-u:\b)false(?-u:\b)/                                                               : Token; // Keyword: Literal
-FinalTerm             : <INITIAL, Generic             >/(?-u:\b)final(?-u:\b)/                                                               : Token; // Keyword: Statement
-ForTerm               : <INITIAL, Generic             >/(?-u:\b)for(?-u:\b)/                                                                 : Token; // Keyword: Repeat
-FunctionTerm          : <INITIAL, Generic             >/(?-u:\b)function(?-u:\b)/                                                            : Token; // Keyword: Structure
-I8Term                : <INITIAL, Generic             >/(?-u:\b)i8(?-u:\b)/                                                                  : Token; // Keyword: Type
-I16Term               : <INITIAL, Generic             >/(?-u:\b)i16(?-u:\b)/                                                                 : Token; // Keyword: Type
-I32Term               : <INITIAL, Generic             >/(?-u:\b)i32(?-u:\b)/                                                                 : Token; // Keyword: Type
-I64Term               : <INITIAL, Generic             >/(?-u:\b)i64(?-u:\b)/                                                                 : Token; // Keyword: Type
-IfResetTerm           : <INITIAL, Generic             >/(?-u:\b)if_reset(?-u:\b)/                                                            : Token; // Keyword: Conditional
-IfTerm                : <INITIAL, Generic             >/(?-u:\b)if(?-u:\b)/                                                                  : Token; // Keyword: Conditional
-ImportTerm            : <INITIAL, Generic             >/(?-u:\b)import(?-u:\b)/                                                              : Token; // Keyword: Statement
-IncludeTerm           : <INITIAL, Generic             >/(?-u:\b)include(?-u:\b)/                                                             : Token; // Keyword: Structure
-InitialTerm           : <INITIAL, Generic             >/(?-u:\b)initial(?-u:\b)/                                                             : Token; // Keyword: Statement
-InoutTerm             : <INITIAL, Generic             >/(?-u:\b)inout(?-u:\b)/                                                               : Token; // Keyword: Direction
-InputTerm             : <INITIAL, Generic             >/(?-u:\b)input(?-u:\b)/                                                               : Token; // Keyword: Direction
-InsideTerm            : <INITIAL, Generic             >/(?-u:\b)inside(?-u:\b)/                                                              : Token; // Keyword: Conditional
-InstTerm              : <INITIAL, Generic             >/(?-u:\b)inst(?-u:\b)/                                                                : Token; // Keyword: Statement
-InterfaceTerm         : <INITIAL, Generic             >/(?-u:\b)interface(?-u:\b)/                                                           : Token; // Keyword: Structure
-InTerm                : <INITIAL, Generic             >/(?-u:\b)in(?-u:\b)/                                                                  : Token; // Keyword: Repeat
-LetTerm               : <INITIAL, Generic             >/(?-u:\b)let(?-u:\b)/                                                                 : Token; // Keyword: Statement
-LogicTerm             : <INITIAL, Generic             >/(?-u:\b)logic(?-u:\b)/                                                               : Token; // Keyword: Type
-LsbTerm               : <INITIAL, Generic             >/(?-u:\b)lsb(?-u:\b)/                                                                 : Token; // Keyword: Literal
-ModportTerm           : <INITIAL, Generic             >/(?-u:\b)modport(?-u:\b)/                                                             : Token; // Keyword: Structure
-ModuleTerm            : <INITIAL, Generic             >/(?-u:\b)module(?-u:\b)/                                                              : Token; // Keyword: Structure
-MsbTerm               : <INITIAL, Generic             >/(?-u:\b)msb(?-u:\b)/                                                                 : Token; // Keyword: Literal
-OutputTerm            : <INITIAL, Generic             >/(?-u:\b)output(?-u:\b)/                                                              : Token; // Keyword: Direction
-OutsideTerm           : <INITIAL, Generic             >/(?-u:\b)outside(?-u:\b)/                                                             : Token; // Keyword: Conditional
-PackageTerm           : <INITIAL, Generic             >/(?-u:\b)package(?-u:\b)/                                                             : Token; // Keyword: Structure
-ParamTerm             : <INITIAL, Generic             >/(?-u:\b)param(?-u:\b)/                                                               : Token; // Keyword: Statement
-ProtoTerm             : <INITIAL, Generic             >/(?-u:\b)proto(?-u:\b)/                                                               : Token; // Keyword: Structure
-PubTerm               : <INITIAL, Generic             >/(?-u:\b)pub(?-u:\b)/                                                                 : Token; // Keyword: Structure
-RepeatTerm            : <INITIAL, Generic             >/(?-u:\b)repeat(?-u:\b)/                                                              : Token; // Keyword: Repeat
-ResetTerm             : <INITIAL, Generic             >/(?-u:\b)reset(?-u:\b)/                                                               : Token; // Keyword: Type
-ResetAsyncHighTerm    : <INITIAL, Generic             >/(?-u:\b)reset_async_high(?-u:\b)/                                                    : Token; // Keyword: Type
-ResetAsyncLowTerm     : <INITIAL, Generic             >/(?-u:\b)reset_async_low(?-u:\b)/                                                     : Token; // Keyword: Type
-ResetSyncHighTerm     : <INITIAL, Generic             >/(?-u:\b)reset_sync_high(?-u:\b)/                                                     : Token; // Keyword: Type
-ResetSyncLowTerm      : <INITIAL, Generic             >/(?-u:\b)reset_sync_low(?-u:\b)/                                                      : Token; // Keyword: Type
-ReturnTerm            : <INITIAL, Generic             >/(?-u:\b)return(?-u:\b)/                                                              : Token; // Keyword: Statement
-RevTerm               : <INITIAL, Generic             >/(?-u:\b)rev(?-u:\b)/                                                                 : Token; // Keyword: Repeat
-BreakTerm             : <INITIAL, Generic             >/(?-u:\b)break(?-u:\b)/                                                               : Token; // Keyword: Statement
-SameTerm              : <INITIAL, Generic             >/(?-u:\b)same(?-u:\b)/                                                                : Token; // Keyword: Direction
-SignedTerm            : <INITIAL, Generic             >/(?-u:\b)signed(?-u:\b)/                                                              : Token; // Keyword: Type
-StepTerm              : <INITIAL, Generic             >/(?-u:\b)step(?-u:\b)/                                                                : Token; // Keyword: Repeat
-StringTerm            : <INITIAL, Generic             >/(?-u:\b)string(?-u:\b)/                                                              : Token; // Keyword: Type
-StructTerm            : <INITIAL, Generic             >/(?-u:\b)struct(?-u:\b)/                                                              : Token; // Keyword: Structure
-SwitchTerm            : <INITIAL, Generic             >/(?-u:\b)switch(?-u:\b)/                                                              : Token; // Keyword: Conditional
-TriTerm               : <INITIAL, Generic             >/(?-u:\b)tri(?-u:\b)/                                                                 : Token; // Keyword: Type
-TrueTerm              : <INITIAL, Generic             >/(?-u:\b)true(?-u:\b)/                                                                : Token; // Keyword: Literal
-TypeTerm              : <INITIAL, Generic             >/(?-u:\b)type(?-u:\b)/                                                                : Token; // Keyword: Statement
-U8Term                : <INITIAL, Generic             >/(?-u:\b)u8(?-u:\b)/                                                                  : Token; // Keyword: Type
-U16Term               : <INITIAL, Generic             >/(?-u:\b)u16(?-u:\b)/                                                                 : Token; // Keyword: Type
-U32Term               : <INITIAL, Generic             >/(?-u:\b)u32(?-u:\b)/                                                                 : Token; // Keyword: Type
-U64Term               : <INITIAL, Generic             >/(?-u:\b)u64(?-u:\b)/                                                                 : Token; // Keyword: Type
-UnionTerm             : <INITIAL, Generic             >/(?-u:\b)union(?-u:\b)/                                                               : Token; // Keyword: Structure
-UnsafeTerm            : <INITIAL, Generic             >/(?-u:\b)unsafe(?-u:\b)/                                                              : Token; // Keyword: Structure
-VarTerm               : <INITIAL, Generic             >/(?-u:\b)var(?-u:\b)/                                                                 : Token; // Keyword: Statement
-DollarIdentifierTerm  : <INITIAL, Generic             >/\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
-IdentifierTerm        : <INITIAL, Generic,        Attr>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/                                                      : Token;
-AnyTerm               : <                  Embed      >/[^{}]+/                                                                              : Token;
+AliasTerm             : <INITIAL, Generic                         >'alias'                                                                               : Token; // Keyword: Statement
+AlwaysCombTerm        : <INITIAL, Generic                         >'always_comb'                                                                         : Token; // Keyword: Statement
+AlwaysFfTerm          : <INITIAL, Generic                         >'always_ff'                                                                           : Token; // Keyword: Statement
+AssignTerm            : <INITIAL, Generic                         >'assign'                                                                              : Token; // Keyword: Statement
+AsTerm                : <INITIAL, Generic                         >'as'                                                                                  : Token; // Keyword: Statement
+BitTerm               : <INITIAL, Generic                         >'bit'                                                                                 : Token; // Keyword: Type
+BoolTerm              : <INITIAL, Generic                         >'bool'                                                                                : Token; // Keyword: Type
+CaseTerm              : <INITIAL, Generic                         >'case'                                                                                : Token; // Keyword: Conditional
+ClockTerm             : <INITIAL, Generic                         >'clock'                                                                               : Token; // Keyword: Type
+ClockPosedgeTerm      : <INITIAL, Generic                         >'clock_posedge'                                                                       : Token; // Keyword: Type
+ClockNegedgeTerm      : <INITIAL, Generic                         >'clock_negedge'                                                                       : Token; // Keyword: Type
+ConnectTerm           : <INITIAL, Generic                         >'connect'                                                                             : Token; // Keyword: Statement
+ConstTerm             : <INITIAL, Generic                         >'const'                                                                               : Token; // Keyword: Statement
+ConverseTerm          : <INITIAL, Generic                         >'converse'                                                                            : Token; // Keyword: Direction
+DefaultTerm           : <INITIAL, Generic                         >'default'                                                                             : Token; // Keyword: Conditional
+ElseTerm              : <INITIAL, Generic                         >'else'                                                                                : Token; // Keyword: Conditional
+EmbedTerm             : <INITIAL, Generic                         >'embed'                                                                               : Token; // Keyword: Structure
+EnumTerm              : <INITIAL, Generic                         >'enum'                                                                                : Token; // Keyword: Structure
+F32Term               : <INITIAL, Generic                         >'f32'                                                                                 : Token; // Keyword: Type
+F64Term               : <INITIAL, Generic                         >'f64'                                                                                 : Token; // Keyword: Type
+FalseTerm             : <INITIAL, Generic                         >'false'                                                                               : Token; // Keyword: Literal
+FinalTerm             : <INITIAL, Generic                         >'final'                                                                               : Token; // Keyword: Statement
+ForTerm               : <INITIAL, Generic                         >'for'                                                                                 : Token; // Keyword: Repeat
+FunctionTerm          : <INITIAL, Generic                         >'function'                                                                            : Token; // Keyword: Structure
+I8Term                : <INITIAL, Generic                         >'i8'                                                                                  : Token; // Keyword: Type
+I16Term               : <INITIAL, Generic                         >'i16'                                                                                 : Token; // Keyword: Type
+I32Term               : <INITIAL, Generic                         >'i32'                                                                                 : Token; // Keyword: Type
+I64Term               : <INITIAL, Generic                         >'i64'                                                                                 : Token; // Keyword: Type
+IfResetTerm           : <INITIAL, Generic                         >'if_reset'                                                                            : Token; // Keyword: Conditional
+IfTerm                : <INITIAL, Generic                         >'if'                                                                                  : Token; // Keyword: Conditional
+ImportTerm            : <INITIAL, Generic                         >'import'                                                                              : Token; // Keyword: Statement
+IncludeTerm           : <INITIAL, Generic                         >'include'                                                                             : Token; // Keyword: Structure
+InitialTerm           : <INITIAL, Generic                         >'initial'                                                                             : Token; // Keyword: Statement
+InoutTerm             : <INITIAL, Generic                         >'inout'                                                                               : Token; // Keyword: Direction
+InputTerm             : <INITIAL, Generic                         >'input'                                                                               : Token; // Keyword: Direction
+InsideTerm            : <INITIAL, Generic                         >'inside'                                                                              : Token; // Keyword: Conditional
+InstTerm              : <INITIAL, Generic                         >'inst'                                                                                : Token; // Keyword: Statement
+InterfaceTerm         : <INITIAL, Generic                         >'interface'                                                                           : Token; // Keyword: Structure
+InTerm                : <INITIAL, Generic                         >'in'                                                                                  : Token; // Keyword: Repeat
+LetTerm               : <INITIAL, Generic                         >'let'                                                                                 : Token; // Keyword: Statement
+LogicTerm             : <INITIAL, Generic                         >'logic'                                                                               : Token; // Keyword: Type
+LsbTerm               : <INITIAL, Generic                         >'lsb'                                                                                 : Token; // Keyword: Literal
+ModportTerm           : <INITIAL, Generic                         >'modport'                                                                             : Token; // Keyword: Structure
+ModuleTerm            : <INITIAL, Generic                         >'module'                                                                              : Token; // Keyword: Structure
+MsbTerm               : <INITIAL, Generic                         >'msb'                                                                                 : Token; // Keyword: Literal
+OutputTerm            : <INITIAL, Generic                         >'output'                                                                              : Token; // Keyword: Direction
+OutsideTerm           : <INITIAL, Generic                         >'outside'                                                                             : Token; // Keyword: Conditional
+PackageTerm           : <INITIAL, Generic                         >'package'                                                                             : Token; // Keyword: Structure
+ParamTerm             : <INITIAL, Generic                         >'param'                                                                               : Token; // Keyword: Statement
+ProtoTerm             : <INITIAL, Generic                         >'proto'                                                                               : Token; // Keyword: Structure
+PubTerm               : <INITIAL, Generic                         >'pub'                                                                                 : Token; // Keyword: Structure
+RepeatTerm            : <INITIAL, Generic                         >'repeat'                                                                              : Token; // Keyword: Repeat
+ResetTerm             : <INITIAL, Generic                         >'reset'                                                                               : Token; // Keyword: Type
+ResetAsyncHighTerm    : <INITIAL, Generic                         >'reset_async_high'                                                                    : Token; // Keyword: Type
+ResetAsyncLowTerm     : <INITIAL, Generic                         >'reset_async_low'                                                                     : Token; // Keyword: Type
+ResetSyncHighTerm     : <INITIAL, Generic                         >'reset_sync_high'                                                                     : Token; // Keyword: Type
+ResetSyncLowTerm      : <INITIAL, Generic                         >'reset_sync_low'                                                                      : Token; // Keyword: Type
+ReturnTerm            : <INITIAL, Generic                         >'return'                                                                              : Token; // Keyword: Statement
+RevTerm               : <INITIAL, Generic                         >'rev'                                                                                 : Token; // Keyword: Repeat
+BreakTerm             : <INITIAL, Generic                         >'break'                                                                               : Token; // Keyword: Statement
+SameTerm              : <INITIAL, Generic                         >'same'                                                                                : Token; // Keyword: Direction
+SignedTerm            : <INITIAL, Generic                         >'signed'                                                                              : Token; // Keyword: Type
+StepTerm              : <INITIAL, Generic                         >'step'                                                                                : Token; // Keyword: Repeat
+StringTerm            : <INITIAL, Generic                         >'string'                                                                              : Token; // Keyword: Type
+StructTerm            : <INITIAL, Generic                         >'struct'                                                                              : Token; // Keyword: Structure
+SwitchTerm            : <INITIAL, Generic                         >'switch'                                                                              : Token; // Keyword: Conditional
+TriTerm               : <INITIAL, Generic                         >'tri'                                                                                 : Token; // Keyword: Type
+TrueTerm              : <INITIAL, Generic                         >'true'                                                                                : Token; // Keyword: Literal
+TypeTerm              : <INITIAL, Generic                         >'type'                                                                                : Token; // Keyword: Statement
+U8Term                : <INITIAL, Generic                         >'u8'                                                                                  : Token; // Keyword: Type
+U16Term               : <INITIAL, Generic                         >'u16'                                                                                 : Token; // Keyword: Type
+U32Term               : <INITIAL, Generic                         >'u32'                                                                                 : Token; // Keyword: Type
+U64Term               : <INITIAL, Generic                         >'u64'                                                                                 : Token; // Keyword: Type
+UnionTerm             : <INITIAL, Generic                         >'union'                                                                               : Token; // Keyword: Structure
+UnsafeTerm            : <INITIAL, Generic                         >'unsafe'                                                                              : Token; // Keyword: Structure
+VarTerm               : <INITIAL, Generic                         >'var'                                                                                 : Token; // Keyword: Statement
+DollarIdentifierTerm  : <INITIAL, Generic                         >/\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
+IdentifierTerm        : <INITIAL, Generic,                    Attr>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/                                                      : Token;
+AnyTerm               : <                  Embed, EmbedInner      >/[^{}]+/                                                                              : Token;
 
 // ----------------------------------------------------------------------------
 // Token
@@ -193,11 +214,14 @@ DotDotToken          : DotDotTerm          : Token Comments;
 DotDotEquToken       : DotDotEquTerm       : Token Comments;
 DotToken             : DotTerm             : Token Comments;
 EquToken             : EquTerm             : Token Comments;
+HashLBracketToken    : HashLBracketTerm    : Token Comments;
 HashToken            : HashTerm            : Token Comments;
 QuestionToken        : QuestionTerm        : Token Comments;
 QuoteLBraceToken     : QuoteLBraceTerm     : Token Comments;
 QuoteToken           : QuoteTerm           : Token Comments;
 LAngleToken          : LAngleTerm          : Token Comments;
+EmbedLBraceToken     : LBraceTerm          : Token         ;
+TripleLBraceToken    : TripleLBraceTerm    : Token         ;
 LBraceToken          : LBraceTerm          : Token Comments;
 LBracketToken        : LBracketTerm        : Token Comments;
 LParenToken          : LParenTerm          : Token Comments;
@@ -205,6 +229,8 @@ MinusColonToken      : MinusColonTerm      : Token Comments;
 MinusGTToken         : MinusGTTerm         : Token Comments;
 PlusColonToken       : PlusColonTerm       : Token Comments;
 RAngleToken          : RAngleTerm          : Token Comments;
+EmbedRBraceToken     : RBraceTerm          : Token         ;
+TripleRBraceToken    : TripleRBraceTerm    : Token Comments;
 RBraceToken          : RBraceTerm          : Token Comments;
 RBracketToken        : RBracketTerm        : Token Comments;
 RParenToken          : RParenTerm          : Token Comments;
@@ -291,6 +317,8 @@ VarToken           : VarTerm           : Token Comments;
 DollarIdentifierToken: DollarIdentifierTerm: Token Comments;
 IdentifierToken      : IdentifierTerm      : Token Comments;
 
+AnyToken: AnyTerm: Token;
+
 // ----------------------------------------------------------------------------
 // VerylToken
 // ----------------------------------------------------------------------------
@@ -333,11 +361,14 @@ DotDot          : DotDotToken          : VerylToken;
 DotDotEqu       : DotDotEquToken       : VerylToken;
 Dot             : DotToken             : VerylToken;
 Equ             : EquToken             : VerylToken;
+HashLBracket    : HashLBracketToken    : VerylToken;
 Hash            : HashToken            : VerylToken;
 Question        : QuestionToken        : VerylToken;
 QuoteLBrace     : QuoteLBraceToken     : VerylToken;
 Quote           : QuoteToken           : VerylToken;
 LAngle          : LAngleToken          : VerylToken;
+EmbedLBrace     : EmbedLBraceToken     : VerylToken;
+TripleLBrace    : TripleLBraceToken    : VerylToken;
 LBrace          : LBraceToken          : VerylToken;
 LBracket        : LBracketToken        : VerylToken;
 LParen          : LParenToken          : VerylToken;
@@ -345,6 +376,8 @@ MinusColon      : MinusColonToken      : VerylToken;
 MinusGT         : MinusGTToken         : VerylToken;
 PlusColon       : PlusColonToken       : VerylToken;
 RAngle          : RAngleToken          : VerylToken;
+EmbedRBrace     : EmbedRBraceToken     : VerylToken;
+TripleRBrace    : TripleRBraceToken    : VerylToken;
 RBrace          : RBraceToken          : VerylToken;
 RBracket        : RBracketToken        : VerylToken;
 RParen          : RParenToken          : VerylToken;
@@ -432,6 +465,8 @@ Var           : VarToken           : VerylToken;
 // Identifier
 DollarIdentifier: DollarIdentifierToken: VerylToken;
 Identifier      : IdentifierToken      : VerylToken;
+
+Any: AnyToken: VerylToken;
 
 // ----------------------------------------------------------------------------
 // Number
@@ -667,7 +702,7 @@ SwitchCondition: Expression { Comma Expression } ;
 // Attribute
 // ----------------------------------------------------------------------------
 
-Attribute: Hash %push(Attr) LBracket Identifier [ LParen AttributeList RParen ] RBracket %pop();
+Attribute: HashLBracket Identifier [ LParen AttributeList RParen ] RBracket ;
 
 AttributeList: AttributeItem { Comma AttributeItem } [ Comma ];
 
@@ -795,7 +830,7 @@ GenericProtoBound: ScopedIdentifier | FixedType;
 // WithGenericArgument
 // ----------------------------------------------------------------------------
 
-WithGenericArgument: ColonColonLAngle %push(Generic) [ WithGenericArgumentList ] RAngle %pop();
+WithGenericArgument: ColonColonLAngle [ WithGenericArgumentList ] RAngle;
 
 WithGenericArgumentList: WithGenericArgumentItem { Comma WithGenericArgumentItem } [ Comma ];
 
@@ -967,12 +1002,10 @@ ProtoAliasDeclaration: Alias ( Module | Interface | Package ) Identifier Colon S
 
 EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
 
-EmbedContent: EmbedContentToken: VerylToken;
+EmbedContent: TripleLBrace { EmbedItem } TripleRBrace;
 
-EmbedContentToken: LBraceTerm %push(Embed) LBraceTerm LBraceTerm { EmbedItem } RBraceTerm RBraceTerm RBraceTerm %pop() Comments;
-
-EmbedItem: LBraceTerm { EmbedItem } RBraceTerm
-         | AnyTerm;
+EmbedItem: EmbedLBrace { EmbedItem } EmbedRBrace
+         | Any;
 
 // ----------------------------------------------------------------------------
 // Include
