@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use templates::{Ace, Highlightjs, Rouge, Template, Vim, Vscode};
+use templates::{Ace, Highlightjs, Rouge, Sublime, Template, Vim, Vscode};
 
 #[derive(Parser)]
 struct Opt {
@@ -35,6 +35,7 @@ fn main() -> Result<ExitCode> {
         Box::new(Ace),
         Box::new(Highlightjs),
         Box::new(Rouge),
+        Box::new(Sublime),
         Box::new(Vim),
         Box::new(Vscode),
     ];
