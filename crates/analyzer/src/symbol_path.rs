@@ -476,9 +476,14 @@ impl GenericSymbolPath {
                 // see:
                 // https://github.com/veryl-lang/veryl/issues/1721#issuecomment-2986758880
                 let member_path = self.paths.pop().unwrap();
-                let mut namespace = namespace.clone();
-                namespace.pop();
-                self.resolve_imported(&namespace, generic_maps);
+                if namespace.matched(&symbol.found.namespace) {
+                    // For case that the given namespace is matched with the enum declaration
+                    let mut namespace = namespace.clone();
+                    namespace.pop();
+                    self.resolve_imported(&namespace, generic_maps);
+                } else {
+                    self.resolve_imported(namespace, generic_maps);
+                }
                 self.paths.push(member_path);
             } else if symbol.imported {
                 let self_namespace = namespace_table::get(self.range.beg.id).unwrap();

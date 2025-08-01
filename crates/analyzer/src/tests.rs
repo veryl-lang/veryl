@@ -2766,6 +2766,20 @@ fn mismatch_type() {
     assert!(errors.is_empty());
 
     let code = r#"
+    package PkgA {
+        enum Foo {
+            FOO
+        }
+    }
+    package PkgB::<FOO: PkgA::Foo> {
+    }
+    alias package PkgC = PkgB::<PkgA::Foo::FOO>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     module ModuleA {}
     alias package Pkg = ModuleA;
     "#;
