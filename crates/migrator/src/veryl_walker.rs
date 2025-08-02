@@ -237,6 +237,13 @@ pub trait VerylWalker {
         after!(self, equ, arg);
     }
 
+    /// Semantic action for non-terminal 'HashLBracket'
+    fn hash_l_bracket(&mut self, arg: &HashLBracket) {
+        before!(self, hash_l_bracket, arg);
+        self.veryl_token(&arg.hash_l_bracket_token);
+        after!(self, hash_l_bracket, arg);
+    }
+
     /// Semantic action for non-terminal 'Hash'
     fn hash(&mut self, arg: &Hash) {
         before!(self, hash, arg);
@@ -263,6 +270,20 @@ pub trait VerylWalker {
         before!(self, l_angle, arg);
         self.veryl_token(&arg.l_angle_token);
         after!(self, l_angle, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedLBrace'
+    fn embed_l_brace(&mut self, arg: &EmbedLBrace) {
+        before!(self, embed_l_brace, arg);
+        self.veryl_token(&arg.embed_l_brace_token);
+        after!(self, embed_l_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'TripleLBrace'
+    fn triple_l_brace(&mut self, arg: &TripleLBrace) {
+        before!(self, triple_l_brace, arg);
+        self.veryl_token(&arg.triple_l_brace_token);
+        after!(self, triple_l_brace, arg);
     }
 
     /// Semantic action for non-terminal 'LBrace'
@@ -312,6 +333,20 @@ pub trait VerylWalker {
         before!(self, r_angle, arg);
         self.veryl_token(&arg.r_angle_token);
         after!(self, r_angle, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedRBrace'
+    fn embed_r_brace(&mut self, arg: &EmbedRBrace) {
+        before!(self, embed_r_brace, arg);
+        self.veryl_token(&arg.embed_r_brace_token);
+        after!(self, embed_r_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'TripleRBrace'
+    fn triple_r_brace(&mut self, arg: &TripleRBrace) {
+        before!(self, triple_r_brace, arg);
+        self.veryl_token(&arg.triple_r_brace_token);
+        after!(self, triple_r_brace, arg);
     }
 
     /// Semantic action for non-terminal 'RBrace'
@@ -858,6 +893,13 @@ pub trait VerylWalker {
         before!(self, identifier, arg);
         self.veryl_token(&arg.identifier_token);
         after!(self, identifier, arg);
+    }
+
+    /// Semantic action for non-terminal 'Any'
+    fn any(&mut self, arg: &Any) {
+        before!(self, any, arg);
+        self.veryl_token(&arg.any_token);
+        after!(self, any, arg);
     }
 
     /// Semantic action for non-terminal 'Number'
@@ -1919,8 +1961,7 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'Attribute'
     fn attribute(&mut self, arg: &Attribute) {
         before!(self, attribute, arg);
-        self.hash(&arg.hash);
-        self.l_bracket(&arg.l_bracket);
+        self.hash_l_bracket(&arg.hash_l_bracket);
         self.identifier(&arg.identifier);
         if let Some(ref x) = arg.attribute_opt {
             self.l_paren(&x.l_paren);
@@ -3213,8 +3254,28 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'EmbedContent'
     fn embed_content(&mut self, arg: &EmbedContent) {
         before!(self, embed_content, arg);
-        self.veryl_token(&arg.embed_content_token);
+        self.triple_l_brace(&arg.triple_l_brace);
+        for x in &arg.embed_content_list {
+            self.embed_item(&x.embed_item);
+        }
+        self.triple_r_brace(&arg.triple_r_brace);
         after!(self, embed_content, arg);
+    }
+
+    /// Semantic action for non-terminal 'EmbedItem'
+    fn embed_item(&mut self, arg: &EmbedItem) {
+        before!(self, embed_item, arg);
+        match arg {
+            EmbedItem::EmbedLBraceEmbedItemListEmbedRBrace(x) => {
+                self.embed_l_brace(&x.embed_l_brace);
+                for x in &x.embed_item_list {
+                    self.embed_item(&x.embed_item);
+                }
+                self.embed_r_brace(&x.embed_r_brace);
+            }
+            EmbedItem::Any(x) => self.any(&x.any),
+        }
+        after!(self, embed_item, arg);
     }
 
     /// Semantic action for non-terminal 'IncludeDeclaration'

@@ -766,7 +766,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn attribute(&mut self, arg: &Attribute) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.attribute_lines.insert(arg.hash.hash_token.token.line);
+            let line = arg.hash_l_bracket.hash_l_bracket_token.token.line;
+            self.attribute_lines.insert(line);
         }
         Ok(())
     }
@@ -2261,15 +2262,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
             }
 
-            let content = &arg.embed_content.embed_content_token.token;
+            let content = &arg.embed_content;
             let r#type = match way.as_str() {
                 "inline" => Some(TestType::Inline),
-                "cocotb" => Some(TestType::CocotbEmbed(content.text)),
+                "cocotb" => {
+                    let text = resource_table::insert_str(&content.to_string());
+                    Some(TestType::CocotbEmbed(text))
+                }
                 _ => None,
             };
 
             if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
-                let path = if let TokenSource::File { path, .. } = content.source {
+                let content_source = content.triple_l_brace.triple_l_brace_token.token.source;
+                let path = if let TokenSource::File { path, .. } = content_source {
                     path
                 } else {
                     unreachable!()
