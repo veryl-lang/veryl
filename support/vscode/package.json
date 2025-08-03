@@ -122,7 +122,7 @@
     "@types/glob": "^8.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "@types/vscode": "^1.102.0",
+    "@types/vscode": "^1.61.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",
     "@typescript-eslint/parser": "^8.38.0",
     "@vscode/test-electron": "^2.5.2",
