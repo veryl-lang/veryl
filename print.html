@@ -37,6 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
@@ -93,10 +94,13 @@
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -147,7 +151,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -612,16 +621,7 @@ Generic parameter <code>S</code> is a module name of synchrinozer.</p>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
     <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
-    <td class="table_list_item"> src clock
- src reset
- FIFO is almost full
- FIFO is full
- push to FIFO
- push data
- dst clock
- dst reset
- FIFO is empty
- pop from FIFO
+    <td class="table_list_item"> pop data
 </td>
 </tr>
 </tbody>
@@ -781,15 +781,7 @@ Generic parameter <code>S</code> is a module name of synchrinoizer.</p>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
     <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
-    <td class="table_list_item"> src clock
- src reset
- src data is valid
- src data is acceptable
- src data
- dst clock
- dst reset
- dst data is valid
- dst data is acceptable
+    <td class="table_list_item"> dst data
 </td>
 </tr>
 </tbody>
@@ -2266,6 +2258,7 @@ These and are used to connect compatible AXI4-Lite slaves to a full AXI4 interfa
             window.setTimeout(window.print, 100);
         });
         </script>
+
 
     </div>
     </body>
