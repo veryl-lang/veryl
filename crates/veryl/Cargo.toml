@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl"
-version               = "0.16.2"
+version               = "0.16.3"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -42,11 +42,11 @@ tempfile        = {workspace = true}
 thiserror       = {workspace = true}
 tokio           = {workspace = true}
 tokio-util      = {version = "0.7.15", features = ["codec"]}
-veryl-analyzer  = {version = "0.16.2", path = "../analyzer"}
-veryl-emitter   = {version = "0.16.2", path = "../emitter"}
-veryl-formatter = {version = "0.16.2", path = "../formatter"}
-veryl-metadata  = {version = "0.16.2", path = "../metadata"}
-veryl-migrator  = {version = "0.16.2", path = "../migrator"}
-veryl-parser    = {version = "0.16.2", path = "../parser"}
-veryl-path      = {version = "0.16.2", path = "../path"}
-veryl-sourcemap = {version = "0.16.2", path = "../sourcemap"}
+veryl-analyzer  = {version = "0.16.3", path = "../analyzer"}
+veryl-emitter   = {version = "0.16.3", path = "../emitter"}
+veryl-formatter = {version = "0.16.3", path = "../formatter"}
+veryl-metadata  = {version = "0.16.3", path = "../metadata"}
+veryl-migrator  = {version = "0.16.3", path = "../migrator"}
+veryl-parser    = {version = "0.16.3", path = "../parser"}
+veryl-path      = {version = "0.16.3", path = "../path"}
+veryl-sourcemap = {version = "0.16.3", path = "../sourcemap"}
