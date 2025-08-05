@@ -284,13 +284,9 @@ impl ReferenceTable {
                     }
 
                     for (j, arg) in args.iter_mut().enumerate() {
-                        if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace))
-                        {
-                            // Replace arg with its target if arg is alias
-                            if let Some(target) = symbol.found.alias_target() {
-                                path.paths[i].replace_generic_argument(j, target.clone());
-                                *arg = target;
-                            }
+                        if let Some(unaliased_arg) = arg.unaliased_path() {
+                            path.paths[i].replace_generic_argument(j, unaliased_arg.clone());
+                            *arg = unaliased_arg;
                         }
                     }
 

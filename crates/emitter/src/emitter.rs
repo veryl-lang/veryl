@@ -5830,14 +5830,8 @@ pub fn resolve_generic_path(
             }
 
             for arg in &mut path.paths[i].arguments {
-                if let Ok(symbol) = symbol_table::resolve((&arg.mangled_path(), namespace)) {
-                    if let Some(target) = symbol.found.alias_target() {
-                        if let (Ok(_), path) =
-                            resolve_generic_path(&target, &symbol.found.namespace, generic_maps)
-                        {
-                            *arg = path;
-                        }
-                    }
+                if let Some(unaliased_arg) = arg.unaliased_path() {
+                    *arg = unaliased_arg;
                 }
             }
         }
