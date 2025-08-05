@@ -367,15 +367,11 @@ impl Symbol {
         for i in generic_instances {
             let symbol = symbol_table::get(*i).unwrap();
             let map = if let SymbolKind::GenericInstance(ref x) = symbol.kind {
-                self.generic_table(&x.arguments)
+                self.generic_map(Some(symbol.id), &x.arguments)
             } else {
-                HashMap::default()
+                self.generic_map(Some(symbol.id), &[])
             };
-
-            ret.push(GenericMap {
-                id: Some(symbol.id),
-                map,
-            });
+            ret.push(map);
         }
 
         // empty map for non-generic
@@ -383,6 +379,15 @@ impl Symbol {
             ret.push(GenericMap::default());
         }
         ret
+    }
+
+    pub fn generic_map(&self, id: Option<SymbolId>, arguments: &[GenericSymbolPath]) -> GenericMap {
+        let map = if arguments.is_empty() {
+            HashMap::default()
+        } else {
+            self.generic_table(arguments)
+        };
+        GenericMap { id, map }
     }
 
     pub fn generic_table(&self, arguments: &[GenericSymbolPath]) -> GenericTable {
