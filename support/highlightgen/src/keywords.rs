@@ -28,9 +28,7 @@ impl Keywords {
 
         for line in text.lines() {
             if line.contains("// Keyword: ") {
-                let keyword = line.split('/').nth(1).unwrap();
-                let keyword = keyword.replace("(?-u:\\b)", "");
-                let keyword = keyword.replace("(?-u:\\b)", "");
+                let keyword = line.split("'").nth(1).unwrap().to_string();
                 let category = line.split("// Keyword: ").nth(1).unwrap();
 
                 match category {

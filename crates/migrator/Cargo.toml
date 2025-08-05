@@ -17,9 +17,10 @@ exclude               = ["build.rs"]
 anyhow         = {workspace = true}
 bimap          = "0.6.3"
 once_cell      = {workspace = true}
-parol_runtime  = {version = "3.1", features = ["regex_automata"], default-features = false}
+parol_runtime  = {workspace = true}
 paste          = "1.0"
 regex          = {workspace = true}
+scnr2          = {workspace = true}
 thiserror      = {workspace = true}
 veryl-metadata = {version = "0.16.3", path = "../metadata"}
 veryl-parser   = {version = "0.16.3", path = "../parser"}
@@ -31,7 +32,7 @@ miette        = {workspace = true, features = ["fancy-no-syscall"]}
 miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]
-parol         = {version = "3.1", optional = true}
+parol         = {version = "4.0", optional = true}
 
 [features]
 default = ["build"]

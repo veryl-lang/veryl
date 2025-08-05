@@ -353,6 +353,52 @@ macro_rules! token_with_comments {
     };
 }
 
+macro_rules! token_without_comments {
+    ($x:ident, $y:ident) => {
+        paste! {
+            impl TryFrom<&[<$x Token>]> for VerylToken {
+                type Error = anyhow::Error;
+
+                fn try_from(x: &[<$x Token>]) -> Result<Self, anyhow::Error> {
+                    Ok(VerylToken {
+                        token: x.[<$y:snake _term>].clone(),
+                        comments: Vec::new(),
+                    })
+                }
+            }
+        }
+    };
+    ($x:ident) => {
+        paste! {
+            impl TryFrom<&[<$x Token>]> for VerylToken {
+                type Error = anyhow::Error;
+
+                fn try_from(x: &[<$x Token>]) -> Result<Self, anyhow::Error> {
+                    Ok(VerylToken {
+                        token: x.[<$x:snake _term>].clone(),
+                        comments: Vec::new(),
+                    })
+                }
+            }
+            impl TryFrom<&[<$x Term>]> for Token {
+                type Error = anyhow::Error;
+
+                fn try_from(x: &[<$x Term>]) -> Result<Self, anyhow::Error> {
+                    Ok(Token {
+                        id: x.[<$x:snake _term>].id,
+                        text: x.[<$x:snake _term>].text,
+                        line: x.[<$x:snake _term>].line,
+                        column: x.[<$x:snake _term>].column,
+                        length: x.[<$x:snake _term>].length,
+                        pos: x.[<$x:snake _term>].pos,
+                        source: x.[<$x:snake _term>].source,
+                    })
+                }
+            }
+        }
+    };
+}
+
 token_with_comments!(StringLiteral);
 
 token_with_comments!(FixedPoint);
@@ -369,11 +415,14 @@ token_with_comments!(DotDot);
 token_with_comments!(DotDotEqu);
 token_with_comments!(Dot);
 token_with_comments!(Equ);
+token_with_comments!(HashLBracket);
 token_with_comments!(Hash);
 token_with_comments!(Question);
 token_with_comments!(Quote);
 token_with_comments!(QuoteLBrace);
 token_with_comments!(LAngle);
+token_without_comments!(EmbedLBrace, LBrace);
+token_without_comments!(TripleLBrace);
 token_with_comments!(LBrace);
 token_with_comments!(LBracket);
 token_with_comments!(LParen);
@@ -381,6 +430,8 @@ token_with_comments!(MinusColon);
 token_with_comments!(MinusGT);
 token_with_comments!(PlusColon);
 token_with_comments!(RAngle);
+token_without_comments!(EmbedRBrace, RBrace);
+token_with_comments!(TripleRBrace);
 token_with_comments!(RBrace);
 token_with_comments!(RBracket);
 token_with_comments!(RParen);
@@ -482,51 +533,4 @@ token_with_comments!(Var);
 token_with_comments!(DollarIdentifier);
 token_with_comments!(Identifier);
 
-fn embed_item_to_string(x: &EmbedItem) -> String {
-    let mut ret = String::new();
-    match x {
-        EmbedItem::LBraceTermEmbedItemListRBraceTerm(x) => {
-            ret.push_str(&x.l_brace_term.l_brace_term.to_string());
-            for x in &x.embed_item_list {
-                ret.push_str(&embed_item_to_string(&x.embed_item));
-            }
-            ret.push_str(&x.r_brace_term.r_brace_term.to_string());
-        }
-        EmbedItem::AnyTerm(x) => {
-            ret.push_str(&x.any_term.any_term.to_string());
-        }
-    }
-    ret
-}
-
-impl TryFrom<&EmbedContentToken> for VerylToken {
-    type Error = anyhow::Error;
-
-    fn try_from(x: &EmbedContentToken) -> Result<Self, anyhow::Error> {
-        let head_token = &x.l_brace_term.l_brace_term;
-        let line = head_token.line;
-        let column = head_token.column;
-        let length = head_token.length;
-        let pos = head_token.pos;
-        let source = head_token.source;
-
-        let mut text = x.l_brace_term.l_brace_term.to_string();
-        text.push_str(&x.l_brace_term0.l_brace_term.to_string());
-        text.push_str(&x.l_brace_term1.l_brace_term.to_string());
-        for x in &x.embed_content_token_list {
-            text.push_str(&embed_item_to_string(&x.embed_item));
-        }
-        text.push_str(&x.r_brace_term.r_brace_term.to_string());
-        text.push_str(&x.r_brace_term0.r_brace_term.to_string());
-        text.push_str(&x.r_brace_term1.r_brace_term.to_string());
-
-        let mut comments = Vec::new();
-        if let Some(ref x) = x.comments.comments_opt {
-            let mut tokens = split_comment_token(x.comments_term.comments_term);
-            comments.append(&mut tokens)
-        }
-
-        let token = Token::new(&text, line, column, length, pos, source);
-        Ok(VerylToken { token, comments })
-    }
-}
+token_without_comments!(Any);

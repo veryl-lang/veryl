@@ -292,11 +292,14 @@ impl_token_range_singular!(DotDot);
 impl_token_range_singular!(DotDotEqu);
 impl_token_range_singular!(Dot);
 impl_token_range_singular!(Equ);
+impl_token_range_singular!(HashLBracket);
 impl_token_range_singular!(Hash);
 impl_token_range_singular!(Question);
 impl_token_range_singular!(Quote);
 impl_token_range_singular!(QuoteLBrace);
 impl_token_range_singular!(LAngle);
+impl_token_range_singular!(EmbedLBrace);
+impl_token_range_singular!(TripleLBrace);
 impl_token_range_singular!(LBrace);
 impl_token_range_singular!(LBracket);
 impl_token_range_singular!(LParen);
@@ -304,6 +307,8 @@ impl_token_range_singular!(MinusColon);
 impl_token_range_singular!(MinusGT);
 impl_token_range_singular!(PlusColon);
 impl_token_range_singular!(RAngle);
+impl_token_range_singular!(EmbedRBrace);
+impl_token_range_singular!(TripleRBrace);
 impl_token_range_singular!(RBrace);
 impl_token_range_singular!(RBracket);
 impl_token_range_singular!(RParen);
@@ -408,6 +413,8 @@ impl_token_range_singular!(Var);
 // Identifier
 impl_token_range_singular!(DollarIdentifier);
 impl_token_range_singular!(Identifier);
+
+impl_token_range_singular!(Any);
 
 // ----------------------------------------------------------------------------
 // Number
@@ -942,7 +949,7 @@ impl_token_ext!(SwitchCondition);
 // Attribute
 // ----------------------------------------------------------------------------
 
-impl_token_range!(Attribute, hash, r_bracket);
+impl_token_range!(Attribute, hash_l_bracket, r_bracket);
 impl_token_range_list!(AttributeList, AttributeItem);
 impl_token_range_enum!(AttributeItem, identifier, string_literal);
 
@@ -1368,7 +1375,23 @@ impl_token_range!(ProtoAliasDeclaration, alias, semicolon);
 // ----------------------------------------------------------------------------
 
 impl_token_range!(EmbedDeclaration, embed, embed_content);
-impl_token_range_singular!(EmbedContent);
+impl_token_range!(EmbedContent, triple_l_brace, triple_r_brace);
+
+impl From<&EmbedItem> for TokenRange {
+    fn from(value: &EmbedItem) -> Self {
+        match value {
+            EmbedItem::EmbedLBraceEmbedItemListEmbedRBrace(x) => {
+                let beg: TokenRange = x.embed_l_brace.as_ref().into();
+                let end: TokenRange = x.embed_r_brace.as_ref().into();
+                TokenRange {
+                    beg: beg.beg,
+                    end: end.end,
+                }
+            }
+            EmbedItem::Any(x) => x.any.as_ref().into(),
+        }
+    }
+}
 
 // ----------------------------------------------------------------------------
 // Include
