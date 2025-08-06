@@ -1,9 +1,16 @@
-module veryl_testcase_Module25 (
+
+
+
+module veryl_testcase_Module25
+    import veryl_sample4___bar_pkg__veryl_sample4___foo_pkg__32_FOO_foo::*;
+(
     input var logic                    i_clk  ,
     input var logic                    i_rst_n,
     veryl_sample3_data_if.mp_in  in_if  ,
     veryl_sample3_data_if.mp_out out_if 
 );
+
+
     veryl_sample3_data_if data_if ();
 
     veryl_sample_delay u0 (
