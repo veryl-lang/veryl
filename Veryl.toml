@@ -31,3 +31,4 @@ compile_args = ["-full64"]
 veryl_sample  = {version = "0.13.0", github = "veryl-lang/sample"}
 veryl_sample2 = {version = "0.14.0", project = "veryl_sample", github = "veryl-lang/sample"}
 veryl_sample3 = {version = "0.15.0", project = "veryl_sample", git = "https://github.com/veryl-lang/sample"}
+veryl_sample4 = {path = "testcases/sample"}

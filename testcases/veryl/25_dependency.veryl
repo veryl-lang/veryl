@@ -1,9 +1,14 @@
+alias package foopkg = veryl_sample4::foo_pkg::<32>;
+alias package barpkg = veryl_sample4::bar_pkg::<foopkg::FOO.foo>;
+
 module Module25 (
     i_clk : input   clock                         ,
     i_rst : input   reset                         ,
     in_if : modport veryl_sample3::data_if::mp_in ,
     out_if: modport veryl_sample3::data_if::mp_out,
 ) {
+    import barpkg::*;
+
     inst data_if: veryl_sample3::data_if;
 
     inst u0: veryl_sample::delay (

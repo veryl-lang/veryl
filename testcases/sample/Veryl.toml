@@ -1,0 +1,12 @@
+[project]
+name    = "veryl_sample"
+version = "0.1.0"
+
+[build]
+clock_type    = "posedge"
+reset_type    = "async_low"
+filelist_type = "absolute"
+target        = {type = "source"}
+
+[format]
+indent_width = 4

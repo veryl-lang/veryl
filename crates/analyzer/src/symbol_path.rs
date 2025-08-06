@@ -383,20 +383,16 @@ impl GenericSymbolPath {
             range: self.range,
         };
 
-        let mut pre_symbol: Option<Symbol> = None;
+        let namespace = namespace_table::get(self.paths[0].base.id).unwrap();
         let mut generic_maps: Vec<_> = Vec::new();
 
         for (i, path_item) in self.paths.iter().enumerate() {
-            let namespace = if let Some(ref pre_symbol) = pre_symbol {
-                &pre_symbol.inner_namespace()
-            } else {
-                &namespace_table::get(path_item.base.id).unwrap()
-            };
+            ret.paths.push(path_item.clone());
+            let symbol = symbol_table::resolve((&ret.generic_path(), &namespace));
 
-            let symbol_path = SymbolPath::new(&[path_item.base()]);
-            let symbol = symbol_table::resolve((&symbol_path, namespace)).ok()?;
-
-            if let Some(mut alias_target) = symbol.found.alias_target() {
+            if let Ok(ref symbol) = symbol
+                && let Some(mut alias_target) = symbol.found.alias_target()
+            {
                 alias_target.apply_map(&generic_maps);
                 if (i + 1) < self.paths.len() {
                     for j in (i + 1)..self.paths.len() {
@@ -406,23 +402,23 @@ impl GenericSymbolPath {
                 } else {
                     return Some(alias_target);
                 }
-            } else {
-                let mut path = path_item.clone();
+            }
+
+            if let Some(path) = ret.paths.last_mut() {
                 for arg in path.arguments.iter_mut() {
                     if let Some(x) = arg.unaliased_path() {
                         *arg = x;
                     }
                 }
 
-                if matches!(&symbol.found.kind, SymbolKind::GenericInstance(_)) {
+                if let Ok(ref symbol) = symbol
+                    && matches!(&symbol.found.kind, SymbolKind::GenericInstance(_))
+                {
                     let map = symbol
                         .found
                         .generic_map(Some(symbol.found.id), &path.arguments);
                     generic_maps.push(map);
                 }
-
-                ret.paths.push(path);
-                pre_symbol.replace(symbol.found);
             }
         }
 
