@@ -12,6 +12,7 @@ pub struct CheckEmbedInclude {
     pub errors: Vec<AnalyzerError>,
     point: HandlerPoint,
     in_component: bool,
+    in_inline_sv: bool,
 }
 
 impl CheckEmbedInclude {
@@ -52,31 +53,45 @@ impl VerylGrammarTrait for CheckEmbedInclude {
     }
 
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let way = arg.identifier.identifier_token.to_string();
-            let lang = arg.identifier0.identifier_token.to_string();
+        match self.point {
+            HandlerPoint::Before => {
+                let way = arg.identifier.identifier_token.to_string();
+                let lang = arg.identifier0.identifier_token.to_string();
 
-            if !EMBED_WAY.contains(&way.as_str()) {
-                self.errors.push(AnalyzerError::unknown_embed_way(
-                    &way,
-                    &arg.identifier.as_ref().into(),
-                ));
-            }
+                if !EMBED_WAY.contains(&way.as_str()) {
+                    self.errors.push(AnalyzerError::unknown_embed_way(
+                        &way,
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
 
-            if !EMBED_LANG.contains(&lang.as_str()) {
-                self.errors.push(AnalyzerError::unknown_embed_lang(
-                    &lang,
-                    &arg.identifier0.as_ref().into(),
-                ));
-            }
+                if !EMBED_LANG.contains(&lang.as_str()) {
+                    self.errors.push(AnalyzerError::unknown_embed_lang(
+                        &lang,
+                        &arg.identifier0.as_ref().into(),
+                    ));
+                }
 
-            if self.in_component && (way != "inline" || lang != "sv") {
-                self.errors.push(AnalyzerError::invalid_embed(
-                    &way,
-                    &lang,
-                    &arg.identifier.as_ref().into(),
-                ));
+                self.in_inline_sv = way == "inline" && lang == "sv";
+                if self.in_component && !self.in_inline_sv {
+                    self.errors.push(AnalyzerError::invalid_embed(
+                        &way,
+                        &lang,
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
             }
+            HandlerPoint::After => self.in_inline_sv = false,
+        }
+        Ok(())
+    }
+
+    fn embed_scoped_identifier(&mut self, arg: &EmbedScopedIdentifier) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && !self.in_inline_sv
+        {
+            self.errors
+                .push(AnalyzerError::invalid_embed_identifier(&arg.into()));
         }
         Ok(())
     }

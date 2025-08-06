@@ -10,6 +10,7 @@ use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use veryl_metadata::{Metadata, WaveFormFormat};
 use veryl_parser::resource_table::{self, PathId, StrId};
+use veryl_parser::veryl_grammar_trait::{self as syntax_tree};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum State {
@@ -21,7 +22,7 @@ enum State {
 }
 
 pub enum CocotbSource {
-    Embed(StrId),
+    Embed(Box<syntax_tree::EmbedContent>),
     Include(StrId),
 }
 
@@ -152,11 +153,8 @@ impl Runner for Cocotb {
         }
 
         match self.source {
-            CocotbSource::Embed(x) => {
-                let src_text = x.to_string();
-                let src_text = src_text.strip_prefix("{{{").unwrap();
-                let src_text = src_text.strip_suffix("}}}").unwrap();
-
+            CocotbSource::Embed(ref x) => {
+                let src_text = process_embed_content(x);
                 let mut file = OpenOptions::new()
                     .create(true)
                     .write(true)
@@ -271,5 +269,30 @@ runner.test(
 
     fn failure(&mut self) {
         self.success = false;
+    }
+}
+
+fn process_embed_content(embed_content: &syntax_tree::EmbedContent) -> String {
+    embed_content
+        .embed_content_list
+        .iter()
+        .map(|x| process_embed_item(&x.embed_item))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn process_embed_item(embed_item: &syntax_tree::EmbedItem) -> String {
+    match embed_item {
+        syntax_tree::EmbedItem::EmbedLBraceEmbedItemListEmbedRBrace(x) => {
+            let mut ret = String::new();
+            ret.push_str(&x.embed_l_brace.embed_l_brace_token.to_string());
+            for x in &x.embed_item_list {
+                ret.push_str(&process_embed_item(&x.embed_item));
+            }
+            ret.push_str(&x.embed_r_brace.embed_r_brace_token.to_string());
+            ret
+        }
+        syntax_tree::EmbedItem::Any(x) => x.any.any_token.to_string(),
+        _ => unreachable!(),
     }
 }

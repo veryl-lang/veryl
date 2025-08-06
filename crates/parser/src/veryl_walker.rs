@@ -283,6 +283,13 @@ pub trait VerylWalker {
         after!(self, embed_l_brace, arg);
     }
 
+    /// Semantic action for non-terminal 'EscapedLBrace'
+    fn escaped_l_brace(&mut self, arg: &EscapedLBrace) {
+        before!(self, escaped_l_brace, arg);
+        self.veryl_token(&arg.escaped_l_brace_token);
+        after!(self, escaped_l_brace, arg);
+    }
+
     /// Semantic action for non-terminal 'TripleLBrace'
     fn triple_l_brace(&mut self, arg: &TripleLBrace) {
         before!(self, triple_l_brace, arg);
@@ -344,6 +351,13 @@ pub trait VerylWalker {
         before!(self, embed_r_brace, arg);
         self.veryl_token(&arg.embed_r_brace_token);
         after!(self, embed_r_brace, arg);
+    }
+
+    /// Semantic action for non-terminal 'EscapedRBrace'
+    fn escaped_r_brace(&mut self, arg: &EscapedRBrace) {
+        before!(self, escaped_r_brace, arg);
+        self.veryl_token(&arg.escaped_r_brace_token);
+        after!(self, escaped_r_brace, arg);
     }
 
     /// Semantic action for non-terminal 'TripleRBrace'
@@ -3423,6 +3437,15 @@ pub trait VerylWalker {
         after!(self, embed_content, arg);
     }
 
+    /// Semantic action for non-terminal 'EmbedScopedIdentifier'
+    fn embed_scoped_identifier(&mut self, arg: &EmbedScopedIdentifier) {
+        before!(self, embed_scoped_identifier, arg);
+        self.escaped_l_brace(&arg.escaped_l_brace);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.escaped_r_brace(&arg.escaped_r_brace);
+        after!(self, embed_scoped_identifier, arg);
+    }
+
     /// Semantic action for non-terminal 'EmbedItem'
     fn embed_item(&mut self, arg: &EmbedItem) {
         before!(self, embed_item, arg);
@@ -3433,6 +3456,9 @@ pub trait VerylWalker {
                     self.embed_item(&x.embed_item);
                 }
                 self.embed_r_brace(&x.embed_r_brace);
+            }
+            EmbedItem::EmbedScopedIdentifier(x) => {
+                self.embed_scoped_identifier(&x.embed_scoped_identifier)
             }
             EmbedItem::Any(x) => self.any(&x.any),
         }
