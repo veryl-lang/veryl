@@ -3849,6 +3849,20 @@ fn undefined_identifier() {
         errors[1],
         AnalyzerError::UndefinedIdentifier { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        embed(inline) sv {{{
+            \{ ModuleB \} u_monitor();
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -4016,6 +4030,72 @@ fn invalid_embed() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidEmbed { .. }));
+}
+
+#[test]
+fn invalid_embed_identifier() {
+    let code = r#"
+    module ModuleA {}
+    module ModuleB {
+        embed (inline) sv{{{
+            \{ ModuleA \} u_module_a ();
+        }}}
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {}
+    embed (inline) sv {{{
+        module ModuleB;
+            \{ ModuleA \} u_module_a ();
+        endmodule
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {}
+    embed (cocotb) py{{{
+        \{ ModuleA \}
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEmbedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {}
+    embed (cocotb) sv{{{
+        \{ ModuleA \}
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEmbedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {}
+    embed (inline) py{{{
+        \{ ModuleA \}
+    }}}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEmbedIdentifier { .. }
+    ));
 }
 
 #[test]

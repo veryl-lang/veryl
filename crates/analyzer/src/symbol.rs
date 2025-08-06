@@ -2243,7 +2243,7 @@ pub struct GenericInstanceProperty {
 #[derive(Debug, Clone)]
 pub enum TestType {
     Inline,
-    CocotbEmbed(StrId),
+    CocotbEmbed(Box<syntax_tree::EmbedContent>),
     CocotbInclude(StrId),
 }
 

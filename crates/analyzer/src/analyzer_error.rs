@@ -972,6 +972,15 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
     },
 
+    #[diagnostic(severity(Error), code(invalid_enbed_identifier), help(""), url(""))]
+    #[error("embed identifier can be used in way: inline/lang: sv code block only")]
+    InvalidEmbedIdentifier {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
     #[diagnostic(
         severity(Error),
         code(unknown_embed_lang),
@@ -1930,6 +1939,13 @@ impl AnalyzerError {
         AnalyzerError::InvalidEmbed {
             way: way.to_string(),
             lang: lang.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_embed_identifier(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidEmbedIdentifier {
             input: source(token),
             error_location: token.into(),
         }
