@@ -3019,6 +3019,24 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA::<V: u32> {
+        struct Foo {
+            foo: u32,
+        }
+        const FOO: Foo = Foo'{ foo: V };
+    }
+    package PkgB::<V: u32> {
+        const BAR: u32 = V;
+    }
+    module ModuleA {
+        import PkgB::<PkgA::<32>::FOO.foo>::*;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
