@@ -5,7 +5,8 @@ use crate::attribute_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{
-    GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind, Type as SymType, TypeModifierKind,
+    GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind, Type as SymType, TypeKind,
+    TypeModifierKind,
 };
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPathNamespace};
 use crate::symbol_table;
@@ -193,20 +194,20 @@ fn check_generic_proto_arg(
     } else {
         None
     };
-    let type_symbol = if let Some(x) = &arg_symbol {
+    let (arg_type, type_symbol) = if let Some(x) = &arg_symbol {
         let proto_symbol = x.found.proto();
         if proto_symbol.is_some() {
-            proto_symbol
+            (None, proto_symbol)
         } else if let Some(r#type) = x.found.kind.get_type() {
             r#type
                 .trace_user_defined(Some(&x.found.namespace))
-                .map(|(_, x)| x)
-                .unwrap_or(None)
+                .map(|(x, y)| (Some(x), y))
+                .unwrap_or((None, None))
         } else {
-            None
+            (None, None)
         }
     } else {
-        None
+        (None, None)
     };
 
     let expected = match &required {
@@ -246,8 +247,10 @@ fn check_generic_proto_arg(
                 Some(format!("{}", r.token))
             }
         }
-        ProtoBound::FactorType(x) => {
-            let is_matched = if let Some(arg_symbol) = arg_symbol.as_ref() {
+        ProtoBound::FactorType(param_type) => {
+            let is_matched = if let Some(arg_type) = arg_type.as_ref() {
+                match_fixed_type(arg_type, param_type)
+            } else if let Some(arg_symbol) = arg_symbol.as_ref() {
                 match &arg_symbol.found.kind {
                     SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) => true,
                     SymbolKind::GenericParameter(x) => x
@@ -265,7 +268,7 @@ fn check_generic_proto_arg(
             if is_matched {
                 None
             } else {
-                Some(format!("{x}"))
+                Some(format!("{param_type}"))
             }
         }
     };
@@ -297,6 +300,28 @@ fn check_generic_proto_arg(
     }
 
     None
+}
+
+fn match_fixed_type(arg_type: &SymType, param_type: &SymType) -> bool {
+    if arg_type.modifier.len() != param_type.modifier.len() {
+        return false;
+    }
+
+    for i in 0..arg_type.modifier.len() {
+        if arg_type.modifier[i].kind != param_type.modifier[i].kind {
+            return false;
+        }
+    }
+
+    if !arg_type.width.is_empty() || !arg_type.array.is_empty() {
+        return false;
+    }
+
+    if matches!(param_type.kind, TypeKind::Bool | TypeKind::String) {
+        arg_type.kind == param_type.kind
+    } else {
+        arg_type.kind.is_fixed()
+    }
 }
 
 enum InstTypeSource {
