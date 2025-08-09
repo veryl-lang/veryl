@@ -9,9 +9,10 @@ module veryl_testcase_Module69A #(
     localparam int unsigned B_WIDTH = $clog2(B),
     localparam int unsigned C_WIDTH = $clog2(C)
 ) (
-    input  var logic [A_WIDTH-1:0] a,
-    input  var logic [B_WIDTH-1:0] b,
-    output var logic [C_WIDTH-1:0] c
+    input  var logic                       [A_WIDTH-1:0] a,
+    input  var logic                       [B_WIDTH-1:0] b,
+    output var logic                       [C_WIDTH-1:0] c,
+    veryl_testcase_Interface69.port               d
 );
     always_comb c = a;
 endmodule
@@ -26,4 +27,10 @@ endpackage
 package veryl_testcase_Package69B;
     typedef veryl_testcase_Package69A::A A;
 endpackage
+
+interface veryl_testcase_Interface69;
+    modport port (
+
+    );
+endinterface
 //# sourceMappingURL=../map/69_proto.sv.map

@@ -1,8 +1,10 @@
 module Module69::<T: Proto69> {
+    inst i: Interface69;
     inst u: T (
         a: 0,
         b: 0,
         c: _,
+        d: i,
     );
 }
 
@@ -14,9 +16,10 @@ proto module Proto69 #(
     const B_WIDTH: u32,
     const C_WIDTH: u32,
 ) (
-    a: input  logic<A_WIDTH>,
-    b: input  logic<B_WIDTH>,
-    c: output logic<C_WIDTH>,
+    a: input   logic            <A_WIDTH>,
+    b: input   logic            <B_WIDTH>,
+    c: output  logic            <C_WIDTH>,
+    d: modport Interface69::port         ,
 );
 
 module Module69A for Proto69 #(
@@ -27,9 +30,10 @@ module Module69A for Proto69 #(
     const B_WIDTH: u32 = $clog2(B),
     const C_WIDTH: u32 = $clog2(C),
 ) (
-    a: input  logic<A_WIDTH>,
-    b: input  logic<B_WIDTH>,
-    c: output logic<C_WIDTH>,
+    a: input   logic            <A_WIDTH>,
+    b: input   logic            <B_WIDTH>,
+    c: output  logic            <C_WIDTH>,
+    d: modport Interface69::port         ,
 ) {
     assign c = a;
 }
@@ -46,4 +50,11 @@ proto package ProtoPackage69B {
 
 package Package69B for ProtoPackage69B {
     type A = Package69A::A;
+}
+
+interface Interface69 {
+    modport port {
+
+
+    }
 }
