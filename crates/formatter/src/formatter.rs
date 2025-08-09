@@ -2856,6 +2856,15 @@ impl VerylWalker for Formatter {
         self.triple_r_brace(&arg.triple_r_brace);
     }
 
+    /// Semantic action for non-terminal 'EmbedScopedIdentifier'
+    fn embed_scoped_identifier(&mut self, arg: &EmbedScopedIdentifier) {
+        self.escaped_l_brace(&arg.escaped_l_brace);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.space(1);
+        self.escaped_r_brace(&arg.escaped_r_brace);
+    }
+
     /// Semantic action for non-terminal 'IncludeDeclaration'
     fn include_declaration(&mut self, arg: &IncludeDeclaration) {
         self.include(&arg.include);

@@ -2264,10 +2264,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let content = &arg.embed_content;
             let r#type = match way.as_str() {
                 "inline" => Some(TestType::Inline),
-                "cocotb" => {
-                    let text = resource_table::insert_str(&content.to_string());
-                    Some(TestType::CocotbEmbed(text))
-                }
+                "cocotb" => Some(TestType::CocotbEmbed(content.clone())),
                 _ => None,
             };
 
