@@ -37,3 +37,8 @@ path = ""
 project = "veryl_sample"
 version = "0.15.0"
 revision = "7b4076a1203f89a2b08feee758c8557e208afb31"
+
+[[projects]]
+name = "veryl_sample4"
+source = "testcases/sample"
+dependencies = []

@@ -221,11 +221,12 @@ impl ReferenceTable {
         generics_token: Option<Token>,
         generic_maps: Option<&Vec<GenericMap>>,
     ) {
-        let orig_len = path.len();
         let mut path = path.clone();
         if let Some(maps) = generic_maps {
             path.apply_map(maps);
         }
+
+        let orig_len = path.len();
         path.resolve_imported(namespace, generic_maps);
 
         if path.is_generic_reference() {

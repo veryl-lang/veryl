@@ -1,0 +1,3 @@
+package bar_pkg::<V: u32> {
+    const BAR: u32 = V;
+}

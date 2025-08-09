@@ -1,0 +1,7 @@
+package foo_pkg::<V: u32> {
+    struct Foo {
+        foo: u32,
+    }
+
+    const FOO: Foo = Foo'{foo: V};
+}
