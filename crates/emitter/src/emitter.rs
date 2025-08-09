@@ -5345,6 +5345,11 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'EmbedScopedIdentifier'
+    fn embed_scoped_identifier(&mut self, arg: &EmbedScopedIdentifier) {
+        self.scoped_identifier(&arg.scoped_identifier);
+    }
+
     /// Semantic action for non-terminal 'IncludeDeclaration'
     fn include_declaration(&mut self, arg: &IncludeDeclaration) {
         if arg.identifier.identifier_token.to_string() == "inline" {

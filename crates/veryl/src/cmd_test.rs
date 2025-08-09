@@ -56,7 +56,9 @@ impl CmdTest {
                     SimType::Vcs => Vcs::new().runner(),
                     SimType::Vivado => Vivado::new().runner(),
                 },
-                TestType::CocotbEmbed(x) => Cocotb::new(CocotbSource::Embed(x)).runner(),
+                TestType::CocotbEmbed(ref x) => {
+                    Cocotb::new(CocotbSource::Embed(x.clone())).runner()
+                }
                 TestType::CocotbInclude(x) => Cocotb::new(CocotbSource::Include(x)).runner(),
             };
 

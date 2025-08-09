@@ -7,6 +7,7 @@
 
 %on HashLBracketTerm %push Attr
 %on ColonColonLAngleTerm %push Generic
+%on EscapedRBraceTerm %pop
 %on TripleLBraceTerm %push Embed
 
 %scanner Embed {
@@ -14,6 +15,7 @@
     %auto_ws_off
 
     %on LBraceTerm %push EmbedInner
+    %on EscapedLBraceTerm %push INITIAL
     %on TripleRBraceTerm %pop
 }
 
@@ -22,6 +24,7 @@
     %auto_ws_off
 
     %on LBraceTerm %push EmbedInner
+    %on EscapedLBraceTerm %push INITIAL
     %on RBraceTerm %pop
 }
 
@@ -80,11 +83,13 @@ LAngleTerm            : <INITIAL, Generic                         >'<'          
 QuestionTerm          : <INITIAL                                  >'?'                                                                                   : Token;
 QuoteLBraceTerm       : <INITIAL, Generic                         >"'\{"                                                                                 : Token;
 QuoteTerm             : <INITIAL                                  >"'"                                                                                   : Token;
+EscapedLBraceTerm     : <                  Embed, EmbedInner      >'\{'                                                                                  : Token;
 TripleLBraceTerm      : <INITIAL                                  >'{{{'                                                                                 : Token;
 LBraceTerm            : <INITIAL, Generic, Embed, EmbedInner, Attr>'{'                                                                                   : Token;
 LBracketTerm          : <INITIAL, Generic,                    Attr>'['                                                                                   : Token;
 LParenTerm            : <INITIAL, Generic,                    Attr>'('                                                                                   : Token;
 RAngleTerm            : <INITIAL, Generic                         >'>'                                                                                   : Token;
+EscapedRBraceTerm     : <INITIAL                                  >'\}'                                                                                  : Token;
 TripleRBraceTerm      : <                  Embed                  >'}}}'                                                                                 : Token;
 RBraceTerm            : <INITIAL, Generic,        EmbedInner, Attr>'}'                                                                                   : Token;
 RBracketTerm          : <INITIAL, Generic,                    Attr>']'                                                                                   : Token;
@@ -173,7 +178,7 @@ UnsafeTerm            : <INITIAL, Generic                         >'unsafe'     
 VarTerm               : <INITIAL, Generic                         >'var'                                                                                 : Token; // Keyword: Statement
 DollarIdentifierTerm  : <INITIAL, Generic                         >/\$[a-zA-Z_][0-9a-zA-Z_$]*/                                                           : Token;
 IdentifierTerm        : <INITIAL, Generic,                    Attr>/(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/                                                      : Token;
-AnyTerm               : <                  Embed, EmbedInner      >/[^{}]+/                                                                              : Token;
+AnyTerm               : <                  Embed, EmbedInner      >/(?:[^{}\\]|\\[^{])+/                                                                 : Token;
 
 // ----------------------------------------------------------------------------
 // Token
@@ -221,6 +226,7 @@ QuoteLBraceToken     : QuoteLBraceTerm     : Token Comments;
 QuoteToken           : QuoteTerm           : Token Comments;
 LAngleToken          : LAngleTerm          : Token Comments;
 EmbedLBraceToken     : LBraceTerm          : Token         ;
+EscapedLBraceToken   : EscapedLBraceTerm   : Token         ;
 TripleLBraceToken    : TripleLBraceTerm    : Token         ;
 LBraceToken          : LBraceTerm          : Token Comments;
 LBracketToken        : LBracketTerm        : Token Comments;
@@ -230,6 +236,7 @@ MinusGTToken         : MinusGTTerm         : Token Comments;
 PlusColonToken       : PlusColonTerm       : Token Comments;
 RAngleToken          : RAngleTerm          : Token Comments;
 EmbedRBraceToken     : RBraceTerm          : Token         ;
+EscapedRBraceToken   : EscapedRBraceTerm   : Token         ;
 TripleRBraceToken    : TripleRBraceTerm    : Token Comments;
 RBraceToken          : RBraceTerm          : Token Comments;
 RBracketToken        : RBracketTerm        : Token Comments;
@@ -368,6 +375,7 @@ QuoteLBrace     : QuoteLBraceToken     : VerylToken;
 Quote           : QuoteToken           : VerylToken;
 LAngle          : LAngleToken          : VerylToken;
 EmbedLBrace     : EmbedLBraceToken     : VerylToken;
+EscapedLBrace   : EscapedLBraceToken   : VerylToken;
 TripleLBrace    : TripleLBraceToken    : VerylToken;
 LBrace          : LBraceToken          : VerylToken;
 LBracket        : LBracketToken        : VerylToken;
@@ -377,6 +385,7 @@ MinusGT         : MinusGTToken         : VerylToken;
 PlusColon       : PlusColonToken       : VerylToken;
 RAngle          : RAngleToken          : VerylToken;
 EmbedRBrace     : EmbedRBraceToken     : VerylToken;
+EscapedRBrace   : EscapedRBraceToken   : VerylToken;
 TripleRBrace    : TripleRBraceToken    : VerylToken;
 RBrace          : RBraceToken          : VerylToken;
 RBracket        : RBracketToken        : VerylToken;
@@ -1004,7 +1013,10 @@ EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
 
 EmbedContent: TripleLBrace { EmbedItem } TripleRBrace;
 
+EmbedScopedIdentifier: EscapedLBrace ScopedIdentifier EscapedRBrace;
+
 EmbedItem: EmbedLBrace { EmbedItem } EmbedRBrace
+         | EmbedScopedIdentifier
          | Any;
 
 // ----------------------------------------------------------------------------

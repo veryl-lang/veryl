@@ -299,6 +299,7 @@ impl_token_range_singular!(Quote);
 impl_token_range_singular!(QuoteLBrace);
 impl_token_range_singular!(LAngle);
 impl_token_range_singular!(EmbedLBrace);
+impl_token_range_singular!(EscapedLBrace);
 impl_token_range_singular!(TripleLBrace);
 impl_token_range_singular!(LBrace);
 impl_token_range_singular!(LBracket);
@@ -308,6 +309,7 @@ impl_token_range_singular!(MinusGT);
 impl_token_range_singular!(PlusColon);
 impl_token_range_singular!(RAngle);
 impl_token_range_singular!(EmbedRBrace);
+impl_token_range_singular!(EscapedRBrace);
 impl_token_range_singular!(TripleRBrace);
 impl_token_range_singular!(RBrace);
 impl_token_range_singular!(RBracket);
@@ -1376,6 +1378,7 @@ impl_token_range!(ProtoAliasDeclaration, alias, semicolon);
 
 impl_token_range!(EmbedDeclaration, embed, embed_content);
 impl_token_range!(EmbedContent, triple_l_brace, triple_r_brace);
+impl_token_range!(EmbedScopedIdentifier, escaped_l_brace, escaped_r_brace);
 
 impl From<&EmbedItem> for TokenRange {
     fn from(value: &EmbedItem) -> Self {
@@ -1388,6 +1391,7 @@ impl From<&EmbedItem> for TokenRange {
                     end: end.end,
                 }
             }
+            EmbedItem::EmbedScopedIdentifier(x) => x.embed_scoped_identifier.as_ref().into(),
             EmbedItem::Any(x) => x.any.as_ref().into(),
         }
     }
