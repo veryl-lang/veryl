@@ -359,10 +359,10 @@ impl Expression {
     }
 
     pub fn unwrap_identifier(&self) -> Option<&ExpressionIdentifier> {
-        if let Some(Factor::IdentifierFactor(x)) = self.unwrap_factor() {
-            if x.identifier_factor.identifier_factor_opt.is_none() {
-                return Some(x.identifier_factor.expression_identifier.as_ref());
-            }
+        if let Some(Factor::IdentifierFactor(x)) = self.unwrap_factor()
+            && x.identifier_factor.identifier_factor_opt.is_none()
+        {
+            return Some(x.identifier_factor.expression_identifier.as_ref());
         }
 
         None
@@ -478,10 +478,10 @@ impl InterfaceGroup {
                 }
             }
             InterfaceGroupGroup::InterfaceItem(x) => {
-                if let InterfaceItem::GenerateItem(x) = &*x.interface_item {
-                    if let GenerateItem::ImportDeclaration(x) = &*x.generate_item {
-                        ret.push(x.import_declaration.as_ref().clone());
-                    }
+                if let InterfaceItem::GenerateItem(x) = &*x.interface_item
+                    && let GenerateItem::ImportDeclaration(x) = &*x.generate_item
+                {
+                    ret.push(x.import_declaration.as_ref().clone());
                 }
             }
         }
@@ -607,10 +607,10 @@ impl AlwaysFfDeclaration {
     }
 
     pub fn get_explicit_reset(&self) -> Option<HierarchicalIdentifier> {
-        if let Some(x) = &self.always_ff_declaration_opt {
-            if let Some(x) = &x.always_ff_event_list.always_ff_event_list_opt {
-                return Some(x.always_ff_reset.hierarchical_identifier.as_ref().clone());
-            }
+        if let Some(x) = &self.always_ff_declaration_opt
+            && let Some(x) = &x.always_ff_event_list.always_ff_event_list_opt
+        {
+            return Some(x.always_ff_reset.hierarchical_identifier.as_ref().clone());
         }
 
         None

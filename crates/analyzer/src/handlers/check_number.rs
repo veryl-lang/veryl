@@ -81,11 +81,11 @@ impl VerylGrammarTrait for CheckNumber {
             let zero = number.trim_start_matches('0').is_empty();
 
             if let Some(actual_width) = strnum_bitwidth::bitwidth(number, base) {
-                if let Some(width) = width {
-                    if actual_width > width {
-                        self.errors
-                            .push(AnalyzerError::too_large_number(width, &token.into()));
-                    }
+                if let Some(width) = width
+                    && actual_width > width
+                {
+                    self.errors
+                        .push(AnalyzerError::too_large_number(width, &token.into()));
                 }
             } else if width.is_none() && !zero {
                 // bitwidth calculation may be failed over 128bit.

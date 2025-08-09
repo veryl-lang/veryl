@@ -490,15 +490,16 @@ impl Lockfile {
     ) -> Result<Option<(Release, PathBuf)>, MetadataError> {
         if let Some(locks) = self.lock_table.get_mut(url) {
             for lock in locks {
-                if let LockSource::Repository(x) = &lock.source {
-                    if x.project == project && version_req.matches(&x.version) {
-                        let release = Release {
-                            version: x.version.clone(),
-                            revision: x.revision.clone(),
-                        };
-                        let path = x.path.clone();
-                        return Ok(Some((release, path)));
-                    }
+                if let LockSource::Repository(x) = &lock.source
+                    && x.project == project
+                    && version_req.matches(&x.version)
+                {
+                    let release = Release {
+                        version: x.version.clone(),
+                        revision: x.revision.clone(),
+                    };
+                    let path = x.path.clone();
+                    return Ok(Some((release, path)));
                 }
             }
         }
@@ -513,14 +514,13 @@ impl Lockfile {
 
     fn search_project(path: &Path, project: &str) -> Option<PathBuf> {
         for entry in WalkDir::new(path).into_iter().flatten() {
-            if entry.file_name() == "Veryl.toml" {
-                if let Ok(metadata) = Metadata::load(entry.path()) {
-                    if metadata.project.name == project {
-                        let ret = entry.path();
-                        let ret = ret.parent().unwrap().strip_prefix(path).unwrap();
-                        return Some(ret.to_path_buf());
-                    }
-                }
+            if entry.file_name() == "Veryl.toml"
+                && let Ok(metadata) = Metadata::load(entry.path())
+                && metadata.project.name == project
+            {
+                let ret = entry.path();
+                let ret = ret.parent().unwrap().strip_prefix(path).unwrap();
+                return Some(ret.to_path_buf());
             }
         }
         None

@@ -100,17 +100,17 @@ impl AnalyzerPass3 {
         let mut ret = Vec::new();
 
         for symbol in symbols {
-            if symbol.token.source == self.path {
-                if let SymbolKind::Variable(_) = symbol.kind {
-                    if symbol.references.is_empty() && !symbol.allow_unused {
-                        let name = symbol.token.to_string();
-                        if !name.starts_with('_') {
-                            ret.push(AnalyzerError::unused_variable(
-                                &symbol.token.to_string(),
-                                &symbol.token.into(),
-                            ));
-                        }
-                    }
+            if symbol.token.source == self.path
+                && let SymbolKind::Variable(_) = symbol.kind
+                && symbol.references.is_empty()
+                && !symbol.allow_unused
+            {
+                let name = symbol.token.to_string();
+                if !name.starts_with('_') {
+                    ret.push(AnalyzerError::unused_variable(
+                        &symbol.token.to_string(),
+                        &symbol.token.into(),
+                    ));
                 }
             }
         }

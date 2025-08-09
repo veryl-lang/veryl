@@ -404,19 +404,19 @@ impl VerylGrammarTrait for CheckType {
     }
 
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(symbol) = symbol_table::resolve(arg) {
-                // Check modport default member type
-                if self.in_modport_default_member
-                    && !matches!(symbol.found.kind, SymbolKind::Modport(_))
-                {
-                    self.errors.push(AnalyzerError::mismatch_type(
-                        &symbol.found.token.to_string(),
-                        "modport",
-                        &symbol.found.kind.to_kind_name(),
-                        &arg.identifier_token.token.into(),
-                    ));
-                }
+        if let HandlerPoint::Before = self.point
+            && let Ok(symbol) = symbol_table::resolve(arg)
+        {
+            // Check modport default member type
+            if self.in_modport_default_member
+                && !matches!(symbol.found.kind, SymbolKind::Modport(_))
+            {
+                self.errors.push(AnalyzerError::mismatch_type(
+                    &symbol.found.token.to_string(),
+                    "modport",
+                    &symbol.found.kind.to_kind_name(),
+                    &arg.identifier_token.token.into(),
+                ));
             }
         }
         Ok(())
@@ -575,59 +575,55 @@ impl VerylGrammarTrait for CheckType {
     fn scalar_type(&mut self, arg: &ScalarType) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let r#type: SymType = arg.into();
-            if let Some(modifier) = r#type.find_modifier(&TypeModifierKind::Signed) {
-                if let Some((atom_type, _)) = r#type.trace_user_defined(None) {
-                    if atom_type.kind.is_fixed() {
-                        self.errors
-                            .push(AnalyzerError::fixed_type_with_signed_modifier(
-                                &modifier.token.token.into(),
-                            ));
-                    }
-                }
+            if let Some(modifier) = r#type.find_modifier(&TypeModifierKind::Signed)
+                && let Some((atom_type, _)) = r#type.trace_user_defined(None)
+                && atom_type.kind.is_fixed()
+            {
+                self.errors
+                    .push(AnalyzerError::fixed_type_with_signed_modifier(
+                        &modifier.token.token.into(),
+                    ));
             }
         }
         Ok(())
     }
 
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if arg.for_statement_opt.is_some() {
-                if let Some((r#type, _)) =
-                    SymType::from(arg.scalar_type.as_ref()).trace_user_defined(None)
-                {
-                    if !r#type.is_signed() {
-                        self.errors.push(
-                            AnalyzerError::unsigned_loop_variable_in_descending_order_for_loop(
-                                &arg.scalar_type.as_ref().into(),
-                            ),
-                        );
-                    }
-                }
-            }
+        if let HandlerPoint::Before = self.point
+            && arg.for_statement_opt.is_some()
+            && let Some((r#type, _)) =
+                SymType::from(arg.scalar_type.as_ref()).trace_user_defined(None)
+            && !r#type.is_signed()
+        {
+            self.errors.push(
+                AnalyzerError::unsigned_loop_variable_in_descending_order_for_loop(
+                    &arg.scalar_type.as_ref().into(),
+                ),
+            );
         }
         Ok(())
     }
 
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if self.in_interface {
-                self.errors
-                    .push(AnalyzerError::invalid_type_declaration("enum", &arg.into()));
-            }
+        if let HandlerPoint::Before = self.point
+            && self.in_interface
+        {
+            self.errors
+                .push(AnalyzerError::invalid_type_declaration("enum", &arg.into()));
         }
         Ok(())
     }
 
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if self.in_interface {
-                let kind = match *arg.struct_union {
-                    StructUnion::Struct(_) => "struct",
-                    StructUnion::Union(_) => "union",
-                };
-                self.errors
-                    .push(AnalyzerError::invalid_type_declaration(kind, &arg.into()));
-            }
+        if let HandlerPoint::Before = self.point
+            && self.in_interface
+        {
+            let kind = match *arg.struct_union {
+                StructUnion::Struct(_) => "struct",
+                StructUnion::Union(_) => "union",
+            };
+            self.errors
+                .push(AnalyzerError::invalid_type_declaration(kind, &arg.into()));
         }
         Ok(())
     }
@@ -675,22 +671,22 @@ impl VerylGrammarTrait for CheckType {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             let mut connected_params = Vec::new();
-            if let Some(ref x) = arg.inst_declaration_opt1 {
-                if let Some(ref x) = x.inst_parameter.inst_parameter_opt {
-                    let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
-                    for item in items {
-                        connected_params.push(item.identifier.identifier_token.token.text);
-                    }
+            if let Some(ref x) = arg.inst_declaration_opt1
+                && let Some(ref x) = x.inst_parameter.inst_parameter_opt
+            {
+                let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
+                for item in items {
+                    connected_params.push(item.identifier.identifier_token.token.text);
                 }
             }
 
             let mut connected_ports = Vec::new();
-            if let Some(ref x) = arg.inst_declaration_opt2 {
-                if let Some(ref x) = x.inst_declaration_opt3 {
-                    let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
-                    for item in items {
-                        connected_ports.push(item.identifier.identifier_token.token.text);
-                    }
+            if let Some(ref x) = arg.inst_declaration_opt2
+                && let Some(ref x) = x.inst_declaration_opt3
+            {
+                let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
+                for item in items {
+                    connected_ports.push(item.identifier.identifier_token.token.text);
                 }
             }
 

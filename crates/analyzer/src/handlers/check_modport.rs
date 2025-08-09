@@ -43,17 +43,17 @@ impl CheckModport {
                         return false;
                     };
 
-                    if let SymbolKind::Modport(modport) = &symbol.found.kind {
-                        if let Some(symbol) = symbol_table::get(modport.interface) {
-                            let SymbolKind::Interface(x) = symbol.kind else {
-                                unreachable!()
-                            };
+                    if let SymbolKind::Modport(modport) = &symbol.found.kind
+                        && let Some(symbol) = symbol_table::get(modport.interface)
+                    {
+                        let SymbolKind::Interface(x) = symbol.kind else {
+                            unreachable!()
+                        };
 
-                            let is_expandable = x.parameters.is_empty()
-                                && (!self.in_function || port_type.array.is_empty());
-                            if !is_expandable {
-                                return true;
-                            }
+                        let is_expandable = x.parameters.is_empty()
+                            && (!self.in_function || port_type.array.is_empty());
+                        if !is_expandable {
+                            return true;
                         }
                     }
                 }
@@ -85,15 +85,15 @@ impl Handler for CheckModport {
 
 impl VerylGrammarTrait for CheckModport {
     fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
-        if matches!(self.point, HandlerPoint::Before) && self.is_target_modport(&arg.identifier) {
-            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                if self.is_unexpandable_modport(&symbol.found) {
-                    self.errors.push(AnalyzerError::unexpandable_modport(
-                        &arg.identifier.identifier_token.token.to_string(),
-                        &arg.identifier.as_ref().into(),
-                    ));
-                }
-            }
+        if matches!(self.point, HandlerPoint::Before)
+            && self.is_target_modport(&arg.identifier)
+            && let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())
+            && self.is_unexpandable_modport(&symbol.found)
+        {
+            self.errors.push(AnalyzerError::unexpandable_modport(
+                &arg.identifier.identifier_token.token.to_string(),
+                &arg.identifier.as_ref().into(),
+            ));
         }
         Ok(())
     }

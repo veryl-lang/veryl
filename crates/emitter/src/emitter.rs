@@ -343,10 +343,11 @@ impl Emitter {
             &text
         };
 
-        if x.line != 0 && x.column != 0 {
-            if let Some(ref mut map) = self.source_map {
-                map.add(self.dst_line, self.dst_column, x.line, x.column, text);
-            }
+        if x.line != 0
+            && x.column != 0
+            && let Some(ref mut map) = self.source_map
+        {
+            map.add(self.dst_line, self.dst_column, x.line, x.column, text);
         }
 
         let newlines_in_text = text.matches('\n').count() as u32;
@@ -1117,12 +1118,12 @@ impl Emitter {
                     self.str(")");
                 }
                 self.force_duplicated = false;
-            } else if let Some(ref y) = x.select_opt {
-                if matches!(&*y.select_operator, SelectOperator::Step(_)) {
-                    self.str("*(");
-                    self.expression(&y.expression);
-                    self.str(")");
-                }
+            } else if let Some(ref y) = x.select_opt
+                && matches!(&*y.select_operator, SelectOperator::Step(_))
+            {
+                self.str("*(");
+                self.expression(&y.expression);
+                self.str(")");
             }
         }
 
@@ -1498,15 +1499,14 @@ impl Emitter {
     fn get_interface_generic_map(&self, symbol: &Symbol) -> Vec<GenericMap> {
         match &symbol.kind {
             SymbolKind::Port(x) => {
-                if let Some(x) = x.r#type.get_user_defined() {
-                    if let (Ok(symbol), _) =
+                if let Some(x) = x.r#type.get_user_defined()
+                    && let (Ok(symbol), _) =
                         self.resolve_generic_path(&x.path, Some(&symbol.namespace))
-                    {
-                        // symbol for interface is parent symbol because
-                        // resolved symbol is for modport
-                        let parent = symbol.found.get_parent().unwrap();
-                        return parent.generic_maps();
-                    }
+                {
+                    // symbol for interface is parent symbol because
+                    // resolved symbol is for modport
+                    let parent = symbol.found.get_parent().unwrap();
+                    return parent.generic_maps();
                 }
             }
             SymbolKind::Instance(x) => {
@@ -1600,12 +1600,11 @@ impl Emitter {
             return false;
         };
 
-        if let (Some(driver), Some(driver_map)) = (driver, driver_map) {
-            if let Some((driver_type, _, _)) = get_type_symbol(driver, driver_map) {
-                if target_type.id == driver_type.id {
-                    return false;
-                }
-            }
+        if let (Some(driver), Some(driver_map)) = (driver, driver_map)
+            && let Some((driver_type, _, _)) = get_type_symbol(driver, driver_map)
+            && target_type.id == driver_type.id
+        {
+            return false;
         }
 
         let context = SymbolContext {
@@ -1782,26 +1781,26 @@ impl Emitter {
             if let SymbolKind::Modport(x) = symbol.found.kind {
                 for (i, x) in x.members.iter().enumerate() {
                     let symbol = symbol_table::get(*x).unwrap();
-                    if let TokenSource::Generated(_) = symbol.token.source {
-                        if let SymbolKind::ModportVariableMember(x) = symbol.kind {
-                            if i != 0 || arg.modport_declaration_opt.is_some() {
-                                self.str(",");
-                                self.newline();
-                            }
-                            let token = arg
-                                .modport_declaration_opt0
-                                .clone()
-                                .unwrap()
-                                .dot_dot
-                                .dot_dot_token;
-                            self.align_start(align_kind::DIRECTION);
-                            self.duplicated_token(&token.replace(&x.direction.to_string()));
-                            self.align_finish(align_kind::DIRECTION);
-                            self.space(1);
-                            self.align_start(align_kind::IDENTIFIER);
-                            self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
-                            self.align_finish(align_kind::IDENTIFIER);
+                    if let TokenSource::Generated(_) = symbol.token.source
+                        && let SymbolKind::ModportVariableMember(x) = symbol.kind
+                    {
+                        if i != 0 || arg.modport_declaration_opt.is_some() {
+                            self.str(",");
+                            self.newline();
                         }
+                        let token = arg
+                            .modport_declaration_opt0
+                            .clone()
+                            .unwrap()
+                            .dot_dot
+                            .dot_dot_token;
+                        self.align_start(align_kind::DIRECTION);
+                        self.duplicated_token(&token.replace(&x.direction.to_string()));
+                        self.align_finish(align_kind::DIRECTION);
+                        self.space(1);
+                        self.align_start(align_kind::IDENTIFIER);
+                        self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
+                        self.align_finish(align_kind::IDENTIFIER);
                     }
                 }
             } else {
@@ -2287,17 +2286,17 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         let mut expanded_modport = None;
-        if let Some(table) = self.modport_ports_table.as_ref() {
-            if let Some(member_identifier) = arg.expression_identifier_list0.first() {
-                let port_identifier = arg.scoped_identifier.identifier();
-                expanded_modport = table
-                    .get_modport_member(
-                        &port_identifier.token,
-                        &member_identifier.identifier.identifier_token.token,
-                        &[],
-                    )
-                    .map(|x| (port_identifier, x));
-            }
+        if let Some(table) = self.modport_ports_table.as_ref()
+            && let Some(member_identifier) = arg.expression_identifier_list0.first()
+        {
+            let port_identifier = arg.scoped_identifier.identifier();
+            expanded_modport = table
+                .get_modport_member(
+                    &port_identifier.token,
+                    &member_identifier.identifier.identifier_token.token,
+                    &[],
+                )
+                .map(|x| (port_identifier, x));
         }
 
         let array_size = if self.build_opt.flatten_array_interface
@@ -3517,18 +3516,19 @@ impl VerylWalker for Emitter {
                 }
             }
             "test" => {
-                if let Some(ref x) = arg.attribute_opt {
-                    if let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item {
-                        let test_name = x.identifier.identifier_token.to_string();
-                        let text = format!(
-                            "`ifdef __veryl_test_{}_{}__",
-                            self.project_name.unwrap(),
-                            test_name
-                        );
-                        self.token(&arg.hash_l_bracket.hash_l_bracket_token.replace(&text));
-                        self.newline();
-                        let mut wavedump = format!(
-                            r##"    `ifdef __veryl_wavedump_{}_{}__
+                if let Some(ref x) = arg.attribute_opt
+                    && let AttributeItem::Identifier(x) = &*x.attribute_list.attribute_item
+                {
+                    let test_name = x.identifier.identifier_token.to_string();
+                    let text = format!(
+                        "`ifdef __veryl_test_{}_{}__",
+                        self.project_name.unwrap(),
+                        test_name
+                    );
+                    self.token(&arg.hash_l_bracket.hash_l_bracket_token.replace(&text));
+                    self.newline();
+                    let mut wavedump = format!(
+                        r##"    `ifdef __veryl_wavedump_{}_{}__
         module __veryl_wavedump;
             initial begin
                 $dumpfile("{}.vcd");
@@ -3537,18 +3537,17 @@ impl VerylWalker for Emitter {
         endmodule
     `endif
 "##,
-                            self.project_name.unwrap(),
-                            test_name,
-                            test_name
-                        );
+                        self.project_name.unwrap(),
+                        test_name,
+                        test_name
+                    );
 
-                        if cfg!(windows) {
-                            wavedump = wavedump.replace("\n", NEWLINE);
-                        }
-
-                        self.str(&wavedump);
-                        self.attribute.push(AttributeType::Test);
+                    if cfg!(windows) {
+                        wavedump = wavedump.replace("\n", NEWLINE);
                     }
+
+                    self.str(&wavedump);
+                    self.attribute.push(AttributeType::Test);
                 }
             }
             _ => (),
@@ -5842,18 +5841,18 @@ pub fn resolve_generic_path(
     }
 
     let result = symbol_table::resolve((&path.mangled_path(), namespace));
-    if let Ok(symbol) = &result {
-        if let Some(target) = symbol.found.alias_target() {
-            if let Some(parent) = symbol.found.get_parent() {
-                if matches!(parent.kind, SymbolKind::GenericInstance(_)) {
-                    // Alias target may be a generic parameter if it is defined in a generic package.
-                    // Need to apply parent's generic map to resolve a generic parameter.
-                    let map = parent.generic_maps();
-                    return resolve_generic_path(&target, &symbol.found.namespace, Some(&map));
-                }
-            }
-            return resolve_generic_path(&target, &symbol.found.namespace, generic_maps);
+    if let Ok(symbol) = &result
+        && let Some(target) = symbol.found.alias_target()
+    {
+        if let Some(parent) = symbol.found.get_parent()
+            && matches!(parent.kind, SymbolKind::GenericInstance(_))
+        {
+            // Alias target may be a generic parameter if it is defined in a generic package.
+            // Need to apply parent's generic map to resolve a generic parameter.
+            let map = parent.generic_maps();
+            return resolve_generic_path(&target, &symbol.found.namespace, Some(&map));
         }
+        return resolve_generic_path(&target, &symbol.found.namespace, generic_maps);
     }
 
     (result, path)

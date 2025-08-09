@@ -1436,13 +1436,12 @@ impl Evaluator {
 
                                 if let Ok(symbol) = symbol_table::resolve(
                                     x.identifier_factor.expression_identifier.as_ref(),
-                                ) {
-                                    if !symbol.found.kind.is_function() {
-                                        ret.errors.push(EvaluatedError::CallNonFunction {
-                                            kind: symbol.found.kind.to_kind_name(),
-                                            token: symbol.found.token,
-                                        });
-                                    }
+                                ) && !symbol.found.kind.is_function()
+                                {
+                                    ret.errors.push(EvaluatedError::CallNonFunction {
+                                        kind: symbol.found.kind.to_kind_name(),
+                                        token: symbol.found.token,
+                                    });
                                 }
 
                                 // TODO return type of function

@@ -498,57 +498,57 @@ impl CreateSymbolTable {
     ) -> Vec<SymbolId> {
         let mut ret = Vec::new();
 
-        if let SymbolKind::Modport(ref x) = mp.kind {
-            if let Some(ref default) = x.default {
-                let explicit_members: HashSet<_> = x
-                    .members
-                    .iter()
-                    .map(|x| symbol_table::get(*x).unwrap().token.text)
-                    .collect();
-                let mut default_members: Vec<_> = self
-                    .variable_ids
-                    .iter()
-                    .filter(|(x, y)| {
-                        !explicit_members.contains(x)
-                            && symbol_table::get(**y)
-                                .map(|x| {
-                                    // member variables should belong to
-                                    // the interface directly
-                                    x.namespace.matched(interface_namesapce)
-                                })
-                                .unwrap()
-                    })
-                    .collect();
+        if let SymbolKind::Modport(ref x) = mp.kind
+            && let Some(ref default) = x.default
+        {
+            let explicit_members: HashSet<_> = x
+                .members
+                .iter()
+                .map(|x| symbol_table::get(*x).unwrap().token.text)
+                .collect();
+            let mut default_members: Vec<_> = self
+                .variable_ids
+                .iter()
+                .filter(|(x, y)| {
+                    !explicit_members.contains(x)
+                        && symbol_table::get(**y)
+                            .map(|x| {
+                                // member variables should belong to
+                                // the interface directly
+                                x.namespace.matched(interface_namesapce)
+                            })
+                            .unwrap()
+                })
+                .collect();
 
-                // Sort by SymbolId to keep inserting order as the same as definition order
-                default_members.sort_by(|x, y| x.1.cmp(y.1));
+            // Sort by SymbolId to keep inserting order as the same as definition order
+            default_members.sort_by(|x, y| x.1.cmp(y.1));
 
-                let namespace = mp.inner_namespace();
-                for (text, id) in default_members {
-                    let direction = match default {
-                        SymModportDefault::Input => Some(SymDirection::Input),
-                        SymModportDefault::Output => Some(SymDirection::Output),
-                        SymModportDefault::Same(tgt) => directions.get(&(tgt.text, *text)).copied(),
-                        SymModportDefault::Converse(tgt) => {
-                            directions.get(&(tgt.text, *text)).map(|x| x.converse())
-                        }
+            let namespace = mp.inner_namespace();
+            for (text, id) in default_members {
+                let direction = match default {
+                    SymModportDefault::Input => Some(SymDirection::Input),
+                    SymModportDefault::Output => Some(SymDirection::Output),
+                    SymModportDefault::Same(tgt) => directions.get(&(tgt.text, *text)).copied(),
+                    SymModportDefault::Converse(tgt) => {
+                        directions.get(&(tgt.text, *text)).map(|x| x.converse())
+                    }
+                };
+
+                if let Some(direction) = direction {
+                    let path = mp.token.source.get_path().unwrap();
+                    let token = Token::generate(*text, path);
+                    namespace_table::insert(token.id, path, &namespace);
+
+                    let property = ModportVariableMemberProperty {
+                        direction,
+                        variable: *id,
                     };
-
-                    if let Some(direction) = direction {
-                        let path = mp.token.source.get_path().unwrap();
-                        let token = Token::generate(*text, path);
-                        namespace_table::insert(token.id, path, &namespace);
-
-                        let property = ModportVariableMemberProperty {
-                            direction,
-                            variable: *id,
-                        };
-                        let kind = SymbolKind::ModportVariableMember(property);
-                        let symbol =
-                            Symbol::new(&token, kind, &namespace, false, DocComment::default());
-                        if let Some(id) = symbol_table::insert(&token, symbol) {
-                            ret.push(id);
-                        }
+                    let kind = SymbolKind::ModportVariableMember(property);
+                    let symbol =
+                        Symbol::new(&token, kind, &namespace, false, DocComment::default());
+                    if let Some(id) = symbol_table::insert(&token, symbol) {
+                        ret.push(id);
                     }
                 }
             }
@@ -581,23 +581,23 @@ impl CreateSymbolTable {
             }
         }
 
-        if let Some(x) = self.type_dag_candidates.last_mut() {
-            if let Some(symbol) = &symbol {
-                let import = if symbol.2 {
-                    let mut import = self.file_scope_import_item.clone();
-                    import.extend(self.file_scope_import_wildcard.clone());
-                    import
-                } else {
-                    Vec::new()
-                };
-                let cand = TypeDagCandidate::Symbol {
-                    id: symbol.0,
-                    context: symbol.1,
-                    parent: None,
-                    import,
-                };
-                x.push(cand);
-            }
+        if let Some(x) = self.type_dag_candidates.last_mut()
+            && let Some(symbol) = &symbol
+        {
+            let import = if symbol.2 {
+                let mut import = self.file_scope_import_item.clone();
+                import.extend(self.file_scope_import_wildcard.clone());
+                import
+            } else {
+                Vec::new()
+            };
+            let cand = TypeDagCandidate::Symbol {
+                id: symbol.0,
+                context: symbol.1,
+                parent: None,
+                import,
+            };
+            x.push(cand);
         }
     }
 }
@@ -660,22 +660,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 // Add symbols under $sv namespace
                 if let ScopedIdentifierGroup::DollarIdentifier(x) =
                     arg.scoped_identifier_group.as_ref()
+                    && x.dollar_identifier.dollar_identifier_token.to_string() == "$sv"
                 {
-                    if x.dollar_identifier.dollar_identifier_token.to_string() == "$sv" {
-                        let mut namespace = Namespace::new();
-                        for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
-                            if i != 0 {
-                                let symbol = Symbol::new(
-                                    token,
-                                    SymbolKind::SystemVerilog,
-                                    &namespace,
-                                    false,
-                                    DocComment::default(),
-                                );
-                                let _ = symbol_table::insert(token, symbol);
-                            }
-                            namespace.push(token.text);
+                    let mut namespace = Namespace::new();
+                    for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
+                        if i != 0 {
+                            let symbol = Symbol::new(
+                                token,
+                                SymbolKind::SystemVerilog,
+                                &namespace,
+                                false,
+                                DocComment::default(),
+                            );
+                            let _ = symbol_table::insert(token, symbol);
                         }
+                        namespace.push(token.text);
                     }
                 }
 
@@ -1132,11 +1131,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .enum_declaration_opt
                     .as_ref()
                     .map(|x| x.scalar_type.as_ref().into());
-                if let Some(r#type) = &r#type {
-                    if !self.check_identifer_with_type(&arg.identifier, r#type) {
-                        self.pop_type_dag_cand(None);
-                        return Ok(());
-                    }
+                if let Some(r#type) = &r#type
+                    && !self.check_identifer_with_type(&arg.identifier, r#type)
+                {
+                    self.pop_type_dag_cand(None);
+                    return Ok(());
                 }
 
                 let width = if let Some(x) = r#type.clone() {
@@ -1620,11 +1619,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .function_declaration_opt1
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
-                if let Some(ret) = &ret {
-                    if !self.check_identifer_with_type(&arg.identifier, ret) {
-                        self.pop_type_dag_cand(None);
-                        return Ok(());
-                    }
+                if let Some(ret) = &ret
+                    && !self.check_identifer_with_type(&arg.identifier, ret)
+                {
+                    self.pop_type_dag_cand(None);
+                    return Ok(());
                 }
 
                 let range = TokenRange::new(
@@ -2189,10 +2188,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .proto_function_declaration_opt1
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
-                if let Some(ret) = &ret {
-                    if !self.check_identifer_with_type(&arg.identifier, ret) {
-                        return Ok(());
-                    }
+                if let Some(ret) = &ret
+                    && !self.check_identifer_with_type(&arg.identifier, ret)
+                {
+                    return Ok(());
                 }
 
                 let range =

@@ -41,13 +41,12 @@ fn includes_unemittable_cast(target: &Symbol, driver: Option<&Symbol>) -> bool {
         return false;
     };
 
-    if let Some(driver) = driver {
-        if let Some(driver_type) = get_type_symbol(driver) {
-            if target_type.id == driver_type.id {
-                // no emit is required if both types are matched.
-                return false;
-            }
-        }
+    if let Some(driver) = driver
+        && let Some(driver_type) = get_type_symbol(driver)
+        && target_type.id == driver_type.id
+    {
+        // no emit is required if both types are matched.
+        return false;
     }
 
     target_type.namespace.matched(&target.namespace)

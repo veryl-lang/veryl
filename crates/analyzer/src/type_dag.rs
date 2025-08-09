@@ -133,16 +133,14 @@ impl TypeDag {
                 parent,
                 import,
             } = cand
+                && let Some(symbol) = symbol_table::get(*id)
+                && let Some(child) = self.insert_declaration_symbol(&symbol, parent)
             {
-                if let Some(symbol) = symbol_table::get(*id) {
-                    if let Some(child) = self.insert_declaration_symbol(&symbol, parent) {
-                        for x in import {
-                            if let Ok(import) = symbol_table::resolve(x) {
-                                if let Some(import) = self.insert_symbol(&import.found) {
-                                    self.insert_dag_edge(child, import, *context);
-                                }
-                            }
-                        }
+                for x in import {
+                    if let Ok(import) = symbol_table::resolve(x)
+                        && let Some(import) = self.insert_symbol(&import.found)
+                    {
+                        self.insert_dag_edge(child, import, *context);
                     }
                 }
             }
@@ -222,10 +220,10 @@ impl TypeDag {
                 } else {
                     (parent_symbol, *parent_context)
                 };
-                if let Some(parent) = self.insert_symbol(parent_symbol) {
-                    if !self.is_dag_owned(parent, base) {
-                        self.insert_dag_edge(parent, base, parent_context);
-                    }
+                if let Some(parent) = self.insert_symbol(parent_symbol)
+                    && !self.is_dag_owned(parent, base)
+                {
+                    self.insert_dag_edge(parent, base, parent_context);
                 }
             }
 
@@ -339,6 +337,7 @@ impl TypeDag {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn insert_node(&mut self, symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
         let symbol = symbol_table::get(symbol_id).unwrap();
         let trinfo = TypeResolveInfo {
@@ -372,6 +371,7 @@ impl TypeDag {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn insert_edge(&mut self, start: u32, end: u32, edge: Context) -> Result<(), DagError> {
         match self.dag.add_edge(start.into(), end.into(), edge) {
             Ok(_) => {
@@ -472,16 +472,16 @@ impl TypeDag {
             let mut dfs = Dfs::new(&graph, (*node).into());
             while let Some(x) = dfs.next(&graph) {
                 let index = x.index() as u32;
-                if index != *node {
-                    if let Some(x) = self.file_nodes.get_by_right(&index) {
-                        dependents.push(*x);
-                    }
+                if index != *node
+                    && let Some(x) = self.file_nodes.get_by_right(&index)
+                {
+                    dependents.push(*x);
                 }
             }
-            if !dependents.is_empty() {
-                if let Some(x) = self.file_nodes.get_by_right(node) {
-                    ret.insert(*x, dependents);
-                }
+            if !dependents.is_empty()
+                && let Some(x) = self.file_nodes.get_by_right(node)
+            {
+                ret.insert(*x, dependents);
             }
         }
 

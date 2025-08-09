@@ -84,16 +84,16 @@ pub fn remap_msg_by_regex(line: &str, re: &Regex) -> String {
             .name("column")
             .map(|x| x.as_str().parse::<u32>().unwrap());
 
-        if let Ok(source_map) = SourceMap::from_src(&PathBuf::from(path)) {
-            if let Some((path, line, column)) = source_map.lookup(line, column.unwrap_or(1)) {
-                ret.push_str(&format!(
-                    "\n{}^ from: {}:{}:{}",
-                    " ".repeat(start),
-                    path.to_string_lossy(),
-                    line,
-                    column
-                ));
-            }
+        if let Ok(source_map) = SourceMap::from_src(&PathBuf::from(path))
+            && let Some((path, line, column)) = source_map.lookup(line, column.unwrap_or(1))
+        {
+            ret.push_str(&format!(
+                "\n{}^ from: {}:{}:{}",
+                " ".repeat(start),
+                path.to_string_lossy(),
+                line,
+                column
+            ));
         }
     }
 

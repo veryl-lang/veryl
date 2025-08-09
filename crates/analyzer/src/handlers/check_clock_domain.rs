@@ -74,10 +74,10 @@ impl Handler for CheckClockDomain {
 
 impl VerylGrammarTrait for CheckClockDomain {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(symbol) = symbol_table::resolve(arg) {
-                self.push_expr_clock_domain(&symbol.found, arg.into());
-            }
+        if let HandlerPoint::Before = self.point
+            && let Ok(symbol) = symbol_table::resolve(arg)
+        {
+            self.push_expr_clock_domain(&symbol.found, arg.into());
         }
         Ok(())
     }
@@ -136,10 +136,10 @@ impl VerylGrammarTrait for CheckClockDomain {
                     if let Ok(symbol) = symbol_table::resolve(clock.identifier.as_ref()) {
                         self.set_always_ff_clock_domain(&symbol.found, range);
                     }
-                } else if let Some(clock) = self.default_clock {
-                    if let Some(symbol) = symbol_table::get(clock) {
-                        self.set_always_ff_clock_domain(&symbol, range);
-                    }
+                } else if let Some(clock) = self.default_clock
+                    && let Some(symbol) = symbol_table::get(clock)
+                {
+                    self.set_always_ff_clock_domain(&symbol, range);
                 }
 
                 let check_reset = self.always_ff_clock_domain.is_some()
@@ -150,31 +150,22 @@ impl VerylGrammarTrait for CheckClockDomain {
 
                     if let Some(reset) = arg.get_explicit_reset() {
                         // clock domain is assigned to base identifier
-                        if let Ok(symbol) = symbol_table::resolve(reset.identifier.as_ref()) {
-                            if let Some(reset_domain) =
+                        if let Ok(symbol) = symbol_table::resolve(reset.identifier.as_ref())
+                            && let Some(reset_domain) =
                                 get_clock_domain(&symbol.found, symbol.found.token.into())
-                            {
-                                check_clock_domain(
-                                    &reset_domain,
-                                    &clock_domain,
-                                    false,
-                                    &mut self.errors,
-                                );
-                            }
+                        {
+                            check_clock_domain(
+                                &reset_domain,
+                                &clock_domain,
+                                false,
+                                &mut self.errors,
+                            );
                         }
-                    } else if let Some(reset) = self.default_reset {
-                        if let Some(symbol) = symbol_table::get(reset) {
-                            if let Some(reset_domain) =
-                                get_clock_domain(&symbol, symbol.token.into())
-                            {
-                                check_clock_domain(
-                                    &reset_domain,
-                                    &clock_domain,
-                                    false,
-                                    &mut self.errors,
-                                );
-                            }
-                        }
+                    } else if let Some(reset) = self.default_reset
+                        && let Some(symbol) = symbol_table::get(reset)
+                        && let Some(reset_domain) = get_clock_domain(&symbol, symbol.token.into())
+                    {
+                        check_clock_domain(&reset_domain, &clock_domain, false, &mut self.errors);
                     }
                 }
             }
@@ -205,10 +196,10 @@ impl VerylGrammarTrait for CheckClockDomain {
         match self.point {
             HandlerPoint::Before => self.expr_clock_domains.clear(),
             HandlerPoint::After => {
-                if arg.inst_port_item_opt.is_none() {
-                    if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                        self.push_expr_clock_domain(&symbol.found, arg.identifier.as_ref().into());
-                    }
+                if arg.inst_port_item_opt.is_none()
+                    && let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())
+                {
+                    self.push_expr_clock_domain(&symbol.found, arg.identifier.as_ref().into());
                 }
                 let domain = self.check_expr_clock_domains(&arg.identifier.identifier_token.token);
                 let range: TokenRange = arg.identifier.as_ref().into();
@@ -223,56 +214,49 @@ impl VerylGrammarTrait for CheckClockDomain {
         match self.point {
             HandlerPoint::Before => self.inst_clock_domains.clear(),
             HandlerPoint::After => {
-                if let Ok(inst_symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                    if let Some(type_kind) = get_inst_type_kind(&inst_symbol.found) {
-                        if !matches!(type_kind, SymbolKind::Interface(_)) {
-                            if let Some(ref x) = arg.inst_declaration_opt {
-                                self.errors.push(AnalyzerError::invalid_clock_domain(
-                                    &x.clock_domain.as_ref().into(),
-                                ));
-                                return Ok(());
+                if let Ok(inst_symbol) = symbol_table::resolve(arg.identifier.as_ref())
+                    && let Some(type_kind) = get_inst_type_kind(&inst_symbol.found)
+                {
+                    if !matches!(type_kind, SymbolKind::Interface(_))
+                        && let Some(ref x) = arg.inst_declaration_opt
+                    {
+                        self.errors.push(AnalyzerError::invalid_clock_domain(
+                            &x.clock_domain.as_ref().into(),
+                        ));
+                        return Ok(());
+                    }
+
+                    let cdc_unsafe =
+                        unsafe_table::contains(&arg.semicolon.semicolon_token.token, Unsafe::Cdc);
+                    match type_kind {
+                        SymbolKind::Module(x) => {
+                            self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
+                        }
+                        SymbolKind::Interface(_) => {
+                            if let SymbolKind::Instance(x) = &inst_symbol.found.kind
+                                && x.clock_domain == ClockDomain::None
+                            {
+                                let mut property = x.clone();
+                                property.clock_domain = ClockDomain::Implicit;
+
+                                let mut symbol = inst_symbol.found.clone();
+                                symbol.kind = SymbolKind::Instance(property);
+                                symbol_table::update(symbol);
                             }
                         }
-
-                        let cdc_unsafe = unsafe_table::contains(
-                            &arg.semicolon.semicolon_token.token,
-                            Unsafe::Cdc,
-                        );
-                        match type_kind {
-                            SymbolKind::Module(x) => {
-                                self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
-                            }
-                            SymbolKind::Interface(_) => {
-                                if let SymbolKind::Instance(x) = &inst_symbol.found.kind {
-                                    if x.clock_domain == ClockDomain::None {
-                                        let mut property = x.clone();
-                                        property.clock_domain = ClockDomain::Implicit;
-
-                                        let mut symbol = inst_symbol.found.clone();
-                                        symbol.kind = SymbolKind::Instance(property);
-                                        symbol_table::update(symbol);
-                                    }
+                        SymbolKind::SystemVerilog => {
+                            let mut prev: Option<(ClockDomain, TokenRange)> = None;
+                            for curr in self.inst_clock_domains.values() {
+                                if let Some(prev) = prev {
+                                    check_clock_domain(curr, &prev, cdc_unsafe, &mut self.errors);
                                 }
+                                prev = Some(*curr);
                             }
-                            SymbolKind::SystemVerilog => {
-                                let mut prev: Option<(ClockDomain, TokenRange)> = None;
-                                for curr in self.inst_clock_domains.values() {
-                                    if let Some(prev) = prev {
-                                        check_clock_domain(
-                                            curr,
-                                            &prev,
-                                            cdc_unsafe,
-                                            &mut self.errors,
-                                        );
-                                    }
-                                    prev = Some(*curr);
-                                }
-                            }
-                            SymbolKind::ProtoModule(x) => {
-                                self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
-                            }
-                            _ => {}
                         }
+                        SymbolKind::ProtoModule(x) => {
+                            self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -312,25 +296,24 @@ fn get_clock_domain(symbol: &Symbol, range: TokenRange) -> Option<(ClockDomain, 
 }
 
 fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
-    if let SymbolKind::Instance(ref x) = inst_symbol.kind {
-        if let Ok(type_symbol) =
+    if let SymbolKind::Instance(ref x) = inst_symbol.kind
+        && let Ok(type_symbol) =
             symbol_table::resolve((&x.type_name.mangled_path(), &inst_symbol.namespace))
-        {
-            match type_symbol.found.kind {
-                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::SystemVerilog => {
-                    return Some(type_symbol.found.kind);
-                }
-                SymbolKind::GenericInstance(ref x) => {
-                    let base = symbol_table::get(x.base).unwrap();
-                    return Some(base.kind);
-                }
-                SymbolKind::GenericParameter(x) => {
-                    if let Some(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace) {
-                        return proto.get_symbol().map(|x| x.kind);
-                    }
-                }
-                _ => {}
+    {
+        match type_symbol.found.kind {
+            SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::SystemVerilog => {
+                return Some(type_symbol.found.kind);
             }
+            SymbolKind::GenericInstance(ref x) => {
+                let base = symbol_table::get(x.base).unwrap();
+                return Some(base.kind);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let Some(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace) {
+                    return proto.get_symbol().map(|x| x.kind);
+                }
+            }
+            _ => {}
         }
     }
 

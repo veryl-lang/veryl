@@ -37,22 +37,22 @@ impl VerylGrammarTrait for CheckStatement {
     }
 
     fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if self.in_initial || self.in_final {
-                let (kind, token) = match &*arg.assignment_group {
-                    AssignmentGroup::Equ(x) => ("assignment", &x.equ.equ_token.token),
-                    AssignmentGroup::AssignmentOperator(x) => (
-                        "assignment",
-                        &x.assignment_operator.assignment_operator_token.token,
-                    ),
-                    AssignmentGroup::DiamondOperator(x) => (
-                        "connection",
-                        &x.diamond_operator.diamond_operator_token.token,
-                    ),
-                };
-                self.errors
-                    .push(AnalyzerError::invalid_statement(kind, &token.into()));
-            }
+        if let HandlerPoint::Before = self.point
+            && (self.in_initial || self.in_final)
+        {
+            let (kind, token) = match &*arg.assignment_group {
+                AssignmentGroup::Equ(x) => ("assignment", &x.equ.equ_token.token),
+                AssignmentGroup::AssignmentOperator(x) => (
+                    "assignment",
+                    &x.assignment_operator.assignment_operator_token.token,
+                ),
+                AssignmentGroup::DiamondOperator(x) => (
+                    "connection",
+                    &x.diamond_operator.diamond_operator_token.token,
+                ),
+            };
+            self.errors
+                .push(AnalyzerError::invalid_statement(kind, &token.into()));
         }
         Ok(())
     }
@@ -77,25 +77,25 @@ impl VerylGrammarTrait for CheckStatement {
     }
 
     fn return_statement(&mut self, arg: &ReturnStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.in_non_void_function {
-                self.errors.push(AnalyzerError::invalid_statement(
-                    "return",
-                    &arg.r#return.return_token.token.into(),
-                ));
-            }
+        if let HandlerPoint::Before = self.point
+            && !self.in_non_void_function
+        {
+            self.errors.push(AnalyzerError::invalid_statement(
+                "return",
+                &arg.r#return.return_token.token.into(),
+            ));
         }
         Ok(())
     }
 
     fn break_statement(&mut self, arg: &BreakStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if self.statement_depth_in_loop == 0 {
-                self.errors.push(AnalyzerError::invalid_statement(
-                    "break",
-                    &arg.r#break.break_token.token.into(),
-                ));
-            }
+        if let HandlerPoint::Before = self.point
+            && self.statement_depth_in_loop == 0
+        {
+            self.errors.push(AnalyzerError::invalid_statement(
+                "break",
+                &arg.r#break.break_token.token.into(),
+            ));
         }
         Ok(())
     }

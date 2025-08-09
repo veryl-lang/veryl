@@ -194,30 +194,30 @@ impl CheckIdentifier {
                 .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
         }
 
-        if let Some(x) = identifier.strip_prefix("r#") {
-            if is_sv_keyword(x) {
-                self.errors
-                    .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
-            }
+        if let Some(x) = identifier.strip_prefix("r#")
+            && is_sv_keyword(x)
+        {
+            self.errors
+                .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
         }
 
-        if let Some(prefix) = prefix {
-            if !identifier.starts_with(prefix) {
-                self.errors.push(AnalyzerError::invalid_identifier(
-                    &identifier,
-                    &format!("prefix: {prefix}"),
-                    &token.into(),
-                ));
-            }
+        if let Some(prefix) = prefix
+            && !identifier.starts_with(prefix)
+        {
+            self.errors.push(AnalyzerError::invalid_identifier(
+                &identifier,
+                &format!("prefix: {prefix}"),
+                &token.into(),
+            ));
         }
-        if let Some(suffix) = suffix {
-            if !identifier.ends_with(suffix) {
-                self.errors.push(AnalyzerError::invalid_identifier(
-                    &identifier,
-                    &format!("suffix: {suffix}"),
-                    &token.into(),
-                ));
-            }
+        if let Some(suffix) = suffix
+            && !identifier.ends_with(suffix)
+        {
+            self.errors.push(AnalyzerError::invalid_identifier(
+                &identifier,
+                &format!("suffix: {suffix}"),
+                &token.into(),
+            ));
         }
         if let Some(case) = case {
             let pass = match case {

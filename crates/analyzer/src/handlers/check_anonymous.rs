@@ -40,10 +40,10 @@ fn get_inst_ports(symbol: &Symbol, ports: &mut Vec<Port>) {
             }
         }
         SymbolKind::GenericParameter(x) => {
-            if let Some(proto) = x.bound.resolve_proto_bound(&symbol.namespace) {
-                if let Some(symbol) = proto.get_symbol() {
-                    get_inst_ports(&symbol, ports);
-                }
+            if let Some(proto) = x.bound.resolve_proto_bound(&symbol.namespace)
+                && let Some(symbol) = proto.get_symbol()
+            {
+                get_inst_ports(&symbol, ports);
             }
         }
         SymbolKind::GenericInstance(x) => {
@@ -57,14 +57,14 @@ fn get_inst_ports(symbol: &Symbol, ports: &mut Vec<Port>) {
 
 impl VerylGrammarTrait for CheckAnonymous {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !self.is_anonymous_identifier {
-                let ident = arg.identifier().token;
-                if is_anonymous_text(ident.text) {
-                    let path: GenericSymbolPath = arg.into();
-                    self.errors
-                        .push(AnalyzerError::anonymous_identifier_usage(&path.range));
-                }
+        if let HandlerPoint::Before = self.point
+            && !self.is_anonymous_identifier
+        {
+            let ident = arg.identifier().token;
+            if is_anonymous_text(ident.text) {
+                let path: GenericSymbolPath = arg.into();
+                self.errors
+                    .push(AnalyzerError::anonymous_identifier_usage(&path.range));
             }
         }
         Ok(())
@@ -138,29 +138,29 @@ impl VerylGrammarTrait for CheckAnonymous {
     }
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
-                let is_wildcard = arg.import_declaration_opt.is_some();
-                let is_valid_import = if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
-                    true
-                } else if is_wildcard {
-                    symbol.found.is_package(false)
-                } else {
-                    let package_symbol = symbol
-                        .full_path
-                        .get(symbol.full_path.len() - 2)
-                        .map(|x| symbol_table::get(*x).unwrap())
-                        .unwrap();
-                    // The preceding symbol must be a package or
-                    // a proto-package referenced through a generic parameter.
-                    package_symbol.is_package(false) && symbol.found.is_importable(true)
-                };
+        if let HandlerPoint::Before = self.point
+            && let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref())
+        {
+            let is_wildcard = arg.import_declaration_opt.is_some();
+            let is_valid_import = if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
+                true
+            } else if is_wildcard {
+                symbol.found.is_package(false)
+            } else {
+                let package_symbol = symbol
+                    .full_path
+                    .get(symbol.full_path.len() - 2)
+                    .map(|x| symbol_table::get(*x).unwrap())
+                    .unwrap();
+                // The preceding symbol must be a package or
+                // a proto-package referenced through a generic parameter.
+                package_symbol.is_package(false) && symbol.found.is_importable(true)
+            };
 
-                if !is_valid_import {
-                    self.errors.push(AnalyzerError::invalid_import(
-                        &arg.scoped_identifier.as_ref().into(),
-                    ));
-                }
+            if !is_valid_import {
+                self.errors.push(AnalyzerError::invalid_import(
+                    &arg.scoped_identifier.as_ref().into(),
+                ));
             }
         }
         Ok(())
