@@ -818,28 +818,28 @@ impl Handler for CheckProto {
 
 impl VerylGrammarTrait for CheckProto {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Some(ref x) = arg.module_declaration_opt0 {
-                self.check_proto(&arg.identifier, &x.scoped_identifier);
-            }
+        if let HandlerPoint::Before = self.point
+            && let Some(ref x) = arg.module_declaration_opt0
+        {
+            self.check_proto(&arg.identifier, &x.scoped_identifier);
         }
         Ok(())
     }
 
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Some(ref x) = arg.interface_declaration_opt0 {
-                self.check_proto(&arg.identifier, &x.scoped_identifier);
-            }
+        if let HandlerPoint::Before = self.point
+            && let Some(ref x) = arg.interface_declaration_opt0
+        {
+            self.check_proto(&arg.identifier, &x.scoped_identifier);
         }
         Ok(())
     }
 
     fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Some(ref x) = arg.package_declaration_opt0 {
-                self.check_proto(&arg.identifier, &x.scoped_identifier);
-            }
+        if let HandlerPoint::Before = self.point
+            && let Some(ref x) = arg.package_declaration_opt0
+        {
+            self.check_proto(&arg.identifier, &x.scoped_identifier);
         }
         Ok(())
     }

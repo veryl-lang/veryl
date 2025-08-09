@@ -118,17 +118,17 @@ impl SymbolTable {
     }
 
     fn match_nested_generic_instance(&self, context: &ResolveContext, found: &Symbol) -> bool {
-        if let Some(last_found) = context.last_found {
-            if let (SymbolKind::GenericInstance(_), SymbolKind::GenericInstance(_)) =
+        if let Some(last_found) = context.last_found
+            && let (SymbolKind::GenericInstance(_), SymbolKind::GenericInstance(_)) =
                 (&last_found.kind, &found.kind)
-            {
-                let namespace = last_found.inner_namespace();
-                return namespace.matched(&found.namespace);
-            }
+        {
+            let namespace = last_found.inner_namespace();
+            return namespace.matched(&found.namespace);
         }
         false
     }
 
+    #[allow(clippy::result_large_err)]
     fn trace_type_kind<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -136,10 +136,10 @@ impl SymbolTable {
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let TypeKind::UserDefined(x) = kind {
             // Detect infinite loop in trace_type_kind
-            if let Some(last_found) = context.last_found {
-                if x.path.paths.first().unwrap().base.text == last_found.token.text {
-                    return Ok(context);
-                }
+            if let Some(last_found) = context.last_found
+                && x.path.paths.first().unwrap().base.text == last_found.token.text
+            {
+                return Ok(context);
             }
 
             let symbol = self.resolve(
@@ -185,6 +185,7 @@ impl SymbolTable {
         Ok(context)
     }
 
+    #[allow(clippy::result_large_err)]
     fn trace_type_path<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -215,6 +216,7 @@ impl SymbolTable {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn trace_generic_instance<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -232,6 +234,7 @@ impl SymbolTable {
         Ok(context)
     }
 
+    #[allow(clippy::result_large_err)]
     fn trace_generic_parameter<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -278,29 +281,29 @@ impl SymbolTable {
         mut context: ResolveContext<'a>,
         found: &Symbol,
     ) -> Option<Result<ResolveContext<'a>, ResolveError>> {
-        if let SymbolKind::GenericParameter(_) = &found.kind {
-            if let Some(generic_table) = context.generic_tables.get(&found.namespace) {
-                if let Some(path) = generic_table.get(&found.token.text) {
-                    let result = self.resolve(
-                        &path.generic_path(),
-                        &path.generic_arguments(),
-                        context.push(),
-                    );
-                    if let Ok(symbol) = result {
-                        context.namespace = symbol.found.inner_namespace();
-                        context.last_found_type = Some(symbol.found.id);
-                        context.inner = true;
-                        return Some(Ok(context));
-                    } else {
-                        return result.err().map(Err);
-                    }
-                }
+        if let SymbolKind::GenericParameter(_) = &found.kind
+            && let Some(generic_table) = context.generic_tables.get(&found.namespace)
+            && let Some(path) = generic_table.get(&found.token.text)
+        {
+            let result = self.resolve(
+                &path.generic_path(),
+                &path.generic_arguments(),
+                context.push(),
+            );
+            if let Ok(symbol) = result {
+                context.namespace = symbol.found.inner_namespace();
+                context.last_found_type = Some(symbol.found.id);
+                context.inner = true;
+                return Some(Ok(context));
+            } else {
+                return result.err().map(Err);
             }
         }
 
         None
     }
 
+    #[allow(clippy::result_large_err)]
     fn trace_type_parameter<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -328,12 +331,11 @@ impl SymbolTable {
                     }
                 }
                 SymbolKind::GenericParameter(x) => {
-                    if matches!(x.bound, GenericBoundKind::Type) {
-                        if let Some(x) =
+                    if matches!(x.bound, GenericBoundKind::Type)
+                        && let Some(x) =
                             self.resolve_generic_parameter(context.clone(), &symbol.found)
-                        {
-                            return x;
-                        }
+                    {
+                        return x;
                     }
                 }
                 _ => {}
@@ -473,6 +475,7 @@ impl SymbolTable {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn resolve<'a>(
         &'a self,
         path: &SymbolPath,
@@ -983,12 +986,12 @@ impl SymbolTable {
                 return self.get_package(&symbol, false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let GenericBoundKind::Proto(proto) = &x.bound {
-                    if let Some(x) = proto.get_user_defined() {
-                        let context = ResolveContext::new(&symbol.namespace);
-                        if let Ok(symbol) = self.resolve(&x.path.generic_path(), &[], context) {
-                            return self.get_package(&symbol.found, true);
-                        }
+                if let GenericBoundKind::Proto(proto) = &x.bound
+                    && let Some(x) = proto.get_user_defined()
+                {
+                    let context = ResolveContext::new(&symbol.namespace);
+                    if let Ok(symbol) = self.resolve(&x.path.generic_path(), &[], context) {
+                        return self.get_package(&symbol.found, true);
                     }
                 }
             }
@@ -1001,14 +1004,14 @@ impl SymbolTable {
     pub fn get_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {
         let mut resolved = Vec::new();
         for symbol in self.symbol_table.values() {
-            if let Some(x) = symbol.kind.get_type() {
-                if let TypeKind::UserDefined(x) = &x.kind {
-                    let context = ResolveContext::new(&symbol.namespace);
-                    if let Ok(type_symbol) =
-                        self.resolve(&x.path.generic_path(), &x.path.generic_arguments(), context)
-                    {
-                        resolved.push((symbol.id, type_symbol.found.id));
-                    }
+            if let Some(x) = symbol.kind.get_type()
+                && let TypeKind::UserDefined(x) = &x.kind
+            {
+                let context = ResolveContext::new(&symbol.namespace);
+                if let Ok(type_symbol) =
+                    self.resolve(&x.path.generic_path(), &x.path.generic_arguments(), context)
+                {
+                    resolved.push((symbol.id, type_symbol.found.id));
                 }
             }
         }
@@ -1018,10 +1021,10 @@ impl SymbolTable {
     pub fn set_user_defined(&mut self, resolved: Vec<(SymbolId, SymbolId)>) {
         for (id, type_id) in resolved {
             let symbol = self.symbol_table.get_mut(&id).unwrap();
-            if let Some(x) = symbol.kind.get_type_mut() {
-                if let TypeKind::UserDefined(x) = &mut x.kind {
-                    x.symbol = Some(type_id);
-                }
+            if let Some(x) = symbol.kind.get_type_mut()
+                && let TypeKind::UserDefined(x) = &mut x.kind
+            {
+                x.symbol = Some(type_id);
             }
         }
     }
@@ -1457,6 +1460,7 @@ pub fn update(symbol: Symbol) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().update(symbol))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, ResolveError> {
     let path: SymbolPathNamespace = path.into();
 

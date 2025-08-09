@@ -69,21 +69,21 @@ impl Handler for CheckSeparator {
 
 impl VerylGrammarTrait for CheckSeparator {
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(symbol) = symbol_table::resolve(arg) {
-                let mut full_path: Vec<_> = symbol.full_path.into_iter().rev().collect();
+        if let HandlerPoint::Before = self.point
+            && let Ok(symbol) = symbol_table::resolve(arg)
+        {
+            let mut full_path: Vec<_> = symbol.full_path.into_iter().rev().collect();
 
-                for x in &arg.scoped_identifier.scoped_identifier_list {
-                    self.check_separator(
-                        &mut full_path,
-                        false,
-                        &x.colon_colon.colon_colon_token.token,
-                    );
-                }
+            for x in &arg.scoped_identifier.scoped_identifier_list {
+                self.check_separator(
+                    &mut full_path,
+                    false,
+                    &x.colon_colon.colon_colon_token.token,
+                );
+            }
 
-                for x in &arg.expression_identifier_list0 {
-                    self.check_separator(&mut full_path, true, &x.dot.dot_token.token);
-                }
+            for x in &arg.expression_identifier_list0 {
+                self.check_separator(&mut full_path, true, &x.dot.dot_token.token);
             }
         }
         Ok(())

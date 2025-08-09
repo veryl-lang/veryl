@@ -175,13 +175,12 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        if let Value::Object(x) = params.settings {
-            if let Some(x) = x.get("veryl-ls") {
-                if let Some(Value::Bool(x)) = x.get("useOperatorCompletion") {
-                    let x = ServerConfigItem::UseOperatorCompletion(*x);
-                    self.send(MsgToServer::DidChangeConfiguration(x)).await;
-                }
-            }
+        if let Value::Object(x) = params.settings
+            && let Some(x) = x.get("veryl-ls")
+            && let Some(Value::Bool(x)) = x.get("useOperatorCompletion")
+        {
+            let x = ServerConfigItem::UseOperatorCompletion(*x);
+            self.send(MsgToServer::DidChangeConfiguration(x)).await;
         }
     }
 

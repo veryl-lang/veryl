@@ -15,24 +15,23 @@ fn main() {
 
     for entry in WalkDir::new("../../testcases/veryl") {
         let entry = entry.unwrap();
-        if entry.file_type().is_file() {
-            if let Some(x) = entry.path().extension() {
-                if x == "veryl" {
-                    testcases.push(
-                        entry
-                            .path()
-                            .canonicalize()
-                            .unwrap()
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                    let file = entry.path().file_stem().unwrap().to_string_lossy();
-                    let _ = writeln!(out_test, "#[test]");
-                    let _ = writeln!(out_test, "fn test_{file}() {{");
-                    let _ = writeln!(out_test, "    test(\"{file}\");");
-                    let _ = writeln!(out_test, "}}");
-                }
-            }
+        if entry.file_type().is_file()
+            && let Some(x) = entry.path().extension()
+            && x == "veryl"
+        {
+            testcases.push(
+                entry
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            let file = entry.path().file_stem().unwrap().to_string_lossy();
+            let _ = writeln!(out_test, "#[test]");
+            let _ = writeln!(out_test, "fn test_{file}() {{");
+            let _ = writeln!(out_test, "    test(\"{file}\");");
+            let _ = writeln!(out_test, "}}");
         }
     }
 

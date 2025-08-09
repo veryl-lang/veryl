@@ -148,10 +148,10 @@ fn can_assign(full_path: &[SymbolId]) -> bool {
     }
 
     for path in full_path {
-        if let Some(symbol) = symbol_table::get(*path) {
-            if is_assignable_symbol(&symbol) {
-                return true;
-            }
+        if let Some(symbol) = symbol_table::get(*path)
+            && is_assignable_symbol(&symbol)
+        {
+            return true;
         }
     }
 
@@ -172,19 +172,15 @@ fn has_cond_type(token: &Token) -> bool {
 }
 
 fn map_assignable_factor(arg: &Expression) -> Option<VarRefPath> {
-    if let Some(Factor::IdentifierFactor(x)) = arg.unwrap_factor() {
-        if x.identifier_factor.identifier_factor_opt.is_none() {
-            if let Ok(symbol) =
-                symbol_table::resolve(x.identifier_factor.expression_identifier.as_ref())
-            {
-                if is_assignable_symbol(&symbol.found) {
-                    let path =
-                        VarRefPath::try_from(x.identifier_factor.expression_identifier.as_ref())
-                            .unwrap();
-                    return Some(path);
-                }
-            }
-        }
+    if let Some(Factor::IdentifierFactor(x)) = arg.unwrap_factor()
+        && x.identifier_factor.identifier_factor_opt.is_none()
+        && let Ok(symbol) =
+            symbol_table::resolve(x.identifier_factor.expression_identifier.as_ref())
+        && is_assignable_symbol(&symbol.found)
+    {
+        let path =
+            VarRefPath::try_from(x.identifier_factor.expression_identifier.as_ref()).unwrap();
+        return Some(path);
     }
 
     None
@@ -192,27 +188,27 @@ fn map_assignable_factor(arg: &Expression) -> Option<VarRefPath> {
 
 impl VerylGrammarTrait for CheckVarRef {
     fn r#else(&mut self, arg: &Else) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if self.in_if_expression.is_empty() {
-                let position = if let AssignPositionType::StatementBranchItem { .. } =
-                    self.assign_position.0.last().unwrap()
-                {
-                    AssignPositionType::StatementBranchItem {
-                        token: arg.else_token.token,
-                        define_context: arg.else_token.token.into(),
-                        index: self.get_branch_index(),
-                        r#type: AssignStatementBranchItemType::Else,
-                    }
-                } else {
-                    AssignPositionType::DeclarationBranchItem {
-                        token: arg.else_token.token,
-                        define_context: arg.else_token.token.into(),
-                        index: self.get_branch_index(),
-                    }
-                };
-                *self.assign_position.0.last_mut().unwrap() = position;
-                self.inc_branch_index();
-            }
+        if let HandlerPoint::Before = self.point
+            && self.in_if_expression.is_empty()
+        {
+            let position = if let AssignPositionType::StatementBranchItem { .. } =
+                self.assign_position.0.last().unwrap()
+            {
+                AssignPositionType::StatementBranchItem {
+                    token: arg.else_token.token,
+                    define_context: arg.else_token.token.into(),
+                    index: self.get_branch_index(),
+                    r#type: AssignStatementBranchItemType::Else,
+                }
+            } else {
+                AssignPositionType::DeclarationBranchItem {
+                    token: arg.else_token.token,
+                    define_context: arg.else_token.token.into(),
+                    index: self.get_branch_index(),
+                }
+            };
+            *self.assign_position.0.last_mut().unwrap() = position;
+            self.inc_branch_index();
         }
         Ok(())
     }
@@ -290,39 +286,38 @@ impl VerylGrammarTrait for CheckVarRef {
     }
 
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if *self.in_expression.last().unwrap_or(&false) {
-                if let Ok(path) = VarRefPath::try_from(arg) {
-                    let full_path = path.full_path();
-                    let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
-                    let r#type = match symbol.kind {
-                        SymbolKind::Variable(_) => ExpressionTargetType::Variable,
-                        SymbolKind::Parameter(_) => ExpressionTargetType::Parameter,
-                        SymbolKind::Port(x) => match x.direction {
-                            Direction::Input => ExpressionTargetType::InputPort,
-                            Direction::Output => ExpressionTargetType::OutputPort,
-                            Direction::Inout => ExpressionTargetType::InoutPort,
-                            _ => return Ok(()),
-                        },
-                        _ => return Ok(()),
-                    };
-                    self.add_expression(&path, r#type);
-                }
-            }
+        if let HandlerPoint::Before = self.point
+            && *self.in_expression.last().unwrap_or(&false)
+            && let Ok(path) = VarRefPath::try_from(arg)
+        {
+            let full_path = path.full_path();
+            let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
+            let r#type = match symbol.kind {
+                SymbolKind::Variable(_) => ExpressionTargetType::Variable,
+                SymbolKind::Parameter(_) => ExpressionTargetType::Parameter,
+                SymbolKind::Port(x) => match x.direction {
+                    Direction::Input => ExpressionTargetType::InputPort,
+                    Direction::Output => ExpressionTargetType::OutputPort,
+                    Direction::Inout => ExpressionTargetType::InoutPort,
+                    _ => return Ok(()),
+                },
+                _ => return Ok(()),
+            };
+            self.add_expression(&path, r#type);
         }
         Ok(())
     }
 
     fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::After = self.point {
-            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
-                self.assign_position.push(AssignPositionType::Statement {
-                    token: arg.equ.equ_token.token,
-                    define_context: arg.equ.equ_token.token.into(),
-                    resettable: false,
-                });
-                self.add_assign(&path);
-            }
+        if let HandlerPoint::After = self.point
+            && let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref())
+        {
+            self.assign_position.push(AssignPositionType::Statement {
+                token: arg.equ.equ_token.token,
+                define_context: arg.equ.equ_token.token.into(),
+                resettable: false,
+            });
+            self.add_assign(&path);
         }
         Ok(())
     }
@@ -395,17 +390,15 @@ impl VerylGrammarTrait for CheckVarRef {
                                 }
 
                                 // Check to confirm not assigning to constant
-                                if let SymbolKind::Variable(v) = symbol.kind.clone() {
-                                    if v.r#type.is_const {
-                                        let token = arg.expression_identifier.identifier().token;
-                                        self.errors.push(
-                                            AnalyzerError::invalid_assignment_to_const(
-                                                &token.to_string(),
-                                                &symbol.kind.to_kind_name(),
-                                                &arg.expression_identifier.as_ref().into(),
-                                            ),
-                                        );
-                                    }
+                                if let SymbolKind::Variable(v) = symbol.kind.clone()
+                                    && v.r#type.is_const
+                                {
+                                    let token = arg.expression_identifier.identifier().token;
+                                    self.errors.push(AnalyzerError::invalid_assignment_to_const(
+                                        &token.to_string(),
+                                        &symbol.kind.to_kind_name(),
+                                        &arg.expression_identifier.as_ref().into(),
+                                    ));
                                 }
                             }
                         }
@@ -495,15 +488,15 @@ impl VerylGrammarTrait for CheckVarRef {
     }
 
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
-                self.assign_position.push(AssignPositionType::Statement {
-                    token: arg.r#for.for_token.token,
-                    define_context: arg.r#for.for_token.token.into(),
-                    resettable: false,
-                });
-                self.add_assign(&path);
-            }
+        if let HandlerPoint::Before = self.point
+            && let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref())
+        {
+            self.assign_position.push(AssignPositionType::Statement {
+                token: arg.r#for.for_token.token,
+                define_context: arg.r#for.for_token.token.into(),
+                resettable: false,
+            });
+            self.add_assign(&path);
         }
         Ok(())
     }
@@ -559,15 +552,15 @@ impl VerylGrammarTrait for CheckVarRef {
     }
 
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::After = self.point {
-            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
-                self.assign_position.push(AssignPositionType::Declaration {
-                    token: arg.r#let.let_token.token,
-                    define_context: arg.r#let.let_token.token.into(),
-                    r#type: AssignDeclarationType::Let,
-                });
-                self.add_assign(&path);
-            }
+        if let HandlerPoint::After = self.point
+            && let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref())
+        {
+            self.assign_position.push(AssignPositionType::Declaration {
+                token: arg.r#let.let_token.token,
+                define_context: arg.r#let.let_token.token.into(),
+                r#type: AssignDeclarationType::Let,
+            });
+            self.add_assign(&path);
         }
         Ok(())
     }
@@ -668,119 +661,114 @@ impl VerylGrammarTrait for CheckVarRef {
         if let HandlerPoint::After = self.point {
             // Mangled module is also resolved during resolving the inst symbol.
             // To get correct result, this statement should be executed after resolving generic parameters.
-            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-                if let SymbolKind::Instance(ref x) = symbol.found.kind {
-                    let mut ports = HashMap::default();
-                    let mut port_unknown = false;
-                    let mut sv_instance = false;
+            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())
+                && let SymbolKind::Instance(ref x) = symbol.found.kind
+            {
+                let mut ports = HashMap::default();
+                let mut port_unknown = false;
+                let mut sv_instance = false;
 
-                    if let Ok(x) = symbol_table::resolve((
-                        &x.type_name.mangled_path(),
-                        &symbol.found.namespace,
-                    )) {
-                        match x.found.kind {
-                            SymbolKind::Module(ref x) => {
+                if let Ok(x) =
+                    symbol_table::resolve((&x.type_name.mangled_path(), &symbol.found.namespace))
+                {
+                    match x.found.kind {
+                        SymbolKind::Module(ref x) => {
+                            for port in &x.ports {
+                                ports.insert(port.name(), port.property());
+                            }
+                        }
+                        SymbolKind::GenericInstance(ref x) => {
+                            let base = symbol_table::get(x.base).unwrap();
+                            if let SymbolKind::Module(ref x) = base.kind {
                                 for port in &x.ports {
                                     ports.insert(port.name(), port.property());
                                 }
                             }
-                            SymbolKind::GenericInstance(ref x) => {
-                                let base = symbol_table::get(x.base).unwrap();
-                                if let SymbolKind::Module(ref x) = base.kind {
-                                    for port in &x.ports {
-                                        ports.insert(port.name(), port.property());
-                                    }
-                                }
-                            }
-                            SymbolKind::GenericParameter(x) => {
-                                if let Some(proto) =
-                                    x.bound.resolve_proto_bound(&symbol.found.namespace)
-                                {
-                                    if let Some(SymbolKind::ProtoModule(x)) =
-                                        proto.get_symbol().map(|x| x.kind)
-                                    {
-                                        for port in &x.ports {
-                                            ports.insert(port.name(), port.property());
-                                        }
-                                    }
-                                }
-                            }
-                            SymbolKind::SystemVerilog => {
-                                port_unknown = true;
-                                sv_instance = true;
-                            }
-                            _ => (),
                         }
+                        SymbolKind::GenericParameter(x) => {
+                            if let Some(proto) =
+                                x.bound.resolve_proto_bound(&symbol.found.namespace)
+                                && let Some(SymbolKind::ProtoModule(x)) =
+                                    proto.get_symbol().map(|x| x.kind)
+                            {
+                                for port in &x.ports {
+                                    ports.insert(port.name(), port.property());
+                                }
+                            }
+                        }
+                        SymbolKind::SystemVerilog => {
+                            port_unknown = true;
+                            sv_instance = true;
+                        }
+                        _ => (),
+                    }
+                }
+
+                self.assign_position.push(AssignPositionType::Declaration {
+                    token: arg.inst.inst_token.token,
+                    define_context: arg.inst.inst_token.token.into(),
+                    r#type: AssignDeclarationType::Inst,
+                });
+
+                let mut evaluator = Evaluator::new(&[]);
+
+                for (token, target) in &x.connects {
+                    // Gather port information
+                    let dir_output = if let Some(port) = ports.get(&token.text) {
+                        matches!(port.direction, Direction::Inout | Direction::Output)
+                    } else {
+                        false
+                    };
+                    let (is_clock, is_reset) = if let Some(port) = ports.get(&token.text) {
+                        (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
+                    } else {
+                        (false, false)
+                    };
+
+                    let exp = evaluator.expression(&target.expression);
+
+                    // Check assignment of clock/reset type
+                    if is_clock && !(exp.is_fixed() || exp.is_clock()) {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            &token.text.to_string(),
+                            "clock type",
+                            "non-clock type",
+                            &token.into(),
+                        ));
                     }
 
-                    self.assign_position.push(AssignPositionType::Declaration {
-                        token: arg.inst.inst_token.token,
-                        define_context: arg.inst.inst_token.token.into(),
-                        r#type: AssignDeclarationType::Inst,
-                    });
+                    if is_reset && !(exp.is_fixed() || exp.is_reset()) {
+                        self.errors.push(AnalyzerError::mismatch_type(
+                            &token.text.to_string(),
+                            "reset type",
+                            "non-reset type",
+                            &token.into(),
+                        ));
+                    }
 
-                    let mut evaluator = Evaluator::new(&[]);
+                    // Check implicit reset to SV instance
+                    if sv_instance && exp.is_reset() && !exp.is_explicit_reset() {
+                        self.errors
+                            .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
+                    }
 
-                    for (token, target) in &x.connects {
-                        // Gather port information
-                        let dir_output = if let Some(port) = ports.get(&token.text) {
-                            matches!(port.direction, Direction::Inout | Direction::Output)
-                        } else {
-                            false
-                        };
-                        let (is_clock, is_reset) = if let Some(port) = ports.get(&token.text) {
-                            (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
-                        } else {
-                            (false, false)
-                        };
+                    // Check output to non-assignable variable
+                    if dir_output && !target.expression.is_assignable() {
+                        self.errors
+                            .push(AnalyzerError::unassignable_output(&token.into()));
+                    }
 
-                        let exp = evaluator.expression(&target.expression);
-
-                        // Check assignment of clock/reset type
-                        if is_clock && !(exp.is_fixed() || exp.is_clock()) {
-                            self.errors.push(AnalyzerError::mismatch_type(
-                                &token.text.to_string(),
-                                "clock type",
-                                "non-clock type",
-                                &token.into(),
-                            ));
-                        }
-
-                        if is_reset && !(exp.is_fixed() || exp.is_reset()) {
-                            self.errors.push(AnalyzerError::mismatch_type(
-                                &token.text.to_string(),
-                                "reset type",
-                                "non-reset type",
-                                &token.into(),
-                            ));
-                        }
-
-                        // Check implicit reset to SV instance
-                        if sv_instance && exp.is_reset() && !exp.is_explicit_reset() {
-                            self.errors
-                                .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
-                        }
-
-                        // Check output to non-assignable variable
-                        if dir_output && !target.expression.is_assignable() {
-                            self.errors
-                                .push(AnalyzerError::unassignable_output(&token.into()));
-                        }
-
-                        // Check assignment from output port
-                        for target in &target.identifiers {
-                            if let Ok(path) =
-                                VarRefPath::try_from((target, &symbol.found.namespace))
-                            {
-                                if dir_output | port_unknown {
-                                    self.assign_position.push(AssignPositionType::Connect {
-                                        token: *token,
-                                        define_context: (*token).into(),
-                                        maybe: port_unknown,
-                                    });
-                                    self.add_assign(&path);
-                                }
-                            }
+                    // Check assignment from output port
+                    for target in &target.identifiers {
+                        if let Ok(path) = VarRefPath::try_from((target, &symbol.found.namespace))
+                            && (dir_output | port_unknown)
+                        {
+                            self.assign_position.push(AssignPositionType::Connect {
+                                token: *token,
+                                define_context: (*token).into(),
+                                maybe: port_unknown,
+                            });
+                            self.add_assign(&path);
                         }
                     }
                 }
@@ -839,15 +827,15 @@ impl VerylGrammarTrait for CheckVarRef {
     }
 
     fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref()) {
-                self.assign_position.push(AssignPositionType::Statement {
-                    token: arg.r#for.for_token.token,
-                    define_context: arg.r#for.for_token.token.into(),
-                    resettable: false,
-                });
-                self.add_assign(&path);
-            }
+        if let HandlerPoint::Before = self.point
+            && let Ok(path) = VarRefPath::try_from(arg.identifier.as_ref())
+        {
+            self.assign_position.push(AssignPositionType::Statement {
+                token: arg.r#for.for_token.token,
+                define_context: arg.r#for.for_token.token.into(),
+                resettable: false,
+            });
+            self.add_assign(&path);
         }
         Ok(())
     }

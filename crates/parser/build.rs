@@ -12,10 +12,10 @@ fn main() {
     use std::time::Instant;
 
     // Skip in GitHub Actions
-    if let Ok(x) = env::var("GITHUB_ACTIONS") {
-        if x == "true" {
-            return;
-        }
+    if let Ok(x) = env::var("GITHUB_ACTIONS")
+        && x == "true"
+    {
+        return;
     }
 
     let generate_parser = if env::var("VERYL_GENERATE_PARSER").is_ok() {

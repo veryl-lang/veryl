@@ -953,10 +953,8 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         let is_doc_comment = text.starts_with("///");
         let text = resource_table::insert_str(text);
 
-        if is_doc_comment {
-            if let TokenSource::File { path, .. } = token.source {
-                doc_comment_table::insert(path, line, text);
-            }
+        if is_doc_comment && let TokenSource::File { path, .. } = token.source {
+            doc_comment_table::insert(path, line, text);
         }
 
         let token = Token {

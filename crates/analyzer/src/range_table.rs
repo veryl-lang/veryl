@@ -49,12 +49,12 @@ where
     pub fn get(&self, token: &Token) -> Vec<T> {
         let mut ret = Vec::new();
 
-        if let TokenSource::File { path, .. } = token.source {
-            if let Some(values) = self.table.get(&path) {
-                for (range, value) in values {
-                    if range.include(path, token.line, token.column) {
-                        ret.push(value.clone());
-                    }
+        if let TokenSource::File { path, .. } = token.source
+            && let Some(values) = self.table.get(&path)
+        {
+            for (range, value) in values {
+                if range.include(path, token.line, token.column) {
+                    ret.push(value.clone());
                 }
             }
         }

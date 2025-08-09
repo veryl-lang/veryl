@@ -4,10 +4,10 @@ use std::path::PathBuf;
 
 fn main() {
     // Skip in GitHub Actions
-    if let Ok(x) = env::var("GITHUB_ACTIONS") {
-        if x == "true" {
-            return;
-        }
+    if let Ok(x) = env::var("GITHUB_ACTIONS")
+        && x == "true"
+    {
+        return;
     }
 
     println!("cargo::rerun-if-changed=../parser/veryl.par");

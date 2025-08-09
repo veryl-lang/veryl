@@ -34,15 +34,14 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
         .into_iter()
         .flatten()
     {
-        if entry.file_type().is_file() {
-            if let Some(x) = entry.path().file_name() {
-                if x == "Veryl.toml" {
-                    let prj_dir = entry.path().parent().unwrap();
-                    if prj_dir != base_dir.as_ref() {
-                        debug!("Found inner project ({})", prj_dir.to_string_lossy());
-                        inner_prj.push(prj_dir.to_path_buf());
-                    }
-                }
+        if entry.file_type().is_file()
+            && let Some(x) = entry.path().file_name()
+            && x == "Veryl.toml"
+        {
+            let prj_dir = entry.path().parent().unwrap();
+            if prj_dir != base_dir.as_ref() {
+                debug!("Found inner project ({})", prj_dir.to_string_lossy());
+                inner_prj.push(prj_dir.to_path_buf());
             }
         }
     }
@@ -54,16 +53,15 @@ pub fn gather_files_with_extension<T: AsRef<Path>>(
         .into_iter()
         .flatten()
     {
-        if entry.file_type().is_file() {
-            if let Some(x) = entry.path().extension() {
-                if x == ext {
-                    let is_inner = inner_prj.iter().any(|x| entry.path().starts_with(x));
+        if entry.file_type().is_file()
+            && let Some(x) = entry.path().extension()
+            && x == ext
+        {
+            let is_inner = inner_prj.iter().any(|x| entry.path().starts_with(x));
 
-                    if !is_inner {
-                        debug!("Found file ({})", entry.path().to_string_lossy());
-                        ret.push(entry.path().to_path_buf());
-                    }
-                }
+            if !is_inner {
+                debug!("Found file ({})", entry.path().to_string_lossy());
+                ret.push(entry.path().to_path_buf());
             }
         }
     }
@@ -96,19 +94,19 @@ pub fn unlock_dir(_lock: ()) -> Result<(), PathError> {
 }
 
 pub fn ignore_already_exists(x: Result<(), std::io::Error>) -> Result<(), std::io::Error> {
-    if let Err(x) = x {
-        if x.kind() != std::io::ErrorKind::AlreadyExists {
-            return Err(x);
-        }
+    if let Err(x) = x
+        && x.kind() != std::io::ErrorKind::AlreadyExists
+    {
+        return Err(x);
     }
     Ok(())
 }
 
 pub fn ignore_directory_not_empty(x: Result<(), std::io::Error>) -> Result<(), std::io::Error> {
-    if let Err(x) = x {
-        if x.kind() != std::io::ErrorKind::DirectoryNotEmpty {
-            return Err(x);
-        }
+    if let Err(x) = x
+        && x.kind() != std::io::ErrorKind::DirectoryNotEmpty
+    {
+        return Err(x);
     }
     Ok(())
 }

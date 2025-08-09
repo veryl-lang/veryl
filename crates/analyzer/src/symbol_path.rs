@@ -285,10 +285,10 @@ impl GenericSymbol {
                     continue;
                 }
                 let head = &arg.paths[0];
-                if let Ok(symbol) = symbol_table::resolve(&head.base) {
-                    if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
-                        return self.base();
-                    }
+                if let Ok(symbol) = symbol_table::resolve(&head.base)
+                    && matches!(symbol.found.kind, SymbolKind::GenericParameter(_))
+                {
+                    return self.base();
                 }
             }
 
@@ -482,10 +482,10 @@ impl GenericSymbolPath {
         }
 
         let head = &self.paths[0];
-        if let Ok(symbol) = symbol_table::resolve(&head.base) {
-            if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
-                return true;
-            }
+        if let Ok(symbol) = symbol_table::resolve(&head.base)
+            && matches!(symbol.found.kind, SymbolKind::GenericParameter(_))
+        {
+            return true;
         }
 
         for path in &self.paths {
@@ -552,47 +552,47 @@ impl GenericSymbolPath {
                     return;
                 };
 
-                if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace)) {
-                    if let Some(parent) = symbol.found.get_parent_package() {
-                        let package_symbol = if parent.is_package(false) {
-                            parent
-                        } else if let Some(maps) = generic_maps {
-                            // replace proto package with actual package
-                            let mut package_path = symbol
-                                .found
-                                .imported
-                                .iter()
-                                .find(|(_, x)| namespace.included(x))
-                                .map(|(x, _)| x)
+                if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace))
+                    && let Some(parent) = symbol.found.get_parent_package()
+                {
+                    let package_symbol = if parent.is_package(false) {
+                        parent
+                    } else if let Some(maps) = generic_maps {
+                        // replace proto package with actual package
+                        let mut package_path = symbol
+                            .found
+                            .imported
+                            .iter()
+                            .find(|(_, x)| namespace.included(x))
+                            .map(|(x, _)| x)
+                            .unwrap()
+                            .clone();
+                        package_path.apply_map(maps);
+                        if let Some(path) = package_path.unaliased_path() {
+                            symbol_table::resolve((&path.mangled_path(), namespace))
+                                .map(|x| x.found)
                                 .unwrap()
-                                .clone();
-                            package_path.apply_map(maps);
-                            if let Some(path) = package_path.unaliased_path() {
-                                symbol_table::resolve((&path.mangled_path(), namespace))
-                                    .map(|x| x.found)
-                                    .unwrap()
-                            } else {
-                                symbol_table::resolve((&package_path.mangled_path(), namespace))
-                                    .map(|x| x.found)
-                                    .unwrap()
-                            }
                         } else {
-                            parent
-                        };
-
-                        // If symbol belongs Package, it can be expanded
-                        let mut package_namespace = package_symbol.inner_namespace();
-                        package_namespace.strip_prefix(&namespace_table::get_default());
-
-                        for (i, path) in package_namespace.paths.iter().enumerate() {
-                            let token = Token::generate(*path, self_file_path);
-                            namespace_table::insert(token.id, self_file_path, &self_namespace);
-                            let generic_symbol = GenericSymbol {
-                                base: token,
-                                arguments: vec![],
-                            };
-                            self.paths.insert(i, generic_symbol);
+                            symbol_table::resolve((&package_path.mangled_path(), namespace))
+                                .map(|x| x.found)
+                                .unwrap()
                         }
+                    } else {
+                        parent
+                    };
+
+                    // If symbol belongs Package, it can be expanded
+                    let mut package_namespace = package_symbol.inner_namespace();
+                    package_namespace.strip_prefix(&namespace_table::get_default());
+
+                    for (i, path) in package_namespace.paths.iter().enumerate() {
+                        let token = Token::generate(*path, self_file_path);
+                        namespace_table::insert(token.id, self_file_path, &self_namespace);
+                        let generic_symbol = GenericSymbol {
+                            base: token,
+                            arguments: vec![],
+                        };
+                        self.paths.insert(i, generic_symbol);
                     }
                 }
             }
@@ -747,14 +747,14 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                 let base = x.identifier.identifier_token.token;
                 let mut arguments = Vec::new();
 
-                if let Some(ref x) = x.scoped_identifier_opt {
-                    if let Some(ref x) = x.with_generic_argument.with_generic_argument_opt {
-                        let list: Vec<syntax_tree::WithGenericArgumentItem> =
-                            x.with_generic_argument_list.as_ref().into();
-                        for x in &list {
-                            let arg: GenericSymbolPath = x.into();
-                            arguments.push(arg);
-                        }
+                if let Some(ref x) = x.scoped_identifier_opt
+                    && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
+                {
+                    let list: Vec<syntax_tree::WithGenericArgumentItem> =
+                        x.with_generic_argument_list.as_ref().into();
+                    for x in &list {
+                        let arg: GenericSymbolPath = x.into();
+                        arguments.push(arg);
                     }
                 }
 
@@ -766,14 +766,14 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
             let base = x.identifier.identifier_token.token;
             let mut arguments = Vec::new();
 
-            if let Some(ref x) = x.scoped_identifier_opt0 {
-                if let Some(ref x) = x.with_generic_argument.with_generic_argument_opt {
-                    let list: Vec<syntax_tree::WithGenericArgumentItem> =
-                        x.with_generic_argument_list.as_ref().into();
-                    for x in &list {
-                        let arg: GenericSymbolPath = x.into();
-                        arguments.push(arg);
-                    }
+            if let Some(ref x) = x.scoped_identifier_opt0
+                && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
+            {
+                let list: Vec<syntax_tree::WithGenericArgumentItem> =
+                    x.with_generic_argument_list.as_ref().into();
+                for x in &list {
+                    let arg: GenericSymbolPath = x.into();
+                    arguments.push(arg);
                 }
             }
 

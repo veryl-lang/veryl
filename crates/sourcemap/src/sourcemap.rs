@@ -46,30 +46,30 @@ impl SourceMap {
     pub fn from_src(src_path: &Path) -> Result<Self, SourceMapError> {
         let src = fs::read_to_string(src_path)?;
 
-        if let Some(line) = src.lines().last() {
-            if line.starts_with(LINK_HEADER) {
-                let map_path = line.strip_prefix(LINK_HEADER).unwrap();
-                let map_path = src_path.parent().unwrap().join(map_path);
-                let text = fs::read(&map_path)?;
+        if let Some(line) = src.lines().last()
+            && line.starts_with(LINK_HEADER)
+        {
+            let map_path = line.strip_prefix(LINK_HEADER).unwrap();
+            let map_path = src_path.parent().unwrap().join(map_path);
+            let text = fs::read(&map_path)?;
 
-                let src_path = src_path.to_path_buf();
-                let dst_path = PathBuf::new();
-                let src_path_from_map = String::new();
-                let map_path_from_dst = String::new();
-                let builder =
-                    SourceMapBuilder::new(Some(&map_path.file_name().unwrap().to_string_lossy()));
-                let source_map = Some(sourcemap::SourceMap::from_reader(text.as_slice())?);
+            let src_path = src_path.to_path_buf();
+            let dst_path = PathBuf::new();
+            let src_path_from_map = String::new();
+            let map_path_from_dst = String::new();
+            let builder =
+                SourceMapBuilder::new(Some(&map_path.file_name().unwrap().to_string_lossy()));
+            let source_map = Some(sourcemap::SourceMap::from_reader(text.as_slice())?);
 
-                return Ok(Self {
-                    src_path,
-                    dst_path,
-                    map_path,
-                    src_path_from_map,
-                    map_path_from_dst,
-                    builder,
-                    source_map,
-                });
-            }
+            return Ok(Self {
+                src_path,
+                dst_path,
+                map_path,
+                src_path_from_map,
+                map_path_from_dst,
+                builder,
+                source_map,
+            });
         }
 
         Err(SourceMapError::NotFound)

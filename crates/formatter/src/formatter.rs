@@ -193,13 +193,12 @@ impl Formatter {
     fn newline_list_post(&mut self, is_empty: bool, start_token: &VerylToken) {
         if !is_empty {
             self.newline_pop();
-        } else if let Some(last_commant) = start_token.comments.last() {
-            if resource_table::get_str_value(last_commant.text)
+        } else if let Some(last_commant) = start_token.comments.last()
+            && resource_table::get_str_value(last_commant.text)
                 .map(|x| !x.ends_with("\n"))
                 .unwrap()
-            {
-                self.newline();
-            }
+        {
+            self.newline();
         }
     }
 
@@ -2942,11 +2941,11 @@ fn is_single_line_inst_declaration(arg: &InstDeclaration) -> bool {
         return true;
     }
 
-    if let Some(x) = &arg.inst_declaration_opt2 {
-        if x.inst_declaration_opt3.is_some() {
-            // Non empty port list
-            return false;
-        }
+    if let Some(x) = &arg.inst_declaration_opt2
+        && x.inst_declaration_opt3.is_some()
+    {
+        // Non empty port list
+        return false;
     }
 
     true

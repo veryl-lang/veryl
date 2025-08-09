@@ -294,12 +294,11 @@ impl CmdBuild {
             if matches!(
                 symbol.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
-            ) {
-                if let TokenSource::File { path, .. } = symbol.token.source {
-                    let path = PathBuf::from(format!("{path}"));
-                    if let Some(x) = used_paths.remove(&path) {
-                        ret.push(x.clone());
-                    }
+            ) && let TokenSource::File { path, .. } = symbol.token.source
+            {
+                let path = PathBuf::from(format!("{path}"));
+                if let Some(x) = used_paths.remove(&path) {
+                    ret.push(x.clone());
                 }
             }
         }

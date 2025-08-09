@@ -658,18 +658,18 @@ impl AssignPositionTree {
     }
 
     pub fn check_always_comb_uncovered(&self) -> Option<Token> {
-        if let Some(AssignPositionType::Declaration { ref r#type, .. }) = self.r#type {
-            if *r#type == AssignDeclarationType::AlwaysComb {
-                let children: Vec<_> = self
-                    .children
-                    .iter()
-                    .map(|x| x.impl_always_comb_uncovered())
-                    .collect();
-                if children.iter().any(|x| x.is_none()) {
-                    return None;
-                } else {
-                    return children.into_iter().find(|x| x.is_some()).flatten();
-                }
+        if let Some(AssignPositionType::Declaration { ref r#type, .. }) = self.r#type
+            && *r#type == AssignDeclarationType::AlwaysComb
+        {
+            let children: Vec<_> = self
+                .children
+                .iter()
+                .map(|x| x.impl_always_comb_uncovered())
+                .collect();
+            if children.iter().any(|x| x.is_none()) {
+                return None;
+            } else {
+                return children.into_iter().find(|x| x.is_some()).flatten();
             }
         }
 
@@ -725,19 +725,14 @@ impl AssignPositionTree {
             ref allow_missing_reset_statement,
             ..
         }) = self.r#type
+            && *r#type == AssignStatementBranchType::IfReset
+            && !allow_missing_reset_statement
+            && self.is_resettable()
+            && let Some(AssignPositionType::StatementBranchItem { ref r#type, .. }) =
+                self.children[0].r#type
+            && *r#type != AssignStatementBranchItemType::IfReset
         {
-            if *r#type == AssignStatementBranchType::IfReset
-                && !allow_missing_reset_statement
-                && self.is_resettable()
-            {
-                if let Some(AssignPositionType::StatementBranchItem { ref r#type, .. }) =
-                    self.children[0].r#type
-                {
-                    if *r#type != AssignStatementBranchItemType::IfReset {
-                        return Some(*token);
-                    }
-                }
-            }
+            return Some(*token);
         }
 
         for child in &self.children {

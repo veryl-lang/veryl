@@ -44,33 +44,33 @@ fn check_function_args(
     };
 
     let mut args = 0;
-    if let Some(x) = function_call {
-        if let Some(ref x) = x.function_call_opt {
-            let list: Vec<_> = x.argument_list.as_ref().into();
+    if let Some(x) = function_call
+        && let Some(ref x) = x.function_call_opt
+    {
+        let list: Vec<_> = x.argument_list.as_ref().into();
 
-            let positional_only = list.iter().all(|x| x.argument_item_opt.is_none());
-            let named_only = list.iter().all(|x| x.argument_item_opt.is_some());
-            if !positional_only && !named_only {
-                return Some(AnalyzerError::mixed_function_argument(&identifier.into()));
-            }
-
-            args += list.len();
+        let positional_only = list.iter().all(|x| x.argument_item_opt.is_none());
+        let named_only = list.iter().all(|x| x.argument_item_opt.is_some());
+        if !positional_only && !named_only {
+            return Some(AnalyzerError::mixed_function_argument(&identifier.into()));
         }
+
+        args += list.len();
     }
 
-    if let Some(arity) = get_arity(&symbol.found.kind) {
-        if arity != args {
-            let name = format!(
-                "{}",
-                SymbolPath::from(identifier).as_slice().last().unwrap()
-            );
-            return Some(AnalyzerError::mismatch_function_arity(
-                &name,
-                arity,
-                args,
-                &identifier.into(),
-            ));
-        }
+    if let Some(arity) = get_arity(&symbol.found.kind)
+        && arity != args
+    {
+        let name = format!(
+            "{}",
+            SymbolPath::from(identifier).as_slice().last().unwrap()
+        );
+        return Some(AnalyzerError::mismatch_function_arity(
+            &name,
+            arity,
+            args,
+            &identifier.into(),
+        ));
     }
 
     None
@@ -96,47 +96,45 @@ fn get_arity(kind: &SymbolKind) -> Option<usize> {
 
 impl VerylGrammarTrait for CheckFunction {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if let IdentifierStatementGroup::FunctionCall(x) = &*arg.identifier_statement_group {
-                let error = check_function_args(&arg.expression_identifier, Some(&x.function_call));
-                if let Some(error) = error {
-                    self.errors.push(error);
-                }
+        if let HandlerPoint::Before = self.point
+            && let IdentifierStatementGroup::FunctionCall(x) = &*arg.identifier_statement_group
+        {
+            let error = check_function_args(&arg.expression_identifier, Some(&x.function_call));
+            if let Some(error) = error {
+                self.errors.push(error);
+            }
 
-                // skip system function
-                if matches!(
-                    arg.expression_identifier
-                        .scoped_identifier
-                        .scoped_identifier_group
-                        .as_ref(),
-                    ScopedIdentifierGroup::DollarIdentifier(_)
-                ) {
-                    return Ok(());
-                }
+            // skip system function
+            if matches!(
+                arg.expression_identifier
+                    .scoped_identifier
+                    .scoped_identifier_group
+                    .as_ref(),
+                ScopedIdentifierGroup::DollarIdentifier(_)
+            ) {
+                return Ok(());
+            }
 
-                if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                    let function_symbol = match symbol.found.kind {
-                        SymbolKind::Function(_) => symbol.found,
-                        SymbolKind::ModportFunctionMember(x) => {
-                            symbol_table::get(x.function).unwrap()
-                        }
-                        _ => return Ok(()),
-                    };
-                    if let SymbolKind::Function(x) = function_symbol.kind {
-                        if x.ret.is_some() {
-                            let name = format!(
-                                "{}",
-                                SymbolPath::from(arg.expression_identifier.as_ref())
-                                    .as_slice()
-                                    .last()
-                                    .unwrap()
-                            );
-                            self.errors.push(AnalyzerError::unused_return(
-                                &name,
-                                &arg.expression_identifier.as_ref().into(),
-                            ));
-                        }
-                    }
+            if let Ok(symbol) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
+                let function_symbol = match symbol.found.kind {
+                    SymbolKind::Function(_) => symbol.found,
+                    SymbolKind::ModportFunctionMember(x) => symbol_table::get(x.function).unwrap(),
+                    _ => return Ok(()),
+                };
+                if let SymbolKind::Function(x) = function_symbol.kind
+                    && x.ret.is_some()
+                {
+                    let name = format!(
+                        "{}",
+                        SymbolPath::from(arg.expression_identifier.as_ref())
+                            .as_slice()
+                            .last()
+                            .unwrap()
+                    );
+                    self.errors.push(AnalyzerError::unused_return(
+                        &name,
+                        &arg.expression_identifier.as_ref().into(),
+                    ));
                 }
             }
         }

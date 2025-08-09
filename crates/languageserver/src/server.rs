@@ -280,12 +280,11 @@ impl Server {
     }
 
     fn get_line(&self, url: &Url, line: usize) -> Option<String> {
-        if let Some(path) = url.to_file_path() {
-            if let Some(rope) = self.document_map.get(path.as_ref()) {
-                if let Some(text) = rope.line(line - 1).as_str() {
-                    return Some(text.to_string());
-                }
-            }
+        if let Some(path) = url.to_file_path()
+            && let Some(rope) = self.document_map.get(path.as_ref())
+            && let Some(text) = rope.line(line - 1).as_str()
+        {
+            return Some(text.to_string());
         }
         None
     }
@@ -337,28 +336,28 @@ impl Server {
     }
 
     fn goto_definition(&mut self, url: &Url, line: usize, column: usize) {
-        if let Some(path) = url.to_file_path() {
-            if let Some(parser) = self.parser_map.get(path.as_ref()) {
-                let mut finder = Finder::new();
-                finder.line = line as u32;
-                finder.column = column as u32;
-                finder.veryl(&parser.veryl);
+        if let Some(path) = url.to_file_path()
+            && let Some(parser) = self.parser_map.get(path.as_ref())
+        {
+            let mut finder = Finder::new();
+            finder.line = line as u32;
+            finder.column = column as u32;
+            finder.veryl(&parser.veryl);
 
-                if let Some(token) = finder.token {
-                    if let Some(namespace) = namespace_table::get(token.id) {
-                        let path = if finder.token_group.is_empty() {
-                            SymbolPath::new(&[token.text])
-                        } else {
-                            SymbolPath::from(finder.token_group.as_slice())
-                        };
-                        if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                            let location = to_location(&symbol.found.token);
-                            self.snd
-                                .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
-                                .unwrap();
-                            return;
-                        }
-                    }
+            if let Some(token) = finder.token
+                && let Some(namespace) = namespace_table::get(token.id)
+            {
+                let path = if finder.token_group.is_empty() {
+                    SymbolPath::new(&[token.text])
+                } else {
+                    SymbolPath::from(finder.token_group.as_slice())
+                };
+                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                    let location = to_location(&symbol.found.token);
+                    self.snd
+                        .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
+                        .unwrap();
+                    return;
                 }
             }
         }
@@ -432,31 +431,31 @@ impl Server {
     }
 
     fn hover(&mut self, url: &Url, line: usize, column: usize) {
-        if let Some(path) = url.to_file_path() {
-            if let Some(parser) = self.parser_map.get(path.as_ref()) {
-                let mut finder = Finder::new();
-                finder.line = line as u32;
-                finder.column = column as u32;
-                finder.veryl(&parser.veryl);
-                if let Some(token) = finder.token {
-                    if let Some(namespace) = namespace_table::get(token.id) {
-                        let path = if finder.token_group.is_empty() {
-                            SymbolPath::new(&[token.text])
-                        } else {
-                            SymbolPath::from(finder.token_group.as_slice())
-                        };
-                        if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                            let text = symbol.found.kind.to_string();
-                            let hover = Hover {
-                                contents: HoverContents::Scalar(MarkedString::String(text)),
-                                range: None,
-                            };
-                            self.snd
-                                .send_blocking(MsgFromServer::Hover(Some(hover)))
-                                .unwrap();
-                            return;
-                        }
-                    }
+        if let Some(path) = url.to_file_path()
+            && let Some(parser) = self.parser_map.get(path.as_ref())
+        {
+            let mut finder = Finder::new();
+            finder.line = line as u32;
+            finder.column = column as u32;
+            finder.veryl(&parser.veryl);
+            if let Some(token) = finder.token
+                && let Some(namespace) = namespace_table::get(token.id)
+            {
+                let path = if finder.token_group.is_empty() {
+                    SymbolPath::new(&[token.text])
+                } else {
+                    SymbolPath::from(finder.token_group.as_slice())
+                };
+                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                    let text = symbol.found.kind.to_string();
+                    let hover = Hover {
+                        contents: HoverContents::Scalar(MarkedString::String(text)),
+                        range: None,
+                    };
+                    self.snd
+                        .send_blocking(MsgFromServer::Hover(Some(hover)))
+                        .unwrap();
+                    return;
                 }
             }
         }
@@ -465,25 +464,25 @@ impl Server {
 
     fn references(&mut self, url: &Url, line: usize, column: usize) {
         let mut ret = Vec::new();
-        if let Some(path) = url.to_file_path() {
-            if let Some(parser) = self.parser_map.get(path.as_ref()) {
-                let mut finder = Finder::new();
-                finder.line = line as u32;
-                finder.column = column as u32;
-                finder.veryl(&parser.veryl);
-                if let Some(token) = finder.token {
-                    if let Some(namespace) = namespace_table::get(token.id) {
-                        let path = if finder.token_group.is_empty() {
-                            SymbolPath::new(&[token.text])
-                        } else {
-                            SymbolPath::from(finder.token_group.as_slice())
-                        };
-                        if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                            for reference in &symbol.found.references {
-                                let location = to_location(reference);
-                                ret.push(location);
-                            }
-                        }
+        if let Some(path) = url.to_file_path()
+            && let Some(parser) = self.parser_map.get(path.as_ref())
+        {
+            let mut finder = Finder::new();
+            finder.line = line as u32;
+            finder.column = column as u32;
+            finder.veryl(&parser.veryl);
+            if let Some(token) = finder.token
+                && let Some(namespace) = namespace_table::get(token.id)
+            {
+                let path = if finder.token_group.is_empty() {
+                    SymbolPath::new(&[token.text])
+                } else {
+                    SymbolPath::from(finder.token_group.as_slice())
+                };
+                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                    for reference in &symbol.found.references {
+                        let location = to_location(reference);
+                        ret.push(location);
                     }
                 }
             }
@@ -496,63 +495,63 @@ impl Server {
     fn semantic_tokens(&mut self, url: &Url) {
         let mut ret = None;
 
-        if let Some(path) = url.to_file_path() {
-            if let Some(path) = resource_table::get_path_id(path.to_path_buf()) {
-                let mut tokens = Vec::new();
-                for symbol in &symbol_table::get_all() {
-                    if symbol.token.source == path {
-                        if let VerylSymbolKind::Port(_) = symbol.kind {
-                            let token_type = semantic_legend::PROPERTY;
-                            tokens.push((symbol.token, token_type));
-                            for reference in &symbol.references {
-                                if reference.source == path {
-                                    tokens.push((*reference, token_type));
-                                }
-                            }
+        if let Some(path) = url.to_file_path()
+            && let Some(path) = resource_table::get_path_id(path.to_path_buf())
+        {
+            let mut tokens = Vec::new();
+            for symbol in &symbol_table::get_all() {
+                if symbol.token.source == path
+                    && let VerylSymbolKind::Port(_) = symbol.kind
+                {
+                    let token_type = semantic_legend::PROPERTY;
+                    tokens.push((symbol.token, token_type));
+                    for reference in &symbol.references {
+                        if reference.source == path {
+                            tokens.push((*reference, token_type));
                         }
                     }
                 }
-
-                tokens.sort_by(|a, b| {
-                    a.0.line
-                        .partial_cmp(&b.0.line)
-                        .unwrap()
-                        .then(a.0.column.partial_cmp(&b.0.column).unwrap())
-                });
-
-                let mut line = 0;
-                let mut column = 0;
-                let mut data = Vec::new();
-                for (token, token_type) in tokens {
-                    let token_line = token.line - 1;
-                    let token_column = token.column - 1;
-
-                    let delta_line = token_line - line;
-                    let delta_start = if delta_line == 0 {
-                        token_column - column
-                    } else {
-                        token_column
-                    };
-
-                    let semantic_token = SemanticToken {
-                        delta_line,
-                        delta_start,
-                        length: token.length,
-                        token_type,
-                        token_modifiers_bitset: 0,
-                    };
-                    data.push(semantic_token);
-
-                    line = token_line;
-                    column = token_column;
-                }
-
-                let tokens = SemanticTokens {
-                    result_id: None,
-                    data,
-                };
-                ret = Some(SemanticTokensResult::Tokens(tokens))
             }
+
+            tokens.sort_by(|a, b| {
+                a.0.line
+                    .partial_cmp(&b.0.line)
+                    .unwrap()
+                    .then(a.0.column.partial_cmp(&b.0.column).unwrap())
+            });
+
+            let mut line = 0;
+            let mut column = 0;
+            let mut data = Vec::new();
+            for (token, token_type) in tokens {
+                let token_line = token.line - 1;
+                let token_column = token.column - 1;
+
+                let delta_line = token_line - line;
+                let delta_start = if delta_line == 0 {
+                    token_column - column
+                } else {
+                    token_column
+                };
+
+                let semantic_token = SemanticToken {
+                    delta_line,
+                    delta_start,
+                    length: token.length,
+                    token_type,
+                    token_modifiers_bitset: 0,
+                };
+                data.push(semantic_token);
+
+                line = token_line;
+                column = token_column;
+            }
+
+            let tokens = SemanticTokens {
+                result_id: None,
+                data,
+            };
+            ret = Some(SemanticTokensResult::Tokens(tokens))
         }
 
         self.snd
@@ -561,25 +560,24 @@ impl Server {
     }
 
     fn formatting(&mut self, url: &Url) {
-        if let Some(path) = url.to_file_path() {
-            if let Some(metadata) = self.get_metadata(url) {
-                if let Some(rope) = self.document_map.get(path.as_ref()) {
-                    let line = rope.len_lines() as u32;
-                    if let Some(parser) = self.parser_map.get(path.as_ref()) {
-                        let mut formatter = Formatter::new(&metadata);
-                        formatter.format(&parser.veryl);
+        if let Some(path) = url.to_file_path()
+            && let Some(metadata) = self.get_metadata(url)
+            && let Some(rope) = self.document_map.get(path.as_ref())
+        {
+            let line = rope.len_lines() as u32;
+            if let Some(parser) = self.parser_map.get(path.as_ref()) {
+                let mut formatter = Formatter::new(&metadata);
+                formatter.format(&parser.veryl);
 
-                        let text_edit = TextEdit {
-                            range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
-                            new_text: formatter.as_str().to_string(),
-                        };
+                let text_edit = TextEdit {
+                    range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),
+                    new_text: formatter.as_str().to_string(),
+                };
 
-                        self.snd
-                            .send_blocking(MsgFromServer::Formatting(Some(vec![text_edit])))
-                            .unwrap();
-                        return;
-                    }
-                }
+                self.snd
+                    .send_blocking(MsgFromServer::Formatting(Some(vec![text_edit])))
+                    .unwrap();
+                return;
             }
         }
 
@@ -673,12 +671,12 @@ impl Server {
         if let Some(path) = url.to_file_path() {
             if let Some(metadata) = self.metadata_map.get(path.as_ref()) {
                 return Some(metadata.to_owned());
-            } else if let Ok(metadata_path) = Metadata::search_from(path.as_ref()) {
-                if let Ok(metadata) = Metadata::load(metadata_path) {
-                    self.metadata_map
-                        .insert(path.to_path_buf(), metadata.clone());
-                    return Some(metadata);
-                }
+            } else if let Ok(metadata_path) = Metadata::search_from(path.as_ref())
+                && let Ok(metadata) = Metadata::load(metadata_path)
+            {
+                self.metadata_map
+                    .insert(path.to_path_buf(), metadata.clone());
+                return Some(metadata);
             }
         }
         None
@@ -751,10 +749,10 @@ impl Server {
     }
 
     fn on_remove(&mut self, path: Url) {
-        if let Some(path) = path.to_file_path() {
-            if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
-                drop_tables(path_id);
-            }
+        if let Some(path) = path.to_file_path()
+            && let Some(path_id) = resource_table::get_path_id(path.to_path_buf())
+        {
+            drop_tables(path_id);
         }
     }
 }
@@ -971,27 +969,27 @@ fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<C
     };
     let mut items = Vec::new();
 
-    if let Some(namespace) = current_namespace {
-        if let Ok(symbol) = symbol_table::resolve((&vec![text], &namespace)) {
-            match symbol.found.kind {
-                VerylSymbolKind::Port(x) => {
-                    if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                        if let Some(id) = x.symbol {
-                            let symbol = symbol_table::get(id).unwrap();
-                            items.append(&mut get_member(&symbol));
-                        }
-                    }
+    if let Some(namespace) = current_namespace
+        && let Ok(symbol) = symbol_table::resolve((&vec![text], &namespace))
+    {
+        match symbol.found.kind {
+            VerylSymbolKind::Port(x) => {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind
+                    && let Some(id) = x.symbol
+                {
+                    let symbol = symbol_table::get(id).unwrap();
+                    items.append(&mut get_member(&symbol));
                 }
-                VerylSymbolKind::Variable(x) => {
-                    if let TypeKind::UserDefined(ref x) = x.r#type.kind {
-                        if let Some(id) = x.symbol {
-                            let symbol = symbol_table::get(id).unwrap();
-                            items.append(&mut get_member(&symbol));
-                        }
-                    }
-                }
-                _ => (),
             }
+            VerylSymbolKind::Variable(x) => {
+                if let TypeKind::UserDefined(ref x) = x.r#type.kind
+                    && let Some(id) = x.symbol
+                {
+                    let symbol = symbol_table::get(id).unwrap();
+                    items.append(&mut get_member(&symbol));
+                }
+            }
+            _ => (),
         }
     }
 

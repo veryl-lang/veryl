@@ -37,17 +37,17 @@ impl Handler for CheckMsbLsb {
 
 fn trace_type(r#type: &SymType) -> Vec<(SymType, Option<SymbolKind>)> {
     let mut ret = vec![(r#type.clone(), None)];
-    if let TypeKind::UserDefined(ref x) = r#type.kind {
-        if let Some(id) = x.symbol {
-            let symbol = symbol_table::get(id).unwrap();
-            ret.last_mut().unwrap().1 = Some(symbol.kind.clone());
-            if let SymbolKind::TypeDef(ref x) = symbol.kind {
-                ret.append(&mut trace_type(&x.r#type));
-            } else if let SymbolKind::ProtoTypeDef(ref x) = symbol.kind {
-                if let Some(ref r#type) = x.r#type {
-                    ret.append(&mut trace_type(r#type));
-                }
-            }
+    if let TypeKind::UserDefined(ref x) = r#type.kind
+        && let Some(id) = x.symbol
+    {
+        let symbol = symbol_table::get(id).unwrap();
+        ret.last_mut().unwrap().1 = Some(symbol.kind.clone());
+        if let SymbolKind::TypeDef(ref x) = symbol.kind {
+            ret.append(&mut trace_type(&x.r#type));
+        } else if let SymbolKind::ProtoTypeDef(ref x) = symbol.kind
+            && let Some(ref r#type) = x.r#type
+        {
+            ret.append(&mut trace_type(r#type));
         }
     }
     ret
@@ -55,11 +55,11 @@ fn trace_type(r#type: &SymType) -> Vec<(SymType, Option<SymbolKind>)> {
 
 impl VerylGrammarTrait for CheckMsbLsb {
     fn lsb(&mut self, arg: &Lsb) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if !(self.is_in_expression_identifier() && self.in_select) {
-                self.errors
-                    .push(AnalyzerError::invalid_lsb(&arg.lsb_token.token.into()));
-            }
+        if let HandlerPoint::Before = self.point
+            && !(self.is_in_expression_identifier() && self.in_select)
+        {
+            self.errors
+                .push(AnalyzerError::invalid_lsb(&arg.lsb_token.token.into()));
         }
         Ok(())
     }
@@ -150,14 +150,14 @@ impl VerylGrammarTrait for CheckMsbLsb {
     }
 
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            if self.is_in_expression_identifier() {
-                self.identifier_path
-                    .last_mut()
-                    .unwrap()
-                    .0
-                    .push(arg.identifier_token.token.text);
-            }
+        if let HandlerPoint::Before = self.point
+            && self.is_in_expression_identifier()
+        {
+            self.identifier_path
+                .last_mut()
+                .unwrap()
+                .0
+                .push(arg.identifier_token.token.text);
         }
         Ok(())
     }
