@@ -32,9 +32,9 @@ mod analyzer {
 
         if crate::DEPENDENCY_TESTS.contains(&name) {
             let paths = metadata.paths::<&str>(&[], false, true).unwrap();
-            let cache_path = veryl_path::cache_path().canonicalize().unwrap();
+            let dependency_path = metadata.project_dependencies_path();
             for path in paths {
-                if path.src.starts_with(&cache_path) {
+                if path.dst.starts_with(&dependency_path) {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
@@ -124,9 +124,9 @@ mod emitter {
 
         if crate::DEPENDENCY_TESTS.contains(&name) {
             let paths = metadata.paths::<&str>(&[], false, true).unwrap();
-            let cache_path = veryl_path::cache_path().canonicalize().unwrap();
+            let dependency_path = metadata.project_dependencies_path();
             for path in paths {
-                if path.src.starts_with(&cache_path) {
+                if path.dst.starts_with(&dependency_path) {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
