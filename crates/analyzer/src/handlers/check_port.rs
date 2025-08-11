@@ -9,6 +9,7 @@ pub struct CheckPort {
     point: HandlerPoint,
     in_function: bool,
     in_module: bool,
+    in_proto_module: bool,
     in_modport: bool,
 }
 
@@ -76,7 +77,7 @@ impl VerylGrammarTrait for CheckPort {
         if let HandlerPoint::Before = self.point {
             match arg {
                 Direction::Modport(x) => {
-                    if !(self.in_module || self.in_function) {
+                    if !(self.in_module || self.in_function || self.in_proto_module) {
                         self.errors.push(AnalyzerError::invalid_direction(
                             "modport",
                             &x.modport.modport_token.token.into(),
@@ -109,6 +110,17 @@ impl VerylGrammarTrait for CheckPort {
         match self.point {
             HandlerPoint::Before => self.in_module = true,
             HandlerPoint::After => self.in_module = false,
+        }
+        Ok(())
+    }
+
+    fn proto_module_declaration(
+        &mut self,
+        _arg: &ProtoModuleDeclaration,
+    ) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.in_proto_module = true,
+            HandlerPoint::After => self.in_proto_module = false,
         }
         Ok(())
     }
