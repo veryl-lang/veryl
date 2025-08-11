@@ -114,7 +114,10 @@ impl VerylGrammarTrait for CheckPort {
         Ok(())
     }
 
-    fn proto_module_declaration(&mut self, _arg: &ProtoModuleDeclaration) -> Result<(), ParolError> {
+    fn proto_module_declaration(
+        &mut self,
+        _arg: &ProtoModuleDeclaration,
+    ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => self.in_proto_module = true,
             HandlerPoint::After => self.in_proto_module = false,
