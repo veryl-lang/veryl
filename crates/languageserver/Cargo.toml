@@ -18,7 +18,7 @@ exclude               = ["build.rs"]
 async-channel     = "2.5"
 dashmap           = "6.1.0"
 futures           = {workspace = true}
-glob              = "0.3.2"
+glob              = "0.3.3"
 ropey             = "1.6.1"
 mark-flaky-tests  = {version = "1.0.2", features = ["tokio"]}
 miette            = {workspace = true}
