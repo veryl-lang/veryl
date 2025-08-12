@@ -34,7 +34,7 @@ edition     = "2024"
 
 [workspace.dependencies]
 anyhow          = "1.0"
-clap            = {version = "4.5.44", features = ["derive"]}
+clap            = {version = "4.5.45", features = ["derive"]}
 console         = "0.16.0"
 futures         = "0.3.31"
 fxhash          = "0.2.1"
