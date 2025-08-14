@@ -79,3 +79,22 @@ jobs:
     - run: make publish
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  highlightjs:
+    permissions:
+      id-token: write  # Required for OIDC
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/highlightjs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      # Ensure npm 11.5.1 or later is installed
+      - name: Update npm
+        run: npm install -g npm@latest
+      - run: npm publish
