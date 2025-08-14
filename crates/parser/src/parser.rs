@@ -13,7 +13,6 @@ pub struct Parser {
 }
 
 impl Parser {
-    #[allow(clippy::result_large_err)]
     pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self, ParserError> {
         let path = resource_table::insert_path(file.as_ref());
         let text = TextInfo {

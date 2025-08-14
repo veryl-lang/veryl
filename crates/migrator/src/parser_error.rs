@@ -6,7 +6,7 @@ use thiserror::Error;
 pub enum ParserError {
     #[error(transparent)]
     #[diagnostic(transparent)]
-    SyntaxError(SyntaxError),
+    SyntaxError(Box<SyntaxError>),
 
     #[error(transparent)]
     ParserError(#[from] parol_runtime::ParserError),
@@ -403,7 +403,7 @@ impl From<ParolError> for ParserError {
         match x {
             ParolError::ParserError(x) => match x {
                 parol_runtime::ParserError::SyntaxErrors { mut entries } if !entries.is_empty() => {
-                    ParserError::SyntaxError(entries.remove(0).into())
+                    ParserError::SyntaxError(Box::new(entries.remove(0).into()))
                 }
                 _ => ParserError::ParserError(x),
             },
