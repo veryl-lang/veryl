@@ -27,7 +27,7 @@ pub struct ResolveResult {
 
 #[derive(Clone, Debug)]
 pub struct ResolveError {
-    pub last_found: Option<Symbol>,
+    pub last_found: Option<Box<Symbol>>,
     pub cause: ResolveErrorCause,
 }
 
@@ -41,7 +41,7 @@ pub enum ResolveErrorCause {
 impl ResolveError {
     pub fn new(last_found: Option<&Symbol>, cause: ResolveErrorCause) -> Self {
         Self {
-            last_found: last_found.cloned(),
+            last_found: last_found.map(|x| Box::new(x.clone())),
             cause,
         }
     }
@@ -128,7 +128,6 @@ impl SymbolTable {
         false
     }
 
-    #[allow(clippy::result_large_err)]
     fn trace_type_kind<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -185,7 +184,6 @@ impl SymbolTable {
         Ok(context)
     }
 
-    #[allow(clippy::result_large_err)]
     fn trace_type_path<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -216,7 +214,6 @@ impl SymbolTable {
         }
     }
 
-    #[allow(clippy::result_large_err)]
     fn trace_generic_instance<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -234,7 +231,6 @@ impl SymbolTable {
         Ok(context)
     }
 
-    #[allow(clippy::result_large_err)]
     fn trace_generic_parameter<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -303,7 +299,6 @@ impl SymbolTable {
         None
     }
 
-    #[allow(clippy::result_large_err)]
     fn trace_type_parameter<'a>(
         &self,
         mut context: ResolveContext<'a>,
@@ -475,7 +470,6 @@ impl SymbolTable {
         }
     }
 
-    #[allow(clippy::result_large_err)]
     fn resolve<'a>(
         &'a self,
         path: &SymbolPath,
@@ -1460,7 +1454,6 @@ pub fn update(symbol: Symbol) {
     SYMBOL_TABLE.with(|f| f.borrow_mut().update(symbol))
 }
 
-#[allow(clippy::result_large_err)]
 pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, ResolveError> {
     let path: SymbolPathNamespace = path.into();
 

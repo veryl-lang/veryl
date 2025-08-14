@@ -12,11 +12,10 @@ use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::Token;
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum TypeDagCandidate {
     Path {
-        path: GenericSymbolPath,
+        path: Box<GenericSymbolPath>,
         namespace: Namespace,
         project_namespace: Namespace,
         parent: Option<(SymbolId, Context)>,
@@ -85,7 +84,7 @@ pub enum Context {
 
 #[derive(Debug, Clone)]
 pub enum DagError {
-    Cyclic(Symbol, Symbol),
+    Cyclic(Box<Symbol>, Box<Symbol>),
 }
 
 impl From<DagError> for AnalyzerError {
@@ -337,7 +336,6 @@ impl TypeDag {
         }
     }
 
-    #[allow(clippy::result_large_err)]
     fn insert_node(&mut self, symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
         let symbol = symbol_table::get(symbol_id).unwrap();
         let trinfo = TypeResolveInfo {
@@ -371,7 +369,6 @@ impl TypeDag {
         }
     }
 
-    #[allow(clippy::result_large_err)]
     fn insert_edge(&mut self, start: u32, end: u32, edge: Context) -> Result<(), DagError> {
         match self.dag.add_edge(start.into(), end.into(), edge) {
             Ok(_) => {
@@ -389,7 +386,7 @@ impl TypeDag {
                 } else {
                     let ssym = self.get_symbol(start);
                     let esym = self.get_symbol(end);
-                    Err(DagError::Cyclic(ssym, esym))
+                    Err(DagError::Cyclic(Box::new(ssym), Box::new(esym)))
                 }
             }
         }

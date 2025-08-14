@@ -2137,12 +2137,11 @@ pub struct ModportFunctionMemberProperty {
     pub function: SymbolId,
 }
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum GenericBoundKind {
     Type,
     Inst(SymbolPath),
-    Proto(Type),
+    Proto(Box<Type>),
 }
 
 #[derive(Debug, Clone)]

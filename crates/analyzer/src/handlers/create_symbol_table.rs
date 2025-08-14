@@ -683,7 +683,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     let path: GenericSymbolPath = arg.into();
                     let namespace = self.get_namespace(&ident);
                     let cand = TypeDagCandidate::Path {
-                        path,
+                        path: Box::new(path),
                         namespace,
                         project_namespace: self.project_namespace.clone(),
                         parent: None,
@@ -1471,7 +1471,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     if !self.check_identifer_with_type(&arg.identifier, &r#type) {
                         return Ok(());
                     }
-                    GenericBoundKind::Proto(r#type)
+                    GenericBoundKind::Proto(Box::new(r#type))
                 }
             };
 
