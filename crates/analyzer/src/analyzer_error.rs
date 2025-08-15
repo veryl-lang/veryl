@@ -1,6 +1,6 @@
 use crate::evaluator::EvaluatedError;
 use crate::multi_sources::{MultiSources, Source};
-use miette::{self, Diagnostic, SourceSpan};
+use miette::{self, Diagnostic, Severity, SourceSpan};
 use thiserror::Error;
 use veryl_parser::token_range::TokenRange;
 
@@ -1397,6 +1397,10 @@ fn source_with_context(
 }
 
 impl AnalyzerError {
+    pub fn is_error(&self) -> bool {
+        matches!(self.severity(), Some(Severity::Error) | None)
+    }
+
     pub fn anonymous_identifier_usage(token: &TokenRange) -> Self {
         AnalyzerError::AnonymousIdentifierUsage {
             input: source(token),

@@ -41,7 +41,7 @@ impl CmdPublish {
             }
         }
 
-        let mut check_error = CheckError::default();
+        let mut check_error = CheckError::new(metadata.build.error_count_limit);
         let mut contexts = Vec::new();
 
         for path in &paths {

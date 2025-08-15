@@ -48,6 +48,8 @@ pub struct Build {
     pub hashed_mangled_name: bool,
     #[serde(default = "default_incremental")]
     pub incremental: bool,
+    #[serde(default)]
+    pub error_count_limit: u32,
 }
 
 fn default_source() -> PathBuf {
