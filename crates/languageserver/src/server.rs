@@ -5,6 +5,7 @@ use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use tower_lsp_server::lsp_types::ClientCapabilities;
 use tower_lsp_server::lsp_types::Uri as Url;
 use tower_lsp_server::lsp_types::*;
 use tower_lsp_server::{Client, UriExt};
@@ -25,7 +26,26 @@ use veryl_parser::veryl_walker::VerylWalker;
 use veryl_parser::{Finder, Parser, ParserError};
 use veryl_path::PathSet;
 
+pub struct Capability {
+    work_done_progress: bool,
+}
+
+impl From<ClientCapabilities> for Capability {
+    fn from(value: ClientCapabilities) -> Self {
+        let work_done_progress = if let Some(x) = &value.window {
+            x.work_done_progress.unwrap_or(false)
+        } else {
+            false
+        };
+
+        Self { work_done_progress }
+    }
+}
+
 pub enum MsgToServer {
+    Initialize {
+        capability: Capability,
+    },
     DidOpen {
         url: Url,
         text: String,
@@ -126,6 +146,7 @@ pub struct Server {
     background_done: bool,
     config: ServerConfig,
     latest_change: Option<(Url, String, i32)>,
+    work_done_progress: bool,
 }
 
 impl Server {
@@ -143,6 +164,7 @@ impl Server {
             background_done: true,
             config: ServerConfig::default(),
             latest_change: None,
+            work_done_progress: true,
         }
     }
 
@@ -150,6 +172,9 @@ impl Server {
         loop {
             if let Ok(msg) = self.rcv.recv_blocking() {
                 match msg {
+                    MsgToServer::Initialize { capability } => {
+                        self.work_done_progress = capability.work_done_progress;
+                    }
                     MsgToServer::DidOpen { url, text, version } => {
                         self.did_open(&url, &text, version);
                         self.latest_change = Some((url, text, version));
@@ -589,6 +614,10 @@ impl Server {
 
 impl Server {
     fn progress_start(&mut self, msg: &str) {
+        if !self.work_done_progress {
+            return;
+        }
+
         self.lsp_token += 1;
         let token = NumberOrString::Number(self.lsp_token);
         let begin = WorkDoneProgressBegin {
@@ -615,6 +644,10 @@ impl Server {
     }
 
     fn progress_report(&self, msg: &str, pcnt: u32) {
+        if !self.work_done_progress {
+            return;
+        }
+
         let token = NumberOrString::Number(self.lsp_token);
         let report = WorkDoneProgressReport {
             cancellable: Some(false),
@@ -632,6 +665,10 @@ impl Server {
     }
 
     fn progress_done(&self, msg: &str) {
+        if !self.work_done_progress {
+            return;
+        }
+
         let token = NumberOrString::Number(self.lsp_token);
         let end = WorkDoneProgressEnd {
             message: Some(msg.to_string()),
