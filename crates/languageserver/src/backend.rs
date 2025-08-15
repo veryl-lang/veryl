@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use crate::server::{MsgFromServer, MsgToServer, Server, ServerConfigItem, semantic_legend};
+use crate::server::{
+    Capability, MsgFromServer, MsgToServer, Server, ServerConfigItem, semantic_legend,
+};
 use async_channel::{Receiver, Sender, unbounded};
 use serde_json::Value;
 use tower_lsp_server::jsonrpc::Result;
@@ -49,7 +51,10 @@ impl Backend {
 }
 
 impl LanguageServer for Backend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let capability: Capability = params.capabilities.into();
+        self.send(MsgToServer::Initialize { capability }).await;
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(

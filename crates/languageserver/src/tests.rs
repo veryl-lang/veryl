@@ -104,7 +104,11 @@ impl TestServer {
 }
 
 fn build_initialize(id: i64) -> Request {
-    let params = InitializeParams::default();
+    let mut params = InitializeParams::default();
+    params.capabilities.window = Some(WindowClientCapabilities {
+        work_done_progress: Some(true),
+        ..Default::default()
+    });
     Request::build("initialize")
         .params(json!(params))
         .id(id)
