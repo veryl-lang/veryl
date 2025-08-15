@@ -1,7 +1,7 @@
 use crate::OptCheck;
 use crate::context::Context;
 use log::info;
-use miette::{self, Diagnostic, IntoDiagnostic, Result, Severity, WrapErr};
+use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use thiserror::Error;
 use veryl_analyzer::{Analyzer, AnalyzerError};
@@ -12,25 +12,38 @@ pub struct CmdCheck {
     opt: OptCheck,
 }
 
-#[derive(Error, Diagnostic, Debug, Default)]
+#[derive(Error, Diagnostic, Debug)]
 #[error("veryl check failed")]
 pub struct CheckError {
     #[related]
     pub related: Vec<AnalyzerError>,
+    error_count: u32,
+    error_count_limit: u32,
 }
 
 impl CheckError {
+    pub fn new(error_count_limit: u32) -> Self {
+        Self {
+            related: Vec::new(),
+            error_count: 0,
+            error_count_limit,
+        }
+    }
+
     pub fn append(mut self, x: &mut Vec<AnalyzerError>) -> Self {
-        self.related.append(x);
+        for x in x.drain(0..) {
+            if !x.is_error() || self.error_count_limit == 0 {
+                self.related.push(x);
+            } else if self.error_count < self.error_count_limit {
+                self.related.push(x);
+                self.error_count += 1;
+            }
+        }
         self
     }
 
     pub fn check_err(self) -> Result<Self> {
-        if self
-            .related
-            .iter()
-            .all(|x| !matches!(x.severity(), Some(Severity::Error) | None))
-        {
+        if self.related.iter().all(|x| !x.is_error()) {
             Ok(self)
         } else {
             Err(self.into())
@@ -54,7 +67,7 @@ impl CmdCheck {
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
-        let mut check_error = CheckError::default();
+        let mut check_error = CheckError::new(metadata.build.error_count_limit);
         let mut contexts = Vec::new();
 
         for path in &paths {
