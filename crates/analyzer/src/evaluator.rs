@@ -1542,6 +1542,8 @@ impl Evaluator {
                     tmp = self.do_concatenation(tmp, e.clone());
                 }
                 tmp
+            } else if c.is_known_static() {
+                Evaluated::create_unknown_static()
             } else {
                 Evaluated::create_unknown()
             }
