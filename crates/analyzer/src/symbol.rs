@@ -302,6 +302,17 @@ impl Symbol {
                     }
                 }
                 SymbolKind::Genvar => Evaluated::create_unknown_static(),
+                SymbolKind::GenericParameter(x) => {
+                    if x.bound
+                        .resolve_proto_bound(&self.namespace)
+                        .map(|x| x.is_variable_type())
+                        .unwrap_or(false)
+                    {
+                        Evaluated::create_unknown_static()
+                    } else {
+                        self.create_evaluated_with_error()
+                    }
+                }
                 SymbolKind::Module(_)
                 | SymbolKind::ProtoModule(_)
                 | SymbolKind::Interface(_)
