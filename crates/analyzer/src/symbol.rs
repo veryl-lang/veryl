@@ -206,70 +206,11 @@ impl Symbol {
             self.evaluated.borrow().clone().unwrap()
         } else {
             let evaluated = match &self.kind {
-                SymbolKind::Variable(x) => {
-                    let mut evaluator = Evaluator::new(&[]);
-                    let width = evaluator.type_width(x.r#type.clone());
-                    let array = evaluator.type_array(x.r#type.clone());
-
-                    if let (Some(width), Some(array)) = (width, array) {
-                        if x.r#type.kind.is_clock() {
-                            let kind = match x.r#type.kind {
-                                TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
-                                TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
-                                TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
-                                _ => unreachable!(),
-                            };
-                            Evaluated::create_clock(kind, width, array)
-                        } else if x.r#type.kind.is_reset() {
-                            let kind = match x.r#type.kind {
-                                TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
-                                TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
-                                TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
-                                TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
-                                TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
-                                _ => unreachable!(),
-                            };
-                            Evaluated::create_reset(kind, width, array)
-                        } else if x.loop_variable {
-                            Evaluated::create_unknown_static()
-                        } else {
-                            let signed = x.r#type.is_signed();
-                            let is_4state = x.r#type.kind.is_4state();
-                            Evaluated::create_variable(signed, is_4state, width, array)
-                        }
-                    } else {
-                        Evaluated::create_unknown()
-                    }
-                }
-                SymbolKind::Port(x) => {
-                    let mut evaluator = Evaluator::new(&[]);
-                    let width = evaluator.type_width(x.r#type.clone());
-                    let array = evaluator.type_array(x.r#type.clone());
-
-                    if let (Some(width), Some(array)) = (width, array) {
-                        if x.r#type.kind.is_clock() {
-                            let kind = match x.r#type.kind {
-                                TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
-                                TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
-                                TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
-                                _ => unreachable!(),
-                            };
-                            Evaluated::create_clock(kind, width, array)
-                        } else if x.r#type.kind.is_reset() {
-                            let kind = match x.r#type.kind {
-                                TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
-                                TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
-                                TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
-                                TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
-                                TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
-                                _ => unreachable!(),
-                            };
-                            Evaluated::create_reset(kind, width, array)
-                        } else {
-                            let signed = x.r#type.is_signed();
-                            let is_4state = x.r#type.kind.is_4state();
-                            Evaluated::create_variable(signed, is_4state, width, array)
-                        }
+                SymbolKind::Variable(x) => Self::evaluate_variable_type(&x.r#type, x.loop_variable),
+                SymbolKind::Port(x) => Self::evaluate_variable_type(&x.r#type, false),
+                SymbolKind::ModportVariableMember(x) => {
+                    if let Some(x) = symbol_table::get(x.variable) {
+                        x.evaluate()
                     } else {
                         Evaluated::create_unknown()
                     }
@@ -349,6 +290,42 @@ impl Symbol {
             };
             self.evaluated.replace(Some(evaluated.clone()));
             evaluated
+        }
+    }
+
+    fn evaluate_variable_type(r#type: &Type, is_loop_variable: bool) -> Evaluated {
+        let mut evaluator = Evaluator::new(&[]);
+        let width = evaluator.type_width(r#type.clone());
+        let array = evaluator.type_array(r#type.clone());
+
+        if let (Some(width), Some(array)) = (width, array) {
+            if r#type.kind.is_clock() {
+                let kind = match r#type.kind {
+                    TypeKind::Clock => EvaluatedTypeClockKind::Implicit,
+                    TypeKind::ClockPosedge => EvaluatedTypeClockKind::Posedge,
+                    TypeKind::ClockNegedge => EvaluatedTypeClockKind::Negedge,
+                    _ => unreachable!(),
+                };
+                Evaluated::create_clock(kind, width, array)
+            } else if r#type.kind.is_reset() {
+                let kind = match r#type.kind {
+                    TypeKind::Reset => EvaluatedTypeResetKind::Implicit,
+                    TypeKind::ResetAsyncHigh => EvaluatedTypeResetKind::AsyncHigh,
+                    TypeKind::ResetAsyncLow => EvaluatedTypeResetKind::AsyncLow,
+                    TypeKind::ResetSyncHigh => EvaluatedTypeResetKind::SyncHigh,
+                    TypeKind::ResetSyncLow => EvaluatedTypeResetKind::SyncLow,
+                    _ => unreachable!(),
+                };
+                Evaluated::create_reset(kind, width, array)
+            } else if is_loop_variable {
+                Evaluated::create_unknown_static()
+            } else {
+                let signed = r#type.is_signed();
+                let is_4state = r#type.kind.is_4state();
+                Evaluated::create_variable(signed, is_4state, width, array)
+            }
+        } else {
+            Evaluated::create_unknown()
         }
     }
 

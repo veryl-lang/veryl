@@ -5947,6 +5947,26 @@ fn invalid_cast() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidCast { .. }));
+
+    let code = r#"
+    interface FooIF {
+        var clk: clock;
+        var rst: reset;
+        modport mp {
+            clk: input,
+            rst: input,
+        }
+    }
+    module BarModule (
+        foo_if: modport FooIF::mp,
+    ) {
+        let _clk: clock = foo_if.clk as clock;
+        let _rst: reset = foo_if.rst as reset;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
