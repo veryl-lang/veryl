@@ -5530,6 +5530,40 @@ fn reset_value_non_elaborative() {
         errors[0],
         AnalyzerError::InvalidResetNonElaborative { .. }
     ));
+
+    let code = r#"
+    module ModuleA::<A: u32> (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var _a: logic;
+        always_ff {
+            if_reset {
+                _a = A;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<A: u32> (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var _a: logic<A>;
+        always_ff {
+            if_reset {
+                _a = {1'b0 repeat A};
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
