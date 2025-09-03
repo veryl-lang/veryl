@@ -101,7 +101,9 @@ fn check_project_name(name: &str) -> Result<(), MetadataError> {
 
 impl Metadata {
     pub fn search_from_current() -> Result<PathBuf, MetadataError> {
-        Metadata::search_from(env::current_dir()?)
+        Metadata::search_from(
+            env::current_dir().map_err(|x| MetadataError::file_io(x, &PathBuf::from(".")))?,
+        )
     }
 
     pub fn search_from<T: AsRef<Path>>(from: T) -> Result<PathBuf, MetadataError> {
@@ -116,8 +118,11 @@ impl Metadata {
     }
 
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
-        let path = path.as_ref().canonicalize()?;
-        let text = fs::read_to_string(&path)?;
+        let path = path
+            .as_ref()
+            .canonicalize()
+            .map_err(|x| MetadataError::file_io(x, path.as_ref()))?;
+        let text = fs::read_to_string(&path).map_err(|x| MetadataError::file_io(x, &path))?;
         let mut metadata: Metadata = Self::from_str(&text)?;
         metadata.metadata_path.clone_from(&path);
         metadata.pubfile_path = path.with_file_name("Veryl.pub");
@@ -130,7 +135,8 @@ impl Metadata {
 
         let dot_build = metadata.project_dot_build_path();
         if !dot_build.exists() {
-            ignore_already_exists(fs::create_dir(&dot_build))?;
+            ignore_already_exists(fs::create_dir(&dot_build))
+                .map_err(|x| MetadataError::file_io(x, &dot_build))?;
         }
 
         let build_info = metadata.project_build_info_path();
@@ -223,14 +229,16 @@ impl Metadata {
 
         self.project.version = bumped_version.clone();
 
-        let toml = fs::read_to_string(&self.metadata_path)?;
+        let toml = fs::read_to_string(&self.metadata_path)
+            .map_err(|x| MetadataError::file_io(x, &self.metadata_path))?;
         let re = Regex::new(r#"version\s+=\s+"([^"]*)""#).unwrap();
         let caps = re
             .captures(&toml)
             .expect("safely unwrap because metadata is valid");
         let bumped_field = caps[0].replace(&caps[1], &bumped_version.to_string());
         let bumped_toml = re.replace(&toml, bumped_field);
-        fs::write(&self.metadata_path, bumped_toml.as_bytes())?;
+        fs::write(&self.metadata_path, bumped_toml.as_bytes())
+            .map_err(|x| MetadataError::file_io(x, &self.metadata_path))?;
         info!(
             "Updating version field ({})",
             self.metadata_path.to_string_lossy()
@@ -295,7 +303,10 @@ impl Metadata {
             } else {
                 let mut ret = Vec::new();
                 for file in files {
-                    ret.push(fs::canonicalize(file.as_ref())?);
+                    ret.push(
+                        fs::canonicalize(file.as_ref())
+                            .map_err(|x| MetadataError::file_io(x, file.as_ref()))?,
+                    );
                 }
                 ret
             };
@@ -339,7 +350,8 @@ impl Metadata {
 
         let base_dst = self.project_dependencies_path();
         if !base_dst.exists() {
-            ignore_already_exists(fs::create_dir(&base_dst))?;
+            ignore_already_exists(fs::create_dir(&base_dst))
+                .map_err(|x| MetadataError::file_io(x, &base_dst))?;
         }
 
         if include_dependencies {

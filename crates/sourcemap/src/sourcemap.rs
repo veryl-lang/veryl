@@ -44,14 +44,14 @@ impl SourceMap {
     }
 
     pub fn from_src(src_path: &Path) -> Result<Self, SourceMapError> {
-        let src = fs::read_to_string(src_path)?;
+        let src = fs::read_to_string(src_path).map_err(|x| SourceMapError::io(x, src_path))?;
 
         if let Some(line) = src.lines().last()
             && line.starts_with(LINK_HEADER)
         {
             let map_path = line.strip_prefix(LINK_HEADER).unwrap();
             let map_path = src_path.parent().unwrap().join(map_path);
-            let text = fs::read(&map_path)?;
+            let text = fs::read(&map_path).map_err(|x| SourceMapError::io(x, &map_path))?;
 
             let src_path = src_path.to_path_buf();
             let dst_path = PathBuf::new();
