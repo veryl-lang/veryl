@@ -48,7 +48,8 @@ impl Git {
             let output = Command::new(GIT_COMMAND)
                 .arg("init")
                 .current_dir(path)
-                .output()?;
+                .output()
+                .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
             if !output.status.success() {
                 let context = String::from_utf8_lossy(&output.stderr).to_string();
                 let msg = format!("failed to init: {}", path.to_string_lossy());
@@ -75,7 +76,8 @@ impl Git {
                 .arg(url.to_string())
                 .arg(target)
                 .current_dir(current_dir)
-                .output()?;
+                .output()
+                .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
             if !output.status.success() {
                 // retry at checkout failure
                 if path.exists() {
@@ -84,7 +86,8 @@ impl Git {
                         .arg("--source=HEAD")
                         .arg(":/")
                         .current_dir(path)
-                        .output()?;
+                        .output()
+                        .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
                     if output.status.success() {
                         return Ok(Git {
                             path: path.to_path_buf(),
@@ -108,7 +111,8 @@ impl Git {
         let output = Command::new(GIT_COMMAND)
             .arg("fetch")
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
             let msg = format!(
@@ -134,7 +138,8 @@ impl Git {
             .arg("checkout")
             .arg(&dst)
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
             let msg = format!(
@@ -158,7 +163,8 @@ impl Git {
             .arg("rev-parse")
             .arg("HEAD")
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
             let msg = format!("failed to get revision: {}", self.path.to_string_lossy());
@@ -175,7 +181,8 @@ impl Git {
             .arg("status")
             .arg("-s")
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         Ok(output.status.success())
     }
 
@@ -184,7 +191,8 @@ impl Git {
             .arg("status")
             .arg("-s")
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
             let msg = format!("failed to get status: {}", self.path.to_string_lossy());
@@ -199,7 +207,8 @@ impl Git {
             .arg("add")
             .arg(file)
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
             let msg = format!("failed to add: {}", self.path.to_string_lossy());
@@ -215,7 +224,8 @@ impl Git {
             .arg("-m")
             .arg(msg)
             .current_dir(&self.path)
-            .output()?;
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
         if !output.status.success() {
             let context = String::from_utf8_lossy(&output.stderr).to_string();
             let msg = format!("failed to commit: {}", self.path.to_string_lossy());
