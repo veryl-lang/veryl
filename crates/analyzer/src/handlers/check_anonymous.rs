@@ -73,7 +73,29 @@ impl VerylGrammarTrait for CheckAnonymous {
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref()) {
+                if let Ok(symbol) =
+                    symbol_table::resolve(arg.component_instantiation.scoped_identifier.as_ref())
+                {
+                    match symbol.found.kind {
+                        SymbolKind::SystemVerilog => self.inst_sv_module = true,
+                        _ => get_inst_ports(&symbol.found, &mut self.inst_ports),
+                    }
+                }
+            }
+            HandlerPoint::After => {
+                self.inst_ports.clear();
+                self.inst_sv_module = false;
+            }
+        }
+        Ok(())
+    }
+
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                if let Ok(symbol) =
+                    symbol_table::resolve(arg.component_instantiation.scoped_identifier.as_ref())
+                {
                     match symbol.found.kind {
                         SymbolKind::SystemVerilog => self.inst_sv_module = true,
                         _ => get_inst_ports(&symbol.found, &mut self.inst_ports),

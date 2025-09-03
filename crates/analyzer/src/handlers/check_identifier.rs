@@ -330,7 +330,24 @@ impl VerylGrammarTrait for CheckIdentifier {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            self.check(&arg.identifier.identifier_token.token, Kind::Instance);
+            let token = &arg
+                .component_instantiation
+                .identifier
+                .identifier_token
+                .token;
+            self.check(token, Kind::Instance);
+        }
+        Ok(())
+    }
+
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let token = &arg
+                .component_instantiation
+                .identifier
+                .identifier_token
+                .token;
+            self.check(token, Kind::Instance);
         }
         Ok(())
     }

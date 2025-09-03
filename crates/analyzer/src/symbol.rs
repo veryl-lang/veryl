@@ -2010,7 +2010,8 @@ impl From<&syntax_tree::ExpressionIdentifier> for ConnectTargetIdentifier {
 pub struct InstanceProperty {
     pub array: Vec<syntax_tree::Expression>,
     pub type_name: GenericSymbolPath,
-    pub connects: HashMap<Token, ConnectTarget>,
+    pub parameter_connects: HashMap<Token, ConnectTarget>,
+    pub port_connects: HashMap<Token, ConnectTarget>,
     pub clock_domain: ClockDomain,
 }
 

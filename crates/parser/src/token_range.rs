@@ -304,6 +304,7 @@ impl_token_range_singular!(TripleLBrace);
 impl_token_range_singular!(LBrace);
 impl_token_range_singular!(LBracket);
 impl_token_range_singular!(LParen);
+impl_token_range_singular!(LTMinus);
 impl_token_range_singular!(MinusColon);
 impl_token_range_singular!(MinusGT);
 impl_token_range_singular!(PlusColon);
@@ -323,6 +324,7 @@ impl_token_range_singular!(AlwaysComb);
 impl_token_range_singular!(AlwaysFf);
 impl_token_range_singular!(As);
 impl_token_range_singular!(Assign);
+impl_token_range_singular!(Bind);
 impl_token_range_singular!(Bit);
 impl_token_range_singular!(Bool);
 impl_token_range_singular!(Break);
@@ -1042,6 +1044,24 @@ impl_token_range!(FinalDeclaration, r#final, statement_block);
 // ----------------------------------------------------------------------------
 
 impl_token_range!(InstDeclaration, inst, semicolon);
+impl_token_range!(BindDeclaration, bind, semicolon);
+
+impl From<&ComponentInstantiation> for TokenRange {
+    fn from(value: &ComponentInstantiation) -> Self {
+        let mut ret: TokenRange = value.identifier.as_ref().into();
+        if let Some(x) = &value.component_instantiation_opt2 {
+            ret.set_end(x.inst_port.as_ref().into());
+        } else if let Some(x) = &value.component_instantiation_opt1 {
+            ret.set_end(x.inst_parameter.as_ref().into());
+        } else if let Some(x) = &value.component_instantiation_opt0 {
+            ret.set_end(x.array.as_ref().into());
+        } else {
+            ret.set_end(value.scoped_identifier.as_ref().into());
+        }
+        ret
+    }
+}
+
 impl_token_range!(InstParameter, hash, r_paren);
 impl_token_range_list!(InstParameterList, InstParameterGroup);
 impl_token_range_group!(InstParameterGroup, InstParameterList, InstParameterItem);
@@ -1057,6 +1077,7 @@ impl From<&InstParameterItem> for TokenRange {
 }
 impl_token_ext!(InstParameterItem);
 
+impl_token_range!(InstPort, l_paren, r_paren);
 impl_token_range_list!(InstPortList, InstPortGroup);
 impl_token_range_group!(InstPortGroup, InstPortList, InstPortItem);
 
@@ -1276,6 +1297,7 @@ impl_token_range_enum!(
     let_declaration,
     var_declaration,
     inst_declaration,
+    bind_declaration,
     const_declaration,
     always_ff_declaration,
     always_comb_declaration,
@@ -1418,6 +1440,7 @@ impl From<&DescriptionItem> for TokenRange {
                 ret
             }
             DescriptionItem::ImportDeclaration(x) => x.import_declaration.as_ref().into(),
+            DescriptionItem::BindDeclaration(x) => x.bind_declaration.as_ref().into(),
             DescriptionItem::EmbedDeclaration(x) => x.embed_declaration.as_ref().into(),
             DescriptionItem::IncludeDeclaration(x) => x.include_declaration.as_ref().into(),
         }

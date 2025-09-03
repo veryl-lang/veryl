@@ -23,8 +23,9 @@ use crate::symbol::{
     TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty, VariableAffiliation,
     VariableProperty,
 };
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPathNamespace};
 use crate::symbol_table;
+use crate::symbol_table::Bind as SymBind;
 use crate::symbol_table::Import as SymImport;
 use crate::type_dag::{self, Context, TypeDagCandidate};
 use std::collections::{HashMap, HashSet};
@@ -90,7 +91,8 @@ pub struct CreateSymbolTable {
     declaration_items: Vec<SymbolId>,
     affiliation: Vec<VariableAffiliation>,
     connect_target_identifiers: Vec<ConnectTargetIdentifier>,
-    connects: HashMap<Token, ConnectTarget>,
+    parameter_connects: HashMap<Token, ConnectTarget>,
+    port_connects: HashMap<Token, ConnectTarget>,
     parameters: Vec<Vec<Parameter>>,
     ports: Vec<Vec<Port>>,
     needs_default_generic_argument: bool,
@@ -175,8 +177,32 @@ impl CreateSymbolTable {
     }
 
     fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
+        let doc_comment = self.create_doc_comment(token);
+        let mut symbol = Symbol::new(token, kind, &self.get_namespace(token), public, doc_comment);
+
+        if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
+            symbol.allow_unused = true;
+        }
+
+        let id = symbol_table::insert(token, symbol);
+        if id.is_some() {
+            // Some symbols (e.g. module declaration) are inserted at Hander::After phase.
+            // For such symbols, namespace assosiated with the symbol and namespace included in
+            // namespace_table are different.
+            // Need to insert the namespace again to resolve this namespace mismatch.
+            self.insert_namespace(token);
+        } else {
+            self.errors.push(AnalyzerError::duplicated_identifier(
+                &token.to_string(),
+                &token.into(),
+            ));
+        }
+        id
+    }
+
+    fn create_doc_comment(&self, token: &Token) -> DocComment {
         let line = token.line;
-        let doc_comment = if let TokenSource::File { path, .. } = token.source {
+        if let TokenSource::File { path, .. } = token.source {
             if line == 0 {
                 DocComment::default()
             } else if let Some(doc_comment) = doc_comment_table::get(path, line) {
@@ -199,27 +225,7 @@ impl CreateSymbolTable {
             }
         } else {
             DocComment::default()
-        };
-        let mut symbol = Symbol::new(token, kind, &self.get_namespace(token), public, doc_comment);
-
-        if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
-            symbol.allow_unused = true;
         }
-
-        let id = symbol_table::insert(token, symbol);
-        if id.is_some() {
-            // Some symbols (e.g. module declaration) are inserted at Hander::After phase.
-            // For such symbols, namespace assosiated with the symbol and namespace included in
-            // namespace_table are different.
-            // Need to insert the namespace again to resolve this namespace mismatch.
-            self.insert_namespace(token);
-        } else {
-            self.errors.push(AnalyzerError::duplicated_identifier(
-                &token.to_string(),
-                &token.into(),
-            ));
-        }
-        id
     }
 
     fn insert_clock_domain(&mut self, clock_domain: &ClockDomain) -> SymClockDomain {
@@ -1319,18 +1325,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
-            let array: Vec<Expression> = if let Some(x) = &arg.inst_declaration_opt0 {
+            let inst = &arg.component_instantiation;
+
+            let array: Vec<Expression> = if let Some(ref x) = inst.component_instantiation_opt0 {
                 x.array.as_ref().into()
             } else {
                 Vec::new()
             };
-            let type_name: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-            if !self.check_identifer_with_type_path(&arg.identifier, &type_name) {
+            let type_name: GenericSymbolPath = inst.scoped_identifier.as_ref().into();
+            if !self.check_identifer_with_type_path(&inst.identifier, &type_name) {
                 return Ok(());
             }
 
-            let connects = self.connects.drain().collect();
-            let clock_domain = if let Some(ref x) = arg.inst_declaration_opt {
+            let parameter_connects = self.parameter_connects.drain().collect();
+            let port_connects = self.port_connects.drain().collect();
+            let clock_domain = if let Some(ref x) = inst.component_instantiation_opt {
                 self.insert_clock_domain(&x.clock_domain)
             } else {
                 // Clock domain will be updated to 'Implicit' if the instance is for an interface
@@ -1339,11 +1348,85 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let property = InstanceProperty {
                 array,
                 type_name,
-                connects,
+                parameter_connects,
+                port_connects,
                 clock_domain,
             };
             let kind = SymbolKind::Instance(property);
-            self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
+            self.insert_symbol(&inst.identifier.identifier_token.token, kind, false);
+        }
+        Ok(())
+    }
+
+    /// Semantic action for non-terminal 'BindDeclaration'
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point {
+            let inst = &arg.component_instantiation;
+            let parameter_connects = self.parameter_connects.drain().collect();
+            let port_connects = self.port_connects.drain().collect();
+
+            let type_name: GenericSymbolPath = inst.scoped_identifier.as_ref().into();
+            if !self.check_identifer_with_type_path(&inst.identifier, &type_name) {
+                return Ok(());
+            }
+
+            let clock_domain = if let Some(ref x) = inst.component_instantiation_opt {
+                self.insert_clock_domain(&x.clock_domain)
+            } else {
+                // Clock domain will be updated to 'Implicit' if the instance is for an interface
+                SymClockDomain::None
+            };
+            let property = InstanceProperty {
+                array: Vec::new(),
+                type_name,
+                parameter_connects,
+                port_connects,
+                clock_domain,
+            };
+
+            let doc_comment = self.create_doc_comment(&inst.identifier.identifier_token.token);
+            let target = SymbolPathNamespace(
+                arg.scoped_identifier.as_ref().into(),
+                self.namespace.clone(),
+            );
+            let bind = SymBind {
+                token: inst.identifier.identifier_token.token,
+                target,
+                doc_comment,
+                property,
+            };
+
+            symbol_table::add_bind(bind);
+        }
+        Ok(())
+    }
+
+    fn inst_parameter_item(&mut self, arg: &InstParameterItem) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                reference_table::add(arg.into());
+                self.connect_target_identifiers.clear();
+            }
+            HandlerPoint::After => {
+                let parameter = arg.identifier.identifier_token.token;
+                let identifiers = if arg.inst_parameter_item_opt.is_some() {
+                    self.connect_target_identifiers.drain(0..).collect()
+                } else {
+                    vec![ConnectTargetIdentifier {
+                        path: vec![(parameter.text, vec![])],
+                    }]
+                };
+                let expression = if let Some(x) = &arg.inst_parameter_item_opt {
+                    x.expression.as_ref().clone()
+                } else {
+                    arg.identifier.as_ref().into()
+                };
+                let target = ConnectTarget {
+                    identifiers,
+                    expression,
+                };
+                self.parameter_connects.insert(parameter, target);
+            }
         }
         Ok(())
     }
@@ -1372,7 +1455,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     identifiers,
                     expression,
                 };
-                self.connects.insert(port, target);
+                self.port_connects.insert(port, target);
             }
         }
         Ok(())

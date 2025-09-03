@@ -12,6 +12,7 @@ use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPathNam
 use crate::symbol_table;
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 use veryl_parser::{ParolError, Stringifier};
 
@@ -300,6 +301,142 @@ fn check_generic_proto_arg(
     }
 
     None
+}
+
+fn check_inst(
+    in_module: bool,
+    header_token: &Token,
+    arg: &ComponentInstantiation,
+) -> Vec<AnalyzerError> {
+    let mut errors = Vec::new();
+
+    let mut connected_params = Vec::new();
+    if let Some(ref x) = arg.component_instantiation_opt1
+        && let Some(ref x) = x.inst_parameter.inst_parameter_opt
+    {
+        let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
+        for item in items {
+            connected_params.push(item.identifier.identifier_token.token.text);
+        }
+    }
+
+    let mut connected_ports = Vec::new();
+    if let Some(ref x) = arg.component_instantiation_opt2
+        && let Some(ref x) = x.inst_port.inst_port_opt
+    {
+        let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
+        for item in items {
+            connected_ports.push(item.identifier.identifier_token.token.text);
+        }
+    }
+
+    let path: SymbolPathNamespace = arg.scoped_identifier.as_ref().into();
+    if let Some(symbol) = resolve_inst_type(&InstTypeSource::Path(path)) {
+        let mut stringifier = Stringifier::new();
+        stringifier.scoped_identifier(&arg.scoped_identifier);
+        let name = stringifier.as_str();
+
+        let mut params = vec![];
+        let mut ports = vec![];
+        let mut check_port_connection = false;
+
+        let type_expected = match symbol.kind {
+            SymbolKind::Module(ref x) if in_module => {
+                params.append(&mut x.parameters.clone());
+                ports.append(&mut x.ports.clone());
+                check_port_connection = true;
+                None
+            }
+            SymbolKind::ProtoModule(ref x) if in_module => {
+                params.append(&mut x.parameters.clone());
+                ports.append(&mut x.ports.clone());
+                check_port_connection = true;
+                None
+            }
+            SymbolKind::Interface(ref x) => {
+                params.append(&mut x.parameters.clone());
+                check_port_connection = true;
+                None
+            }
+            SymbolKind::ProtoInterface(ref x) => {
+                params.append(&mut x.parameters.clone());
+                check_port_connection = true;
+                None
+            }
+            SymbolKind::SystemVerilog => None,
+            _ => {
+                if in_module {
+                    Some("module or interface")
+                } else {
+                    Some("interface")
+                }
+            }
+        };
+
+        if let Some(expected) = type_expected {
+            errors.push(AnalyzerError::mismatch_type(
+                name,
+                expected,
+                &symbol.kind.to_kind_name(),
+                &arg.identifier.as_ref().into(),
+            ));
+        }
+
+        if check_port_connection {
+            for port in &ports {
+                if !connected_ports.contains(&port.name())
+                    && port.property().default_value.is_none()
+                    && !attribute_table::contains(header_token, Attr::Allow(AllowItem::MissingPort))
+                {
+                    let port = resource_table::get_str_value(port.name()).unwrap();
+                    errors.push(AnalyzerError::missing_port(
+                        name,
+                        &port,
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
+            }
+            for param in &connected_params {
+                if !params.iter().any(|x| &x.name == param) {
+                    let param = resource_table::get_str_value(*param).unwrap();
+                    errors.push(AnalyzerError::unknown_param(
+                        name,
+                        &param,
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
+            }
+            for port in &connected_ports {
+                if !ports.iter().any(|x| &x.name() == port) {
+                    let port = resource_table::get_str_value(*port).unwrap();
+                    errors.push(AnalyzerError::unknown_port(
+                        name,
+                        &port,
+                        &arg.identifier.as_ref().into(),
+                    ));
+                }
+            }
+        }
+    }
+
+    errors
+}
+
+fn check_bind_target(identifier: &ScopedIdentifier, target: &Symbol) -> Option<AnalyzerError> {
+    if !(target.is_module(true) || target.is_interface(true)) {
+        let mut stringifier = Stringifier::new();
+        stringifier.scoped_identifier(identifier);
+        let name = stringifier.as_str();
+
+        Some(AnalyzerError::mismatch_type(
+            name,
+            "module or interface",
+            &target.kind.to_kind_name(),
+            &identifier.into(),
+        ))
+    } else {
+        None
+    }
 }
 
 fn match_fixed_type(arg_type: &SymType, param_type: &SymType) -> bool {
@@ -695,117 +832,29 @@ impl VerylGrammarTrait for CheckType {
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let mut connected_params = Vec::new();
-            if let Some(ref x) = arg.inst_declaration_opt1
-                && let Some(ref x) = x.inst_parameter.inst_parameter_opt
-            {
-                let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
-                for item in items {
-                    connected_params.push(item.identifier.identifier_token.token.text);
-                }
+            self.errors.append(&mut check_inst(
+                self.in_module,
+                &arg.inst.inst_token.token,
+                &arg.component_instantiation,
+            ));
+        }
+        Ok(())
+    }
+
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref())
+        {
+            if let Some(err) = check_bind_target(&arg.scoped_identifier, &symbol.found) {
+                self.errors.push(err);
+                return Ok(());
             }
 
-            let mut connected_ports = Vec::new();
-            if let Some(ref x) = arg.inst_declaration_opt2
-                && let Some(ref x) = x.inst_declaration_opt3
-            {
-                let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
-                for item in items {
-                    connected_ports.push(item.identifier.identifier_token.token.text);
-                }
-            }
-
-            let path: SymbolPathNamespace = arg.scoped_identifier.as_ref().into();
-            if let Some(symbol) = resolve_inst_type(&InstTypeSource::Path(path)) {
-                let mut stringifier = Stringifier::new();
-                stringifier.scoped_identifier(&arg.scoped_identifier);
-                let name = stringifier.as_str();
-
-                let mut params = vec![];
-                let mut ports = vec![];
-                let mut check_port_connection = false;
-
-                let type_expected = match symbol.kind {
-                    SymbolKind::Module(ref x) if self.in_module => {
-                        params.append(&mut x.parameters.clone());
-                        ports.append(&mut x.ports.clone());
-                        check_port_connection = true;
-                        None
-                    }
-                    SymbolKind::ProtoModule(ref x) if self.in_module => {
-                        params.append(&mut x.parameters.clone());
-                        ports.append(&mut x.ports.clone());
-                        check_port_connection = true;
-                        None
-                    }
-                    SymbolKind::Interface(ref x) => {
-                        params.append(&mut x.parameters.clone());
-                        check_port_connection = true;
-                        None
-                    }
-                    SymbolKind::ProtoInterface(ref x) => {
-                        params.append(&mut x.parameters.clone());
-                        check_port_connection = true;
-                        None
-                    }
-                    SymbolKind::SystemVerilog => None,
-                    _ => {
-                        if self.in_module {
-                            Some("module or interface")
-                        } else {
-                            Some("interface")
-                        }
-                    }
-                };
-
-                if let Some(expected) = type_expected {
-                    self.errors.push(AnalyzerError::mismatch_type(
-                        name,
-                        expected,
-                        &symbol.kind.to_kind_name(),
-                        &arg.identifier.as_ref().into(),
-                    ));
-                }
-
-                if check_port_connection {
-                    for port in &ports {
-                        if !connected_ports.contains(&port.name())
-                            && port.property().default_value.is_none()
-                            && !attribute_table::contains(
-                                &arg.inst.inst_token.token,
-                                Attr::Allow(AllowItem::MissingPort),
-                            )
-                        {
-                            let port = resource_table::get_str_value(port.name()).unwrap();
-                            self.errors.push(AnalyzerError::missing_port(
-                                name,
-                                &port,
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-                    }
-                    for param in &connected_params {
-                        if !params.iter().any(|x| &x.name == param) {
-                            let param = resource_table::get_str_value(*param).unwrap();
-                            self.errors.push(AnalyzerError::unknown_param(
-                                name,
-                                &param,
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-                    }
-                    for port in &connected_ports {
-                        if !ports.iter().any(|x| &x.name() == port) {
-                            let port = resource_table::get_str_value(*port).unwrap();
-                            self.errors.push(AnalyzerError::unknown_port(
-                                name,
-                                &port,
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-                    }
-                }
-            }
+            self.errors.append(&mut check_inst(
+                symbol.found.is_module(true),
+                &arg.bind.bind_token.token,
+                &arg.component_instantiation,
+            ));
         }
         Ok(())
     }

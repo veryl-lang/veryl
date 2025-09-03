@@ -64,6 +64,53 @@ impl CheckClockDomain {
             }
         }
     }
+
+    fn check_inst(&mut self, arg: &ComponentInstantiation, semicolon: &Semicolon) {
+        if let Ok(inst_symbol) = symbol_table::resolve(arg.identifier.as_ref())
+            && let Some(type_kind) = get_inst_type_kind(&inst_symbol.found)
+        {
+            if !matches!(type_kind, SymbolKind::Interface(_))
+                && let Some(ref x) = arg.component_instantiation_opt
+            {
+                self.errors.push(AnalyzerError::invalid_clock_domain(
+                    &x.clock_domain.as_ref().into(),
+                ));
+                return;
+            }
+
+            let cdc_unsafe = unsafe_table::contains(&semicolon.semicolon_token.token, Unsafe::Cdc);
+            match type_kind {
+                SymbolKind::Module(x) => {
+                    self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
+                }
+                SymbolKind::Interface(_) => {
+                    if let SymbolKind::Instance(x) = &inst_symbol.found.kind
+                        && x.clock_domain == ClockDomain::None
+                    {
+                        let mut property = x.clone();
+                        property.clock_domain = ClockDomain::Implicit;
+
+                        let mut symbol = inst_symbol.found.clone();
+                        symbol.kind = SymbolKind::Instance(property);
+                        symbol_table::update(symbol);
+                    }
+                }
+                SymbolKind::SystemVerilog => {
+                    let mut prev: Option<(ClockDomain, TokenRange)> = None;
+                    for curr in self.inst_clock_domains.values() {
+                        if let Some(prev) = prev {
+                            check_clock_domain(curr, &prev, cdc_unsafe, &mut self.errors);
+                        }
+                        prev = Some(*curr);
+                    }
+                }
+                SymbolKind::ProtoModule(x) => {
+                    self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 impl Handler for CheckClockDomain {
@@ -214,50 +261,18 @@ impl VerylGrammarTrait for CheckClockDomain {
         match self.point {
             HandlerPoint::Before => self.inst_clock_domains.clear(),
             HandlerPoint::After => {
-                if let Ok(inst_symbol) = symbol_table::resolve(arg.identifier.as_ref())
-                    && let Some(type_kind) = get_inst_type_kind(&inst_symbol.found)
-                {
-                    if !matches!(type_kind, SymbolKind::Interface(_))
-                        && let Some(ref x) = arg.inst_declaration_opt
-                    {
-                        self.errors.push(AnalyzerError::invalid_clock_domain(
-                            &x.clock_domain.as_ref().into(),
-                        ));
-                        return Ok(());
-                    }
+                self.check_inst(&arg.component_instantiation, &arg.semicolon);
+            }
+        }
+        Ok(())
+    }
 
-                    let cdc_unsafe =
-                        unsafe_table::contains(&arg.semicolon.semicolon_token.token, Unsafe::Cdc);
-                    match type_kind {
-                        SymbolKind::Module(x) => {
-                            self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
-                        }
-                        SymbolKind::Interface(_) => {
-                            if let SymbolKind::Instance(x) = &inst_symbol.found.kind
-                                && x.clock_domain == ClockDomain::None
-                            {
-                                let mut property = x.clone();
-                                property.clock_domain = ClockDomain::Implicit;
-
-                                let mut symbol = inst_symbol.found.clone();
-                                symbol.kind = SymbolKind::Instance(property);
-                                symbol_table::update(symbol);
-                            }
-                        }
-                        SymbolKind::SystemVerilog => {
-                            let mut prev: Option<(ClockDomain, TokenRange)> = None;
-                            for curr in self.inst_clock_domains.values() {
-                                if let Some(prev) = prev {
-                                    check_clock_domain(curr, &prev, cdc_unsafe, &mut self.errors);
-                                }
-                                prev = Some(*curr);
-                            }
-                        }
-                        SymbolKind::ProtoModule(x) => {
-                            self.check_cdc_on_port_connections(&x.ports, cdc_unsafe);
-                        }
-                        _ => {}
-                    }
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.inst_clock_domains.clear(),
+            HandlerPoint::After => {
+                if symbol_table::resolve(arg.scoped_identifier.as_ref()).is_ok() {
+                    self.check_inst(&arg.component_instantiation, &arg.semicolon);
                 }
             }
         }

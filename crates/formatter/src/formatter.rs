@@ -370,8 +370,69 @@ impl Formatter {
         !self.multi_line.is_empty()
     }
 
+    fn format_inst(&mut self, arg: &ComponentInstantiation, semicolon: &Semicolon) {
+        let single_line = is_single_line_inst_declaration(arg);
+
+        if single_line {
+            self.single_line_start();
+        }
+        if self.single_line() {
+            self.align_start(align_kind::IDENTIFIER);
+        }
+        self.identifier(&arg.identifier);
+        if self.single_line() {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
+        self.colon(&arg.colon);
+        self.space(1);
+        if let Some(ref x) = arg.component_instantiation_opt {
+            if self.single_line() {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+            }
+            self.clock_domain(&x.clock_domain);
+            self.space(1);
+            if self.single_line() {
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            }
+        } else if self.single_line() {
+            self.align_start(align_kind::CLOCK_DOMAIN);
+            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
+            self.align_finish(align_kind::CLOCK_DOMAIN);
+        }
+        self.scoped_identifier(&arg.scoped_identifier);
+        // skip align at single line
+        if self.mode == Mode::Align && self.single_line() {
+            self.single_line_finish();
+            return;
+        }
+        if let Some(ref x) = arg.component_instantiation_opt0 {
+            self.space(1);
+            self.array(&x.array);
+        }
+        if let Some(ref x) = arg.component_instantiation_opt1 {
+            self.space(1);
+            self.inst_parameter(&x.inst_parameter);
+        }
+        if let Some(ref x) = arg.component_instantiation_opt2 {
+            if let Some(ref y) = x.inst_port.inst_port_opt {
+                self.space(1);
+                self.token_will_push(&x.inst_port.l_paren.l_paren_token);
+                self.newline_push();
+                self.inst_port_list(&y.inst_port_list);
+                self.newline_pop();
+                self.r_paren(&x.inst_port.r_paren);
+            } else {
+                // Remove empty `()`
+            }
+        }
+        self.semicolon(semicolon);
+        if single_line {
+            self.single_line_finish();
+        }
+    }
+
     fn unformat_description_item(&mut self, arg: &DescriptionItem) {
-        let mut token_collector = TokenCollector::default();
+        let mut token_collector = TokenCollector::new(true);
         token_collector.description_item(arg);
 
         let mut string = String::new();
@@ -1860,66 +1921,20 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        let single_line = is_single_line_inst_declaration(arg);
-
         self.inst(&arg.inst);
         self.space(1);
-        if single_line {
-            self.single_line_start();
-        }
-        if self.single_line() {
-            self.align_start(align_kind::IDENTIFIER);
-        }
-        self.identifier(&arg.identifier);
-        if self.single_line() {
-            self.align_finish(align_kind::IDENTIFIER);
-        }
-        self.colon(&arg.colon);
+        self.format_inst(&arg.component_instantiation, &arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'BindDeclaration'
+    fn bind_declaration(&mut self, arg: &BindDeclaration) {
+        self.bind(&arg.bind);
         self.space(1);
-        if let Some(ref x) = arg.inst_declaration_opt {
-            if self.single_line() {
-                self.align_start(align_kind::CLOCK_DOMAIN);
-            }
-            self.clock_domain(&x.clock_domain);
-            self.space(1);
-            if self.single_line() {
-                self.align_finish(align_kind::CLOCK_DOMAIN);
-            }
-        } else if self.single_line() {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
-        }
         self.scoped_identifier(&arg.scoped_identifier);
-        // skip align at single line
-        if self.mode == Mode::Align && self.single_line() {
-            self.single_line_finish();
-            return;
-        }
-        if let Some(ref x) = arg.inst_declaration_opt0 {
-            self.space(1);
-            self.array(&x.array);
-        }
-        if let Some(ref x) = arg.inst_declaration_opt1 {
-            self.space(1);
-            self.inst_parameter(&x.inst_parameter);
-        }
-        if let Some(ref x) = arg.inst_declaration_opt2 {
-            if let Some(ref y) = x.inst_declaration_opt3 {
-                self.space(1);
-                self.token_will_push(&x.l_paren.l_paren_token);
-                self.newline_push();
-                self.inst_port_list(&y.inst_port_list);
-                self.newline_pop();
-                self.r_paren(&x.r_paren);
-            } else {
-                // Remove empty `()`
-            }
-        }
-        self.semicolon(&arg.semicolon);
-        if single_line {
-            self.single_line_finish();
-        }
+        self.space(1);
+        self.l_t_minus(&arg.l_t_minus);
+        self.space(1);
+        self.format_inst(&arg.component_instantiation, &arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'InstParameter'
@@ -2915,6 +2930,9 @@ impl VerylWalker for Formatter {
                 DescriptionItem::ImportDeclaration(x) => {
                     self.import_declaration(&x.import_declaration)
                 }
+                DescriptionItem::BindDeclaration(x) => {
+                    self.bind_declaration(&x.bind_declaration);
+                }
                 DescriptionItem::EmbedDeclaration(x) => {
                     self.embed_declaration(&x.embed_declaration)
                 }
@@ -2945,13 +2963,13 @@ impl VerylWalker for Formatter {
     }
 }
 
-fn is_single_line_inst_declaration(arg: &InstDeclaration) -> bool {
+fn is_single_line_inst_declaration(arg: &ComponentInstantiation) -> bool {
     if attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact) {
         return true;
     }
 
-    if let Some(x) = &arg.inst_declaration_opt2
-        && x.inst_declaration_opt3.is_some()
+    if let Some(ref x) = arg.component_instantiation_opt2
+        && x.inst_port.inst_port_opt.is_some()
     {
         // Non empty port list
         return false;
