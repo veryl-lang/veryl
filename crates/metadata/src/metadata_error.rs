@@ -1,7 +1,7 @@
 use crate::metadata::UrlPath;
 use miette::{self, Diagnostic};
 use semver::Version;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use url::Url;
 use veryl_path::PathError;
@@ -9,8 +9,12 @@ use veryl_path::PathError;
 #[derive(Error, Diagnostic, Debug)]
 pub enum MetadataError {
     #[diagnostic(code(MetadataError::FileIO), help(""))]
-    #[error("file I/O error")]
-    FileIO(#[from] std::io::Error),
+    #[error("file I/O error ({path})")]
+    FileIO {
+        #[source]
+        source: std::io::Error,
+        path: PathBuf,
+    },
 
     #[diagnostic(code(MetadataError::FileNotFound), help(""))]
     #[error("Veryl.toml is not found")]
@@ -84,4 +88,13 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::Path), help(""))]
     #[error("path error")]
     Path(#[from] PathError),
+}
+
+impl MetadataError {
+    pub fn file_io(source: std::io::Error, path: &Path) -> MetadataError {
+        MetadataError::FileIO {
+            source,
+            path: path.into(),
+        }
+    }
 }
