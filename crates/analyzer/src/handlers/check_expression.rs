@@ -25,7 +25,6 @@ pub struct CheckExpression {
     pub errors: Vec<AnalyzerError>,
     point: HandlerPoint,
     evaluator: Evaluator,
-    in_inst_declaration: bool,
     port_direction: Option<Direction>,
     in_proto: bool,
     in_input_port_default_value: bool,
@@ -132,10 +131,76 @@ impl CheckExpression {
         }
     }
 
-    fn get_overridden_params(&mut self, arg: &InstDeclaration) -> HashMap<StrId, Evaluated> {
+    fn check_inst(&mut self, arg: &ComponentInstantiation) {
+        if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref())
+            && matches!(
+                symbol.found.kind,
+                SymbolKind::Module(_) | SymbolKind::Interface(_)
+            )
+        {
+            let parameters = symbol.found.kind.get_parameters();
+            let definition = symbol.found.kind.get_definition().unwrap();
+
+            let mut sig = InstanceSignature::new(symbol.found.id);
+
+            // Push override parameters
+            let params = self.get_overridden_params(arg);
+            for x in parameters {
+                if let Some(value) = params.get(&x.name) {
+                    symbol_table::push_override(x.symbol, value.clone());
+                    sig.add_param(x.name, value.value.clone());
+                }
+            }
+
+            symbol_table::clear_evaluated_cache(&symbol.found.inner_namespace());
+
+            if let SymbolKind::Module(x) = &symbol.found.kind {
+                self.check_port_connection(arg, x);
+            }
+
+            match instance_history::push(sig) {
+                Ok(true) => {
+                    // Check expression with overridden parameters
+                    if let Some(def) = definition_table::get(definition) {
+                        match def {
+                            Definition::Module(x) => {
+                                let mut inst_context = self.inst_context.clone();
+                                inst_context.push(arg.identifier.as_ref().into());
+                                let mut analyzer = AnalyzerPass2Expression::new(inst_context);
+                                analyzer.module_declaration(&x);
+                                self.errors.append(&mut analyzer.get_errors());
+                            }
+                            Definition::Interface(x) => {
+                                let mut inst_context = self.inst_context.clone();
+                                inst_context.push(arg.identifier.as_ref().into());
+                                let mut analyzer = AnalyzerPass2Expression::new(inst_context);
+                                analyzer.interface_declaration(&x);
+                                self.errors.append(&mut analyzer.get_errors());
+                            }
+                        }
+                    }
+                    instance_history::pop();
+                }
+                // Skip duplicated signature
+                Ok(false) => (),
+                Err(x) => self.inst_history_error(x, &arg.identifier.as_ref().into()),
+            }
+
+            symbol_table::clear_evaluated_cache(&symbol.found.inner_namespace());
+
+            // Pop override parameters
+            for x in parameters {
+                if params.contains_key(&x.name) {
+                    symbol_table::pop_override(x.symbol);
+                }
+            }
+        }
+    }
+
+    fn get_overridden_params(&mut self, arg: &ComponentInstantiation) -> HashMap<StrId, Evaluated> {
         let mut ret = HashMap::new();
 
-        let params = if let Some(x) = &arg.inst_declaration_opt1 {
+        let params = if let Some(ref x) = arg.component_instantiation_opt1 {
             if let Some(x) = &x.inst_parameter.inst_parameter_opt {
                 x.inst_parameter_list.as_ref().into()
             } else {
@@ -161,9 +226,9 @@ impl CheckExpression {
         ret
     }
 
-    fn check_port_connection(&mut self, arg: &InstDeclaration, module: &ModuleProperty) {
-        let connections = if let Some(x) = &arg.inst_declaration_opt2 {
-            if let Some(x) = &x.inst_declaration_opt3 {
+    fn check_port_connection(&mut self, arg: &ComponentInstantiation, module: &ModuleProperty) {
+        let connections = if let Some(ref x) = arg.component_instantiation_opt2 {
+            if let Some(ref x) = x.inst_port.inst_port_opt {
                 x.inst_port_list.as_ref().into()
             } else {
                 Vec::new()
@@ -581,79 +646,18 @@ impl VerylGrammarTrait for CheckExpression {
     }
 
     fn inst_declaration(&mut self, arg: &InstDeclaration) -> Result<(), ParolError> {
-        if !self.disable {
-            match self.point {
-                HandlerPoint::Before => {
-                    self.in_inst_declaration = true;
+        if !self.disable && matches!(self.point, HandlerPoint::Before) {
+            self.check_inst(&arg.component_instantiation);
+        }
+        Ok(())
+    }
 
-                    if let Ok(symbol) = symbol_table::resolve(arg.scoped_identifier.as_ref())
-                        && matches!(
-                            symbol.found.kind,
-                            SymbolKind::Module(_) | SymbolKind::Interface(_)
-                        )
-                    {
-                        let parameters = symbol.found.kind.get_parameters();
-                        let definition = symbol.found.kind.get_definition().unwrap();
-
-                        let mut sig = InstanceSignature::new(symbol.found.id);
-
-                        // Push override parameters
-                        let params = self.get_overridden_params(arg);
-                        for x in parameters {
-                            if let Some(value) = params.get(&x.name) {
-                                symbol_table::push_override(x.symbol, value.clone());
-                                sig.add_param(x.name, value.value.clone());
-                            }
-                        }
-
-                        symbol_table::clear_evaluated_cache(&symbol.found.inner_namespace());
-
-                        if let SymbolKind::Module(x) = &symbol.found.kind {
-                            self.check_port_connection(arg, x);
-                        }
-
-                        match instance_history::push(sig) {
-                            Ok(true) => {
-                                // Check expression with overridden parameters
-                                if let Some(def) = definition_table::get(definition) {
-                                    match def {
-                                        Definition::Module(x) => {
-                                            let mut inst_context = self.inst_context.clone();
-                                            inst_context.push(arg.identifier.as_ref().into());
-                                            let mut analyzer =
-                                                AnalyzerPass2Expression::new(inst_context);
-                                            analyzer.module_declaration(&x);
-                                            self.errors.append(&mut analyzer.get_errors());
-                                        }
-                                        Definition::Interface(x) => {
-                                            let mut inst_context = self.inst_context.clone();
-                                            inst_context.push(arg.identifier.as_ref().into());
-                                            let mut analyzer =
-                                                AnalyzerPass2Expression::new(inst_context);
-                                            analyzer.interface_declaration(&x);
-                                            self.errors.append(&mut analyzer.get_errors());
-                                        }
-                                    }
-                                }
-                                instance_history::pop();
-                            }
-                            // Skip duplicated signature
-                            Ok(false) => (),
-                            Err(x) => self.inst_history_error(x, &arg.identifier.as_ref().into()),
-                        }
-
-                        symbol_table::clear_evaluated_cache(&symbol.found.inner_namespace());
-
-                        // Pop override parameters
-                        for x in parameters {
-                            if params.contains_key(&x.name) {
-                                symbol_table::pop_override(x.symbol);
-                            }
-                        }
-                    }
-                }
-                HandlerPoint::After => self.in_inst_declaration = false,
-            }
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        if !self.disable
+            && matches!(self.point, HandlerPoint::Before)
+            && let Ok(_) = symbol_table::resolve(arg.scoped_identifier.as_ref())
+        {
+            self.check_inst(&arg.component_instantiation);
         }
         Ok(())
     }

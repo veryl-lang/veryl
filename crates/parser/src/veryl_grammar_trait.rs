@@ -666,6 +666,13 @@ impl DescriptionItem {
                 Some(x.public_description_item.identifier_token())
             }
             DescriptionItem::ImportDeclaration(_) => None,
+            DescriptionItem::BindDeclaration(x) => Some(
+                x.bind_declaration
+                    .component_instantiation
+                    .identifier
+                    .identifier_token
+                    .clone(),
+            ),
             DescriptionItem::EmbedDeclaration(x) => {
                 Some(x.embed_declaration.identifier.identifier_token.clone())
             }

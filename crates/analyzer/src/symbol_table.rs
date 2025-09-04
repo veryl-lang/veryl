@@ -1,21 +1,23 @@
-use crate::HashMap;
 use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
 use crate::sv_system_function;
 use crate::symbol::{
-    Direction, DocComment, GenericBoundKind, GenericMap, GenericTable, GenericTables, Symbol,
-    SymbolId, SymbolKind, TypeKind,
+    ConnectTarget, Direction, DocComment, GenericBoundKind, GenericMap, GenericTable,
+    GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TypeKind,
 };
 use crate::symbol_path::{
     GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath, SymbolPathNamespace,
 };
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
+use crate::{AnalyzerError, HashMap, namespace_table};
 use log::trace;
 use std::cell::RefCell;
 use std::fmt;
 use veryl_parser::resource_table::{PathId, StrId, TokenId};
+use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::veryl_grammar_trait::Expression;
 use veryl_parser::veryl_token::{Token, TokenSource};
+use veryl_parser::veryl_walker::VerylWalker;
 
 #[derive(Clone, Debug)]
 pub struct ResolveResult {
@@ -54,6 +56,14 @@ pub struct Import {
     pub wildcard: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct Bind {
+    pub token: Token,
+    pub target: SymbolPathNamespace,
+    pub doc_comment: DocComment,
+    pub property: InstanceProperty,
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
     name_table: HashMap<StrId, Vec<SymbolId>>,
@@ -61,6 +71,7 @@ pub struct SymbolTable {
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
     var_ref_list: HashMap<VarRefAffiliation, Vec<VarRef>>,
     import_list: Vec<Import>,
+    bind_list: Vec<Bind>,
 }
 
 impl SymbolTable {
@@ -995,6 +1006,62 @@ impl SymbolTable {
         None
     }
 
+    pub fn add_bind(&mut self, bind: Bind) {
+        self.bind_list.push(bind);
+    }
+
+    pub fn apply_bind(&mut self) -> Vec<AnalyzerError> {
+        let mut errors = Vec::new();
+
+        let bind_list: Vec<Bind> = self.bind_list.drain(0..).collect();
+        for bind in bind_list {
+            let context = ResolveContext::new(&bind.target.1);
+            if let Ok(target) = self.resolve(&bind.target.0, &[], context) {
+                let namespace = target.found.inner_namespace();
+                let symbol = Symbol::new(
+                    &bind.token,
+                    SymbolKind::Instance(bind.property.clone()),
+                    &namespace,
+                    false,
+                    bind.doc_comment.clone(),
+                );
+
+                if self.insert(&bind.token, symbol).is_some() {
+                    if let TokenSource::File { path, .. } = bind.token.source {
+                        namespace_table::insert(bind.token.id, path, &namespace);
+
+                        for target in bind.property.parameter_connects.values() {
+                            Self::update_connect_target_namespace(target, path, &namespace);
+                        }
+                        for target in bind.property.port_connects.values() {
+                            Self::update_connect_target_namespace(target, path, &namespace);
+                        }
+                    }
+                } else {
+                    errors.push(AnalyzerError::duplicated_identifier(
+                        &bind.token.to_string(),
+                        &bind.token.into(),
+                    ));
+                }
+            }
+        }
+
+        errors
+    }
+
+    fn update_connect_target_namespace(
+        target: &ConnectTarget,
+        path: PathId,
+        namespace: &Namespace,
+    ) {
+        let mut collector = TokenCollector::new(false);
+        collector.expression(&target.expression);
+
+        for token in &collector.tokens {
+            namespace_table::insert(token.id, path, namespace);
+        }
+    }
+
     pub fn get_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {
         let mut resolved = Vec::new();
         for symbol in self.symbol_table.values() {
@@ -1505,6 +1572,16 @@ pub fn apply_import() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     let symbols = SYMBOL_TABLE.with(|f| f.borrow().get_imported_symbols());
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import(&symbols));
+}
+
+pub fn add_bind(bind: Bind) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_bind(bind))
+}
+
+pub fn apply_bind() -> Vec<AnalyzerError> {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_bind())
 }
 
 pub fn resolve_user_defined() {

@@ -54,6 +54,7 @@ AllBitTerm            : <INITIAL, Generic                         >/(?:[0-9]+(?:
 BaseLessTerm          : <INITIAL, Generic                         >/[0-9]+(?:_[0-9]+)*/                                                                  : Token;
 MinusColonTerm        : <INITIAL                                  >'-:'                                                                                  : Token;
 MinusGTTerm           : <INITIAL                                  >'->'                                                                                  : Token;
+LTMinusTerm           : <INITIAL                                  >'<-'                                                                                  : Token;
 PlusColonTerm         : <INITIAL                                  >'+:'                                                                                  : Token;
 AssignmentOperatorTerm: <INITIAL                                  >"\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>="                                       : Token;
 DiamondOperatorTerm   : <INITIAL                                  >'<>'                                                                                  : Token;
@@ -105,6 +106,7 @@ AlwaysCombTerm        : <INITIAL, Generic                         >'always_comb'
 AlwaysFfTerm          : <INITIAL, Generic                         >'always_ff'                                                                           : Token; // Keyword: Statement
 AssignTerm            : <INITIAL, Generic                         >'assign'                                                                              : Token; // Keyword: Statement
 AsTerm                : <INITIAL, Generic                         >'as'                                                                                  : Token; // Keyword: Statement
+BindTerm              : <INITIAL, Generic                         >'bind'                                                                                : Token; // Keyword: Statement
 BitTerm               : <INITIAL, Generic                         >'bit'                                                                                 : Token; // Keyword: Type
 BoolTerm              : <INITIAL, Generic                         >'bool'                                                                                : Token; // Keyword: Type
 CaseTerm              : <INITIAL, Generic                         >'case'                                                                                : Token; // Keyword: Conditional
@@ -231,6 +233,7 @@ TripleLBraceToken    : TripleLBraceTerm    : Token         ;
 LBraceToken          : LBraceTerm          : Token Comments;
 LBracketToken        : LBracketTerm        : Token Comments;
 LParenToken          : LParenTerm          : Token Comments;
+LTMinusToken         : LTMinusTerm         : Token Comments;
 MinusColonToken      : MinusColonTerm      : Token Comments;
 MinusGTToken         : MinusGTTerm         : Token Comments;
 PlusColonToken       : PlusColonTerm       : Token Comments;
@@ -249,6 +252,7 @@ AlwaysCombToken    : AlwaysCombTerm    : Token Comments;
 AlwaysFfToken      : AlwaysFfTerm      : Token Comments;
 AsToken            : AsTerm            : Token Comments;
 AssignToken        : AssignTerm        : Token Comments;
+BindToken          : BindTerm          : Token Comments;
 BitToken           : BitTerm           : Token Comments;
 BoolToken          : BoolTerm          : Token Comments;
 CaseToken          : CaseTerm          : Token Comments;
@@ -380,6 +384,7 @@ TripleLBrace    : TripleLBraceToken    : VerylToken;
 LBrace          : LBraceToken          : VerylToken;
 LBracket        : LBracketToken        : VerylToken;
 LParen          : LParenToken          : VerylToken;
+LTMinus         : LTMinusToken         : VerylToken;
 MinusColon      : MinusColonToken      : VerylToken;
 MinusGT         : MinusGTToken         : VerylToken;
 PlusColon       : PlusColonToken       : VerylToken;
@@ -399,6 +404,7 @@ AlwaysComb    : AlwaysCombToken    : VerylToken;
 AlwaysFf      : AlwaysFfToken      : VerylToken;
 As            : AsToken            : VerylToken;
 Assign        : AssignToken        : VerylToken;
+Bind          : BindToken          : VerylToken;
 Bit           : BitToken           : VerylToken;
 Bool          : BoolToken          : VerylToken;
 Break         : BreakToken         : VerylToken;
@@ -788,10 +794,14 @@ InitialDeclaration: Initial StatementBlock;
 FinalDeclaration: Final StatementBlock;
 
 // ----------------------------------------------------------------------------
-// InstDeclaration
+// InstDeclaration/BindDeclaration
 // ----------------------------------------------------------------------------
 
-InstDeclaration: Inst Identifier Colon [ ClockDomain ] ScopedIdentifier [ Array ] [ InstParameter ] [ LParen [ InstPortList ] RParen ] Semicolon;
+InstDeclaration: Inst ComponentInstantiation Semicolon;
+
+BindDeclaration: Bind ScopedIdentifier LTMinus ComponentInstantiation Semicolon;
+
+ComponentInstantiation: Identifier Colon [ ClockDomain ] ScopedIdentifier [ Array ] [ InstParameter ] [ InstPort ];
 
 InstParameter: Hash LParen [ InstParameterList ] RParen;
 
@@ -800,6 +810,8 @@ InstParameterList: InstParameterGroup { Comma InstParameterGroup } [ Comma ];
 InstParameterGroup: { Attribute } ( LBrace InstParameterList RBrace | InstParameterItem );
 
 InstParameterItem: Identifier [ Colon Expression ];
+
+InstPort: LParen [ InstPortList ] RParen;
 
 InstPortList: InstPortGroup { Comma InstPortGroup } [ Comma ];
 
@@ -923,6 +935,7 @@ GenerateGroup: { Attribute } ( LBrace { GenerateGroup } RBrace | GenerateItem );
 GenerateItem: LetDeclaration
             | VarDeclaration
             | InstDeclaration
+            | BindDeclaration
             | ConstDeclaration
             | AlwaysFfDeclaration
             | AlwaysCombDeclaration
@@ -1033,6 +1046,7 @@ DescriptionGroup: { Attribute } ( LBrace { DescriptionGroup } RBrace | Descripti
 
 DescriptionItem: [ Pub ] PublicDescriptionItem
                | ImportDeclaration
+               | BindDeclaration
                | EmbedDeclaration
                | IncludeDeclaration
                ;

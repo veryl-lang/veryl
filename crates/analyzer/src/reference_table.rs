@@ -8,8 +8,8 @@ use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
-    ExpressionIdentifier, HierarchicalIdentifier, Identifier, InstPortItem, ModportItem,
-    ScopedIdentifier, StructConstructorItem,
+    ExpressionIdentifier, HierarchicalIdentifier, Identifier, InstParameterItem, InstPortItem,
+    ModportItem, ScopedIdentifier, StructConstructorItem,
 };
 use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_text};
 
@@ -34,6 +34,10 @@ pub enum ReferenceCandidate {
     },
     ModportItem {
         arg: ModportItem,
+        namespace: Namespace,
+    },
+    InstParameterItem {
+        arg: InstParameterItem,
         namespace: Namespace,
     },
     InstPortItem {
@@ -90,6 +94,15 @@ impl From<&ExpressionIdentifier> for ReferenceCandidate {
 impl From<&ModportItem> for ReferenceCandidate {
     fn from(value: &ModportItem) -> Self {
         Self::ModportItem {
+            arg: value.clone(),
+            namespace: namespace_table::get_default(),
+        }
+    }
+}
+
+impl From<&InstParameterItem> for ReferenceCandidate {
+    fn from(value: &InstParameterItem) -> Self {
+        Self::InstParameterItem {
             arg: value.clone(),
             namespace: namespace_table::get_default(),
         }
@@ -383,34 +396,11 @@ impl ReferenceTable {
                     in_import_declaration,
                 } => {
                     namespace_table::set_default(&namespace.paths);
-
-                    let ident = arg.identifier().token;
-                    let path: GenericSymbolPath = arg.into();
-                    let namespace = namespace_table::get(ident.id).unwrap();
-
-                    self.generic_symbol_path(&path, &namespace, *in_import_declaration, None, None);
+                    self.check_scoped_identifier(arg, *in_import_declaration);
                 }
                 ReferenceCandidate::ExpressionIdentifier { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);
-
-                    let ident = arg.identifier().token;
-                    let namespace = namespace_table::get(ident.id).unwrap();
-                    let mut path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-                    path.resolve_imported(&namespace, None);
-                    let mut path = path.mangled_path();
-
-                    for x in &arg.expression_identifier_list0 {
-                        path.push(x.identifier.identifier_token.token.text);
-
-                        match symbol_table::resolve((&path, &namespace)) {
-                            Ok(symbol) => {
-                                symbol_table::add_reference(symbol.found.id, &ident);
-                            }
-                            Err(err) => {
-                                self.push_resolve_error(err, &arg.into(), None, None);
-                            }
-                        }
-                    }
+                    self.check_expression_identifier(arg);
                 }
                 ReferenceCandidate::ModportItem { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);
@@ -437,30 +427,13 @@ impl ReferenceTable {
                         }
                     }
                 }
+                ReferenceCandidate::InstParameterItem { arg, namespace } => {
+                    namespace_table::set_default(&namespace.paths);
+                    self.check_inst_parameter_item(arg);
+                }
                 ReferenceCandidate::InstPortItem { arg, namespace } => {
                     namespace_table::set_default(&namespace.paths);
-
-                    if arg.inst_port_item_opt.is_none() {
-                        // implicit port connection by name
-                        match symbol_table::resolve(arg.identifier.as_ref()) {
-                            Ok(symbol) => {
-                                for id in symbol.full_path {
-                                    symbol_table::add_reference(
-                                        id,
-                                        &arg.identifier.identifier_token.token,
-                                    );
-                                }
-                            }
-                            Err(err) => {
-                                self.push_resolve_error(
-                                    err,
-                                    &arg.identifier.as_ref().into(),
-                                    None,
-                                    None,
-                                );
-                            }
-                        }
-                    }
+                    self.check_inst_port_item(arg);
                 }
                 ReferenceCandidate::StructConstructorItem { arg, r#type } => {
                     if let Ok(symbol) = symbol_table::resolve(r#type) {
@@ -513,6 +486,67 @@ impl ReferenceTable {
         }
 
         self.errors.drain(0..).collect()
+    }
+
+    fn check_scoped_identifier(&mut self, arg: &ScopedIdentifier, in_import_declaration: bool) {
+        let ident = arg.identifier().token;
+        let path: GenericSymbolPath = arg.into();
+        let namespace = namespace_table::get(ident.id).unwrap();
+        self.generic_symbol_path(&path, &namespace, in_import_declaration, None, None);
+    }
+
+    fn check_expression_identifier(&mut self, arg: &ExpressionIdentifier) {
+        let ident = arg.identifier().token;
+        let namespace = namespace_table::get(ident.id).unwrap();
+
+        let mut path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+        path.resolve_imported(&namespace, None);
+        let mut path = path.mangled_path();
+
+        for x in &arg.expression_identifier_list0 {
+            path.push(x.identifier.identifier_token.token.text);
+
+            match symbol_table::resolve((&path, &namespace)) {
+                Ok(symbol) => {
+                    symbol_table::add_reference(symbol.found.id, &ident);
+                }
+                Err(err) => {
+                    self.push_resolve_error(err, &arg.into(), None, None);
+                }
+            }
+        }
+    }
+
+    fn check_inst_parameter_item(&mut self, arg: &InstParameterItem) {
+        if arg.inst_parameter_item_opt.is_none() {
+            // implicit port connection by name
+            match symbol_table::resolve(arg.identifier.as_ref()) {
+                Ok(symbol) => {
+                    for id in symbol.full_path {
+                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
+                    }
+                }
+                Err(err) => {
+                    self.push_resolve_error(err, &arg.identifier.as_ref().into(), None, None);
+                }
+            }
+        }
+    }
+
+    fn check_inst_port_item(&mut self, arg: &InstPortItem) {
+        if arg.inst_port_item_opt.is_none() {
+            // implicit port connection by name
+            match symbol_table::resolve(arg.identifier.as_ref()) {
+                Ok(symbol) => {
+                    for id in symbol.full_path {
+                        symbol_table::add_reference(id, &arg.identifier.identifier_token.token);
+                    }
+                }
+                Err(err) => {
+                    self.push_resolve_error(err, &arg.identifier.as_ref().into(), None, None);
+                }
+            }
+        }
     }
 
     fn get_struct_namespace(symbol: &Symbol) -> Namespace {

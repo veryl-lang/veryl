@@ -626,6 +626,40 @@ fn duplicated_identifier() {
         errors[0],
         AnalyzerError::DuplicatedIdentifier { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        bind ModuleB <- u: ModuleC;
+        bind ModuleB <- u: ModuleC;
+    }
+    module ModuleB {
+    }
+    module ModuleC {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        bind ModuleB <- u: ModuleC;
+    }
+    module ModuleB {
+        inst u: ModuleC;
+    }
+    module ModuleC {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::DuplicatedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -2286,6 +2320,28 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
+    module ModuleA {}
+    package PkgA {}
+    module ModuleB {
+        bind PkgA <- u: ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {}
+    package PkgA {}
+    module ModuleB {
+        bind ModuleA <- u: PkgA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
     module ModuleA {
         function FuncA() -> logic {
             return 0;
@@ -3150,6 +3206,36 @@ fn mismatch_assignment() {
         errors[0],
         AnalyzerError::MismatchAssignment { .. }
     ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input
+        }
+    }
+    interface InterfaceB {
+        var a: logic;
+        modport mp {
+            a: input
+        }
+    }
+    module ModuleA (
+        a: modport InterfaceA::mp,
+    ) {}
+    module ModuleB {
+        inst b: InterfaceB;
+    }
+    bind ModuleB <- u: ModuleA (
+        a: b,
+    );
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
 }
 
 #[test]
@@ -3874,6 +3960,50 @@ fn undefined_identifier() {
             \{ ModuleB \} u_monitor();
         }}}
     }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_c: input logic,
+    ) {
+        bind ModuleB <- u_c: ModuleC (
+            i_c,
+        );
+    }
+    module ModuleB (
+        i_b: input logic,
+    ){}
+    module ModuleC (
+        i_c: input logic,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_c: input logic,
+    ) {
+        bind ModuleB <- u_c: ModuleC (
+            i_c: i_c,
+        );
+    }
+    module ModuleB (
+        i_b: input logic,
+    ){}
+    module ModuleC (
+        i_c: input logic,
+    ){}
     "#;
 
     let errors = analyze(code);

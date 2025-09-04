@@ -318,6 +318,13 @@ pub trait VerylWalker {
         after!(self, l_paren, arg);
     }
 
+    /// Semantic action for non-terminal 'LTMinus'
+    fn l_t_minus(&mut self, arg: &LTMinus) {
+        before!(self, l_t_minus, arg);
+        self.veryl_token(&arg.l_t_minus_token);
+        after!(self, l_t_minus, arg);
+    }
+
     /// Semantic action for non-terminal 'MinusColon'
     fn minus_colon(&mut self, arg: &MinusColon) {
         before!(self, minus_colon, arg);
@@ -435,6 +442,13 @@ pub trait VerylWalker {
         before!(self, assign, arg);
         self.veryl_token(&arg.assign_token);
         after!(self, assign, arg);
+    }
+
+    /// Semantic action for non-terminal 'Bind'
+    fn bind(&mut self, arg: &Bind) {
+        before!(self, bind, arg);
+        self.veryl_token(&arg.bind_token);
+        after!(self, bind, arg);
     }
 
     /// Semantic action for non-terminal 'Bit'
@@ -2452,27 +2466,41 @@ pub trait VerylWalker {
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
         before!(self, inst_declaration, arg);
         self.inst(&arg.inst);
+        self.component_instantiation(&arg.component_instantiation);
+        self.semicolon(&arg.semicolon);
+        after!(self, inst_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'BindDeclaration'
+    fn bind_declaration(&mut self, arg: &BindDeclaration) {
+        before!(self, bind_declaration, arg);
+        self.bind(&arg.bind);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.l_t_minus(&arg.l_t_minus);
+        self.component_instantiation(&arg.component_instantiation);
+        self.semicolon(&arg.semicolon);
+        after!(self, bind_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ComponentInstantiation'
+    fn component_instantiation(&mut self, arg: &ComponentInstantiation) {
+        before!(self, component_instantiation, arg);
         self.identifier(&arg.identifier);
         self.colon(&arg.colon);
-        if let Some(ref x) = arg.inst_declaration_opt {
+        if let Some(ref x) = arg.component_instantiation_opt {
             self.clock_domain(&x.clock_domain);
         }
         self.scoped_identifier(&arg.scoped_identifier);
-        if let Some(ref x) = arg.inst_declaration_opt0 {
+        if let Some(ref x) = arg.component_instantiation_opt0 {
             self.array(&x.array);
         }
-        if let Some(ref x) = arg.inst_declaration_opt1 {
+        if let Some(ref x) = arg.component_instantiation_opt1 {
             self.inst_parameter(&x.inst_parameter);
         }
-        if let Some(ref x) = arg.inst_declaration_opt2 {
-            self.l_paren(&x.l_paren);
-            if let Some(ref x) = x.inst_declaration_opt3 {
-                self.inst_port_list(&x.inst_port_list);
-            }
-            self.r_paren(&x.r_paren);
+        if let Some(ref x) = arg.component_instantiation_opt2 {
+            self.inst_port(&x.inst_port);
         }
-        self.semicolon(&arg.semicolon);
-        after!(self, inst_declaration, arg);
+        after!(self, component_instantiation, arg);
     }
 
     /// Semantic action for non-terminal 'InstParameter'
@@ -2529,6 +2557,17 @@ pub trait VerylWalker {
             self.expression(&x.expression);
         }
         after!(self, inst_parameter_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'InstPort'
+    fn inst_port(&mut self, arg: &InstPort) {
+        before!(self, inst_port, arg);
+        self.l_paren(&arg.l_paren);
+        if let Some(ref x) = arg.inst_port_opt {
+            self.inst_port_list(&x.inst_port_list);
+        }
+        self.r_paren(&arg.r_paren);
+        after!(self, inst_port, arg);
     }
 
     /// Semantic action for non-terminal 'InstPortList'
@@ -3113,6 +3152,7 @@ pub trait VerylWalker {
             GenerateItem::LetDeclaration(x) => self.let_declaration(&x.let_declaration),
             GenerateItem::VarDeclaration(x) => self.var_declaration(&x.var_declaration),
             GenerateItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
+            GenerateItem::BindDeclaration(x) => self.bind_declaration(&x.bind_declaration),
             GenerateItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
             GenerateItem::AlwaysFfDeclaration(x) => {
                 self.always_ff_declaration(&x.always_ff_declaration)
@@ -3508,6 +3548,7 @@ pub trait VerylWalker {
                 self.public_description_item(&x.public_description_item);
             }
             DescriptionItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
+            DescriptionItem::BindDeclaration(x) => self.bind_declaration(&x.bind_declaration),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
             DescriptionItem::IncludeDeclaration(x) => {
                 self.include_declaration(&x.include_declaration)

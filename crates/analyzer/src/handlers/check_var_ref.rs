@@ -123,6 +123,120 @@ impl CheckVarRef {
     fn inc_branch_index(&mut self) {
         *self.branch_index.last_mut().unwrap() += 1;
     }
+
+    fn check_inst(&mut self, header_token: &Token, arg: &ComponentInstantiation) {
+        if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())
+            && let SymbolKind::Instance(ref x) = symbol.found.kind
+        {
+            let mut ports = HashMap::default();
+            let mut port_unknown = false;
+            let mut sv_instance = false;
+
+            if let Ok(x) =
+                symbol_table::resolve((&x.type_name.mangled_path(), &symbol.found.namespace))
+            {
+                match x.found.kind {
+                    SymbolKind::Module(ref x) => {
+                        for port in &x.ports {
+                            ports.insert(port.name(), port.property());
+                        }
+                    }
+                    SymbolKind::GenericInstance(ref x) => {
+                        let base = symbol_table::get(x.base).unwrap();
+                        if let SymbolKind::Module(ref x) = base.kind {
+                            for port in &x.ports {
+                                ports.insert(port.name(), port.property());
+                            }
+                        }
+                    }
+                    SymbolKind::GenericParameter(x) => {
+                        if let Some(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace)
+                            && let Some(SymbolKind::ProtoModule(x)) =
+                                proto.get_symbol().map(|x| x.kind)
+                        {
+                            for port in &x.ports {
+                                ports.insert(port.name(), port.property());
+                            }
+                        }
+                    }
+                    SymbolKind::SystemVerilog => {
+                        port_unknown = true;
+                        sv_instance = true;
+                    }
+                    _ => (),
+                }
+            }
+
+            self.assign_position.push(AssignPositionType::Declaration {
+                token: *header_token,
+                define_context: (*header_token).into(),
+                r#type: AssignDeclarationType::Inst,
+            });
+
+            let mut evaluator = Evaluator::new(&[]);
+
+            for (token, target) in &x.port_connects {
+                // Gather port information
+                let dir_output = if let Some(port) = ports.get(&token.text) {
+                    matches!(port.direction, Direction::Inout | Direction::Output)
+                } else {
+                    false
+                };
+                let (is_clock, is_reset) = if let Some(port) = ports.get(&token.text) {
+                    (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
+                } else {
+                    (false, false)
+                };
+
+                let exp = evaluator.expression(&target.expression);
+
+                // Check assignment of clock/reset type
+                if is_clock && !(exp.is_fixed() || exp.is_clock()) {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        &token.text.to_string(),
+                        "clock type",
+                        "non-clock type",
+                        &token.into(),
+                    ));
+                }
+
+                if is_reset && !(exp.is_fixed() || exp.is_reset()) {
+                    self.errors.push(AnalyzerError::mismatch_type(
+                        &token.text.to_string(),
+                        "reset type",
+                        "non-reset type",
+                        &token.into(),
+                    ));
+                }
+
+                // Check implicit reset to SV instance
+                if sv_instance && exp.is_reset() && !exp.is_explicit_reset() {
+                    self.errors
+                        .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
+                }
+
+                // Check output to non-assignable variable
+                if dir_output && !target.expression.is_assignable() {
+                    self.errors
+                        .push(AnalyzerError::unassignable_output(&token.into()));
+                }
+
+                // Check assignment from output port
+                for target in &target.identifiers {
+                    if let Ok(path) = VarRefPath::try_from((target, &symbol.found.namespace))
+                        && (dir_output | port_unknown)
+                    {
+                        self.assign_position.push(AssignPositionType::Connect {
+                            token: *token,
+                            define_context: (*token).into(),
+                            maybe: port_unknown,
+                        });
+                        self.add_assign(&path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Handler for CheckVarRef {
@@ -661,118 +775,16 @@ impl VerylGrammarTrait for CheckVarRef {
         if let HandlerPoint::After = self.point {
             // Mangled module is also resolved during resolving the inst symbol.
             // To get correct result, this statement should be executed after resolving generic parameters.
-            if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())
-                && let SymbolKind::Instance(ref x) = symbol.found.kind
-            {
-                let mut ports = HashMap::default();
-                let mut port_unknown = false;
-                let mut sv_instance = false;
+            self.check_inst(&arg.inst.inst_token.token, &arg.component_instantiation);
+        }
+        Ok(())
+    }
 
-                if let Ok(x) =
-                    symbol_table::resolve((&x.type_name.mangled_path(), &symbol.found.namespace))
-                {
-                    match x.found.kind {
-                        SymbolKind::Module(ref x) => {
-                            for port in &x.ports {
-                                ports.insert(port.name(), port.property());
-                            }
-                        }
-                        SymbolKind::GenericInstance(ref x) => {
-                            let base = symbol_table::get(x.base).unwrap();
-                            if let SymbolKind::Module(ref x) = base.kind {
-                                for port in &x.ports {
-                                    ports.insert(port.name(), port.property());
-                                }
-                            }
-                        }
-                        SymbolKind::GenericParameter(x) => {
-                            if let Some(proto) =
-                                x.bound.resolve_proto_bound(&symbol.found.namespace)
-                                && let Some(SymbolKind::ProtoModule(x)) =
-                                    proto.get_symbol().map(|x| x.kind)
-                            {
-                                for port in &x.ports {
-                                    ports.insert(port.name(), port.property());
-                                }
-                            }
-                        }
-                        SymbolKind::SystemVerilog => {
-                            port_unknown = true;
-                            sv_instance = true;
-                        }
-                        _ => (),
-                    }
-                }
-
-                self.assign_position.push(AssignPositionType::Declaration {
-                    token: arg.inst.inst_token.token,
-                    define_context: arg.inst.inst_token.token.into(),
-                    r#type: AssignDeclarationType::Inst,
-                });
-
-                let mut evaluator = Evaluator::new(&[]);
-
-                for (token, target) in &x.connects {
-                    // Gather port information
-                    let dir_output = if let Some(port) = ports.get(&token.text) {
-                        matches!(port.direction, Direction::Inout | Direction::Output)
-                    } else {
-                        false
-                    };
-                    let (is_clock, is_reset) = if let Some(port) = ports.get(&token.text) {
-                        (port.r#type.kind.is_clock(), port.r#type.kind.is_reset())
-                    } else {
-                        (false, false)
-                    };
-
-                    let exp = evaluator.expression(&target.expression);
-
-                    // Check assignment of clock/reset type
-                    if is_clock && !(exp.is_fixed() || exp.is_clock()) {
-                        self.errors.push(AnalyzerError::mismatch_type(
-                            &token.text.to_string(),
-                            "clock type",
-                            "non-clock type",
-                            &token.into(),
-                        ));
-                    }
-
-                    if is_reset && !(exp.is_fixed() || exp.is_reset()) {
-                        self.errors.push(AnalyzerError::mismatch_type(
-                            &token.text.to_string(),
-                            "reset type",
-                            "non-reset type",
-                            &token.into(),
-                        ));
-                    }
-
-                    // Check implicit reset to SV instance
-                    if sv_instance && exp.is_reset() && !exp.is_explicit_reset() {
-                        self.errors
-                            .push(AnalyzerError::sv_with_implicit_reset(&token.into()));
-                    }
-
-                    // Check output to non-assignable variable
-                    if dir_output && !target.expression.is_assignable() {
-                        self.errors
-                            .push(AnalyzerError::unassignable_output(&token.into()));
-                    }
-
-                    // Check assignment from output port
-                    for target in &target.identifiers {
-                        if let Ok(path) = VarRefPath::try_from((target, &symbol.found.namespace))
-                            && (dir_output | port_unknown)
-                        {
-                            self.assign_position.push(AssignPositionType::Connect {
-                                token: *token,
-                                define_context: (*token).into(),
-                                maybe: port_unknown,
-                            });
-                            self.add_assign(&path);
-                        }
-                    }
-                }
-            }
+    fn bind_declaration(&mut self, arg: &BindDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::After = self.point
+            && let Ok(_) = symbol_table::resolve(arg.scoped_identifier.as_ref())
+        {
+            self.check_inst(&arg.bind.bind_token.token, &arg.component_instantiation);
         }
         Ok(())
     }

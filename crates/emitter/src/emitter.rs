@@ -13,9 +13,7 @@ use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
-use veryl_analyzer::symbol_path::{
-    GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
-};
+use veryl_analyzer::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
@@ -1288,6 +1286,112 @@ impl Emitter {
         self.force_duplicated = false;
     }
 
+    fn emit_inst(
+        &mut self,
+        header_token: &VerylToken,
+        arg: &ComponentInstantiation,
+        semicolon: &Semicolon,
+    ) {
+        let allow_missing_port =
+            attribute_table::contains(&header_token.token, Attr::Allow(AllowItem::MissingPort));
+
+        let (defined_ports, generic_map, symbol) =
+            if let (Ok(symbol), _) = self.resolve_scoped_idnetifier(&arg.scoped_identifier) {
+                match symbol.found.kind {
+                    SymbolKind::Module(ref x) if !allow_missing_port => {
+                        (x.ports.clone(), vec![], symbol.found)
+                    }
+                    SymbolKind::GenericInstance(ref x) => {
+                        let base = symbol_table::get(x.base).unwrap();
+                        match base.kind {
+                            SymbolKind::Module(ref x) if !allow_missing_port => {
+                                (x.ports.clone(), symbol.found.generic_maps(), base)
+                            }
+                            _ => (vec![], vec![], base),
+                        }
+                    }
+                    _ => (vec![], vec![], symbol.found),
+                }
+            } else {
+                unreachable!()
+            };
+        let connected_ports: Vec<InstPortItem> =
+            if let Some(ref x) = arg.component_instantiation_opt2 {
+                if let Some(ref x) = x.inst_port.inst_port_opt {
+                    x.inst_port_list.as_ref().into()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            };
+
+        let modport_connections_table = ExpandModportConnectionsTable::create_from_inst_ports(
+            &defined_ports,
+            &connected_ports,
+            &generic_map,
+            &symbol.namespace,
+        );
+        self.modport_connections_tables
+            .push(modport_connections_table);
+        self.inst_module_namespace = Some(symbol.inner_namespace());
+
+        let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
+        let single_line =
+            arg.component_instantiation_opt2.is_none() && defined_ports.is_empty() || compact;
+        if single_line {
+            self.single_line_start();
+        }
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.space(1);
+
+        if let Some(ref x) = arg.component_instantiation_opt1 {
+            // skip align at single line
+            if self.mode == Mode::Emit || !self.single_line() {
+                self.inst_parameter(&x.inst_parameter);
+            }
+            self.space(1);
+        }
+        if self.single_line() {
+            self.align_start(align_kind::IDENTIFIER);
+        }
+        self.identifier(&arg.identifier);
+        if self.single_line() {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
+        if let Some(ref x) = arg.component_instantiation_opt0 {
+            self.space(1);
+            self.emit_array(&x.array, self.build_opt.flatten_array_interface);
+        }
+        self.space(1);
+
+        if let Some(ref x) = arg.component_instantiation_opt2 {
+            self.token_will_push(&x.inst_port.l_paren.l_paren_token.replace("("));
+            self.newline_push();
+            if let Some(ref x) = x.inst_port.inst_port_opt {
+                self.inst_port_list(&x.inst_port_list);
+            }
+            self.emit_inst_unconnected_port(&defined_ports, &connected_ports, &generic_map);
+            self.newline_pop();
+            self.token(&x.inst_port.r_paren.r_paren_token.replace(")"));
+        } else if !defined_ports.is_empty() {
+            self.str("(");
+            self.newline_push();
+            self.emit_inst_unconnected_port(&defined_ports, &connected_ports, &generic_map);
+            self.newline_pop();
+            self.str(")");
+        } else {
+            self.str("()");
+        }
+        self.semicolon(semicolon);
+        if single_line {
+            self.single_line_finish();
+        }
+
+        self.modport_connections_tables.pop();
+        self.inst_module_namespace = None;
+    }
+
     fn emit_inst_param_port_item_assigned_by_name(&mut self, identifier: &Identifier) {
         self.align_start(align_kind::EXPRESSION);
         match self.resolve_generic_path(&identifier.into(), None) {
@@ -1312,12 +1416,9 @@ impl Emitter {
     }
 
     fn emit_port_identifier(&mut self, identifier: &Identifier) {
-        let path: SymbolPathNamespace = if let Some(namespace) = &self.inst_module_namespace {
-            SymbolPathNamespace(identifier.into(), namespace.clone())
-        } else {
-            identifier.into()
-        };
-        let symbol = symbol_table::resolve(path).map(|x| x.found).ok();
+        let symbol = symbol_table::resolve((identifier, self.inst_module_namespace.as_ref()))
+            .map(|x| x.found)
+            .ok();
         self.emit_identifier(identifier, symbol.as_ref());
     }
 
@@ -2337,7 +2438,7 @@ impl VerylWalker for Emitter {
                 self.dot(&x.dot);
                 self.push_resolved_identifier(".");
                 if (i + 1) < arg.expression_identifier_list0.len() {
-                    self.identifier(&x.identifier);
+                    self.emit_identifier(&x.identifier, None);
                 } else {
                     let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
                     self.emit_identifier(&x.identifier, symbol.as_ref());
@@ -4285,104 +4386,25 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
-        let allow_missing_port = attribute_table::contains(
-            &arg.inst.inst_token.token,
-            Attr::Allow(AllowItem::MissingPort),
-        );
-        let (defined_ports, generic_map, symbol) =
-            if let (Ok(symbol), _) = self.resolve_scoped_idnetifier(&arg.scoped_identifier) {
-                match symbol.found.kind {
-                    SymbolKind::Module(ref x) if !allow_missing_port => {
-                        (x.ports.clone(), vec![], symbol.found)
-                    }
-                    SymbolKind::GenericInstance(ref x) => {
-                        let base = symbol_table::get(x.base).unwrap();
-                        match base.kind {
-                            SymbolKind::Module(ref x) if !allow_missing_port => {
-                                (x.ports.clone(), symbol.found.generic_maps(), base)
-                            }
-                            _ => (vec![], vec![], base),
-                        }
-                    }
-                    _ => (vec![], vec![], symbol.found),
-                }
-            } else {
-                unreachable!()
-            };
-        let connected_ports: Vec<InstPortItem> = if let Some(ref x) = arg.inst_declaration_opt2 {
-            if let Some(ref x) = x.inst_declaration_opt3 {
-                x.inst_port_list.as_ref().into()
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
-        let modport_connections_table = ExpandModportConnectionsTable::create_from_inst_ports(
-            &defined_ports,
-            &connected_ports,
-            &generic_map,
-            &symbol.namespace,
-        );
-        self.modport_connections_tables
-            .push(modport_connections_table);
-        self.inst_module_namespace = Some(symbol.inner_namespace());
-
-        let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
-        let single_line =
-            arg.inst_declaration_opt2.is_none() && defined_ports.is_empty() || compact;
         self.token(&arg.inst.inst_token.replace(""));
-        if single_line {
-            self.single_line_start();
-        }
+        self.emit_inst(
+            &arg.inst.inst_token,
+            &arg.component_instantiation,
+            &arg.semicolon,
+        );
+    }
+
+    /// Semantic action for non-terminal 'BindDeclaration'
+    fn bind_declaration(&mut self, arg: &BindDeclaration) {
+        self.bind(&arg.bind);
+        self.space(1);
         self.scoped_identifier(&arg.scoped_identifier);
         self.space(1);
-        if let Some(ref x) = arg.inst_declaration_opt1 {
-            // skip align at single line
-            if self.mode == Mode::Emit || !self.single_line() {
-                self.inst_parameter(&x.inst_parameter);
-            }
-            self.space(1);
-        }
-        if self.single_line() {
-            self.align_start(align_kind::IDENTIFIER);
-        }
-        self.identifier(&arg.identifier);
-        if self.single_line() {
-            self.align_finish(align_kind::IDENTIFIER);
-        }
-        if let Some(ref x) = arg.inst_declaration_opt0 {
-            self.space(1);
-            self.emit_array(&x.array, self.build_opt.flatten_array_interface);
-        }
-        self.space(1);
-
-        if let Some(ref x) = arg.inst_declaration_opt2 {
-            self.token_will_push(&x.l_paren.l_paren_token.replace("("));
-            self.newline_push();
-            if let Some(ref x) = x.inst_declaration_opt3 {
-                self.inst_port_list(&x.inst_port_list);
-            }
-            self.emit_inst_unconnected_port(&defined_ports, &connected_ports, &generic_map);
-            self.newline_pop();
-            self.token(&x.r_paren.r_paren_token.replace(")"));
-        } else if !defined_ports.is_empty() {
-            self.str("(");
-            self.newline_push();
-            self.emit_inst_unconnected_port(&defined_ports, &connected_ports, &generic_map);
-            self.newline_pop();
-            self.str(")");
-        } else {
-            self.str("()");
-        }
-        self.semicolon(&arg.semicolon);
-        if single_line {
-            self.single_line_finish();
-        }
-
-        self.modport_connections_tables.pop();
-        self.inst_module_namespace = None;
+        self.emit_inst(
+            &arg.bind.bind_token,
+            &arg.component_instantiation,
+            &arg.semicolon,
+        );
     }
 
     /// Semantic action for non-terminal 'InstParameter'
@@ -5397,6 +5419,7 @@ impl VerylWalker for Emitter {
             }
             // file scope import is not emitted at SystemVerilog
             DescriptionItem::ImportDeclaration(_) => (),
+            DescriptionItem::BindDeclaration(x) => self.bind_declaration(&x.bind_declaration),
             DescriptionItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
             DescriptionItem::IncludeDeclaration(x) => {
                 self.include_declaration(&x.include_declaration)

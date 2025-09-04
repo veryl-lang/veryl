@@ -4,6 +4,7 @@ pub const KEYWORDS: &[&str] = &[
     "always_ff",
     "assign",
     "as",
+    "bind",
     "bit",
     "bool",
     "case",
