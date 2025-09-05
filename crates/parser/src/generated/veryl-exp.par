@@ -32,7 +32,7 @@
 
 %%
 
-/*    0 */ CommentsTerm: <INITIAL, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+" : Token;
+/*    0 */ CommentsTerm: <INITIAL, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" : Token;
 /*    1 */ StringLiteralTerm: <INITIAL, Generic, Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
 /*    2 */ ExponentTerm: <INITIAL, Generic>/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
 /*    3 */ FixedPointTerm: <INITIAL, Generic>/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;

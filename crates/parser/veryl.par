@@ -45,7 +45,7 @@
 
 // Longest match should be first
 
-CommentsTerm          : <INITIAL, Generic,                    Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+"                 : Token;
+CommentsTerm          : <INITIAL, Generic,                    Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+"                  : Token;
 StringLiteralTerm     : <INITIAL, Generic,                    Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
 ExponentTerm          : <INITIAL, Generic                         >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : <INITIAL, Generic                         >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
