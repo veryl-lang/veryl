@@ -162,7 +162,7 @@ scanner! {
         mode INITIAL {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*" => 7; // "ExponentTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*" => 8; // "FixedPointTerm"
@@ -320,7 +320,7 @@ scanner! {
         mode Generic {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*" => 7; // "ExponentTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*" => 8; // "FixedPointTerm"
@@ -433,7 +433,7 @@ scanner! {
         mode Attr {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"," => 33; // "CommaTerm"
             token r"\{" => 46; // "LBraceTerm"
@@ -33318,7 +33318,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 787] = &[
 ];
 
 pub const PRODUCTIONS: &[Production; 1143] = &[
-    // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*(?:[^*]|\*[^/])*\*/))\s*)+";
+    // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+";
     Production {
         lhs: 122,
         production: &[ParseType::T(5)],
