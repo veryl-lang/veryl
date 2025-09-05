@@ -27,7 +27,7 @@ module Module55 {
     inst u_f1: Module55F::<>;
     inst u_h0: Module55H::<10>;
     inst u_h1: Module55H::<10>;
-    inst u_i0: Module55I::<Package55::<8, 16>>;
+    inst u_i0: Module55I::<Package55::<32'd8, 32'd16>>;
     inst u_j0: Module55J;
     inst u_k0: Module55K::<Package55K::FooBar::FOO>;
     inst u_k1: Module55K::<Package55K::FooBar::BAR>;
