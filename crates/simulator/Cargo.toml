@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-simulator"
-version               = "0.16.3"
+version               = "0.16.4"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -12,7 +12,7 @@ edition.workspace     = true
 
 [dependencies]
 toml           = {workspace = true}
-veryl-analyzer = {version = "0.16.3", path = "../analyzer"}
-veryl-metadata = {version = "0.16.3", path = "../metadata"}
-veryl-parser   = {version = "0.16.3", path = "../parser"}
-veryl-path     = {version = "0.16.3", path = "../path"}
+veryl-analyzer = {version = "0.16.4", path = "../analyzer"}
+veryl-metadata = {version = "0.16.4", path = "../metadata"}
+veryl-parser   = {version = "0.16.4", path = "../parser"}
+veryl-path     = {version = "0.16.4", path = "../path"}
