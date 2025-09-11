@@ -556,7 +556,7 @@ impl SymbolTable {
                         let imported = symbol
                             .imported
                             .iter()
-                            .any(|(_, namespace)| context.namespace.included(namespace));
+                            .any(|x| context.namespace.included(&x.namespace));
                         (
                             context.namespace.included(&symbol.namespace) || imported,
                             imported,
@@ -914,32 +914,18 @@ impl SymbolTable {
         }
     }
 
-    fn add_imported_item(
-        &mut self,
-        target: TokenId,
-        path: &GenericSymbolPath,
-        namespace: &Namespace,
-    ) {
+    fn add_imported_item(&mut self, target: TokenId, import: &Import) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.token.id == target {
-                symbol
-                    .imported
-                    .push((path.to_owned(), namespace.to_owned()));
+                symbol.imported.push(import.to_owned());
             }
         }
     }
 
-    fn add_imported_package(
-        &mut self,
-        target: &Namespace,
-        path: &GenericSymbolPath,
-        namespace: &Namespace,
-    ) {
+    fn add_imported_package(&mut self, target: &Namespace, import: &Import) {
         for (_, symbol) in self.symbol_table.iter_mut() {
             if symbol.namespace.matched(target) {
-                symbol
-                    .imported
-                    .push((path.to_owned(), namespace.to_owned()));
+                symbol.imported.push(import.to_owned());
             }
         }
     }
@@ -964,10 +950,10 @@ impl SymbolTable {
             if import.wildcard {
                 if let Some(pkg) = self.get_package(symbol, false) {
                     let target = pkg.inner_namespace();
-                    self.add_imported_package(&target, &import.path.0, &import.namespace);
+                    self.add_imported_package(&target, import);
                 }
             } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                self.add_imported_item(symbol.token.id, &import.path.0, &import.namespace);
+                self.add_imported_item(symbol.token.id, import);
             }
         }
         self.import_list.clear();

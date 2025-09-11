@@ -5,7 +5,7 @@ use crate::symbol_table;
 use crate::{SVec, svec};
 use std::cmp::Ordering;
 use std::fmt;
-use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -560,46 +560,25 @@ impl GenericSymbolPath {
                 };
 
                 if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace))
-                    && let Some(parent) = symbol.found.get_parent_package()
+                    && let Some(_) = symbol.found.get_parent_package()
+                    && let Some(import) = symbol
+                        .found
+                        .imported
+                        .iter()
+                        .find(|x| namespace.included(&x.namespace))
                 {
-                    let package_symbol = if parent.is_package(false) {
-                        parent
-                    } else if let Some(maps) = generic_maps {
-                        // replace proto package with actual package
-                        let mut package_path = symbol
-                            .found
-                            .imported
-                            .iter()
-                            .find(|(_, x)| namespace.included(x))
-                            .map(|(x, _)| x)
-                            .unwrap()
-                            .clone();
+                    let mut package_path = import.path.0.clone();
+                    if !import.wildcard {
+                        package_path.paths.pop();
+                    }
+                    if let Some(maps) = generic_maps {
                         package_path.apply_map(maps);
-                        if let Some(path) = package_path.unaliased_path() {
-                            symbol_table::resolve((&path.mangled_path(), namespace))
-                                .map(|x| x.found)
-                                .unwrap()
-                        } else {
-                            symbol_table::resolve((&package_path.mangled_path(), namespace))
-                                .map(|x| x.found)
-                                .unwrap()
-                        }
+                    }
+
+                    if let Some(path) = package_path.unaliased_path() {
+                        self.append_package_path(&path, self_file_path, &self_namespace);
                     } else {
-                        parent
-                    };
-
-                    // If symbol belongs Package, it can be expanded
-                    let mut package_namespace = package_symbol.inner_namespace();
-                    package_namespace.strip_prefix(&namespace_table::get_default());
-
-                    for (i, path) in package_namespace.paths.iter().enumerate() {
-                        let token = Token::generate(*path, self_file_path);
-                        namespace_table::insert(token.id, self_file_path, &self_namespace);
-                        let generic_symbol = GenericSymbol {
-                            base: token,
-                            arguments: vec![],
-                        };
-                        self.paths.insert(i, generic_symbol);
+                        self.append_package_path(&package_path, self_file_path, &self_namespace);
                     }
                 }
             }
@@ -608,6 +587,20 @@ impl GenericSymbolPath {
             for arg in &mut path.arguments {
                 arg.resolve_imported(namespace, generic_maps);
             }
+        }
+    }
+
+    fn append_package_path(
+        &mut self,
+        package_path: &GenericSymbolPath,
+        file_path: PathId,
+        self_namespace: &Namespace,
+    ) {
+        for (i, path) in package_path.paths.iter().enumerate() {
+            let token = Token::generate(path.base.text, file_path);
+            namespace_table::insert(token.id, file_path, self_namespace);
+
+            self.paths.insert(i, path.clone());
         }
     }
 }

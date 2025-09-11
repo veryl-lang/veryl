@@ -1362,6 +1362,22 @@ fn mismatch_generics_arity() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA::<V: u32> {
+        const A: u32 = V;
+    }
+    module ModuleA {
+        import PkgA::<32>::*;
+        function get_v::<V: u32> -> u32 {
+            return V;
+        }
+        let _a: u32 = get_v::<A>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
