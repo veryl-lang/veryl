@@ -2342,6 +2342,15 @@ fn mismatch_type() {
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
+    proto module ProtoModuleA;
+    module ModuleB {}
+    bind ProtoModuleA <- u: ModuleB;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
     module ModuleA {
         function FuncA() -> logic {
             return 0;
@@ -4011,6 +4020,21 @@ fn undefined_identifier() {
         errors[0],
         AnalyzerError::UndefinedIdentifier { .. }
     ));
+
+    let code = r#"
+    module ModuleA::<A: u32> {
+        let a: logic<A> = 0;
+    }
+    module ModuleB::<B: u32> (
+        b: input logic<B>,
+    ) {}
+    bind ModuleA::<32> <- u: ModuleB::<32> (
+        b: a
+    );
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

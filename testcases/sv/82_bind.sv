@@ -1,35 +1,35 @@
-interface veryl_testcase_Interface82A;
-    logic a;
+interface veryl_testcase___Interface82A__32;
+    logic [32-1:0] a;
     modport mp (
         input a
     );
 endinterface
 
-interface veryl_testcase_Interface82B;
-    logic b;
+interface veryl_testcase___Interface82B__32;
+    logic [32-1:0] b;
     modport mp (
         input b
     );
 endinterface
 
-module veryl_testcase_Module82A (
+module veryl_testcase___Module82A__32 (
     input var logic i_clk  ,
     input var logic i_rst_n
 );
-    veryl_testcase_Interface82A a ();
-    veryl_testcase_Interface82B b ();
+    veryl_testcase___Interface82A__32 a ();
+    veryl_testcase___Interface82B__32 b ();
 endmodule
 
-module veryl_testcase_Module82B (
-    veryl_testcase_Interface82A.mp a      ,
-    input var logic                      b      ,
-    input var logic                      i_clk  ,
-    input var logic                      i_rst_n
+module veryl_testcase___Module82B__32 (
+    veryl_testcase___Interface82A__32.mp a      ,
+    input var logic                            b      ,
+    input var logic                            i_clk  ,
+    input var logic                            i_rst_n
 );
 endmodule
 
 module veryl_testcase_Module82C;
-    bind veryl_testcase_Module82A veryl_testcase_Module82B u0 (
+    bind veryl_testcase___Module82A__32 veryl_testcase___Module82B__32 u0 (
         .a       (a      ),
         .b       (b.b    ),
         .i_clk   (i_clk  ),
@@ -37,7 +37,7 @@ module veryl_testcase_Module82C;
     );
 endmodule
 
-bind veryl_testcase_Module82A veryl_testcase_Module82B u1 (
+bind veryl_testcase___Module82A__32 veryl_testcase___Module82B__32 u1 (
     .a       (a      ),
     .b       (b.b    ),
     .i_clk   (i_clk  ),

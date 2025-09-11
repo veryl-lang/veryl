@@ -1,34 +1,34 @@
-interface Interface82A {
-    var a: logic;
+interface Interface82A::<W: u32> {
+    var a: logic<W>;
     modport mp {
         a: input,
     }
 }
 
-interface Interface82B {
-    var b: logic;
+interface Interface82B::<W: u32> {
+    var b: logic<W>;
     modport mp {
         b: input,
     }
 }
 
-module Module82A (
+module Module82A::<W: u32> (
     i_clk: input clock,
     i_rst: input reset,
 ) {
-    inst a: Interface82A;
-    inst b: Interface82B;
+    inst a: Interface82A::<W>;
+    inst b: Interface82B::<W>;
 }
 
-module Module82B (
-    a    : modport Interface82A::mp,
-    b    : input   logic           ,
-    i_clk: input   clock           ,
-    i_rst: input   reset           ,
+module Module82B::<W: u32> (
+    a    : modport Interface82A::<W>::mp,
+    b    : input   logic                ,
+    i_clk: input   clock                ,
+    i_rst: input   reset                ,
 ) {}
 
 module Module82C {
-    bind Module82A <- u0: Module82B (
+    bind Module82A::<32> <- u0: Module82B::<32> (
         a         ,
         b    : b.b,
         i_clk     ,
@@ -36,7 +36,7 @@ module Module82C {
     );
 }
 
-bind Module82A <- u1: Module82B (
+bind Module82A::<32> <- u1: Module82B::<32> (
     a         ,
     b    : b.b,
     i_clk     ,

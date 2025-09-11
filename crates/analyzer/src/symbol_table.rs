@@ -59,7 +59,7 @@ pub struct Import {
 #[derive(Clone, Debug)]
 pub struct Bind {
     pub token: Token,
-    pub target: SymbolPathNamespace,
+    pub target: GenericSymbolPathNamesapce,
     pub doc_comment: DocComment,
     pub property: InstanceProperty,
 }
@@ -1015,38 +1015,70 @@ impl SymbolTable {
 
         let bind_list: Vec<Bind> = self.bind_list.drain(0..).collect();
         for bind in bind_list {
-            let context = ResolveContext::new(&bind.target.1);
-            if let Ok(target) = self.resolve(&bind.target.0, &[], context) {
-                let namespace = target.found.inner_namespace();
-                let symbol = Symbol::new(
-                    &bind.token,
-                    SymbolKind::Instance(bind.property.clone()),
-                    &namespace,
-                    false,
-                    bind.doc_comment.clone(),
-                );
+            let Ok(target) = self.resolve_generic_path(&bind.target.0, &bind.target.1) else {
+                continue;
+            };
 
-                if self.insert(&bind.token, symbol).is_some() {
-                    if let TokenSource::File { path, .. } = bind.token.source {
-                        namespace_table::insert(bind.token.id, path, &namespace);
+            let Some(namespace) = self.resolve_bind_target_namespace(&target.found) else {
+                continue;
+            };
+            let symbol = Symbol::new(
+                &bind.token,
+                SymbolKind::Instance(bind.property.clone()),
+                &namespace,
+                false,
+                bind.doc_comment.clone(),
+            );
 
-                        for target in bind.property.parameter_connects.values() {
-                            Self::update_connect_target_namespace(target, path, &namespace);
-                        }
-                        for target in bind.property.port_connects.values() {
-                            Self::update_connect_target_namespace(target, path, &namespace);
-                        }
+            if self.insert(&bind.token, symbol).is_some() {
+                if let TokenSource::File { path, .. } = bind.token.source {
+                    namespace_table::insert(bind.token.id, path, &namespace);
+
+                    for target in bind.property.parameter_connects.values() {
+                        Self::update_connect_target_namespace(target, path, &namespace);
                     }
-                } else {
-                    errors.push(AnalyzerError::duplicated_identifier(
-                        &bind.token.to_string(),
-                        &bind.token.into(),
-                    ));
+                    for target in bind.property.port_connects.values() {
+                        Self::update_connect_target_namespace(target, path, &namespace);
+                    }
                 }
+            } else {
+                errors.push(AnalyzerError::duplicated_identifier(
+                    &bind.token.to_string(),
+                    &bind.token.into(),
+                ));
             }
         }
 
         errors
+    }
+
+    fn resolve_generic_path(
+        &mut self,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) -> Result<ResolveResult, ResolveError> {
+        let context = ResolveContext::new(namespace);
+        self.resolve(&path.generic_path(), &[], context)
+    }
+
+    fn resolve_bind_target_namespace(&mut self, target: &Symbol) -> Option<Namespace> {
+        match &target.kind {
+            SymbolKind::Module(_) => Some(target.inner_namespace()),
+            SymbolKind::AliasModule(x) => {
+                let Ok(target) = self.resolve_generic_path(&x.target, &target.namespace) else {
+                    return None;
+                };
+                self.resolve_bind_target_namespace(&target.found)
+            }
+            SymbolKind::Interface(_) => Some(target.inner_namespace()),
+            SymbolKind::AliasInterface(x) => {
+                let Ok(target) = self.resolve_generic_path(&x.target, &target.namespace) else {
+                    return None;
+                };
+                self.resolve_bind_target_namespace(&target.found)
+            }
+            _ => None,
+        }
     }
 
     fn update_connect_target_namespace(
