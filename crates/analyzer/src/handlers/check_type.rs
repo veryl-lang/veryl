@@ -423,7 +423,7 @@ fn check_inst(
 }
 
 fn check_bind_target(identifier: &ScopedIdentifier, target: &Symbol) -> Option<AnalyzerError> {
-    if !(target.is_module(true) || target.is_interface(true)) {
+    if !(target.is_module(false) || target.is_interface(false)) {
         let mut stringifier = Stringifier::new();
         stringifier.scoped_identifier(identifier);
         let name = stringifier.as_str();

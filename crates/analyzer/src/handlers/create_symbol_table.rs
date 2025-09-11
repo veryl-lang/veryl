@@ -23,7 +23,7 @@ use crate::symbol::{
     TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty, VariableAffiliation,
     VariableProperty,
 };
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce};
 use crate::symbol_table;
 use crate::symbol_table::Bind as SymBind;
 use crate::symbol_table::Import as SymImport;
@@ -1385,7 +1385,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             };
 
             let doc_comment = self.create_doc_comment(&inst.identifier.identifier_token.token);
-            let target = SymbolPathNamespace(
+            let target = GenericSymbolPathNamesapce(
                 arg.scoped_identifier.as_ref().into(),
                 self.namespace.clone(),
             );
