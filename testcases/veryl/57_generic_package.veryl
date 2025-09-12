@@ -37,12 +37,14 @@ package Package57F::<M: ProtoModule57F> for ProtoPackage57F {
 
 module Module57 {
     import Package57E::Y;
+    import Package57B::<5>::*;
     const A: u32 = Package57A::<1>::X;
     const B: u64 = Package57A::<2>::X;
     const C: u32 = Package57B::<3>::X;
-    const E: u32 = Package57B::<3>::X;
-    const D: u64 = Package57B::<>::X;
+    const D: u32 = Package57B::<3>::X;
+    const E: u64 = Package57B::<>::X;
     const F: u64 = Package57B::<Y>::X;
+    const G: u64 = X;
 
     var _c   : Package57C::<2>::StructC     ;
     var _d   : Package57D::<1>::StructD::<2>;
