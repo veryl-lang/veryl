@@ -5657,7 +5657,7 @@ pub fn symbol_string(
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
             let visible = namespace.included(&symbol.namespace)
-                || symbol.imported.iter().any(|(_, x)| *x == namespace);
+                || symbol.imported.iter().any(|x| x.namespace == namespace);
             if visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
@@ -5700,7 +5700,7 @@ pub fn symbol_string(
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
             let visible = namespace.included(&base.namespace)
-                || base.imported.iter().any(|(_, x)| *x == namespace);
+                || base.imported.iter().any(|x| x.namespace == namespace);
             let top_level = matches!(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)

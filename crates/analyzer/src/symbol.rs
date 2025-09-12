@@ -7,7 +7,7 @@ use crate::evaluator::{
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
-use crate::symbol_table;
+use crate::symbol_table::{self, Import};
 use std::cell::RefCell;
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -123,7 +123,7 @@ pub struct Symbol {
     pub namespace: Namespace,
     pub references: Vec<Token>,
     pub generic_instances: Vec<SymbolId>,
-    pub imported: Vec<(GenericSymbolPath, Namespace)>,
+    pub imported: Vec<Import>,
     pub evaluated: RefCell<Option<Evaluated>>,
     pub overrides: Vec<Evaluated>,
     pub allow_unused: bool,
