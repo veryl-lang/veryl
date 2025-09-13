@@ -3,6 +3,7 @@
 [![Actions Status](https://github.com/veryl-lang/veryl/workflows/Regression/badge.svg)](https://github.com/veryl-lang/veryl/actions)
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
 [![CodSpeed Badge](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/veryl-lang/veryl)
+[![Docker Pulls](https://img.shields.io/docker/pulls/veryllang/veryl)](https://hub.docker.com/r/veryllang/veryl)
 
 Veryl is a modern hardware description language.
 
