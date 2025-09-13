@@ -2141,3 +2141,42 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn import_declaration_with_generic_package() {
+    let code = r#"package PkgA::<V: u32> {
+  const A: u32 = V;
+}
+module ModuleA {
+  import PkgA::<1>::*;
+  const A: u32 = PkgA::<2>::A;
+}
+"#;
+
+    let expect = r#"package prj___PkgA__1;
+    localparam int unsigned A = 1;
+endpackage
+package prj___PkgA__2;
+    localparam int unsigned A = 2;
+endpackage
+module prj_ModuleA;
+    import prj___PkgA__1::*;
+
+
+    localparam int unsigned A = prj___PkgA__2::A;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

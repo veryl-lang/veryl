@@ -9,6 +9,9 @@ package veryl_testcase___Package57A__2;
 endpackage
 
 /// Generic package test for doc comment
+package veryl_testcase___Package57B__5;
+    localparam int unsigned X = 5;
+endpackage
 package veryl_testcase___Package57B__3;
     localparam int unsigned X = 3;
 endpackage
@@ -48,14 +51,17 @@ endpackage
 
 module veryl_testcase_Module57;
     import veryl_testcase_Package57E::Y;
+    import veryl_testcase___Package57B__5::*;
+
 
 
     localparam int unsigned     A = veryl_testcase___Package57A__1::X;
     localparam longint unsigned B = veryl_testcase___Package57A__2::X;
     localparam int unsigned     C = veryl_testcase___Package57B__3::X;
-    localparam int unsigned     E = veryl_testcase___Package57B__3::X;
-    localparam longint unsigned D = veryl_testcase___Package57B__4::X;
+    localparam int unsigned     D = veryl_testcase___Package57B__3::X;
+    localparam longint unsigned E = veryl_testcase___Package57B__4::X;
     localparam longint unsigned F = veryl_testcase___Package57B__Package57E_Y::X;
+    localparam longint unsigned G = X;
 
     veryl_testcase___Package57C__2::StructC      _c   ;
     veryl_testcase___Package57D__1::__StructD__2 _d   ;

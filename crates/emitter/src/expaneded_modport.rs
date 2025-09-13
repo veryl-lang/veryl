@@ -347,6 +347,7 @@ impl ExpandedModportPortTable {
                     &interface_path,
                     &interface_tables,
                     context,
+                    1,
                 );
                 port.token.replace(&text)
             };
