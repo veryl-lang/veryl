@@ -531,6 +531,12 @@ impl fmt::Display for Direction {
     }
 }
 
+impl ScopedIdentifier {
+    pub fn get_scope_depth(&self) -> usize {
+        self.scoped_identifier_list.len() + 1
+    }
+}
+
 impl ExpressionIdentifier {
     pub fn last_select(&self) -> Vec<Select> {
         if self.expression_identifier_list0.is_empty() {

@@ -1403,6 +1403,7 @@ impl Emitter {
                     &symbol.full_path,
                     &symbol.generic_tables,
                     &context,
+                    1,
                 );
                 self.duplicated_token(&identifier.identifier_token.replace(&text));
             }
@@ -1715,7 +1716,14 @@ impl Emitter {
             in_direction_modport: false,
             generic_map: target_map.clone(),
         };
-        let text = symbol_string(token, &target_type, &target_path, &target_tables, &context);
+        let text = symbol_string(
+            token,
+            &target_type,
+            &target_path,
+            &target_tables,
+            &context,
+            1,
+        );
         self.str(&text);
         self.str("'(");
 
@@ -2363,6 +2371,7 @@ impl VerylWalker for Emitter {
                         &symbol.full_path,
                         &symbol.generic_tables,
                         &context,
+                        arg.get_scope_depth(),
                     );
                     self.identifier(&Identifier {
                         identifier_token: arg.identifier().replace(&text),
@@ -5630,6 +5639,7 @@ pub fn symbol_string(
     full_path: &[SymbolId],
     generic_tables: &GenericTables,
     context: &SymbolContext,
+    scope_depth: usize,
 ) -> String {
     let mut ret = String::new();
     let namespace = namespace_table::get(token.token.id).unwrap();
@@ -5658,7 +5668,7 @@ pub fn symbol_string(
         | SymbolKind::Enum(_) => {
             let visible = namespace.included(&symbol.namespace)
                 || symbol.imported.iter().any(|x| x.namespace == namespace);
-            if visible & !context.in_import {
+            if (scope_depth == 1) & visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
                 ret.push_str(&namespace_string(
@@ -5673,8 +5683,8 @@ pub fn symbol_string(
             let mut enum_namespace = symbol.namespace.clone();
             enum_namespace.pop();
 
-            // if enum definition is not visible, explicit namespace is required
-            if !namespace.included(&enum_namespace) {
+            // if enum definition is scoped or it is not visible, explicit namespace is required
+            if scope_depth >= 3 || !namespace.included(&enum_namespace) {
                 ret.push_str(&namespace_string(&enum_namespace, generic_tables, context));
             }
             ret.push_str(&x.prefix);
@@ -5705,7 +5715,7 @@ pub fn symbol_string(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
-            if !visible | top_level {
+            if (scope_depth >= 2) | !visible | top_level {
                 ret.push_str(&namespace_string(
                     &symbol.namespace,
                     generic_tables,
@@ -5754,7 +5764,14 @@ pub fn symbol_string(
                 .map(|(_, id)| symbol_table::get(*id).unwrap())
                 .filter(|x| !matches!(x.kind, SymbolKind::Namespace | SymbolKind::Package(_)))
             {
-                let text = symbol_string(token, &x, &[], &GenericTables::default(), context);
+                let text = symbol_string(
+                    token,
+                    &x,
+                    &[],
+                    &GenericTables::default(),
+                    context,
+                    scope_depth,
+                );
                 ret.push_str(&text);
                 ret.push('.');
             }

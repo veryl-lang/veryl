@@ -15,7 +15,7 @@ module veryl_testcase_Module44;
 
 
 
-    always_comb a = z;
+    always_comb a = veryl_testcase_Package44A::z;
     always_comb b = z;
     always_comb c = y;
 endmodule
