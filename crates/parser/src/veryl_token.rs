@@ -254,6 +254,7 @@ static COMMENT_REGEX: Lazy<Regex> =
 
 fn split_comment_token(token: Token) -> Vec<Token> {
     let mut line = token.line;
+    let mut column = token.column;
     let text = resource_table::get_str_value(token.text).unwrap();
 
     let mut prev_pos = 0;
@@ -263,7 +264,16 @@ fn split_comment_token(token: Token) -> Vec<Token> {
         let pos = cap.start();
         let length = (cap.end() - pos) as u32;
 
-        line += text[prev_pos..(pos)].matches('\n').count() as u32;
+        let prev_text = &text[prev_pos..(pos)];
+        let n_lines = prev_text.matches('\n').count() as u32;
+        line += n_lines;
+
+        column = if n_lines == 0 {
+            column + prev_text.len() as u32
+        } else {
+            (prev_text.len() - prev_text.rfind('\n').unwrap_or(0)) as u32
+        };
+
         prev_pos = pos;
 
         let id = resource_table::new_token_id();
@@ -279,7 +289,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
             id,
             text,
             line,
-            column: 0,
+            column,
             length,
             pos: pos as u32 + length,
             source: token.source,

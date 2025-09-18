@@ -163,4 +163,23 @@ package PackageA {
 
     println!("ret\n{}\nexp\n{}", ret, code);
     assert_eq!(ret, code);
+
+    let code = r#"#[fmt(skip)]
+module ModuleA () {
+    /* this comment line is important */
+}
+#[fmt(skip)]
+module ModuleB () {
+    // this comment line is important
+}
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.format.indent_width = 2;
+
+    let ret = format(&metadata, &code);
+
+    println!("ret\n{}\nexp\n{}", ret, code);
+    assert_eq!(ret, code);
 }
