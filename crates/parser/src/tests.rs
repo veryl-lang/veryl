@@ -150,3 +150,16 @@ fn assignment_statement() {
     success("always_comb { a <<<= 1; }");
     success("always_comb { a >>>= 1; }");
 }
+
+#[test]
+fn embed() {
+    let code = r#"
+    let a: logic = {{{1'b0}}};
+    embed (inline) sv {{{
+        initial begin
+            $display("a = %0d", \{ a \});
+        end
+    }}}
+    "#;
+    success(code);
+}

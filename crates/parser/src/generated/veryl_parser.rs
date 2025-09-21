@@ -201,7 +201,6 @@ scanner! {
             token r"\?" => 41; // "QuestionTerm"
             token r"'\{" => 42; // "QuoteLBraceTerm"
             token r"'" => 43; // "QuoteTerm"
-            token r"\{\{\{" => 45; // "TripleLBraceTerm"
             token r"\{" => 46; // "LBraceTerm"
             token r"\[" => 47; // "LBracketTerm"
             token r"\(" => 48; // "LParenTerm"
@@ -294,27 +293,38 @@ scanner! {
             token r"." => 137; // "Error"
             on 30 push Generic;
             on 38 push Attr;
-            on 45 push Embed;
             on 50 pop;
+            on 74 enter EmbedHeader;
         }
-        mode Embed {
+        mode EmbedHeader {
+            token r"\r\n|\r|\n" => 1; // "Newline"
+            token r"[\s--\r\n]+" => 2; // "Whitespace"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"\{\{\{" => 45; // "TripleLBraceTerm"
+            token r"\(" => 48; // "LParenTerm"
+            token r"\)" => 54; // "RParenTerm"
+            token r"(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*" => 135; // "IdentifierTerm"
+            token r"." => 137; // "Error"
+            on 45 enter EmbedBody;
+        }
+        mode EmbedBody {
             token r"\\\{" => 44; // "EscapedLBraceTerm"
             token r"\{" => 46; // "LBraceTerm"
             token r"\}\}\}" => 51; // "TripleRBraceTerm"
             token r"(?:[^{}\\]|\\[^{])+" => 136; // "AnyTerm"
             token r"." => 137; // "Error"
             on 44 push INITIAL;
-            on 46 push EmbedInner;
-            on 51 pop;
+            on 46 push EmbedBodyInner;
+            on 51 enter INITIAL;
         }
-        mode EmbedInner {
+        mode EmbedBodyInner {
             token r"\\\{" => 44; // "EscapedLBraceTerm"
             token r"\{" => 46; // "LBraceTerm"
             token r"\}" => 52; // "RBraceTerm"
             token r"(?:[^{}\\]|\\[^{])+" => 136; // "AnyTerm"
             token r"." => 137; // "Error"
             on 44 push INITIAL;
-            on 46 push EmbedInner;
+            on 46 push EmbedBodyInner;
             on 52 pop;
         }
         mode Generic {
@@ -364,7 +374,6 @@ scanner! {
             token r"converse" => 71; // "ConverseTerm"
             token r"default" => 72; // "DefaultTerm"
             token r"else" => 73; // "ElseTerm"
-            token r"embed" => 74; // "EmbedTerm"
             token r"enum" => 75; // "EnumTerm"
             token r"f32" => 76; // "F32Term"
             token r"f64" => 77; // "F64Term"
