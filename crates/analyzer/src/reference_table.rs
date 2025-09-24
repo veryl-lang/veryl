@@ -304,36 +304,12 @@ impl ReferenceTable {
                         }
                     }
 
-                    let path = GenericSymbol {
-                        base: path.paths[i].base,
-                        arguments: args,
-                    };
-                    if let Some((token, new_symbol)) = path.get_generic_instance(&symbol.found) {
-                        if let Some(ref x) = symbol_table::insert(&token, new_symbol) {
-                            symbol_table::add_generic_instance(symbol.found.id, *x);
-                        }
-
-                        let table = symbol.found.generic_table(&path.arguments);
-                        let map = vec![GenericMap {
-                            id: None,
-                            map: table,
-                        }];
-
-                        let mut references = symbol.found.generic_references();
-                        for path in &mut references {
-                            // check recursive reference
-                            if path.paths[0].base.text == symbol.found.token.text {
-                                continue;
-                            }
-
-                            self.generic_symbol_path(
-                                path,
-                                &symbol.found.inner_namespace(),
-                                false,
-                                Some(symbol.found.token),
-                                Some(&map),
-                            );
-                        }
+                    if path.is_generic_reference() {
+                        // some unaliased generic args are still generic references.
+                        self.add_generic_reference(&symbol.found, namespace, &path, i);
+                        return;
+                    } else {
+                        self.insert_generic_instance(&path, i, &args, &symbol.found);
                     }
                 }
                 Err(err) => {
@@ -345,6 +321,104 @@ impl ReferenceTable {
                 }
             }
         }
+    }
+
+    fn insert_generic_instance(
+        &mut self,
+        path: &GenericSymbolPath,
+        ith: usize,
+        generic_args: &[GenericSymbolPath],
+        target: &Symbol,
+    ) {
+        let instance_path = GenericSymbol {
+            base: path.paths[ith].base,
+            arguments: generic_args.to_owned(),
+        };
+
+        let Some((token, symbol)) = instance_path.get_generic_instance(target) else {
+            return;
+        };
+
+        if let Some(ref id) = symbol_table::insert(&token, symbol) {
+            symbol_table::add_generic_instance(target.id, *id);
+        }
+
+        let map = vec![GenericMap {
+            id: None,
+            map: target.generic_table(&instance_path.arguments),
+        }];
+
+        let mut referecnes = target.generic_references();
+        for path in &mut referecnes {
+            // check recursive reference
+            if path.paths[0].base.text == target.token.text {
+                continue;
+            }
+
+            self.generic_symbol_path(
+                path,
+                &target.inner_namespace(),
+                false,
+                Some(target.token),
+                Some(&map),
+            );
+        }
+    }
+
+    fn add_generic_reference(
+        &mut self,
+        symbol: &Symbol,
+        namespace: &Namespace,
+        path: &GenericSymbolPath,
+        ith: usize,
+    ) {
+        let Some(mut target) = namespace.get_symbol() else {
+            return;
+        };
+        let path = path.slice(ith);
+
+        let generic_maps = target.generic_maps();
+        for map in generic_maps {
+            // existing generic maps means that the target symbol has
+            // already been processed.
+            // For this case, need to insert generic instance generated from
+            // the given path explicitly.
+            let mut path = path.clone();
+            let ith = path.len() - 1;
+            path.apply_map(&[map]);
+            self.insert_generic_instance(&path, ith, &path.paths[ith].arguments, symbol);
+        }
+
+        let kind = match target.kind {
+            SymbolKind::Function(mut x) => {
+                x.generic_references.push(path);
+                SymbolKind::Function(x)
+            }
+            SymbolKind::Module(mut x) => {
+                x.generic_references.push(path);
+                SymbolKind::Module(x)
+            }
+            SymbolKind::Interface(mut x) => {
+                x.generic_references.push(path);
+                SymbolKind::Interface(x)
+            }
+            SymbolKind::Package(mut x) => {
+                x.generic_references.push(path);
+                SymbolKind::Package(x)
+            }
+            SymbolKind::Struct(mut x) => {
+                x.generic_references.push(path);
+                SymbolKind::Struct(x)
+            }
+            SymbolKind::Union(mut x) => {
+                x.generic_references.push(path);
+                SymbolKind::Union(x)
+            }
+            _ => return,
+        };
+
+        target.kind = kind;
+        symbol_table::update(target);
     }
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {

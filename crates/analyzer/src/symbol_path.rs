@@ -368,6 +368,19 @@ impl GenericSymbolPath {
         SymbolPath::new(&path)
     }
 
+    pub fn slice(&self, i: usize) -> GenericSymbolPath {
+        let paths: Vec<_> = self.paths.clone().drain(0..=i).collect();
+        let range = TokenRange {
+            beg: paths.first().map(|x| x.base).unwrap(),
+            end: paths.last().map(|x| x.base).unwrap(),
+        };
+        GenericSymbolPath {
+            paths,
+            kind: self.kind,
+            range,
+        }
+    }
+
     pub fn mangled_path(&self) -> SymbolPath {
         let path: Vec<_> = self.paths.iter().map(|x| x.mangled()).collect();
         SymbolPath::new(&path)
