@@ -1,7 +1,9 @@
 use crate::attribute::Attribute;
 use crate::attribute_table;
 use crate::namespace_table;
+use crate::symbol::Symbol;
 use crate::symbol_path::SymbolPath;
+use crate::symbol_table;
 use crate::{HashMap, SVec, svec};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -146,6 +148,20 @@ impl Namespace {
             }
         }
         self.paths = paths;
+    }
+
+    pub fn get_symbol(&self) -> Option<Symbol> {
+        let mut namespace = self.clone();
+        if let Some(path) = namespace.pop()
+            && namespace.depth() >= 1
+        {
+            let path = SymbolPath::new(&[path]);
+            symbol_table::resolve((&path, &namespace))
+                .map(|x| x.found)
+                .ok()
+        } else {
+            None
+        }
     }
 }
 

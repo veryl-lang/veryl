@@ -156,17 +156,7 @@ impl Symbol {
     }
 
     pub fn get_parent(&self) -> Option<Symbol> {
-        let mut namespace = self.namespace.clone();
-        if let Some(path) = namespace.pop()
-            && namespace.depth() >= 1
-        {
-            let path = SymbolPath::new(&[path]);
-            if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                return Some(symbol.found);
-            }
-        }
-
-        None
+        self.namespace.get_symbol()
     }
 
     pub fn get_parent_package(&self) -> Option<Symbol> {

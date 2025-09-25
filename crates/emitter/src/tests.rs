@@ -2180,3 +2180,58 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn bind_declaration() {
+    let code = r#"
+proto package ProtoPkg {
+}
+
+package Pkg::<A_VALUE: u32> for ProtoPkg {
+}
+
+module ModuleA::<PKG: ProtoPkg> {}
+
+module ModuleB::<PKG: ProtoPkg> {}
+
+alias module mod = ModuleC::<32>;
+
+module ModuleC::<A_VALUE: u32> {
+  alias package pkg = Pkg::<A_VALUE>;
+
+  bind ModuleA::<pkg> <- u: ModuleB::<pkg>;
+}
+"#;
+
+    let expect = r#"
+
+package prj___Pkg__32;
+endpackage
+
+module prj___ModuleA____Pkg__32;
+endmodule
+
+module prj___ModuleB____Pkg__32;
+endmodule
+
+
+module prj___ModuleC__32;
+
+
+    bind prj___ModuleA____Pkg__32 prj___ModuleB____Pkg__32 u ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
