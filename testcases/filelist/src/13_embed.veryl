@@ -1,0 +1,3 @@
+embed (inline) sv {{{
+    `define AXI_PKG \{ $std::axi4_pkg::<32, 4, 8, 1, 1, 1, 1, 1> \}
+}}}

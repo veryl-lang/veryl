@@ -753,6 +753,7 @@ pub enum SymbolKind {
     GenericInstance(GenericInstanceProperty),
     ClockDomain,
     Test(TestProperty),
+    Embed,
 }
 
 impl SymbolKind {
@@ -807,6 +808,7 @@ impl SymbolKind {
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
             SymbolKind::Test(_) => "test".to_string(),
+            SymbolKind::Embed => "embed".to_string(),
         }
     }
 
@@ -1064,6 +1066,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
             SymbolKind::Test(_) => "test".to_string(),
+            SymbolKind::Embed => "embed".to_string(),
         };
         text.fmt(f)
     }

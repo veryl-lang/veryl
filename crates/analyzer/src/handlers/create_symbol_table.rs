@@ -79,7 +79,7 @@ pub struct CreateSymbolTable {
     module_namspace_depth: usize,
     default_block: Option<StrId>,
     for_identifier: Option<Token>,
-    anonymous_namespace: usize,
+    anonymous_block: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
     enum_encoding: EnumEncodingItem,
@@ -141,6 +141,17 @@ impl CreateSymbolTable {
             let namespace = self.get_namespace(token);
             namespace_table::insert(token.id, path, &namespace);
         }
+    }
+
+    fn get_anonymous_block_name(&mut self, prefix: Option<StrId>) -> (String, StrId) {
+        let name = if let Some(x) = prefix {
+            format!("{}@{}", x, self.anonymous_block)
+        } else {
+            format!("@{}", self.anonymous_block)
+        };
+        let id = resource_table::insert_str(&name);
+        self.anonymous_block += 1;
+        (name, id)
     }
 
     fn check_identifer_with_type_path(
@@ -780,10 +791,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn statement_block(&mut self, _arg: &StatementBlock) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let name = format!("@{}", self.anonymous_namespace);
-                let name = resource_table::insert_str(&name);
+                let (_, name) = self.get_anonymous_block_name(None);
                 self.namespace.push(name);
-                self.anonymous_namespace += 1;
                 self.affiliation.push(VariableAffiliation::StatementBlock);
             }
             HandlerPoint::After => {
@@ -847,10 +856,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let name = format!("@{}", self.anonymous_namespace);
-                let name = resource_table::insert_str(&name);
+                let (_, name) = self.get_anonymous_block_name(None);
                 self.namespace.push(name);
-                self.anonymous_namespace += 1;
 
                 let r#type: SymType = arg.scalar_type.as_ref().into();
                 if !self.check_identifer_with_type(&arg.identifier, &r#type) {
@@ -1906,13 +1913,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     );
                     x.identifier.identifier_token.token.text
                 } else {
-                    let name = format!(
-                        "{}@{}",
-                        self.default_block.unwrap(),
-                        self.anonymous_namespace
-                    );
-                    self.anonymous_namespace += 1;
-                    resource_table::insert_str(&name)
+                    let (_, name) = self.get_anonymous_block_name(self.default_block);
+                    name
                 };
 
                 self.namespace.push(name)
@@ -2333,39 +2335,56 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn embed_declaration(&mut self, arg: &EmbedDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            let way = arg.identifier.identifier_token.to_string();
-            let mut test_attr = None;
-
-            let attrs = attribute_table::get(&arg.embed.embed_token.token);
-            for attr in attrs {
-                if let Attr::Test(x, y) = attr {
-                    test_attr = Some((x, y));
-                }
+        match self.point {
+            HandlerPoint::Before => {
+                self.push_type_dag_cand();
             }
+            HandlerPoint::After => {
+                let way = arg.identifier.identifier_token.to_string();
+                let mut test_attr = None;
 
-            let content = &arg.embed_content;
-            let r#type = match way.as_str() {
-                "inline" => Some(TestType::Inline),
-                "cocotb" => Some(TestType::CocotbEmbed(content.clone())),
-                _ => None,
-            };
+                let attrs = attribute_table::get(&arg.embed.embed_token.token);
+                for attr in attrs {
+                    if let Attr::Test(x, y) = attr {
+                        test_attr = Some((x, y));
+                    }
+                }
 
-            if let (Some((token, top)), Some(r#type)) = (test_attr, r#type) {
-                let content_source = content.triple_l_brace.triple_l_brace_token.token.source;
-                let path = if let TokenSource::File { path, .. } = content_source {
-                    path
-                } else {
-                    unreachable!()
+                let content = &arg.embed_content;
+                let r#type = match way.as_str() {
+                    "inline" => Some(TestType::Inline),
+                    "cocotb" => Some(TestType::CocotbEmbed(content.clone())),
+                    _ => None,
                 };
 
-                if top.is_none() && way == "cocotb" {
-                    self.errors
-                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", &token.into()));
-                }
+                let (token, kind) = if let (Some((token, top)), Some(r#type)) = (test_attr, r#type)
+                {
+                    let content_source = content.triple_l_brace.triple_l_brace_token.token.source;
+                    let path = if let TokenSource::File { path, .. } = content_source {
+                        path
+                    } else {
+                        unreachable!()
+                    };
 
-                let property = TestProperty { r#type, path, top };
-                self.insert_symbol(&token, SymbolKind::Test(property), false);
+                    if top.is_none() && way == "cocotb" {
+                        self.errors
+                            .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", &token.into()));
+                    }
+
+                    let property = TestProperty { r#type, path, top };
+                    (token, SymbolKind::Test(property))
+                } else {
+                    let (name, _) =
+                        self.get_anonymous_block_name(Some(arg.embed.embed_token.token.text));
+                    let token = arg.embed.embed_token.replace(&name);
+                    (token.token, SymbolKind::Embed)
+                };
+
+                if let Some(id) = self.insert_symbol(&token, kind, false) {
+                    self.pop_type_dag_cand(Some((id, Context::Embed, false)));
+                } else {
+                    self.pop_type_dag_cand(None);
+                }
             }
         }
         Ok(())

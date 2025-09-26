@@ -692,7 +692,8 @@ impl SymbolTable {
                             | SymbolKind::SystemFunction(_)
                             | SymbolKind::Genvar
                             | SymbolKind::ClockDomain
-                            | SymbolKind::Test(_) => (),
+                            | SymbolKind::Test(_)
+                            | SymbolKind::Embed => (),
                         }
                     }
                 } else {

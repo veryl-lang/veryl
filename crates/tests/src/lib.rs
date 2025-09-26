@@ -428,6 +428,7 @@ mod filelist {
             "10_package_g.veryl",
             "11_package_h.veryl",
             "12_alias_i.veryl",
+            "13_embed.veryl",
             "ram.veryl",
             "axi_pkg.veryl",
         ];
@@ -441,5 +442,6 @@ mod filelist {
         check_order(&paths, "09_module_f.veryl", "08_module_e.veryl");
         check_order(&paths, "10_package_g.veryl", "11_package_h.veryl");
         check_order(&paths, "axi_pkg.veryl", "12_alias_i.veryl");
+        check_order(&paths, "axi_pkg.veryl", "13_embed.veryl");
     }
 }
