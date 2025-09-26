@@ -25,6 +25,26 @@ module Module19C (
     assign o_d = '0;
 }
 
+module Module19D {
+    :g0 {
+        import PackageA::A;
+        let _a: u32 = A;
+    }
+
+    if true :g1 {
+        import PackageA::A;
+        let _a: u32 = A;
+    } else {
+        import PackageA::A;
+        let _a: u32 = A;
+    }
+
+    for i in 0..1 :g2 {
+        import PackageA::A;
+        let _a: u32 = A;
+    }
+}
+
 interface Interface19A {
     import PackageA::A;
     import PackageA::*;

@@ -44,6 +44,28 @@ module veryl_testcase_Module19C
     always_comb o_d = '0;
 endmodule
 
+module veryl_testcase_Module19D;
+    import PackageA::A;
+    import PackageA::*;
+    if (1) begin :g0
+        import veryl_testcase_PackageA::A;
+        int unsigned _a; always_comb _a = A;
+    end
+
+    if (1'b1) begin :g1
+        import veryl_testcase_PackageA::A;
+        int unsigned _a; always_comb _a = A;
+    end else begin :g1
+        import veryl_testcase_PackageA::A;
+        int unsigned _a; always_comb _a = A;
+    end
+
+    for (genvar i = 0; i < 1; i++) begin :g2
+        import veryl_testcase_PackageA::A;
+        int unsigned _a; always_comb _a = A;
+    end
+endmodule
+
 interface veryl_testcase_Interface19A;
     import PackageA::A;
     import PackageA::*;

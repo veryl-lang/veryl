@@ -69,6 +69,7 @@ pub struct Emitter {
     in_expression: Vec<()>,
     in_attribute: bool,
     in_named_argument: Vec<bool>,
+    in_generate_block: Vec<()>,
     signed: bool,
     default_clock: Option<SymbolId>,
     default_reset: Option<SymbolId>,
@@ -120,6 +121,7 @@ impl Default for Emitter {
             in_expression: Vec::new(),
             in_attribute: false,
             in_named_argument: Vec::new(),
+            in_generate_block: Vec::new(),
             signed: false,
             default_clock: None,
             default_reset: None,
@@ -926,9 +928,11 @@ impl Emitter {
             .contains(&BuiltinType::Type)
     }
 
-    fn emit_import_declaration(&mut self, arg: &ImportDeclaration) {
+    fn emit_import_declaration(&mut self, arg: &ImportDeclaration, in_generate_block: bool) {
+        if !in_generate_block {
+            self.clear_adjust_line();
+        }
         let src_line = self.src_line;
-        self.clear_adjust_line();
 
         self.in_import = true;
         self.import(&arg.import);
@@ -941,10 +945,14 @@ impl Emitter {
         self.semicolon(&arg.semicolon);
         self.in_import = false;
 
-        self.src_line = src_line;
+        if !in_generate_block {
+            self.src_line = src_line;
+        }
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {
+        self.in_generate_block.push(());
+
         self.default_block = Some(emitting_identifier_token(
             &arg.identifier.identifier_token,
             None,
@@ -959,6 +967,8 @@ impl Emitter {
         }
         self.newline_list_post(arg.generate_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
+
+        self.in_generate_block.pop();
     }
 
     fn emit_statement_block(&mut self, arg: &StatementBlock, begin_kw: &str, end_kw: &str) {
@@ -4905,8 +4915,10 @@ impl VerylWalker for Emitter {
     }
 
     /// Semantic action for non-terminal 'ImportDeclaration'
-    fn import_declaration(&mut self, _arg: &ImportDeclaration) {
-        // nothing to emit
+    fn import_declaration(&mut self, arg: &ImportDeclaration) {
+        if !self.in_generate_block.is_empty() {
+            self.emit_import_declaration(arg, true);
+        }
     }
 
     /// Semantic action for non-terminal 'UnsafeBlock'
@@ -4974,7 +4986,7 @@ impl VerylWalker for Emitter {
                     if i != 0 {
                         self.newline();
                     }
-                    self.emit_import_declaration(x);
+                    self.emit_import_declaration(x, false);
                 }
                 self.newline_pop();
             }
@@ -4996,7 +5008,7 @@ impl VerylWalker for Emitter {
                 self.newline_list(i);
                 if i == 0 && !import_declarations.is_empty() && empty_header {
                     for x in &import_declarations {
-                        self.emit_import_declaration(x);
+                        self.emit_import_declaration(x, false);
                         self.newline();
                     }
                 }
@@ -5073,7 +5085,7 @@ impl VerylWalker for Emitter {
                     if i != 0 {
                         self.newline();
                     }
-                    self.emit_import_declaration(x);
+                    self.emit_import_declaration(x, false);
                 }
                 self.newline_pop();
             }
@@ -5089,7 +5101,7 @@ impl VerylWalker for Emitter {
                 self.newline_list(i);
                 if i == 0 && !import_declarations.is_empty() && empty_header {
                     for x in &import_declarations {
-                        self.emit_import_declaration(x);
+                        self.emit_import_declaration(x, false);
                         self.newline();
                     }
                 }
@@ -5228,6 +5240,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'GenerateOptionalNamedBlock'
     fn generate_optional_named_block(&mut self, arg: &GenerateOptionalNamedBlock) {
+        self.in_generate_block.push(());
+
         self.str("begin");
         if let Some(ref x) = arg.generate_optional_named_block_opt {
             self.space(1);
@@ -5245,6 +5259,8 @@ impl VerylWalker for Emitter {
         }
         self.newline_list_post(arg.generate_optional_named_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("end"));
+
+        self.in_generate_block.pop();
     }
 
     /// Semantic action for non-terminal 'GenerateGroup'
@@ -5300,7 +5316,7 @@ impl VerylWalker for Emitter {
                     let mut import_declarations = self.file_scope_import.clone();
                     import_declarations.append(&mut arg.collect_import_declarations());
                     for x in import_declarations {
-                        self.emit_import_declaration(&x);
+                        self.emit_import_declaration(&x, false);
                         self.newline();
                     }
                 }
