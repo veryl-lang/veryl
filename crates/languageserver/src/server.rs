@@ -438,6 +438,7 @@ impl Server {
                     VerylSymbolKind::GenericInstance(_) => SymbolKind::MODULE,
                     VerylSymbolKind::ClockDomain => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::Test(_) => SymbolKind::MODULE,
+                    VerylSymbolKind::Embed => SymbolKind::NAMESPACE,
                 };
                 let location = to_location(&symbol.token);
                 #[allow(deprecated)]

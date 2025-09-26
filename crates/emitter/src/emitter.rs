@@ -5795,7 +5795,8 @@ pub fn symbol_string(
         | SymbolKind::ProtoConst(_)
         | SymbolKind::ProtoTypeDef(_)
         | SymbolKind::ProtoFunction(_)
-        | SymbolKind::Test(_) => {
+        | SymbolKind::Test(_)
+        | SymbolKind::Embed => {
             unreachable!()
         }
     }

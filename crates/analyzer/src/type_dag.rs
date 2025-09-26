@@ -80,6 +80,7 @@ pub enum Context {
     Package,
     Modport,
     GenericInstance,
+    Embed,
 }
 
 #[derive(Debug, Clone)]
@@ -271,7 +272,9 @@ impl TypeDag {
             | SymbolKind::TypeDef(_)
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
-            | SymbolKind::Function(_) => true,
+            | SymbolKind::Function(_)
+            | SymbolKind::Test(_)
+            | SymbolKind::Embed => true,
             SymbolKind::Parameter(ref x) => matches!(x.kind, ParameterKind::Const),
             _ => false,
         };
