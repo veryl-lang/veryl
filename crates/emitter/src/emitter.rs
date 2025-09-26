@@ -2038,8 +2038,8 @@ impl Emitter {
         } else {
             &name
         };
-        let name = name.replace("$std_", "__std_");
 
+        let name = escape_path_string(name);
         self.token(&token.replace(&name));
     }
 }
@@ -5539,6 +5539,10 @@ impl From<&mut Emitter> for SymbolContext {
     }
 }
 
+fn escape_path_string(path: &str) -> String {
+    path.replace("$std_", "__std_").replace("'", "__")
+}
+
 fn namespace_string(
     namespace: &Namespace,
     generic_tables: &GenericTables,
@@ -5590,7 +5594,7 @@ fn namespace_string(
         resolve_namespace.push(*path);
     }
 
-    ret.replace("$std_", "__std_")
+    escape_path_string(&ret)
 }
 
 fn generic_instance_namespace_string(symbol: &Symbol, context: &SymbolContext) -> String {
@@ -5817,7 +5821,7 @@ pub fn symbol_string(
         }
     }
 
-    ret.replace("$std_", "__std_")
+    escape_path_string(&ret)
 }
 
 fn get_variable_type_kind(symbol: &Symbol) -> Option<TypeKind> {
