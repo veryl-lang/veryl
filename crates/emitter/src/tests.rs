@@ -794,7 +794,6 @@ endpackage
 package prj___PkgB____PkgA__1;
     import prj___PkgA__1::*;
 
-
     function automatic int unsigned __Func__1;
         return prj___PkgA__1::Foo_FOO + 1;
     endfunction
@@ -808,7 +807,6 @@ package prj___PkgB____PkgA__1;
 endpackage
 package prj___PkgB____PkgA__2;
     import prj___PkgA__2::*;
-
 
     function automatic int unsigned __Func__1;
         return prj___PkgA__2::Foo_FOO + 1;
@@ -1158,7 +1156,6 @@ package prj___Pkg__32;
 endpackage
 interface prj___IfA____Pkg__32;
     import prj___Pkg__32::*;
-
 
     prj___Pkg__32::Foo foo;
     prj___Pkg__32::Bar bar;
@@ -2080,7 +2077,6 @@ endpackage
 module prj___ModuleA____PkgA__32;
     import prj___PkgA__32::*;
 
-
     function automatic int unsigned __func____PkgA__32_A() ;
         return $bits(prj___PkgA__32::A);
     endfunction
@@ -2161,7 +2157,6 @@ package prj___PkgA__2;
 endpackage
 module prj_ModuleA;
     import prj___PkgA__1::*;
-
 
     localparam int unsigned A = prj___PkgA__2::A;
 endmodule

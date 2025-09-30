@@ -54,7 +54,6 @@ module veryl_testcase_Module57;
     import veryl_testcase___Package57B__5::*;
 
 
-
     localparam int unsigned     A = veryl_testcase___Package57A__1::X;
     localparam longint unsigned B = veryl_testcase___Package57A__2::X;
     localparam int unsigned     C = veryl_testcase___Package57B__3::X;

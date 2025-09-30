@@ -14,7 +14,6 @@ module veryl_testcase_Module19A;
     import veryl_testcase_PackageA::*;
 
 
-
 endmodule
 
 module veryl_testcase_Module19B
@@ -27,7 +26,6 @@ module veryl_testcase_Module19B
 );
 
 
-
 endmodule
 
 module veryl_testcase_Module19C
@@ -38,8 +36,6 @@ module veryl_testcase_Module19C
 (
     output var logic [A-1:0] o_d
 );
-
-
 
 
 
@@ -76,7 +72,6 @@ interface veryl_testcase_Interface19A;
     import veryl_testcase_PackageA::*;
 
 
-
 endinterface
 
 interface veryl_testcase_Interface19B
@@ -89,7 +84,6 @@ interface veryl_testcase_Interface19B
 );
 
 
-
 endinterface
 
 package veryl_testcase_Package19;
@@ -97,7 +91,6 @@ package veryl_testcase_Package19;
     import PackageA::*;
     import veryl_testcase_PackageA::A;
     import veryl_testcase_PackageA::*;
-
 
 
 endpackage
