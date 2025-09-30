@@ -4933,6 +4933,7 @@ impl VerylWalker for Emitter {
         } else {
             // emit comments after import declaration which is moved
             self.clear_adjust_line();
+            self.src_line = arg.semicolon.semicolon_token.token.line;
             self.process_comment(&arg.semicolon.semicolon_token, false);
         }
     }
