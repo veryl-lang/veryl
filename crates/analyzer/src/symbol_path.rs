@@ -140,7 +140,7 @@ impl SymbolPathNamespace {
 
 impl From<&Token> for SymbolPathNamespace {
     fn from(value: &Token) -> Self {
-        let namespace = namespace_table::get(value.id).unwrap();
+        let namespace = namespace_table::get(value.id).unwrap_or_default();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
@@ -180,7 +180,7 @@ impl From<(&SVec<StrId>, &Namespace)> for SymbolPathNamespace {
 
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {
-        let namespace = namespace_table::get(value.identifier_token.token.id).unwrap();
+        let namespace = namespace_table::get(value.identifier_token.token.id).unwrap_or_default();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
@@ -198,28 +198,30 @@ impl From<(&syntax_tree::Identifier, Option<&Namespace>)> for SymbolPathNamespac
 
 impl From<&[syntax_tree::Identifier]> for SymbolPathNamespace {
     fn from(value: &[syntax_tree::Identifier]) -> Self {
-        let namespace = namespace_table::get(value[0].identifier_token.token.id).unwrap();
+        let namespace =
+            namespace_table::get(value[0].identifier_token.token.id).unwrap_or_default();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
 
 impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier.identifier_token.token.id).unwrap();
+        let namespace =
+            namespace_table::get(value.identifier.identifier_token.token.id).unwrap_or_default();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
 
 impl From<&syntax_tree::ScopedIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier().token.id).unwrap();
+        let namespace = namespace_table::get(value.identifier().token.id).unwrap_or_default();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
 
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier().token.id).unwrap();
+        let namespace = namespace_table::get(value.identifier().token.id).unwrap_or_default();
         SymbolPathNamespace(value.into(), namespace)
     }
 }
@@ -407,7 +409,7 @@ impl GenericSymbolPath {
             range: self.range,
         };
 
-        let namespace = namespace_table::get(self.paths[0].base.id).unwrap();
+        let namespace = namespace_table::get(self.paths[0].base.id)?;
         let mut generic_maps: Vec<_> = Vec::new();
 
         for (i, path_item) in self.paths.iter().enumerate() {
