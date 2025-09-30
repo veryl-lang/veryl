@@ -21,9 +21,9 @@ module veryl_testcase_Module68A (
     );
 endmodule
 
-module veryl_testcase___Module68B____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg__axi_pkg_ADDRESS_WIDTH__axi_pkg_DATA_WIDTH_BYTES__axi_pkg_ID_LENGTH (
-    __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8.slave                                                      axi4_if     ,
-    __std___axi4_lite_if____std___axi4_lite_pkg__axi_pkg_ADDRESS_WIDTH__axi_pkg_DATA_WIDTH_BYTES__axi_pkg_ID_LENGTH.slave axi4_lite_if
+module veryl_testcase___Module68B____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH (
+    __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8.slave                                                                                                                                                            axi4_if     ,
+    __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH.slave axi4_lite_if
 );
     always_comb begin
         axi4_if.awready = 0;
@@ -58,7 +58,7 @@ endmodule
 
 module veryl_testcase_Module68C;
     __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8 axi4_if          ();
-    __std___axi4_lite_if____std___axi4_lite_pkg__axi_pkg_ADDRESS_WIDTH__axi_pkg_DATA_WIDTH_BYTES__axi_pkg_ID_LENGTH axi4_lite_if     ();
+    __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH axi4_lite_if     ();
     always_comb begin
         axi4_if.awvalid  = 0;
         axi4_if.awaddr   = __std___axi4_pkg__32__8__8__8__8__8__8__8::addr_t'(0);
@@ -106,7 +106,7 @@ module veryl_testcase_Module68C;
         axi4_lite_if.rready  = 0;
     end
 
-    veryl_testcase___Module68B____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg__axi_pkg_ADDRESS_WIDTH__axi_pkg_DATA_WIDTH_BYTES__axi_pkg_ID_LENGTH u (
+    veryl_testcase___Module68B____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH u (
         .axi4_if      (axi4_if     ),
         .axi4_lite_if (axi4_lite_if)
     );

@@ -2,7 +2,7 @@
 
 
 module veryl_testcase_Module25
-    import veryl_sample4___bar_pkg__veryl_sample4___foo_pkg__32_FOO_foo::*;
+    import veryl_sample4___bar_pkg__32::*;
 (
     input var logic                    i_clk  ,
     input var logic                    i_rst_n,
@@ -26,5 +26,7 @@ module veryl_testcase_Module25
         .i_d       (data_if.data),
         .o_d       (out_if.data )
     );
+
+    veryl_sample4___bar_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR__veryl_sample4___bar_pkg__32 u2 ();
 endmodule
 //# sourceMappingURL=../map/25_dependency.sv.map
