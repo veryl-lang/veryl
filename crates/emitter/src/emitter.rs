@@ -90,6 +90,7 @@ pub struct Emitter {
     modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
     inst_module_namespace: Option<Namespace>,
+    skip_comment: bool,
 }
 
 impl Default for Emitter {
@@ -142,6 +143,7 @@ impl Default for Emitter {
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
             inst_module_namespace: None,
+            skip_comment: false,
         }
     }
 }
@@ -367,36 +369,11 @@ impl Emitter {
                 }
 
                 // skip to emit comments
-                if duplicated.is_some() || self.build_opt.strip_comments {
+                if duplicated.is_some() || self.build_opt.strip_comments || self.skip_comment {
                     return;
                 }
 
-                // temporary indent to adjust indent of comments with the next push
-                if will_push {
-                    self.indent += 1;
-                }
-                // detect line comment newline which will consume the next newline
-                self.consumed_next_newline = false;
-                for x in &x.comments {
-                    // insert space between comments in the same line
-                    if x.line == self.src_line && !self.in_start_token {
-                        self.space(1);
-                    }
-                    for _ in 0..x.line - self.src_line {
-                        self.unindent();
-                        self.str(NEWLINE);
-                        self.indent();
-                    }
-                    self.push_token(x);
-                }
-                if will_push {
-                    self.indent -= 1;
-                }
-                if self.consumed_next_newline {
-                    self.unindent();
-                    self.str(NEWLINE);
-                    self.indent();
-                }
+                self.process_comment(x, will_push);
             }
             Mode::Align => {
                 self.aligner.token(x);
@@ -405,6 +382,35 @@ impl Emitter {
         }
 
         self.last_token = Some(x.clone());
+    }
+
+    fn process_comment(&mut self, x: &VerylToken, will_push: bool) {
+        // temporary indent to adjust indent of comments with the next push
+        if will_push {
+            self.indent += 1;
+        }
+        // detect line comment newline which will consume the next newline
+        self.consumed_next_newline = false;
+        for x in &x.comments {
+            // insert space between comments in the same line
+            if x.line == self.src_line && !self.in_start_token {
+                self.space(1);
+            }
+            for _ in 0..x.line - self.src_line {
+                self.unindent();
+                self.str(NEWLINE);
+                self.indent();
+            }
+            self.push_token(x);
+        }
+        if will_push {
+            self.indent -= 1;
+        }
+        if self.consumed_next_newline {
+            self.unindent();
+            self.str(NEWLINE);
+            self.indent();
+        }
     }
 
     fn token(&mut self, x: &VerylToken) {
@@ -928,8 +934,8 @@ impl Emitter {
             .contains(&BuiltinType::Type)
     }
 
-    fn emit_import_declaration(&mut self, arg: &ImportDeclaration, in_generate_block: bool) {
-        if !in_generate_block {
+    fn emit_import_declaration(&mut self, arg: &ImportDeclaration, moved: bool) {
+        if moved {
             self.clear_adjust_line();
         }
         let src_line = self.src_line;
@@ -942,10 +948,16 @@ impl Emitter {
             self.colon_colon(&x.colon_colon);
             self.star(&x.star);
         }
+        if moved {
+            self.skip_comment = true;
+        }
         self.semicolon(&arg.semicolon);
+        if moved {
+            self.skip_comment = false;
+        }
         self.in_import = false;
 
-        if !in_generate_block {
+        if moved {
             self.src_line = src_line;
         }
     }
@@ -4917,7 +4929,11 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'ImportDeclaration'
     fn import_declaration(&mut self, arg: &ImportDeclaration) {
         if !self.in_generate_block.is_empty() {
-            self.emit_import_declaration(arg, true);
+            self.emit_import_declaration(arg, false);
+        } else {
+            // emit comments after import declaration which is moved
+            self.clear_adjust_line();
+            self.process_comment(&arg.semicolon.semicolon_token, false);
         }
     }
 
@@ -4986,7 +5002,7 @@ impl VerylWalker for Emitter {
                     if i != 0 {
                         self.newline();
                     }
-                    self.emit_import_declaration(x, false);
+                    self.emit_import_declaration(x, true);
                 }
                 self.newline_pop();
             }
@@ -5008,7 +5024,7 @@ impl VerylWalker for Emitter {
                 self.newline_list(i);
                 if i == 0 && !import_declarations.is_empty() && empty_header {
                     for x in &import_declarations {
-                        self.emit_import_declaration(x, false);
+                        self.emit_import_declaration(x, true);
                         self.newline();
                     }
                 }
@@ -5085,7 +5101,7 @@ impl VerylWalker for Emitter {
                     if i != 0 {
                         self.newline();
                     }
-                    self.emit_import_declaration(x, false);
+                    self.emit_import_declaration(x, true);
                 }
                 self.newline_pop();
             }
@@ -5101,7 +5117,7 @@ impl VerylWalker for Emitter {
                 self.newline_list(i);
                 if i == 0 && !import_declarations.is_empty() && empty_header {
                     for x in &import_declarations {
-                        self.emit_import_declaration(x, false);
+                        self.emit_import_declaration(x, true);
                         self.newline();
                     }
                 }
@@ -5316,7 +5332,7 @@ impl VerylWalker for Emitter {
                     let mut import_declarations = self.file_scope_import.clone();
                     import_declarations.append(&mut arg.collect_import_declarations());
                     for x in import_declarations {
-                        self.emit_import_declaration(&x, false);
+                        self.emit_import_declaration(&x, true);
                         self.newline();
                     }
                 }
