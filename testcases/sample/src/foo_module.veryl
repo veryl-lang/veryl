@@ -1,0 +1,3 @@
+pub module foo_module::<FooPkg: foo_proto_pkg> {
+    let _foo: u32 = FooPkg::FOO.foo;
+}

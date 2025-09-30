@@ -1,5 +1,5 @@
-alias package foopkg = veryl_sample4::foo_pkg::<32>;
-alias package barpkg = veryl_sample4::bar_pkg::<foopkg::FOO.foo>;
+alias package barpkg = veryl_sample4::bar_pkg::<32>;
+alias package foopkg = veryl_sample4::foo_pkg::<barpkg::BAR>;
 
 module Module25 (
     i_clk : input   clock                         ,
@@ -24,4 +24,6 @@ module Module25 (
         i_d    : data_if.data,
         o_d    : out_if.data ,
     );
+
+    inst u2: veryl_sample4::bar_module::<foopkg, barpkg>;
 }

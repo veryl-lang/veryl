@@ -422,10 +422,8 @@ impl GenericSymbolPath {
                     for j in (i + 1)..self.paths.len() {
                         alias_target.paths.push(self.paths[j].clone());
                     }
-                    return alias_target.unaliased_path();
-                } else {
-                    return Some(alias_target);
                 }
+                return alias_target.unaliased_path();
             }
 
             if let Some(path) = ret.paths.last_mut() {

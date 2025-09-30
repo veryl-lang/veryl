@@ -1,4 +1,12 @@
-package foo_pkg::<V: u32> {
+pub proto package foo_proto_pkg {
+    struct Foo {
+        foo: u32,
+    }
+
+    const FOO: Foo;
+}
+
+pub package foo_pkg::<V: u32> for foo_proto_pkg {
     struct Foo {
         foo: u32,
     }

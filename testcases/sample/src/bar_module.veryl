@@ -1,0 +1,4 @@
+pub module bar_module::<FooPkg: foo_proto_pkg, BarPkg: bar_proto_pkg> {
+  let _bar: u32 = BarPkg::BAR;
+  inst u: foo_module::<FooPkg>;
+}
