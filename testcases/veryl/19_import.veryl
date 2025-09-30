@@ -22,6 +22,8 @@ module Module19C (
 ) {
     import PackageA::A;
     import PackageA::*;
+
+    // comment
     assign o_d = '0;
 }
 
