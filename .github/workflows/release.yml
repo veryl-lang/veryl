@@ -80,6 +80,18 @@ jobs:
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Repository Dispatch
+      uses: peter-evans/repository-dispatch@v1
+      with:
+        token: ${{ secrets.VERYL_DOCKER_PAT }}
+        repository: veryl-lang/docker
+        event-type: release
+        client-payload: '{"ref": "${{ env.GITHUB_REF }}"}'
+
   highlightjs:
     permissions:
       id-token: write  # Required for OIDC
