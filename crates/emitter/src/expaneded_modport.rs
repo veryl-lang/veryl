@@ -344,6 +344,7 @@ impl ExpandedModportPortTable {
                 let text = symbol_string(
                     namespace_token,
                     &interface_symbol,
+                    &interface_symbol.namespace,
                     &interface_path,
                     &interface_tables,
                     context,

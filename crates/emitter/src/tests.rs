@@ -2048,6 +2048,48 @@ endmodule
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"package foo_pkg::<V: u32> {
+    struct foo_struct {
+      foo: u32,
+    }
+
+    const FOO: foo_struct = foo_struct'{ foo: V };
+}
+package bar_pkg::<V: u32> {
+   const BAR: u32 = V;
+}
+
+alias package FooPkg = foo_pkg::<32>;
+alias package BarPkg = bar_pkg::<FooPkg::FOO.foo>;
+"#;
+
+    let expect = r#"package prj___foo_pkg__32;
+    typedef struct packed {
+        int unsigned foo;
+    } foo_struct;
+
+    localparam foo_struct FOO = '{foo: 32};
+endpackage
+package prj___bar_pkg____foo_pkg__32_FOO_foo;
+    localparam int unsigned BAR = prj___foo_pkg__32::FOO.foo;
+endpackage
+
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
