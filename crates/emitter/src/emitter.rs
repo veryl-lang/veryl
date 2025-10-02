@@ -5748,7 +5748,8 @@ pub fn symbol_string(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
-            if (scope_depth >= 2) | !visible | top_level {
+            let add_namespace = (scope_depth >= 2) | !visible | top_level;
+            if add_namespace {
                 ret.push_str(&namespace_string(
                     &symbol.namespace,
                     generic_tables,
@@ -5759,7 +5760,7 @@ pub fn symbol_string(
                 let name = symbol
                     .generic_maps()
                     .first()
-                    .map(|x| x.name(true, true))
+                    .map(|x| x.name(!add_namespace, true))
                     .unwrap();
                 ret.push_str(&name);
             } else {
