@@ -1422,6 +1422,7 @@ impl Emitter {
                 let text = symbol_string(
                     &identifier.identifier_token,
                     &symbol.found,
+                    &symbol.found.namespace,
                     &symbol.full_path,
                     &symbol.generic_tables,
                     &context,
@@ -1741,6 +1742,7 @@ impl Emitter {
         let text = symbol_string(
             token,
             &target_type,
+            &target_type.namespace,
             &target_path,
             &target_tables,
             &context,
@@ -2390,6 +2392,7 @@ impl VerylWalker for Emitter {
                     let text = symbol_string(
                         arg.identifier(),
                         &symbol.found,
+                        &symbol.found.namespace,
                         &symbol.full_path,
                         &symbol.generic_tables,
                         &context,
@@ -5669,6 +5672,7 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
 pub fn symbol_string(
     token: &VerylToken,
     symbol: &Symbol,
+    symbol_namespace: &Namespace,
     full_path: &[SymbolId],
     generic_tables: &GenericTables,
     context: &SymbolContext,
@@ -5699,21 +5703,17 @@ pub fn symbol_string(
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible = namespace.included(&symbol.namespace)
+            let visible = namespace.included(symbol_namespace)
                 || symbol.imported.iter().any(|x| x.namespace == namespace);
             if (scope_depth == 1) & visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
-                ret.push_str(&namespace_string(
-                    &symbol.namespace,
-                    generic_tables,
-                    context,
-                ));
+                ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
                 ret.push_str(&token_text);
             }
         }
         SymbolKind::EnumMember(x) => {
-            let mut enum_namespace = symbol.namespace.clone();
+            let mut enum_namespace = symbol_namespace.clone();
             enum_namespace.pop();
 
             // if enum definition is scoped or it is not visible, explicit namespace is required
@@ -5750,11 +5750,7 @@ pub fn symbol_string(
             );
             let add_namespace = (scope_depth >= 2) | !visible | top_level;
             if add_namespace {
-                ret.push_str(&namespace_string(
-                    &symbol.namespace,
-                    generic_tables,
-                    context,
-                ));
+                ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
             }
             if context.build_opt.hashed_mangled_name {
                 let name = symbol
@@ -5791,23 +5787,31 @@ pub fn symbol_string(
         }
         SymbolKind::StructMember(_) | SymbolKind::UnionMember(_) => {
             // for this case, struct member/union member is given as generic argument
-            for x in full_path
+            let symbols: Vec<_> = full_path
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| (i + 1) < full_path.len())
                 .map(|(_, id)| symbol_table::get(*id).unwrap())
-                .filter(|x| !matches!(x.kind, SymbolKind::Namespace | SymbolKind::Package(_)))
-            {
-                let text = symbol_string(
-                    token,
-                    &x,
-                    &[],
-                    &GenericTables::default(),
-                    context,
-                    scope_depth,
-                );
-                ret.push_str(&text);
-                ret.push('.');
+                .collect();
+            for (i, symbol) in symbols.iter().enumerate() {
+                if !(matches!(symbol.kind, SymbolKind::Namespace) || symbol.is_package(false)) {
+                    let symbol_namespace = if i == 0 {
+                        &symbol.namespace
+                    } else {
+                        &symbols[i - 1].inner_namespace()
+                    };
+                    let text = symbol_string(
+                        token,
+                        symbol,
+                        symbol_namespace,
+                        &[],
+                        &GenericTables::default(),
+                        context,
+                        1,
+                    );
+                    ret.push_str(&text);
+                    ret.push('.');
+                }
             }
             ret.push_str(&token_text);
         }
