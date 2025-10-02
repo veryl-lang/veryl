@@ -1883,6 +1883,56 @@ endmodule
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+proto package a_proto_pkg {
+  const A: u32;
+}
+package a_pkg::<V: u32> for a_proto_pkg {
+  const A: u32 = V;
+}
+module b_module::<PKG: a_proto_pkg> {
+  import PKG::*;
+}
+module c_module::<PKG: a_proto_pkg> {
+  inst u: b_module::<PKG>;
+}
+alias package pkg = a_pkg::<32>;
+alias module mod = c_module::<pkg>;
+"#;
+
+    let expect = r#"
+// __a_pkg__32
+
+package prj___a_pkg__805a71dc85438e33;
+    localparam int unsigned A = 32;
+endpackage
+// __b_module____a_pkg__32
+module prj___b_module__dc41fc063ac19318;
+    import prj___a_pkg__805a71dc85438e33::*;
+
+endmodule
+// __c_module____a_pkg__32
+module prj___c_module__dc41fc063ac19318;
+    prj___b_module__dc41fc063ac19318 u ();
+endmodule
+
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata: Metadata =
+        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    metadata.build.hashed_mangled_name = true;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}\nexp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
