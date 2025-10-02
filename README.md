@@ -157,6 +157,11 @@ Therefore, some features generating FFs are not adopted because these prevent th
 Veryl focuses syntax simplicity because it reduces tool implementation effort.
 Therefore syntax features which introduce large complexity in exchange for slight abbreviation are not adopted.
 
+### What is the origin of the name "Veryl"?
+
+Veryl derives its name from the first letter of Verilog and ["Beryl"](https://en.wikipedia.org/wiki/Beryl), and it is pronounced the same as beryl.
+The theme color of Veryl comes from emerald, a type of beryl.
+
 ## Installation & Usage
 
 See [Getting Started](https://doc.veryl-lang.org/book/03_getting_started.html).
