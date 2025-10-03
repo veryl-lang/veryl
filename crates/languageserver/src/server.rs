@@ -754,6 +754,7 @@ impl Server {
                                             | AnalyzerError::UnassignVariable { .. }
                                             | AnalyzerError::UnusedVariable { .. }
                                             | AnalyzerError::AnonymousIdentifierUsage { .. }
+                                            | AnalyzerError::InvalidResetNonElaborative { .. }
                                     )
                                 }
                             })
