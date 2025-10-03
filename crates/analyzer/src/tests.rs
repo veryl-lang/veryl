@@ -3261,6 +3261,15 @@ fn mismatch_assignment() {
         errors[0],
         AnalyzerError::MismatchAssignment { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        const a: u64 = 64'hfff8000000000000;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

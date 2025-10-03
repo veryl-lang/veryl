@@ -1,6 +1,7 @@
 use crate::symbol::{GenericMap, SymbolId, SymbolKind, Type, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveError, ResolveResult};
+use std::num::IntErrorKind;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -290,15 +291,38 @@ impl Evaluated {
         });
     }
 
-    pub fn create_undefine_fixed(signed: bool, width: Vec<usize>, array: Vec<usize>) -> Evaluated {
+    pub fn create_undefine_fixed_logic(
+        signed: bool,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
         let mut ret = Self::create_unknown();
-        ret.set_undefine_fixed(signed, width, array);
+        ret.set_undefine_fixed_logic(signed, width, array);
         ret
     }
 
-    pub fn set_undefine_fixed(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+    pub fn set_undefine_fixed_logic(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
         self.value = EvaluatedValue::UnknownStatic;
         self.r#type = EvaluatedType::Logic(EvaluatedTypeLogic {
+            signed,
+            width,
+            array,
+        });
+    }
+
+    pub fn create_undefine_fixed_bit(
+        signed: bool,
+        width: Vec<usize>,
+        array: Vec<usize>,
+    ) -> Evaluated {
+        let mut ret = Self::create_unknown();
+        ret.set_undefine_fixed_bit(signed, width, array);
+        ret
+    }
+
+    pub fn set_undefine_fixed_bit(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+        self.value = EvaluatedValue::UnknownStatic;
+        self.r#type = EvaluatedType::Bit(EvaluatedTypeBit {
             signed,
             width,
             array,
@@ -1070,7 +1094,15 @@ impl Evaluator {
                 (Ok(width), Ok(value)) => {
                     Evaluated::create_fixed(value, signed, vec![width], vec![])
                 }
-                (Ok(width), _) => Evaluated::create_undefine_fixed(signed, vec![width], vec![]),
+                (Ok(width), Err(e)) => {
+                    if *e.kind() == IntErrorKind::InvalidDigit {
+                        // value includes 'x' / 'z'
+                        Evaluated::create_undefine_fixed_logic(signed, vec![width], vec![])
+                    } else {
+                        // overflow
+                        Evaluated::create_undefine_fixed_bit(signed, vec![width], vec![])
+                    }
+                }
                 _ => Evaluated::create_unknown_static(),
             }
         } else {
@@ -1112,7 +1144,7 @@ impl Evaluator {
 
         let width = *self.context_width.last().unwrap_or(&0);
         if unknown {
-            Evaluated::create_undefine_fixed(false, vec![width], vec![])
+            Evaluated::create_undefine_fixed_logic(false, vec![width], vec![])
         } else {
             Evaluated::create_fixed(value, false, vec![width], vec![])
         }
@@ -1515,7 +1547,7 @@ impl Evaluator {
                     let value = x | value1;
                     Evaluated::create_fixed(value, false, vec![width], vec![])
                 } else {
-                    Evaluated::create_undefine_fixed(false, vec![width], vec![])
+                    Evaluated::create_undefine_fixed_logic(false, vec![width], vec![])
                 }
             }
             _ => {
