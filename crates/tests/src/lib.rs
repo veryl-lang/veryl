@@ -2,6 +2,9 @@
 const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency", "68_std"];
 
 #[cfg(test)]
+static DEPENDENCY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod parser {
     use std::fs;
     use veryl_parser::Parser;
@@ -27,6 +30,12 @@ mod analyzer {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
+        let _lock = if crate::DEPENDENCY_TESTS.contains(&name) {
+            Some(crate::DEPENDENCY_LOCK.lock())
+        } else {
+            None
+        };
+
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
@@ -119,6 +128,12 @@ mod emitter {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
+        let _lock = if crate::DEPENDENCY_TESTS.contains(&name) {
+            Some(crate::DEPENDENCY_LOCK.lock())
+        } else {
+            None
+        };
+
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
