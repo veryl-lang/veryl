@@ -199,6 +199,14 @@ impl AnalyzerPass3 {
                 .enumerate()
                 .filter(|(_, x)| x.is_assign())
                 .collect();
+            let assign_list: Vec<_> = assign_list
+                .iter()
+                .filter(|(from_index, from_ref)| {
+                    !assign_list.iter().any(|(to_index, to_ref)| {
+                        AnalyzerPass3::is_related_var_ref(from_ref, *from_index, to_ref, *to_index)
+                    })
+                })
+                .collect();
             let target_list: Vec<_> = list
                 .iter()
                 .enumerate()
@@ -213,13 +221,9 @@ impl AnalyzerPass3 {
                     }
                 })
                 .collect();
-
             for (ref_index, var_ref) in target_list {
                 let before_assign = assign_list.iter().any(|(assing_index, assign)| {
-                    *assing_index > ref_index
-                        && (AnalyzerPass3::share_same_branch_path(var_ref, assign)
-                            || AnalyzerPass3::in_other_branch_group(var_ref, assign))
-                        && assign.path.may_fully_included(&var_ref.path)
+                    AnalyzerPass3::is_related_var_ref(assign, *assing_index, var_ref, ref_index)
                 });
                 if before_assign {
                     let full_path = var_ref.path.full_path();
@@ -235,11 +239,26 @@ impl AnalyzerPass3 {
         ret
     }
 
-    fn share_same_branch_path(var_ref: &VarRef, assign: &VarRef) -> bool {
-        let len = if var_ref.branch_group.len() < assign.branch_group.len() {
-            var_ref.branch_group.len()
+    fn is_related_var_ref(
+        from_var_ref: &VarRef,
+        from_index: usize,
+        to_var_ref: &VarRef,
+        to_index: usize,
+    ) -> bool {
+        if to_index >= from_index {
+            return false;
+        }
+
+        from_var_ref.path.may_fully_included(&to_var_ref.path)
+            && (AnalyzerPass3::share_same_branch_path(from_var_ref, to_var_ref)
+                || AnalyzerPass3::in_other_branch_group(from_var_ref, to_var_ref))
+    }
+
+    fn share_same_branch_path(from: &VarRef, to: &VarRef) -> bool {
+        let len = if to.branch_group.len() < from.branch_group.len() {
+            to.branch_group.len()
         } else {
-            assign.branch_group.len()
+            from.branch_group.len()
         };
 
         if len == 0 {
@@ -247,10 +266,10 @@ impl AnalyzerPass3 {
         }
 
         for i in 0..len {
-            if var_ref.branch_group[i] != assign.branch_group[i] {
+            if to.branch_group[i] != from.branch_group[i] {
                 return false;
             }
-            if var_ref.branch_index[i] != assign.branch_index[i] {
+            if to.branch_index[i] != from.branch_index[i] {
                 return false;
             }
         }
@@ -258,11 +277,11 @@ impl AnalyzerPass3 {
         true
     }
 
-    fn in_other_branch_group(var_ref: &VarRef, assign: &VarRef) -> bool {
-        let len = if var_ref.branch_group.len() < assign.branch_group.len() {
-            var_ref.branch_group.len()
+    fn in_other_branch_group(from: &VarRef, to: &VarRef) -> bool {
+        let len = if to.branch_group.len() < from.branch_group.len() {
+            to.branch_group.len()
         } else {
-            assign.branch_group.len()
+            from.branch_group.len()
         };
 
         if len == 0 {
@@ -270,7 +289,7 @@ impl AnalyzerPass3 {
         }
 
         for i in 0..len {
-            if var_ref.branch_group[i] != assign.branch_group[i] {
+            if to.branch_group[i] != from.branch_group[i] {
                 return true;
             }
         }
