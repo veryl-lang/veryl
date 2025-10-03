@@ -103,7 +103,10 @@ impl CheckExpression {
             }
 
             if let TypeKind::UserDefined(x) = &dst_type.kind {
-                let dst_symbol = symbol_table::get(x.symbol.unwrap()).unwrap();
+                let Some(dst_symbol) = x.symbol else {
+                    return;
+                };
+                let dst_symbol = symbol_table::get(dst_symbol).unwrap();
                 if let SymbolKind::Modport(dst) = &dst_symbol.kind {
                     let dst_interface = symbol_table::get(dst.interface).unwrap();
                     if let EvaluatedType::UserDefined(src) = &src.r#type {
