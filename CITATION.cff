@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+title: "Veryl Hardware Description Language"
+license:
+  - Apache-2.0
+  - MIT
+type: software
+message: "If you use this software, please cite it using these metadata."
+repository-code: "https://github.com/veryl-lang/veryl"
+authors:
+  - given-names: Naoya
+    family-names: Hatta
+    orcid: "https://orcid.org/0009-0002-3919-5805"
+  - name: "The Veryl contributors"
