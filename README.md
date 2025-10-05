@@ -4,6 +4,7 @@
 [![Crates.io](https://img.shields.io/crates/v/veryl.svg)](https://crates.io/crates/veryl)
 [![CodSpeed Badge](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/veryl-lang/veryl)
 [![Docker Pulls](https://img.shields.io/docker/pulls/veryllang/veryl)](https://hub.docker.com/r/veryllang/veryl)
+[![DOI](https://zenodo.org/badge/575770340.svg)](https://zenodo.org/badge/latestdoi/575770340)
 
 Veryl is a modern hardware description language.
 
