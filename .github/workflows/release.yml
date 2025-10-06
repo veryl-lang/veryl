@@ -90,7 +90,7 @@ jobs:
         token: ${{ secrets.VERYL_DOCKER_PAT }}
         repository: veryl-lang/docker
         event-type: release
-        client-payload: '{"ref": "${{ env.GITHUB_REF }}"}'
+        client-payload: '{"ref": "${{ github.ref }}"}'
 
   highlightjs:
     permissions:
