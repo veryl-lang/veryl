@@ -1,6 +1,11 @@
 cff-version: 1.2.0
 title: "Veryl Hardware Description Language"
+
+# NOTE: The CFF spec says `license` can be a list, but Zenodo is currently not
+#       accepting lists for this key:
+#       https://github.com/zenodo/zenodo/issues/2515
 license: "MIT"
+
 type: software
 message: "If you use this software, please cite it using these metadata."
 repository-code: "https://github.com/veryl-lang/veryl"
