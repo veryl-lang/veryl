@@ -24,10 +24,11 @@ jobs:
           bins: cargo-codspeed
 
       - name: Build the benchmark target(s)
-        run: cargo codspeed build
+        run: cargo codspeed build -p veryl-tests
 
       - name: Run the benchmarks
-        uses: CodSpeedHQ/action@v3
+        uses: CodSpeedHQ/action@v4
         with:
-          run: cargo codspeed run
+          run: cargo codspeed run -p veryl-tests
+          mode: "instrumentation"
           token: ${{ secrets.CODSPEED_TOKEN }}
