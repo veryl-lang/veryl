@@ -1,8 +1,6 @@
 cff-version: 1.2.0
 title: "Veryl Hardware Description Language"
-license:
-  - Apache-2.0
-  - MIT
+license: "MIT"
 type: software
 message: "If you use this software, please cite it using these metadata."
 repository-code: "https://github.com/veryl-lang/veryl"
