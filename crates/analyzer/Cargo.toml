@@ -13,16 +13,18 @@ edition.workspace     = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bimap           = "0.6.3"
+daggy           = "0.9.0"
 fxhash          = {workspace = true}
 itertools       = "0.14.0"
 log             = {workspace = true}
+num-bigint      = "0.4.6"
+num-traits      = "0.2.19"
 smallvec        = {workspace = true}
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.16.5", path = "../metadata"}
 veryl-parser    = {version = "0.16.5", path = "../parser"}
-daggy           = "0.9.0"
-bimap           = "0.6.3"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 miette          = {workspace = true, features = ["fancy-no-syscall"]}
