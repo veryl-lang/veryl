@@ -611,6 +611,7 @@ impl CreateSymbolTable {
             let cand = TypeDagCandidate::Symbol {
                 id: symbol.0,
                 context: symbol.1,
+                project_namespace: self.project_namespace.clone(),
                 parent: None,
                 import,
             };

@@ -23,6 +23,7 @@ pub enum TypeDagCandidate {
     Symbol {
         id: SymbolId,
         context: Context,
+        project_namespace: Namespace,
         parent: Option<(SymbolId, Context)>,
         import: Vec<GenericSymbolPathNamesapce>,
     },
@@ -130,6 +131,7 @@ impl TypeDag {
             if let TypeDagCandidate::Symbol {
                 id,
                 context,
+                project_namespace,
                 parent,
                 import,
             } = cand
@@ -141,6 +143,18 @@ impl TypeDag {
                         && let Some(import) = self.insert_symbol(&import.found)
                     {
                         self.insert_dag_edge(child, import, *context);
+                    }
+                }
+
+                for map in symbol.generic_maps() {
+                    for arg_path in map.map.values() {
+                        // insert edge between given generic arg and base symbol
+                        self.insert_path(
+                            arg_path,
+                            &symbol.namespace,
+                            project_namespace,
+                            &Some((*id, *context)),
+                        );
                     }
                 }
             }
@@ -225,17 +239,6 @@ impl TypeDag {
                 {
                     self.insert_dag_edge(parent, base, parent_context);
                 }
-            }
-
-            for arg in path.paths[i]
-                .arguments
-                .iter()
-                .filter_map(|x| Self::resolve_symbol_path(&x.generic_path(), namespace))
-            {
-                let Some(arg) = self.insert_symbol(&arg) else {
-                    continue;
-                };
-                self.insert_dag_edge(base, arg, Context::GenericInstance);
             }
         }
     }

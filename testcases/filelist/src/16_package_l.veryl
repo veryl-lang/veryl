@@ -1,0 +1,3 @@
+package PackageL::<PKG: ProtoPackageJ> {
+  const L: u32 = PKG::J;
+}

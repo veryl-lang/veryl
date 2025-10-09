@@ -6704,16 +6704,21 @@ fn unresolvable_generic_argument() {
         struct Bar {
             bar: Baz
         }
-        function Func::<baz: Baz> {}
     }
     package PkgB {
         import PkgA::*;
         const FOO: Bar = Bar'{ bar: Baz'{ baz: 1 } };
     }
+    package PkgC {
+        import PkgA::*;
+        function Func::<baz: Baz> -> logic {
+            return baz.baz;
+        }
+    }
     module ModuleA {
         import PkgB::*;
         always_comb {
-            PkgA::Func::<PkgB::FOO.bar>();
+            PkgC::Func::<PkgB::FOO.bar>();
         }
     }
     "#;
