@@ -1,7 +1,8 @@
 use crate::symbol::{GenericMap, SymbolId, SymbolKind, Type, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveError, ResolveResult};
-use std::num::IntErrorKind;
+use num_bigint::BigInt;
+use num_traits::{Num, ToPrimitive};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -15,16 +16,24 @@ pub struct Evaluated {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EvaluatedValue {
-    Fixed(isize),
+    Fixed(BigInt),
     FixedArray(Vec<isize>),
     Unknown,
     UnknownStatic,
 }
 
 impl EvaluatedValue {
-    pub fn get_value(&self) -> Option<isize> {
+    pub fn get_value(&self) -> Option<BigInt> {
         if let EvaluatedValue::Fixed(x) = self {
-            Some(*x)
+            Some(x.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_value_isize(&self) -> Option<isize> {
+        if let EvaluatedValue::Fixed(x) = self {
+            x.to_isize()
         } else {
             None
         }
@@ -99,17 +108,17 @@ pub enum EvaluatedError {
     InvalidSelect { kind: String, range: TokenRange },
 }
 
-fn reduction<T: Fn(isize, isize) -> isize>(
-    value: isize,
+fn reduction<T: Fn(BigInt, BigInt) -> BigInt>(
+    value: BigInt,
     width: Option<usize>,
     func: T,
-) -> Option<isize> {
+) -> Option<BigInt> {
     if let Some(width) = width {
         let mut tmp = value;
-        let mut ret = tmp & 1;
+        let mut ret = tmp.clone() & BigInt::from(1);
         for _ in 1..width {
             tmp >>= 1;
-            ret = func(ret, tmp & 1);
+            ret = func(ret, tmp.clone() & BigInt::from(1));
         }
         Some(ret)
     } else {
@@ -158,8 +167,12 @@ impl Evaluated {
         matches!(self.r#type, EvaluatedType::Bit(_))
     }
 
-    pub fn get_value(&self) -> Option<isize> {
+    pub fn get_value(&self) -> Option<BigInt> {
         self.value.get_value()
+    }
+
+    pub fn get_value_isize(&self) -> Option<isize> {
+        self.value.get_value_isize()
     }
 
     pub fn get_width(&self) -> Option<Vec<usize>> {
@@ -205,7 +218,7 @@ impl Evaluated {
         }
     }
 
-    pub fn set_value(&mut self, value: isize) {
+    pub fn set_value(&mut self, value: BigInt) {
         if let EvaluatedValue::Fixed(x) = &mut self.value {
             *x = value;
         }
@@ -272,7 +285,7 @@ impl Evaluated {
     }
 
     pub fn create_fixed(
-        value: isize,
+        value: BigInt,
         signed: bool,
         width: Vec<usize>,
         array: Vec<usize>,
@@ -282,7 +295,7 @@ impl Evaluated {
         ret
     }
 
-    pub fn set_fixed(&mut self, value: isize, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+    pub fn set_fixed(&mut self, value: BigInt, signed: bool, width: Vec<usize>, array: Vec<usize>) {
         self.value = EvaluatedValue::Fixed(value);
         self.r#type = EvaluatedType::Bit(EvaluatedTypeBit {
             signed,
@@ -291,38 +304,15 @@ impl Evaluated {
         });
     }
 
-    pub fn create_undefine_fixed_logic(
-        signed: bool,
-        width: Vec<usize>,
-        array: Vec<usize>,
-    ) -> Evaluated {
+    pub fn create_undefine_fixed(signed: bool, width: Vec<usize>, array: Vec<usize>) -> Evaluated {
         let mut ret = Self::create_unknown();
-        ret.set_undefine_fixed_logic(signed, width, array);
+        ret.set_undefine_fixed(signed, width, array);
         ret
     }
 
-    pub fn set_undefine_fixed_logic(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
+    pub fn set_undefine_fixed(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
         self.value = EvaluatedValue::UnknownStatic;
         self.r#type = EvaluatedType::Logic(EvaluatedTypeLogic {
-            signed,
-            width,
-            array,
-        });
-    }
-
-    pub fn create_undefine_fixed_bit(
-        signed: bool,
-        width: Vec<usize>,
-        array: Vec<usize>,
-    ) -> Evaluated {
-        let mut ret = Self::create_unknown();
-        ret.set_undefine_fixed_bit(signed, width, array);
-        ret
-    }
-
-    pub fn set_undefine_fixed_bit(&mut self, signed: bool, width: Vec<usize>, array: Vec<usize>) {
-        self.value = EvaluatedValue::UnknownStatic;
-        self.r#type = EvaluatedType::Bit(EvaluatedTypeBit {
             signed,
             width,
             array,
@@ -450,7 +440,7 @@ impl Evaluated {
                 // select array
 
                 let mut rest: Vec<_> = array[1..].to_vec();
-                if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
+                if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
                     if beg > end {
                         self.errors.push(EvaluatedError::InvalidSelect {
                             kind: format!("wrong index order [{beg}:{end}]"),
@@ -487,7 +477,7 @@ impl Evaluated {
                     width[1..].to_vec()
                 };
 
-                if let (Some(beg), Some(end)) = (beg.get_value(), end.get_value()) {
+                if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
                     if end > beg {
                         self.errors.push(EvaluatedError::InvalidSelect {
                             kind: format!("wrong index order [{beg}:{end}]"),
@@ -511,7 +501,7 @@ impl Evaluated {
                         let beg_bit = beg * part_size as isize;
 
                         if let Some(value) = value {
-                            let mask = !(1 << (beg_bit - end_bit + 1));
+                            let mask = !(BigInt::from(1) << (beg_bit - end_bit + 1));
                             let new_value = (value >> end_bit) & mask;
                             self.set_value(new_value);
                         }
@@ -542,7 +532,7 @@ impl Evaluated {
 
     fn binary_op<
         T: Fn(usize, usize, Option<&usize>) -> usize,
-        U: Fn(isize, isize) -> Option<isize>,
+        U: Fn(BigInt, BigInt) -> Option<BigInt>,
     >(
         mut left: Evaluated,
         mut right: Evaluated,
@@ -581,7 +571,7 @@ impl Evaluated {
         ret
     }
 
-    fn unary_op<T: Fn(usize) -> usize, U: Fn(isize) -> Option<isize>>(
+    fn unary_op<T: Fn(usize) -> usize, U: Fn(BigInt) -> Option<BigInt>>(
         mut left: Evaluated,
         calc_width: T,
         calc_value: U,
@@ -616,7 +606,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
-            |x, y| y.try_into().map(|y| x.checked_pow(y)).ok().flatten(),
+            |x, y| y.try_into().map(|y| x.pow(y)).ok(),
         )
     }
 
@@ -626,7 +616,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
-            |x, y| x.checked_div(y),
+            |x, y| Some(x / y),
         )
     }
 
@@ -636,7 +626,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
-            |x, y| x.checked_rem(y),
+            |x, y| Some(x % y),
         )
     }
 
@@ -646,7 +636,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
-            |x, y| x.checked_mul(y),
+            |x, y| Some(x * y),
         )
     }
 
@@ -656,7 +646,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
-            |x, y| x.checked_add(y),
+            |x, y| Some(x + y),
         )
     }
 
@@ -666,7 +656,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, y, z| x.max(y).max(*z.unwrap_or(&0)),
-            |x, y| x.checked_sub(y),
+            |x, y| Some(x - y),
         )
     }
 
@@ -676,12 +666,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, _, z| x.max(*z.unwrap_or(&0)),
-            |x, y| {
-                y.try_into()
-                    .map(|y| (x as usize).checked_shl(y).map(|x| x as isize))
-                    .ok()
-                    .flatten()
-            },
+            |x, y| y.to_isize().map(|y| x << y),
         )
     }
 
@@ -691,12 +676,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, _, z| x.max(*z.unwrap_or(&0)),
-            |x, y| {
-                y.try_into()
-                    .map(|y| (x as usize).checked_shr(y).map(|x| x as isize))
-                    .ok()
-                    .flatten()
-            },
+            |x, y| y.to_isize().map(|y| x >> y),
         )
     }
 
@@ -706,7 +686,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, _, z| x.max(*z.unwrap_or(&0)),
-            |x, y| y.try_into().map(|y| x.checked_shl(y)).ok().flatten(),
+            |x, y| y.to_isize().map(|y| x << y),
         )
     }
 
@@ -716,7 +696,7 @@ impl Evaluated {
             exp,
             context_width,
             |x, _, z| x.max(*z.unwrap_or(&0)),
-            |x, y| y.try_into().map(|y| x.checked_shr(y)).ok().flatten(),
+            |x, y| y.to_isize().map(|y| x >> y),
         )
     }
 
@@ -726,7 +706,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some(x.cmp(&y).is_le() as isize),
+            |x, y| Some(x.cmp(&y).is_le().into()),
         )
     }
 
@@ -736,7 +716,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some(x.cmp(&y).is_ge() as isize),
+            |x, y| Some(x.cmp(&y).is_ge().into()),
         )
     }
 
@@ -746,7 +726,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some(x.cmp(&y).is_lt() as isize),
+            |x, y| Some(x.cmp(&y).is_lt().into()),
         )
     }
 
@@ -756,7 +736,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some(x.cmp(&y).is_gt() as isize),
+            |x, y| Some(x.cmp(&y).is_gt().into()),
         )
     }
 
@@ -766,7 +746,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some(x.cmp(&y).is_eq() as isize),
+            |x, y| Some(x.cmp(&y).is_eq().into()),
         )
     }
 
@@ -776,7 +756,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some(x.cmp(&y).is_ne() as isize),
+            |x, y| Some(x.cmp(&y).is_ne().into()),
         )
     }
 
@@ -786,7 +766,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some((x != 0 && y != 0) as isize),
+            |x, y| Some((x != 0.into() && y != 0.into()).into()),
         )
     }
 
@@ -796,7 +776,7 @@ impl Evaluated {
             exp,
             None,
             |_, _, _| 1,
-            |x, y| Some((x != 0 || y != 0) as isize),
+            |x, y| Some((x != 0.into() || y != 0.into()).into()),
         )
     }
 
@@ -825,7 +805,7 @@ impl Evaluated {
     }
 
     fn not(self) -> Evaluated {
-        Self::unary_op(self, |_| 1, |x| Some((x == 0) as isize))
+        Self::unary_op(self, |_| 1, |x| Some((x == 0.into()).into()))
     }
 
     fn inv(self) -> Evaluated {
@@ -849,7 +829,7 @@ impl Evaluated {
             |_| 1,
             |x| {
                 let ret = reduction(x, width, |x, y| x & y);
-                ret.map(|x| if x == 0 { 1 } else { 0 })
+                ret.map(|x| if x == 0.into() { 1.into() } else { 0.into() })
             },
         )
     }
@@ -861,7 +841,7 @@ impl Evaluated {
             |_| 1,
             |x| {
                 let ret = reduction(x, width, |x, y| x | y);
-                ret.map(|x| if x == 0 { 1 } else { 0 })
+                ret.map(|x| if x == 0.into() { 1.into() } else { 0.into() })
             },
         )
     }
@@ -878,7 +858,7 @@ impl Evaluated {
             |_| 1,
             |x| {
                 let ret = reduction(x, width, |x, y| x ^ y);
-                ret.map(|x| if x == 0 { 1 } else { 0 })
+                ret.map(|x| if x == 0.into() { 1.into() } else { 0.into() })
             },
         )
     }
@@ -905,12 +885,12 @@ impl Evaluator {
             match x.select_operator.as_ref() {
                 SelectOperator::Colon(_) => (beg, end, false),
                 SelectOperator::PlusColon(_) => {
-                    let one = Evaluated::create_fixed(1, false, vec![32], vec![]);
+                    let one = Evaluated::create_fixed(1.into(), false, vec![32], vec![]);
                     let calc = beg.clone().add(end, None).sub(one, None);
                     (calc, beg, false)
                 }
                 SelectOperator::MinusColon(_) => {
-                    let one = Evaluated::create_fixed(1, false, vec![32], vec![]);
+                    let one = Evaluated::create_fixed(1.into(), false, vec![32], vec![]);
                     let calc = beg.clone().sub(end, None).add(one, None);
                     (beg, calc, false)
                 }
@@ -1089,19 +1069,14 @@ impl Evaluator {
                 _ => unreachable!(),
             };
             let width = str::parse::<usize>(width);
-            let value = isize::from_str_radix(value, radix);
+            let value = BigInt::from_str_radix(value, radix);
             match (width, value) {
                 (Ok(width), Ok(value)) => {
                     Evaluated::create_fixed(value, signed, vec![width], vec![])
                 }
-                (Ok(width), Err(e)) => {
-                    if *e.kind() == IntErrorKind::InvalidDigit {
-                        // value includes 'x' / 'z'
-                        Evaluated::create_undefine_fixed_logic(signed, vec![width], vec![])
-                    } else {
-                        // overflow
-                        Evaluated::create_undefine_fixed_bit(signed, vec![width], vec![])
-                    }
+                (Ok(width), _) => {
+                    // value includes 'x' / 'z'
+                    Evaluated::create_undefine_fixed(signed, vec![width], vec![])
                 }
                 _ => Evaluated::create_unknown_static(),
             }
@@ -1112,7 +1087,7 @@ impl Evaluator {
 
     fn base_less(&mut self, arg: &BaseLess) -> Evaluated {
         let text = arg.base_less_token.to_string().replace('_', "");
-        if let Ok(value) = str::parse::<isize>(&text) {
+        if let Ok(value) = str::parse::<BigInt>(&text) {
             Evaluated::create_fixed(value, false, vec![32], vec![])
         } else {
             Evaluated::create_unknown_static()
@@ -1124,27 +1099,23 @@ impl Evaluator {
         let mut unknown = false;
         let value = match text.as_str() {
             "'1" => {
-                let mut ret: isize = 0;
+                let mut ret = BigInt::from(0);
                 for _ in 0..*self.context_width.last().unwrap_or(&0) {
-                    if let Some(x) = ret.checked_shl(1) {
-                        ret = x;
-                    } else {
-                        unknown = true;
-                    }
-                    ret |= 1;
+                    ret <<= 1;
+                    ret |= BigInt::from(1);
                 }
                 ret
             }
-            "'0" => 0,
+            "'0" => 0.into(),
             _ => {
                 unknown = true;
-                0
+                0.into()
             }
         };
 
         let width = *self.context_width.last().unwrap_or(&0);
         if unknown {
-            Evaluated::create_undefine_fixed_logic(false, vec![width], vec![])
+            Evaluated::create_undefine_fixed(false, vec![width], vec![])
         } else {
             Evaluated::create_fixed(value, false, vec![width], vec![])
         }
@@ -1174,8 +1145,8 @@ impl Evaluator {
 
     fn boolean_literal(&mut self, arg: &BooleanLiteral) -> Evaluated {
         let value = match arg {
-            BooleanLiteral::True(_) => 1,
-            BooleanLiteral::False(_) => 0,
+            BooleanLiteral::True(_) => 1.into(),
+            BooleanLiteral::False(_) => 0.into(),
         };
         Evaluated::create_fixed(value, false, vec![1], vec![])
     }
@@ -1188,7 +1159,7 @@ impl Evaluator {
         for x in &arg.if_expression_list {
             let cond = self.expression(&x.expression);
 
-            if let EvaluatedValue::Fixed(1) = cond.value {
+            if let Some(1) = cond.value.get_value_isize() {
                 return self.expression(&x.expression0);
             }
         }
@@ -1406,7 +1377,7 @@ impl Evaluator {
                     return self.identifier_helper(result);
                 } else {
                     let text = path.base_path(0).0[0].to_string();
-                    if let Ok(value) = text.parse::<isize>() {
+                    if let Ok(value) = text.parse::<BigInt>() {
                         return Evaluated::create_fixed(value, true, vec![], vec![]);
                     }
                 }
@@ -1520,9 +1491,9 @@ impl Evaluator {
                 if let Some(arg) = args.first() {
                     let arg = self.expression(&arg.argument_expression.expression);
                     if let EvaluatedValue::Fixed(x) = arg.value {
-                        let ret = isize::BITS - x.leading_zeros();
-                        let ret = if x.count_ones() == 1 { ret - 1 } else { ret };
-                        Evaluated::create_fixed(ret as isize, false, vec![32], vec![])
+                        let tmp = x - BigInt::from(1);
+                        let ret = tmp.bits().into();
+                        Evaluated::create_fixed(ret, false, vec![32], vec![])
                     } else {
                         Evaluated::create_unknown()
                     }
@@ -1543,12 +1514,8 @@ impl Evaluator {
         ) {
             (Some(value0), Some(value1), Some(width0), Some(width1)) => {
                 let width = width0 + width1;
-                if let Some(x) = value0.checked_shl(width1 as u32) {
-                    let value = x | value1;
-                    Evaluated::create_fixed(value, false, vec![width], vec![])
-                } else {
-                    Evaluated::create_undefine_fixed_logic(false, vec![width], vec![])
-                }
+                let value = (value0 << width1) | value1;
+                Evaluated::create_fixed(value, false, vec![width], vec![])
             }
             _ => {
                 if x.is_known_static() && y.is_known_static() {
@@ -1568,8 +1535,8 @@ impl Evaluator {
         let e = self.expression(arg.expression.as_ref());
         if let Some(cio) = &arg.concatenation_item_opt {
             let c = self.expression(cio.expression.as_ref());
-            if let EvaluatedValue::Fixed(c) = c.value {
-                let mut tmp = Evaluated::create_fixed(0, false, vec![0], vec![]);
+            if let Some(c) = c.value.get_value_isize() {
+                let mut tmp = Evaluated::create_fixed(0.into(), false, vec![0], vec![]);
                 for _ in 0..c {
                     tmp = self.do_concatenation(tmp, e.clone());
                 }
@@ -1594,7 +1561,7 @@ impl Evaluator {
         for cll in arg.concatenation_list_list.iter() {
             eval_vec.push(self.concatenation_list_list(cll));
         }
-        let default_value = Evaluated::create_fixed(0, false, vec![0], vec![]);
+        let default_value = Evaluated::create_fixed(0.into(), false, vec![0], vec![]);
         eval_vec.iter().fold(default_value, |acc, x| {
             self.do_concatenation(acc, x.clone())
         })
@@ -1617,7 +1584,7 @@ impl Evaluator {
                 let mut exp_eval = self.expression(x.expression.as_ref());
                 if let Some(alio) = &x.array_literal_item_opt {
                     let repeat_exp = self.expression(alio.expression.as_ref());
-                    if let Some(value) = repeat_exp.get_value() {
+                    if let Some(value) = repeat_exp.get_value_isize() {
                         exp_eval.set_array(vec![value as usize]);
                         exp_eval
                     } else {

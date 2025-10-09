@@ -145,34 +145,36 @@ impl VarRefPathItem {
 
     fn select_range(&self, x: &VarRefPathItem) -> Option<RangeInclusive<isize>> {
         match x {
-            VarRefPathItem::SelectSingle { index } => match index.value {
-                EvaluatedValue::Fixed(x) => Some(x..=x),
-                _ => None,
-            },
-            VarRefPathItem::SelectColon { msb, lsb } => match (&msb.value, &lsb.value) {
-                (EvaluatedValue::Fixed(msb), EvaluatedValue::Fixed(lsb)) => Some(*lsb..=*msb),
-                _ => None,
-            },
+            VarRefPathItem::SelectSingle { index } => index.value.get_value_isize().map(|x| x..=x),
+            VarRefPathItem::SelectColon { msb, lsb } => {
+                match (&msb.value.get_value_isize(), &lsb.value.get_value_isize()) {
+                    (Some(msb), Some(lsb)) => Some(*lsb..=*msb),
+                    _ => None,
+                }
+            }
             VarRefPathItem::SelectPlusClon { position, width } => {
-                match (&position.value, &width.value) {
-                    (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
-                        Some(*position..=position + width - 1)
-                    }
+                match (
+                    &position.value.get_value_isize(),
+                    &width.value.get_value_isize(),
+                ) {
+                    (Some(position), Some(width)) => Some(*position..=position + width - 1),
                     _ => None,
                 }
             }
             VarRefPathItem::SelectMinusColon { position, width } => {
-                match (&position.value, &width.value) {
-                    (EvaluatedValue::Fixed(position), EvaluatedValue::Fixed(width)) => {
-                        Some(position - width + 1..=*position)
-                    }
+                match (
+                    &position.value.get_value_isize(),
+                    &width.value.get_value_isize(),
+                ) {
+                    (Some(position), Some(width)) => Some(position - width + 1..=*position),
                     _ => None,
                 }
             }
-            VarRefPathItem::SelectStep { index, step } => match (&index.value, &step.value) {
-                (EvaluatedValue::Fixed(index), EvaluatedValue::Fixed(step)) => {
-                    Some(step * index..=step * (index + 1) - 1)
-                }
+            VarRefPathItem::SelectStep { index, step } => match (
+                &index.value.get_value_isize(),
+                &step.value.get_value_isize(),
+            ) {
+                (Some(index), Some(step)) => Some(step * index..=step * (index + 1) - 1),
                 _ => None,
             },
             _ => None,
@@ -235,7 +237,7 @@ impl fmt::Display for VarRefPathItem {
                 }
             }
             VarRefPathItem::SelectSingle { index } => {
-                if let EvaluatedValue::Fixed(index) = index.value {
+                if let EvaluatedValue::Fixed(index) = &index.value {
                     format!("[{index}]")
                 } else {
                     "[]".to_string()

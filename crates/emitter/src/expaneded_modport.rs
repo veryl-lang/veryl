@@ -425,7 +425,7 @@ fn evaluate_array_size(array_size: &[Expression], generic_map: &[GenericMap]) ->
     let mut evaluator = Evaluator::new(generic_map);
     array_size
         .iter()
-        .filter_map(|x| evaluator.expression(x).get_value())
+        .filter_map(|x| evaluator.expression(x).get_value_isize())
         .collect()
 }
 

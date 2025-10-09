@@ -6828,6 +6828,7 @@ fn evaluator() {
         const J: u32 = $clog2(12);
         const K: u32 = B[2:1];
         const L: u32 = $clog2(8);
+        const M: bit<128> = 128'hffff_ffff_ffff_ffff_ffff_ffff_ffff_fff0 + 1;
     }
     "#;
 
@@ -6847,6 +6848,7 @@ fn evaluator() {
     let j = symbol_table::resolve((&Into::<SymbolPath>::into("J"), &namespace)).unwrap();
     let k = symbol_table::resolve((&Into::<SymbolPath>::into("K"), &namespace)).unwrap();
     let l = symbol_table::resolve((&Into::<SymbolPath>::into("L"), &namespace)).unwrap();
+    let m = symbol_table::resolve((&Into::<SymbolPath>::into("M"), &namespace)).unwrap();
 
     let a = a.found.evaluate();
     let b = b.found.evaluate();
@@ -6860,19 +6862,63 @@ fn evaluator() {
     let j = j.found.evaluate();
     let k = k.found.evaluate();
     let l = l.found.evaluate();
+    let m = m.found.evaluate();
 
-    assert_eq!((a.get_value(), a.get_total_width()), (Some(0), Some(32)));
-    assert_eq!((b.get_value(), b.get_total_width()), (Some(6), Some(32)));
-    assert_eq!((c.get_value(), c.get_total_width()), (Some(15), Some(32)));
-    assert_eq!((d.get_value(), d.get_total_width()), (Some(6), Some(32)));
-    assert_eq!((e.get_value(), e.get_total_width()), (Some(6), Some(32)));
-    assert_eq!((f.get_value(), f.get_total_width()), (Some(6), Some(32)));
-    assert_eq!((g.get_value(), g.get_total_width()), (Some(39), Some(32)));
-    assert_eq!((h.get_value(), h.get_total_width()), (Some(362), Some(9)));
-    assert_eq!((i.get_value(), i.get_total_width()), (Some(10), Some(32)));
-    assert_eq!((j.get_value(), j.get_total_width()), (Some(4), Some(32)));
-    assert_eq!((k.get_value(), k.get_total_width()), (Some(3), Some(2)));
-    assert_eq!((l.get_value(), l.get_total_width()), (Some(3), Some(32)));
+    assert_eq!(
+        (a.get_value(), a.get_total_width()),
+        (Some(0.into()), Some(32))
+    );
+    assert_eq!(
+        (b.get_value(), b.get_total_width()),
+        (Some(6.into()), Some(32))
+    );
+    assert_eq!(
+        (c.get_value(), c.get_total_width()),
+        (Some(15.into()), Some(32))
+    );
+    assert_eq!(
+        (d.get_value(), d.get_total_width()),
+        (Some(6.into()), Some(32))
+    );
+    assert_eq!(
+        (e.get_value(), e.get_total_width()),
+        (Some(6.into()), Some(32))
+    );
+    assert_eq!(
+        (f.get_value(), f.get_total_width()),
+        (Some(6.into()), Some(32))
+    );
+    assert_eq!(
+        (g.get_value(), g.get_total_width()),
+        (Some(39.into()), Some(32))
+    );
+    assert_eq!(
+        (h.get_value(), h.get_total_width()),
+        (Some(362.into()), Some(9))
+    );
+    assert_eq!(
+        (i.get_value(), i.get_total_width()),
+        (Some(10.into()), Some(32))
+    );
+    assert_eq!(
+        (j.get_value(), j.get_total_width()),
+        (Some(4.into()), Some(32))
+    );
+    assert_eq!(
+        (k.get_value(), k.get_total_width()),
+        (Some(3.into()), Some(2))
+    );
+    assert_eq!(
+        (l.get_value(), l.get_total_width()),
+        (Some(3.into()), Some(32))
+    );
+    assert_eq!(
+        (m.get_value(), m.get_total_width()),
+        (
+            Some(0xffff_ffff_ffff_ffff_ffff_ffff_ffff_fff1u128.into()),
+            Some(128)
+        )
+    );
 }
 
 #[test]

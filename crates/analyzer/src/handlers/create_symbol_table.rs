@@ -3,7 +3,7 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
 use crate::definition_table::{self, Definition};
-use crate::evaluator::{EvaluatedValue, Evaluator};
+use crate::evaluator::Evaluator;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::reference_table::{self, ReferenceCandidate};
@@ -360,7 +360,7 @@ impl CreateSymbolTable {
     fn evaluate_enum_value(&mut self, arg: &EnumItem) -> EnumMemberValue {
         if let Some(ref x) = arg.enum_item_opt {
             let evaluated = Evaluator::new(&[]).expression(&x.expression);
-            if let EvaluatedValue::Fixed(value) = evaluated.value {
+            if let Some(value) = evaluated.value.get_value_isize() {
                 let valid_variant = match self.enum_encoding {
                     EnumEncodingItem::OneHot => value.count_ones() == 1,
                     EnumEncodingItem::Gray => {

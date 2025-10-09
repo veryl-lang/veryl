@@ -223,12 +223,9 @@ impl Symbol {
                     };
 
                     match value {
-                        Some(value) if r#enum.width > 0 => Evaluated::create_fixed(
-                            value as isize,
-                            false,
-                            vec![r#enum.width],
-                            vec![],
-                        ),
+                        Some(value) if r#enum.width > 0 => {
+                            Evaluated::create_fixed(value.into(), false, vec![r#enum.width], vec![])
+                        }
                         _ => Evaluated::create_unknown_static(),
                     }
                 }

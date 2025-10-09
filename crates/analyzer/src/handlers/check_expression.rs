@@ -728,7 +728,7 @@ impl VerylGrammarTrait for CheckExpression {
 
             let mut already_enabled = false;
             if let Some(value) = exp.get_value() {
-                if value == 0 {
+                if value == 0.into() {
                     let beg = arg.generate_named_block.l_brace.id();
                     let end = arg.generate_named_block.r_brace.id();
                     self.disable_block_beg.insert(beg);
@@ -745,7 +745,7 @@ impl VerylGrammarTrait for CheckExpression {
                 self.evaluated_error(&exp.errors);
 
                 if let Some(value) = exp.get_value() {
-                    if value == 0 || already_enabled {
+                    if value == 0.into() || already_enabled {
                         let beg = x.generate_optional_named_block.l_brace.id();
                         let end = x.generate_optional_named_block.r_brace.id();
                         self.disable_block_beg.insert(beg);
