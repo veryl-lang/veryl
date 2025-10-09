@@ -185,6 +185,10 @@ See [Getting Started](https://doc.veryl-lang.org/book/03_getting_started.html).
   Veryl: A Modern Hardware Description Language For Open Source Hardware Design.
   June 2025. In: Open-Source Computer Architecture Research (OSCAR) co-located with ISCA 2025.
   [[Slides]](https://veryl-lang.org/docs/veryl_oscar2025.pdf)
+* Naoya Hatta.
+  Veryl: SystemVerilogに代わる新しいハードウェア記述言語.
+  October 2025. In: Design Solution Forum 2025.
+  [[Slides]](https://veryl-lang.org/docs/veryl_dsf2025.pdf)
 
 ## Related Projects
 
