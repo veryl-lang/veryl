@@ -194,9 +194,10 @@ impl Runner for Cocotb {
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
             r#"
-import cocotb
+from importlib.metadata import version
 
-if cocotb.__version__.startswith("2"):
+cocotb_version = version("cocotb")
+if cocotb_version.startswith("2."):
     import cocotb_tools
     import cocotb_tools.runner
 
@@ -216,8 +217,7 @@ if cocotb.__version__.startswith("2"):
         test_module="{test},",
         waves={py_waves},
     )
-
-else:
+elif cocotb_version.startswith("1.9."):
     import cocotb.runner
 
     sources = {sources}
@@ -236,6 +236,8 @@ else:
         test_module="{test},",
         waves={py_waves},
     )
+else:
+    raise RuntimeError("unsupported cocotb version")
 "#
         );
 
