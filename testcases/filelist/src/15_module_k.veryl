@@ -1,0 +1,6 @@
+module ModuleK::<PKG: ProtoPackageJ> {
+  const K: u32 = PackageL::<PKG>::L;
+}
+
+alias package J = PackageJ::<32>;
+alias module K = ModuleK::<J>;

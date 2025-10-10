@@ -1,0 +1,7 @@
+proto package ProtoPackageJ {
+  const J: u32;
+}
+
+package PackageJ::<V: u32> for ProtoPackageJ {
+  const J: u32 = V;
+}
