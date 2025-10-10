@@ -194,7 +194,14 @@ impl Runner for Cocotb {
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
             r#"
-from importlib.metadata import version
+try:
+    from importlib.metadata import version
+except ImportError:
+    try:
+        from importlib_metadata import version
+    except ImportError as e:
+        print("Use Python 3.8+ or install importlib_metadata")
+        raise e
 
 cocotb_version = version("cocotb")
 if cocotb_version.startswith("2."):
