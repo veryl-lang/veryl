@@ -163,3 +163,11 @@ fn embed() {
     "#;
     success(code);
 }
+
+#[test]
+fn generic_arg() {
+    let code = r#"
+    inst u: ModuleA::<Pkg::C[0]>;
+    "#;
+    failure(code);
+}
