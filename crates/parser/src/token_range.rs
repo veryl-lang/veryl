@@ -492,6 +492,17 @@ impl From<&ExpressionIdentifier> for TokenRange {
 }
 impl_token_ext!(ExpressionIdentifier);
 
+impl From<&GenericArgIdentifier> for TokenRange {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let mut ret: TokenRange = value.scoped_identifier.as_ref().into();
+        if let Some(x) = &value.generic_arg_identifier_list.last() {
+            ret.set_end(x.identifier.as_ref().into());
+        }
+        ret
+    }
+}
+impl_token_ext!(GenericArgIdentifier);
+
 // ----------------------------------------------------------------------------
 // Expression
 // ----------------------------------------------------------------------------
@@ -1163,7 +1174,7 @@ impl_token_range!(WithGenericArgument, colon_colon_l_angle, r_angle);
 impl_token_range_list!(WithGenericArgumentList, WithGenericArgumentItem);
 impl_token_range_enum!(
     WithGenericArgumentItem,
-    expression_identifier,
+    generic_arg_identifier,
     fixed_type,
     number,
     boolean_literal

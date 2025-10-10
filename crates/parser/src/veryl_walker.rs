@@ -1061,6 +1061,17 @@ pub trait VerylWalker {
         after!(self, expression_identifier, arg);
     }
 
+    /// Semantic action for non-terminal 'GenericArgIdentifier'
+    fn generic_arg_identifier(&mut self, arg: &GenericArgIdentifier) {
+        before!(self, generic_arg_identifier, arg);
+        self.scoped_identifier(&arg.scoped_identifier);
+        for x in &arg.generic_arg_identifier_list {
+            self.dot(&x.dot);
+            self.identifier(&x.identifier);
+        }
+        after!(self, generic_arg_identifier, arg);
+    }
+
     /// Semantic action for non-terminal 'Expression'
     fn expression(&mut self, arg: &Expression) {
         before!(self, expression, arg);
@@ -2770,8 +2781,8 @@ pub trait VerylWalker {
     fn with_generic_argument_item(&mut self, arg: &WithGenericArgumentItem) {
         before!(self, with_generic_argument_item, arg);
         match arg {
-            WithGenericArgumentItem::ExpressionIdentifier(x) => {
-                self.expression_identifier(&x.expression_identifier);
+            WithGenericArgumentItem::GenericArgIdentifier(x) => {
+                self.generic_arg_identifier(&x.generic_arg_identifier);
             }
             WithGenericArgumentItem::FixedType(x) => {
                 self.fixed_type(&x.fixed_type);
