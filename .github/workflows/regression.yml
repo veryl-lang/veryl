@@ -90,6 +90,25 @@ jobs:
         run: veryl test --sim verilator
         working-directory: crates/std/veryl
 
+  cocotb:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Setup veryl
+        run:  cargo install --path crates/veryl
+      - name: Setup verilator
+        uses: veryl-lang/setup-verilator@v1
+      - name: Test cocotb 1.9.2
+        run: |
+          pip install "cocotb==1.9.2"
+          veryl test --sim verilator testcases/veryl/67_cocotb.veryl
+      - name: Test cocotb 2.0.0
+        run: |
+          pip install "cocotb==2.0.0"
+          veryl test --sim verilator testcases/veryl/67_cocotb.veryl
+
   highlightgen:
     runs-on: ubuntu-latest
     steps:
