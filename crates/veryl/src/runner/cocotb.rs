@@ -195,24 +195,47 @@ impl Runner for Cocotb {
         let runner_text = format!(
             r#"
 import cocotb
-import cocotb.runner
 
-sources = {sources}
+if cocotb.__version__.startswith("2"):
+    import cocotb_tools
+    import cocotb_tools.runner
 
-runner = cocotb.runner.get_runner("verilator")
-runner.build(
-    verilog_sources=sources,
-    hdl_toplevel="{module}",
-    always=True,
-    waves={py_waves},
-    build_args={args},
-)
+    sources = {sources}
 
-runner.test(
-    hdl_toplevel="{module}",
-    test_module="{test},",
-    waves={py_waves},
-)
+    runner = cocotb_tools.runner.get_runner("verilator")
+    runner.build(
+        sources=sources,
+        hdl_toplevel="{module}",
+        always=True,
+        waves={py_waves},
+        build_args={args},
+    )
+
+    runner.test(
+        hdl_toplevel="{module}",
+        test_module="{test},",
+        waves={py_waves},
+    )
+
+else:
+    import cocotb.runner
+
+    sources = {sources}
+
+    runner = cocotb.runner.get_runner("verilator")
+    runner.build(
+        verilog_sources=sources,
+        hdl_toplevel="{module}",
+        always=True,
+        waves={py_waves},
+        build_args={args},
+    )
+
+    runner.test(
+        hdl_toplevel="{module}",
+        test_module="{test},",
+        waves={py_waves},
+    )
 "#
         );
 
