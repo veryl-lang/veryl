@@ -1,7 +1,7 @@
 {
   "name": "vscode-veryl",
-  "displayName": "Veryl",
-  "description": "Veryl extension for Visual Studio Code",
+  "displayName": "Veryl (Deprecated)",
+  "description": "Veryl extension for Visual Studio Code (Deprecated, use veryl-lang.vscode-veryl)",
   "version": "0.16.5",
   "publisher": "dalance",
   "icon": "veryl_icon.png",
@@ -26,85 +26,15 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
-      {
-        "command": "vscode-veryl.restartServer",
-        "title": "Restart language server",
-        "category": "vscode-veryl"
-      },
-      {
-        "command": "waveformRender.start",
-        "title": "Draw",
-        "category": "Waveform Render"
-      },
-      {
-        "command": "waveformRender.toggleLivePreview",
-        "title": "Toggle Live Waveform Preview",
-        "category": "Waveform Render",
-        "icon": "$(pulse)"
-      },
-      {
-        "command": "waveformRender.saveAsPng",
-        "title": "Save as PNG",
-        "category": "Waveform Render"
-      },
-      {
-        "command": "waveformRender.saveAsSvg",
-        "title": "Save as SVG",
-        "category": "Waveform Render"
-      }
-    ],
-        "menus": {
-      "editor/title": [
-        {
-          "command": "waveformRender.toggleLivePreview",
-          "group": "navigation",
-          "when": "resourceExtname == .veryl"
-        }
-      ]
-    },
-    "configuration": [
-      {
-        "title": "Veryl Language Server",
-        "properties": {
-          "vscode-veryl.verylLsBinary.path": {
-            "scope": "window",
-            "type": [
-              "string",
-              "null"
-            ],
-            "default": null,
-            "markdownDescription": "Specify veryl-ls binary path."
-          },
-          "waveformRender.closePanelOnDisable": {
-            "type": "boolean",
-            "default": false,
-            "description": "Close the Waveform panel when live preview is disabled."
-          }
-        }
-      }
-    ],
-    "languages": [
-      {
-        "id": "veryl",
-        "aliases": [
-          "Veryl",
-          "veryl"
-        ],
-        "extensions": [
-          ".veryl"
-        ],
-        "configuration": "./language-configuration.json"
-      }
-    ],
-    "grammars": [
-      {
-        "language": "veryl",
-        "scopeName": "source.veryl",
-        "path": "./syntaxes/veryl.tmLanguage.json"
-      }
-    ]
+    "commands": [],
+    "menus": {},
+    "configuration": [],
+    "languages": [],
+    "grammars": []
   },
+  "extensionDependencies": [
+    "veryl-lang.vscode-veryl"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
@@ -112,7 +42,6 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "update-wavedrom-scripts": "mkdir -p localScripts/skins && curl -k -o localScripts/wavedrom.min.js https://wavedrom.com/wavedrom.min.js && curl -k -o localScripts/skins/dark.js https://wavedrom.com/skins/dark.js && curl -k -o localScripts/skins/default.js https://wavedrom.com/skins/default.js && curl -k -o localScripts/skins/lowkey.js https://wavedrom.com/skins/lowkey.js && curl -k -o localScripts/skins/narrow.js https://wavedrom.com/skins/narrow.js && curl -k -o localScripts/skins/narrower.js https://wavedrom.com/skins/narrower.js && curl -k -o localScripts/skins/narrowerer.js https://wavedrom.com/skins/narrowerer.js && curl -k -o localScripts/skins/width.html https://wavedrom.com/skins/width.html",
     "deploy:linux-x64": "vsce publish --target linux-x64",
     "deploy:win32-x64": "vsce publish --target win32-x64",
     "deploy:darwin-x64": "vsce publish --target darwin-x64",

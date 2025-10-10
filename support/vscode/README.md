@@ -1,12 +1,3 @@
-# [Veryl](https://github.com/veryl-lang/veryl) extension for Visual Studio Code
+# [Veryl](https://github.com/veryl-lang/veryl) extension for Visual Studio Code (Deprecated)
 
-![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/dalance.vscode-veryl)
-![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/dalance.vscode-veryl)
-![Visual Studio Marketplace Release Date](https://img.shields.io/visual-studio-marketplace/release-date/dalance.vscode-veryl)
-
-[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=dalance.vscode-veryl)
-
-## Features
-
-* Syntax Highlighting
-* Language Server
+[!WARNING] This extension has been moved to veryl-lang.vscode-veryl in the VS Code Marketplace. This extension (dalance.vscode-veryl) is a deprecated, and exists to help migrate existing extension users to the new extension location. Do not install this extension, instead please download veryl-lang.vscode-veryl. If you have both extensions installed, please uninstall the dalance.vscode-veryl version, which is marked as deprecated.
