@@ -20,7 +20,7 @@ let client: LanguageClient;
 function startServer(context: vscode.ExtensionContext) {
 	let verylLsIntegrated = context.asAbsolutePath(path.join('bin', 'veryl-ls'));
 
-	let verylLsBinaryPath: string | undefined = workspace.getConfiguration("vscode-veryl").get("verylLsBinary.path");
+	let verylLsBinaryPath: string | undefined = workspace.getConfiguration("veryl-vscode").get("verylLsBinary.path");
 	if (typeof verylLsBinaryPath === "undefined") {
 		verylLsBinaryPath = verylLsIntegrated;
 	} else if (verylLsBinaryPath === null) {
@@ -65,10 +65,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "vscode-veryl" is now active!');
+	console.log('Congratulations, your extension "veryl-vscode" is now active!');
 
 	context.subscriptions.push(
-		commands.registerCommand("vscode-veryl.restartServer", () => {
+		commands.registerCommand("veryl-vscode.restartServer", () => {
 			stopServer().then(function () {startServer(context);}, startServer);
 		})
 	);

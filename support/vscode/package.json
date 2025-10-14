@@ -1,5 +1,5 @@
 {
-  "name": "vscode-veryl",
+  "name": "veryl-vscode",
   "displayName": "Veryl",
   "description": "Veryl extension for Visual Studio Code",
   "version": "0.16.5",
@@ -28,9 +28,9 @@
   "contributes": {
     "commands": [
       {
-        "command": "vscode-veryl.restartServer",
+        "command": "veryl-vscode.restartServer",
         "title": "Restart language server",
-        "category": "vscode-veryl"
+        "category": "veryl-vscode"
       },
       {
         "command": "waveformRender.start",
@@ -67,7 +67,7 @@
       {
         "title": "Veryl Language Server",
         "properties": {
-          "vscode-veryl.verylLsBinary.path": {
+          "veryl-vscode.verylLsBinary.path": {
             "scope": "window",
             "type": [
               "string",

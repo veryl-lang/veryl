@@ -1,10 +1,10 @@
 # [Veryl](https://veryl-lang.org) extension for Visual Studio Code
 
-![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/veryl-lang.vscode-veryl)
-![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/veryl-lang.vscode-veryl)
-![Visual Studio Marketplace Release Date](https://img.shields.io/visual-studio-marketplace/release-date/veryl-lang.vscode-veryl)
+![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/veryl-lang.veryl-vscode)
+![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/veryl-lang.veryl-vscode)
+![Visual Studio Marketplace Release Date](https://img.shields.io/visual-studio-marketplace/release-date/veryl-lang.veryl-vscode)
 
-[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=veryl-lang.vscode-veryl)
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=veryl-lang.veryl-vscode)
 
 This extension adds language support for Veryl to Visual Studio Code.
 It supports:
