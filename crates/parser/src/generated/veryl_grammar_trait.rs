@@ -15660,7 +15660,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 59:
     ///
-    /// `BoolTerm: 'bool' : Token;`
+    /// `BoolTerm: <INITIAL, Generic>'bool' : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn bool_term(&mut self, bool_term: &ParseTreeType<'t>) -> Result<()> {

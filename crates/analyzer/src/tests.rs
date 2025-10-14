@@ -3118,6 +3118,17 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package FooPkg::<A: bool = true, B: bool = false> {
+    }
+    module BarModule {
+        import FooPkg::<false, true>::*;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

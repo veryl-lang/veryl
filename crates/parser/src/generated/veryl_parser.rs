@@ -343,6 +343,7 @@ scanner! {
             token r"\." => 36; // "DotTerm"
             token r"=" => 37; // "EquTerm"
             token r">" => 49; // "RAngleTerm"
+            token r"bool" => 64; // "BoolTerm"
             token r"f32" => 76; // "F32Term"
             token r"f64" => 77; // "F64Term"
             token r"false" => 78; // "FalseTerm"
