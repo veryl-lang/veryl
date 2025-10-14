@@ -94,7 +94,7 @@
 /*   56 */ AsTerm: 'as' : Token;
 /*   57 */ BindTerm: 'bind' : Token;
 /*   58 */ BitTerm: 'bit' : Token;
-/*   59 */ BoolTerm: 'bool' : Token;
+/*   59 */ BoolTerm: <INITIAL, Generic>'bool' : Token;
 /*   60 */ CaseTerm: 'case' : Token;
 /*   61 */ ClockTerm: 'clock' : Token;
 /*   62 */ ClockPosedgeTerm: 'clock_posedge' : Token;

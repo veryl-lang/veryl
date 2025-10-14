@@ -112,7 +112,7 @@ AssignTerm            : <INITIAL                                                
 AsTerm                : <INITIAL                                                      >'as'                                                                                  : Token; // Keyword: Statement
 BindTerm              : <INITIAL                                                      >'bind'                                                                                : Token; // Keyword: Statement
 BitTerm               : <INITIAL                                                      >'bit'                                                                                 : Token; // Keyword: Type
-BoolTerm              : <INITIAL                                                      >'bool'                                                                                : Token; // Keyword: Type
+BoolTerm              : <INITIAL, Generic                                             >'bool'                                                                                : Token; // Keyword: Type
 CaseTerm              : <INITIAL                                                      >'case'                                                                                : Token; // Keyword: Conditional
 ClockTerm             : <INITIAL                                                      >'clock'                                                                               : Token; // Keyword: Type
 ClockPosedgeTerm      : <INITIAL                                                      >'clock_posedge'                                                                       : Token; // Keyword: Type
