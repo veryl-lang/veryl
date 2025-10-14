@@ -3,7 +3,7 @@
   "displayName": "Veryl",
   "description": "Veryl extension for Visual Studio Code",
   "version": "0.16.5",
-  "publisher": "dalance",
+  "publisher": "veryl-lang",
   "icon": "veryl_icon.png",
   "galleryBanner": {
       "color": "#ffffff",
