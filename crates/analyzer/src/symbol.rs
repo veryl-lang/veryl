@@ -159,33 +159,57 @@ impl Symbol {
         self.namespace.get_symbol()
     }
 
-    pub fn get_parent_package(&self) -> Option<Symbol> {
+    pub fn get_parent_component(&self) -> Option<Symbol> {
         let parent = self.get_parent()?;
-        Symbol::trace_package_symbol(&parent)
+        Symbol::trace_component_symbol(&parent)
     }
 
-    fn trace_package_symbol(symbol: &Symbol) -> Option<Symbol> {
+    fn trace_component_symbol(symbol: &Symbol) -> Option<Symbol> {
         match &symbol.kind {
-            SymbolKind::Package(_) | SymbolKind::ProtoPackage(_) => Some(symbol.clone()),
+            SymbolKind::Module(_)
+            | SymbolKind::ProtoModule(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::ProtoInterface(_)
+            | SymbolKind::Package(_)
+            | SymbolKind::ProtoPackage(_) => Some(symbol.clone()),
+            SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
+                Symbol::trace_component_symbol(&symbol.found)
+            }
+            SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
+                Symbol::trace_component_symbol(&symbol.found)
+            }
             SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
-                Symbol::trace_package_symbol(&symbol.found)
+                Symbol::trace_component_symbol(&symbol.found)
             }
             SymbolKind::GenericInstance(x) => {
                 let symbol = symbol_table::get(x.base)?;
-                Symbol::trace_package_symbol(&symbol)
+                Symbol::trace_component_symbol(&symbol)
             }
             SymbolKind::GenericParameter(x) => {
                 if let Some(ProtoBound::ProtoPackage(x)) =
                     x.bound.resolve_proto_bound(&symbol.namespace)
                 {
-                    Symbol::trace_package_symbol(&x)
+                    Symbol::trace_component_symbol(&x)
                 } else {
                     None
                 }
             }
             _ => None,
+        }
+    }
+
+    pub fn get_parent_package(&self) -> Option<Symbol> {
+        let parent = self.get_parent_component()?;
+        if parent.is_package(true) {
+            Some(parent)
+        } else {
+            None
         }
     }
 

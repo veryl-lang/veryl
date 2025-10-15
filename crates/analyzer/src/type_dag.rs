@@ -186,18 +186,16 @@ impl TypeDag {
         namespace_table::set_default(&project_namespace.paths);
         if let Some((parent_id, parent_context)) = parent {
             let parent_symbol = symbol_table::get(*parent_id).unwrap();
-            let parent_package = parent_symbol.get_parent_package();
             for generic_map in parent_symbol.generic_maps() {
                 self.insert_path_with_generic_map(
                     path,
                     namespace,
                     Some((&parent_symbol, parent_context)),
-                    parent_package.as_ref(),
                     Some(generic_map),
                 );
             }
         } else {
-            self.insert_path_with_generic_map(path, namespace, None, None, None);
+            self.insert_path_with_generic_map(path, namespace, None, None);
         }
     }
 
@@ -206,7 +204,6 @@ impl TypeDag {
         path: &GenericSymbolPath,
         namespace: &Namespace,
         parent: Option<(&Symbol, &Context)>,
-        parent_package: Option<&Symbol>,
         generic_map: Option<GenericMap>,
     ) {
         let mut path = path.clone();
@@ -221,44 +218,55 @@ impl TypeDag {
             let Some(base_symbol) = Self::resolve_symbol_path(&path.base_path(i), namespace) else {
                 continue;
             };
-            let Some(base) = self.insert_symbol(&base_symbol) else {
-                continue;
-            };
 
             if let Some((parent_symbol, parent_context)) = parent {
-                let (parent_symbol, parent_context) = if parent_package
-                    .map(|x| x.id != base_symbol.id)
-                    .unwrap_or(false)
+                if !base_symbol.namespace.included(&parent_symbol.namespace)
+                    && let Some(parent_symbol) = parent_symbol.get_parent_component()
+                    && let Some(base_symbol) = base_symbol.get_parent_component()
                 {
-                    (parent_package.unwrap(), Context::Package)
+                    let parent_context = if parent_symbol.is_module(true) {
+                        Context::Module
+                    } else if parent_symbol.is_interface(true) {
+                        Context::Interface
+                    } else {
+                        Context::Package
+                    };
+                    self.insert_path_symbols(&parent_symbol, parent_context, &base_symbol);
                 } else {
-                    (parent_symbol, *parent_context)
-                };
-                if let Some(parent) = self.insert_symbol(parent_symbol)
-                    && !self.is_dag_owned(parent, base)
-                {
-                    self.insert_dag_edge(parent, base, parent_context);
+                    self.insert_path_symbols(parent_symbol, *parent_context, &base_symbol);
                 }
+            } else {
+                self.insert_symbol(&base_symbol);
             }
         }
     }
 
     fn resolve_symbol_path(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
         let symbol = symbol_table::resolve((path, namespace)).ok()?;
-        let symbol = if let Some(alias_path) = symbol.found.alias_target() {
+        if let Some(alias_path) = symbol.found.alias_target() {
             // alias referenced as generic arg for generic instance put on the same namespace
             // causes cyclic dependency error.
             // https://github.com/veryl-lang/veryl/blob/52b46337148340b43f8ab1c8f2ab67f58cd3c943/crates/analyzer/src/tests.rs#L3740-L3743
             // Need to use the target symbol of the alias instead of it to prevent this situation.
-            Self::resolve_symbol_path(&alias_path.generic_path(), &symbol.found.namespace)?
+            Self::resolve_symbol_path(&alias_path.generic_path(), &symbol.found.namespace)
         } else {
-            symbol.found
-        };
+            Some(symbol.found)
+        }
+    }
 
-        if let Some(pacakge) = symbol.get_parent_package() {
-            Some(pacakge)
-        } else {
-            Some(symbol)
+    fn insert_path_symbols(
+        &mut self,
+        parent_symbol: &Symbol,
+        parent_context: Context,
+        base_symbol: &Symbol,
+    ) {
+        let Some(base) = self.insert_symbol(base_symbol) else {
+            return;
+        };
+        if let Some(parent) = self.insert_symbol(parent_symbol)
+            && !self.is_dag_owned(parent, base)
+        {
+            self.insert_dag_edge(parent, base, parent_context);
         }
     }
 
