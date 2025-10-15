@@ -178,6 +178,13 @@ impl From<(&SVec<StrId>, &Namespace)> for SymbolPathNamespace {
     }
 }
 
+impl From<(StrId, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (StrId, &Namespace)) -> Self {
+        let path = SymbolPath::new(&[value.0]);
+        SymbolPathNamespace(path, value.1.clone())
+    }
+}
+
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {
         let namespace = namespace_table::get(value.identifier_token.token.id).unwrap_or_default();

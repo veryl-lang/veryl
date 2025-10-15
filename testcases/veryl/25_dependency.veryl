@@ -1,5 +1,10 @@
+package Package25::<V: u32> {
+    const C: u32 = V;
+}
+
 alias package barpkg = veryl_sample4::bar_pkg::<32>;
 alias package foopkg = veryl_sample4::foo_pkg::<barpkg::BAR>;
+alias package bazpkg = veryl_sample4::baz_pkg::<Package25::<1>::C>;
 
 module Module25 (
     i_clk : input   clock                         ,
@@ -8,6 +13,7 @@ module Module25 (
     out_if: modport veryl_sample3::data_if::mp_out,
 ) {
     import barpkg::*;
+    import bazpkg::*;
 
     inst data_if: veryl_sample3::data_if;
 
