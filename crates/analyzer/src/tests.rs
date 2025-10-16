@@ -3595,6 +3595,15 @@ fn invalid_clock_domain() {
         errors[0],
         AnalyzerError::InvalidClockDomain { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        inst u: 'a $sv::InterfaceA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
