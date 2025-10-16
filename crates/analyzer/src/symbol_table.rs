@@ -1109,6 +1109,16 @@ impl SymbolTable {
         }
     }
 
+    pub fn find_project_symbol(&self, prj: StrId) -> Option<Symbol> {
+        for symbol in self.symbol_table.values() {
+            if matches!(symbol.kind, SymbolKind::Namespace) && symbol.token.text == prj {
+                return Some(symbol.clone());
+            }
+        }
+
+        None
+    }
+
     pub fn add_project_local(&mut self, prj: StrId, from: StrId, to: StrId) {
         self.project_local_table
             .entry(prj)
@@ -1607,6 +1617,10 @@ pub fn resolve_user_defined() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     let resolved = SYMBOL_TABLE.with(|f| f.borrow().get_user_defined());
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
+}
+
+pub fn find_project_symbol(prj: StrId) -> Option<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().find_project_symbol(prj))
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {

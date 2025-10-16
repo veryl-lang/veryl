@@ -1,14 +1,20 @@
+package veryl_testcase___Package25__1;
+    localparam int unsigned C = 1;
+endpackage
+
 
 
 
 module veryl_testcase_Module25
     import veryl_sample4___bar_pkg__32::*;
+    import veryl_sample4___baz_pkg____Package25__1_C::*;
 (
     input var logic                    i_clk  ,
     input var logic                    i_rst_n,
     veryl_sample3_data_if.mp_in  in_if  ,
     veryl_sample3_data_if.mp_out out_if 
 );
+
 
 
     veryl_sample3_data_if data_if ();

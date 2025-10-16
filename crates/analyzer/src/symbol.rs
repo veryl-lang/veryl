@@ -605,6 +605,33 @@ impl Symbol {
         false
     }
 
+    pub fn is_component(&self, include_proto: bool) -> bool {
+        match &self.kind {
+            SymbolKind::Module(_)
+            | SymbolKind::AliasModule(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::AliasInterface(_)
+            | SymbolKind::Package(_)
+            | SymbolKind::AliasPackage(_) => return true,
+            SymbolKind::ProtoModule(_)
+            | SymbolKind::ProtoInterface(_)
+            | SymbolKind::ProtoPackage(_) => return include_proto,
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                return symbol.is_component(false);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let Some(ProtoBound::ProtoInterface(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_component(true);
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     pub fn is_proto_package(&self, trace_generic_param: bool) -> bool {
         match &self.kind {
             SymbolKind::ProtoPackage(_) => return true,

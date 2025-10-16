@@ -1,0 +1,7 @@
+pub proto package baz_proto_pkg {
+    const BAZ: u32;
+}
+
+pub package baz_pkg::<V: u32> for baz_proto_pkg {
+    const BAZ: u32 = V;
+}

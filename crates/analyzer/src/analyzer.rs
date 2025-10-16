@@ -22,7 +22,7 @@ use crate::var_ref::{
 use itertools::Itertools;
 use std::path::Path;
 use veryl_metadata::{Build, EnvVar, Lint, Metadata};
-use veryl_parser::resource_table;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -309,7 +309,7 @@ pub struct AnalyzerPass3Info {
     var_refs: HashMap<VarRefAffiliation, Vec<VarRef>>,
 }
 
-fn new_namespace(name: &str, public: bool) -> (Token, Symbol) {
+fn insert_namespace_symbol(name: &str, public: bool) -> StrId {
     let token = Token::new(name, 0, 0, 0, 0, TokenSource::External);
     let symbol = Symbol::new(
         &token,
@@ -318,16 +318,16 @@ fn new_namespace(name: &str, public: bool) -> (Token, Symbol) {
         public,
         DocComment::default(),
     );
-    (token, symbol)
+    symbol_table::insert(&token, symbol);
+    token.text
 }
 
 impl Analyzer {
     pub fn new(metadata: &Metadata) -> Self {
+        insert_namespace_symbol(&metadata.project.name, true);
         for locks in metadata.lockfile.lock_table.values() {
             for lock in locks {
-                let prj = resource_table::insert_str(&lock.name);
-                let (token, symbol) = new_namespace(&lock.name, lock.visible);
-                symbol_table::insert(&token, symbol);
+                let prj = insert_namespace_symbol(&lock.name, lock.visible);
                 for lock_dep in &lock.dependencies {
                     let from = resource_table::insert_str(&lock_dep.name);
                     let to = metadata
@@ -335,12 +335,9 @@ impl Analyzer {
                         .lock_table
                         .get(&lock_dep.source.to_url())
                         .unwrap();
+
                     let to = to.iter().find(|x| x.source == lock_dep.source).unwrap();
-
-                    let (token, symbol) = new_namespace(&to.name, to.visible);
-                    symbol_table::insert(&token, symbol);
-
-                    let to = resource_table::insert_str(&to.name);
+                    let to = insert_namespace_symbol(&to.name, to.visible);
                     symbol_table::add_project_local(prj, from, to);
                 }
             }

@@ -155,8 +155,7 @@ impl Namespace {
         if let Some(path) = namespace.pop()
             && namespace.depth() >= 1
         {
-            let path = SymbolPath::new(&[path]);
-            symbol_table::resolve((&path, &namespace))
+            symbol_table::resolve((path, &namespace))
                 .map(|x| x.found)
                 .ok()
         } else {
