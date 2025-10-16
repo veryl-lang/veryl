@@ -69,8 +69,10 @@ impl CheckClockDomain {
         if let Ok(inst_symbol) = symbol_table::resolve(arg.identifier.as_ref())
             && let Some(type_kind) = get_inst_type_kind(&inst_symbol.found)
         {
-            if !matches!(type_kind, SymbolKind::Interface(_))
-                && let Some(ref x) = arg.component_instantiation_opt
+            if !matches!(
+                type_kind,
+                SymbolKind::Interface(_) | SymbolKind::SystemVerilog
+            ) && let Some(ref x) = arg.component_instantiation_opt
             {
                 self.errors.push(AnalyzerError::invalid_clock_domain(
                     &x.clock_domain.as_ref().into(),
