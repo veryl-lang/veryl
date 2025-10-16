@@ -4,6 +4,7 @@
   "description": "Veryl extension for Visual Studio Code",
   "version": "0.16.5",
   "publisher": "veryl-lang",
+  "homepage": "https://veryl-lang.org",
   "icon": "veryl_icon.png",
   "galleryBanner": {
       "color": "#ffffff",
@@ -15,9 +16,14 @@
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
-    "url": "https://github.com/veryl-lang/veryl.git"
+    "url": "https://github.com/veryl-lang/veryl"
+  },
+  "bugs": {
+    "url": "https://github.com/veryl-lang/veryl/issues"
   },
   "categories": [
+    "Linters",
+    "Formatters",
     "Programming Languages"
   ],
   "activationEvents": [
