@@ -447,6 +447,11 @@ mod filelist {
             "14_package_j.veryl",
             "15_module_k.veryl",
             "16_package_l.veryl",
+            "17_package_m.veryl",
+            "18_package_n.veryl",
+            "19_package_o.veryl",
+            "20_module_p.veryl",
+            "21_alias_q.veryl",
             "ram.veryl",
             "axi_pkg.veryl",
         ];
@@ -463,5 +468,9 @@ mod filelist {
         check_order(&paths, "axi_pkg.veryl", "13_embed.veryl");
         check_order(&paths, "14_package_j.veryl", "16_package_l.veryl");
         check_order(&paths, "16_package_l.veryl", "15_module_k.veryl");
+        check_order(&paths, "17_package_m.veryl", "18_package_n.veryl");
+        check_order(&paths, "18_package_n.veryl", "19_package_o.veryl");
+        check_order(&paths, "19_package_o.veryl", "20_module_p.veryl");
+        check_order(&paths, "20_module_p.veryl", "21_alias_q.veryl");
     }
 }

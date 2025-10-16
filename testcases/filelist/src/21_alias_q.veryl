@@ -1,0 +1,2 @@
+alias package N = PackageN::<1>;
+alias module  P = ModuleP::<N>;
