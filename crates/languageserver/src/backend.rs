@@ -244,11 +244,13 @@ impl LanguageServer for Backend {
         })
         .await;
 
-        if let Some(MsgFromServer::Completion(x)) = self.recv().await {
-            Ok(x)
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::Completion(x) = x {
+                return Ok(x);
+            }
         }
+        Ok(None)
     }
 
     async fn goto_definition(
@@ -262,11 +264,17 @@ impl LanguageServer for Backend {
         self.send(MsgToServer::GotoDefinition { url, line, column })
             .await;
 
-        if let Some(MsgFromServer::GotoDefinition(Some(x))) = self.recv().await {
-            Ok(Some(GotoDefinitionResponse::Scalar(x)))
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::GotoDefinition(x) = x {
+                if let Some(x) = x {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(x)));
+                } else {
+                    return Ok(None);
+                }
+            }
         }
+        Ok(None)
     }
 
     async fn symbol(
@@ -277,11 +285,13 @@ impl LanguageServer for Backend {
 
         self.send(MsgToServer::Symbol { query }).await;
 
-        if let Some(MsgFromServer::Symbol(x)) = self.recv().await {
-            Ok(Some(OneOf::Left(x)))
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::Symbol(x) = x {
+                return Ok(Some(OneOf::Left(x)));
+            }
         }
+        Ok(None)
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -291,11 +301,13 @@ impl LanguageServer for Backend {
 
         self.send(MsgToServer::Hover { url, line, column }).await;
 
-        if let Some(MsgFromServer::Hover(Some(x))) = self.recv().await {
-            Ok(Some(x))
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::Hover(x) = x {
+                return Ok(x);
+            }
         }
+        Ok(None)
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -306,11 +318,13 @@ impl LanguageServer for Backend {
         self.send(MsgToServer::References { url, line, column })
             .await;
 
-        if let Some(MsgFromServer::References(x)) = self.recv().await {
-            Ok(Some(x))
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::References(x) = x {
+                return Ok(Some(x));
+            }
         }
+        Ok(None)
     }
 
     async fn semantic_tokens_full(
@@ -321,11 +335,13 @@ impl LanguageServer for Backend {
 
         self.send(MsgToServer::SemanticTokens { url }).await;
 
-        if let Some(MsgFromServer::SemanticTokens(x)) = self.recv().await {
-            Ok(x)
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::SemanticTokens(x) = x {
+                return Ok(x);
+            }
         }
+        Ok(None)
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
@@ -333,11 +349,13 @@ impl LanguageServer for Backend {
 
         self.send(MsgToServer::Formatting { url }).await;
 
-        if let Some(MsgFromServer::Formatting(x)) = self.recv().await {
-            Ok(x)
-        } else {
-            Ok(None)
+        // Dispose unexpected messages
+        while let Some(x) = self.recv().await {
+            if let MsgFromServer::Formatting(x) = x {
+                return Ok(x);
+            }
         }
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
