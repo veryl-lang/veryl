@@ -2,7 +2,7 @@
   "name": "vscode-veryl",
   "displayName": "Veryl (Deprecated)",
   "description": "Veryl extension for Visual Studio Code (Deprecated, use veryl-lang.vscode-veryl)",
-  "version": "0.16.5",
+  "version": "0.16.6",
   "publisher": "dalance",
   "icon": "veryl_icon.png",
   "galleryBanner": {
