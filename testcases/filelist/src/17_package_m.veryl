@@ -1,0 +1,5 @@
+package PackageM {
+  enum enum_m: u32 {
+    M,
+  }
+}

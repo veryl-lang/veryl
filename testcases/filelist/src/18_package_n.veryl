@@ -1,0 +1,10 @@
+proto package ProtoPackageN {
+    function func_n() -> u32;
+}
+
+package PackageN::<V: u32> for ProtoPackageN {
+    function func_n() -> u32 {
+        let m: u32 = PackageM::enum_m::M;
+        return V + m;
+    }
+}

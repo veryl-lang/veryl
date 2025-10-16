@@ -1,0 +1,5 @@
+package PackageO::<N_PKG: ProtoPackageN> {
+    function func_o() -> u32 {
+        return N_PKG::func_n();
+    }
+}
