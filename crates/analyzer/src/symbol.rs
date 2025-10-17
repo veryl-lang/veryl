@@ -390,16 +390,28 @@ impl Symbol {
     }
 
     pub fn generic_table(&self, arguments: &[GenericSymbolPath]) -> GenericTable {
-        let generic_parameters = self.generic_parameters();
+        let params = self.generic_parameters();
+        let n_args = arguments.len();
         let mut ret = HashMap::default();
 
+        let match_arity = if params.len() > n_args {
+            params[n_args].1.default_value.is_some()
+        } else {
+            params.len() == n_args
+        };
+        if !match_arity {
+            // Too many or too few generic args are given.
+            // Return empty generic table.
+            return ret;
+        }
+
         for (i, arg) in arguments.iter().enumerate() {
-            if let Some((p, _)) = generic_parameters.get(i) {
+            if let Some((p, _)) = params.get(i) {
                 ret.insert(*p, arg.clone());
             }
         }
 
-        for param in generic_parameters.iter().skip(arguments.len()) {
+        for param in params.iter().skip(n_args) {
             ret.insert(param.0, param.1.default_value.as_ref().unwrap().clone());
         }
 
