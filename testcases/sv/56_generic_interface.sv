@@ -29,14 +29,14 @@ module veryl_testcase_Module56
     veryl_testcase___Interface56B__Package56A_X u_b0 ();
     veryl_testcase___Interface56B__Package56A_X u_b1 ();
 
-    veryl_testcase___Interface56B__3 u_b2 ();
+    veryl_testcase___Interface56B__3            u_b2 ();
     veryl_testcase___Interface56B__Package56A_X u_b3 ();
-    veryl_testcase___Module56A__1 u_a2 ();
+    veryl_testcase___Module56A__1               u_a2 ();
 
     veryl_testcase___Module56C____Interface56C__2 u_c0 ();
 
     veryl_testcase___Interface56D__Package56C_StructA u_d0 ();
-    veryl_testcase___Interface56E__Package56C u_d1 ();
+    veryl_testcase___Interface56E__Package56C         u_d1 ();
 
     logic _a; always_comb _a = u_a0._a;
     logic _b; always_comb _b = u_b0._b;

@@ -1364,8 +1364,14 @@ impl Emitter {
         if single_line {
             self.single_line_start();
         }
+        if self.single_line() {
+            self.align_start(align_kind::TYPE);
+        }
         self.scoped_identifier(&arg.scoped_identifier);
         self.space(1);
+        if self.single_line() {
+            self.align_finish(align_kind::TYPE);
+        }
 
         if let Some(ref x) = arg.component_instantiation_opt1 {
             // skip align at single line

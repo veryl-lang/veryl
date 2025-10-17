@@ -2211,7 +2211,7 @@ module prj___ModuleA__false;
     logic _a; always_comb _a = 1'b0;
 endmodule
 module prj_ModuleB;
-    prj___ModuleA__true u0 ();
+    prj___ModuleA__true  u0 ();
     prj___ModuleA__false u1 ();
 endmodule
 //# sourceMappingURL=test.sv.map
