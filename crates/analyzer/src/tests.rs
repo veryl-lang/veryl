@@ -1378,6 +1378,24 @@ fn mismatch_generics_arity() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if::<W: u32> {
+        var a: logic<W>;
+        modport mp {
+            a: input
+        }
+    }
+    module b_module (
+        aif: modport a_if::mp,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchGenericsArity { .. }
+    ));
 }
 
 #[test]
