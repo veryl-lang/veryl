@@ -17,7 +17,7 @@ endinterface
 module veryl_testcase_Module70 (
     interface c
 );
-    veryl_testcase_Interface70A a ();
+    veryl_testcase_Interface70A      a ();
     veryl_testcase___Interface70B__8 b ();
 
     veryl_testcase_Module70A u (

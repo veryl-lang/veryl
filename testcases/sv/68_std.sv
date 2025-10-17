@@ -57,7 +57,7 @@ endmodule
 
 
 module veryl_testcase_Module68C;
-    __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8 axi4_if          ();
+    __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8                                                                                                                                                            axi4_if          ();
     __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH axi4_lite_if     ();
     always_comb begin
         axi4_if.awvalid  = 0;
