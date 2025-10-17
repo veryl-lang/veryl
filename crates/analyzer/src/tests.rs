@@ -680,6 +680,29 @@ fn multiple_assignment() {
         errors[0],
         AnalyzerError::MultipleAssignment { .. }
     ));
+
+    let code = r#"
+    module ModuleA () {
+        var w: logic<2>;
+        if 1 :g {
+            assign w[0] = 1'b1;
+            inst u: ModuleB (
+                o: w[1],
+            );
+        } else {
+            assign w = '0;
+        }
+    }
+
+    module ModuleB (
+        o: output logic,
+    ) {
+        assign o = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

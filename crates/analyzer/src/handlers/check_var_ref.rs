@@ -235,6 +235,8 @@ impl CheckVarRef {
                     }
                 }
             }
+
+            self.assign_position.pop();
         }
     }
 }
