@@ -1,6 +1,6 @@
 RELEASE_URL = https://github.com/veryl-lang/veryl/releases/latest/download/
 
-publish: publish_x86_64_linux publish_x86_64_windows publish_x86_64_mac publish_aarch64_mac
+publish: publish_x86_64_linux publish_aarch64_linux publish_x86_64_windows publish_aarch64_windows publish_x86_64_mac publish_aarch64_mac
 
 publish_x86_64_linux:
 	mkdir -p bin
@@ -24,6 +24,14 @@ publish_x86_64_windows:
 	unzip -o -d bin veryl.zip
 	rm bin/veryl.exe veryl.zip
 	npm run deploy:win32-x64
+	rm -rf bin
+
+publish_aarch64_windows:
+	mkdir -p bin
+	curl -L -o veryl.zip ${RELEASE_URL}/veryl-aarch64-windows.zip
+	unzip -o -d bin veryl.zip
+	rm bin/veryl.exe veryl.zip
+	npm run deploy:win32-arm64
 	rm -rf bin
 
 publish_x86_64_mac:
