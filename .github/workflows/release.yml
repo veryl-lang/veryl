@@ -9,7 +9,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macOS-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macOS-latest, windows-latest, windows-11-arm]
         rust: [stable]
 
     runs-on: ${{ matrix.os }}
@@ -52,6 +52,9 @@ jobs:
     - name: Build for Windows
       if: matrix.os == 'windows-latest'
       run: make release_win
+    - name: Build for Windows aarch64
+      if: matrix.os == 'windows-11-arm'
+      run: make release_win_aarch64
     - name: Release
       uses: softprops/action-gh-release@v1
       with:

@@ -122,6 +122,7 @@
     "deploy:linux-x64": "vsce publish --target linux-x64",
     "deploy:linux-arm64": "vsce publish --target linux-arm64",
     "deploy:win32-x64": "vsce publish --target win32-x64",
+    "deploy:win32-arm64": "vsce publish --target win32-arm64",
     "deploy:darwin-x64": "vsce publish --target darwin-x64",
     "deploy:darwin-arm64": "vsce publish --target darwin-arm64"
   },
