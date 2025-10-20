@@ -5,7 +5,9 @@ use crate::attribute::{AllowItem, CondTypeItem};
 use crate::attribute_table;
 use crate::connect_operation_table;
 use crate::evaluator::Evaluator;
-use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
+use crate::namespace::Namespace;
+use crate::symbol::{Direction, PortProperty, Symbol, SymbolId, SymbolKind};
+use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::var_ref::{
     AssignDeclarationType, AssignPosition, AssignPositionType, AssignStatementBranchItemType,
@@ -13,6 +15,7 @@ use crate::var_ref::{
     VarRefType,
 };
 use veryl_parser::ParolError;
+use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -128,45 +131,8 @@ impl CheckVarRef {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())
             && let SymbolKind::Instance(ref x) = symbol.found.kind
         {
-            let mut ports = HashMap::default();
-            let mut port_unknown = false;
-            let mut sv_instance = false;
-
-            if let Ok(x) =
-                symbol_table::resolve((&x.type_name.mangled_path(), &symbol.found.namespace))
-            {
-                match x.found.kind {
-                    SymbolKind::Module(ref x) => {
-                        for port in &x.ports {
-                            ports.insert(port.name(), port.property());
-                        }
-                    }
-                    SymbolKind::GenericInstance(ref x) => {
-                        let base = symbol_table::get(x.base).unwrap();
-                        if let SymbolKind::Module(ref x) = base.kind {
-                            for port in &x.ports {
-                                ports.insert(port.name(), port.property());
-                            }
-                        }
-                    }
-                    SymbolKind::GenericParameter(x) => {
-                        if let Some(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace)
-                            && let Some(SymbolKind::ProtoModule(x)) =
-                                proto.get_symbol().map(|x| x.kind)
-                        {
-                            for port in &x.ports {
-                                ports.insert(port.name(), port.property());
-                            }
-                        }
-                    }
-                    SymbolKind::SystemVerilog => {
-                        port_unknown = true;
-                        sv_instance = true;
-                    }
-                    _ => (),
-                }
-            }
-
+            let (sv_instance, port_unknown, ports) =
+                Self::resolve_inst_target(&x.type_name, &symbol.found.namespace);
             self.assign_position.push(AssignPositionType::Declaration {
                 token: *header_token,
                 define_context: (*header_token).into(),
@@ -238,6 +204,54 @@ impl CheckVarRef {
 
             self.assign_position.pop();
         }
+    }
+
+    fn resolve_inst_target(
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) -> (bool, bool, HashMap<StrId, PortProperty>) {
+        let mut ports = HashMap::default();
+
+        let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), namespace)) else {
+            return (false, false, ports);
+        };
+
+        match &symbol.found.kind {
+            SymbolKind::Module(x) => {
+                for port in &x.ports {
+                    ports.insert(port.name(), port.property());
+                }
+            }
+            SymbolKind::ProtoModule(x) => {
+                for port in &x.ports {
+                    ports.insert(port.name(), port.property());
+                }
+            }
+            SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
+                return Self::resolve_inst_target(&x.target, &symbol.found.namespace);
+            }
+            SymbolKind::GenericInstance(x) => {
+                let base = symbol_table::get(x.base).unwrap();
+                if let SymbolKind::Module(ref x) = base.kind {
+                    for port in &x.ports {
+                        ports.insert(port.name(), port.property());
+                    }
+                }
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let Some(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace)
+                    && let Some(SymbolKind::ProtoModule(x)) = proto.get_symbol().map(|x| x.kind)
+                {
+                    for port in &x.ports {
+                        ports.insert(port.name(), port.property());
+                    }
+                }
+            }
+            SymbolKind::SystemVerilog => return (true, true, ports),
+            _ => {}
+        }
+
+        (false, false, ports)
     }
 }
 
