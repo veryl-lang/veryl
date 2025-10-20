@@ -3170,6 +3170,37 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto module ProtoModuleA (
+        i_d: input  logic,
+        o_d: output logic,
+    );
+    module ModuleA for ProtoModuleA (
+        i_d: input  logic,
+        o_d: output logic,
+    ) {
+        assign o_d = i_d;
+    }
+    proto package ProtoPackageA {
+        alias module A: ProtoModuleA;
+    }
+    package PackageA {
+        alias module A = ModuleA;
+    }
+    module ModuleB::<PKG_A: ProtoPackageA> (
+        i_d: input  logic,
+        o_d: output logic,
+    ) {
+        inst u: PKG_A::A (
+            i_d: i_d,
+            o_d: o_d,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
