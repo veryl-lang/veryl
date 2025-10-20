@@ -10,6 +10,14 @@ publish_x86_64_linux:
 	npm run deploy:linux-x64
 	rm -rf bin
 
+publish_aarch64_linux:
+	mkdir -p bin
+	curl -L -o veryl.zip ${RELEASE_URL}/veryl-aarch64-linux.zip
+	unzip -o -d bin veryl.zip
+	rm bin/veryl veryl.zip
+	npm run deploy:linux-arm64
+	rm -rf bin
+
 publish_x86_64_windows:
 	mkdir -p bin
 	curl -L -o veryl.zip ${RELEASE_URL}/veryl-x86_64-windows.zip
