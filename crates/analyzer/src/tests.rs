@@ -6619,6 +6619,28 @@ fn sv_keyword_usage() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA {
+        struct event {
+            x: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA {
+        struct X {
+            event: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
 }
 
 #[test]

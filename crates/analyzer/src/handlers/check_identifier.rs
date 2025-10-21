@@ -14,11 +14,13 @@ pub struct CheckIdentifier {
     in_always_comb: bool,
     in_always_ff: bool,
     in_function: bool,
+    in_struct: bool,
 }
 
 enum Kind {
     ClockDomain,
     Enum,
+    EnumItem,
     Function,
     FunctionInout,
     FunctionInput,
@@ -35,7 +37,9 @@ enum Kind {
     PortOutput,
     Reg,
     Struct,
+    StructItem,
     Union,
+    UnionItem,
     Var,
     Wire,
 }
@@ -49,6 +53,7 @@ impl CheckIdentifier {
             in_always_comb: false,
             in_always_ff: false,
             in_function: false,
+            in_struct: false,
         }
     }
 
@@ -58,6 +63,7 @@ impl CheckIdentifier {
         let prefix = match kind {
             Kind::ClockDomain => &opt.prefix_clock_domain,
             Kind::Enum => &opt.prefix_enum,
+            Kind::EnumItem => &None,
             Kind::Function => &opt.prefix_function,
             Kind::FunctionInout => &opt.prefix_function_inout,
             Kind::FunctionInput => &opt.prefix_function_input,
@@ -74,7 +80,9 @@ impl CheckIdentifier {
             Kind::PortOutput => &opt.prefix_port_output,
             Kind::Reg => &opt.prefix_reg,
             Kind::Struct => &opt.prefix_struct,
+            Kind::StructItem => &None,
             Kind::Union => &opt.prefix_union,
+            Kind::UnionItem => &None,
             Kind::Var => &opt.prefix_var,
             Kind::Wire => &opt.prefix_wire,
         };
@@ -82,6 +90,7 @@ impl CheckIdentifier {
         let suffix = match kind {
             Kind::ClockDomain => &opt.suffix_clock_domain,
             Kind::Enum => &opt.suffix_enum,
+            Kind::EnumItem => &None,
             Kind::Function => &opt.suffix_function,
             Kind::FunctionInout => &opt.suffix_function_inout,
             Kind::FunctionInput => &opt.suffix_function_input,
@@ -98,7 +107,9 @@ impl CheckIdentifier {
             Kind::PortOutput => &opt.suffix_port_output,
             Kind::Reg => &opt.suffix_reg,
             Kind::Struct => &opt.suffix_struct,
+            Kind::StructItem => &None,
             Kind::Union => &opt.suffix_union,
+            Kind::UnionItem => &None,
             Kind::Var => &opt.suffix_var,
             Kind::Wire => &opt.suffix_wire,
         };
@@ -106,6 +117,7 @@ impl CheckIdentifier {
         let case = match kind {
             Kind::ClockDomain => &opt.case_clock_domain,
             Kind::Enum => &opt.case_enum,
+            Kind::EnumItem => &None,
             Kind::Function => &opt.case_function,
             Kind::FunctionInout => &opt.case_function_inout,
             Kind::FunctionInput => &opt.case_function_input,
@@ -122,7 +134,9 @@ impl CheckIdentifier {
             Kind::PortOutput => &opt.case_port_output,
             Kind::Reg => &opt.case_reg,
             Kind::Struct => &opt.case_struct,
+            Kind::StructItem => &None,
             Kind::Union => &opt.case_union,
+            Kind::UnionItem => &None,
             Kind::Var => &opt.case_var,
             Kind::Wire => &opt.case_wire,
         };
@@ -130,6 +144,7 @@ impl CheckIdentifier {
         let re_required = match kind {
             Kind::ClockDomain => &opt.re_required_clock_domain,
             Kind::Enum => &opt.re_required_enum,
+            Kind::EnumItem => &None,
             Kind::Function => &opt.re_required_function,
             Kind::FunctionInout => &opt.re_required_function_inout,
             Kind::FunctionInput => &opt.re_required_function_input,
@@ -146,7 +161,9 @@ impl CheckIdentifier {
             Kind::PortOutput => &opt.re_required_port_output,
             Kind::Reg => &opt.re_required_reg,
             Kind::Struct => &opt.re_required_struct,
+            Kind::StructItem => &None,
             Kind::Union => &opt.re_required_union,
+            Kind::UnionItem => &None,
             Kind::Var => &opt.re_required_var,
             Kind::Wire => &opt.re_required_wire,
         };
@@ -154,6 +171,7 @@ impl CheckIdentifier {
         let re_forbidden = match kind {
             Kind::ClockDomain => &opt.re_forbidden_clock_domain,
             Kind::Enum => &opt.re_forbidden_enum,
+            Kind::EnumItem => &None,
             Kind::Function => &opt.re_forbidden_function,
             Kind::FunctionInout => &opt.re_forbidden_function_inout,
             Kind::FunctionInput => &opt.re_forbidden_function_input,
@@ -170,7 +188,9 @@ impl CheckIdentifier {
             Kind::PortOutput => &opt.re_forbidden_port_output,
             Kind::Reg => &opt.re_forbidden_reg,
             Kind::Struct => &opt.re_forbidden_struct,
+            Kind::StructItem => &None,
             Kind::Union => &opt.re_forbidden_union,
+            Kind::UnionItem => &None,
             Kind::Var => &opt.re_forbidden_var,
             Kind::Wire => &opt.re_forbidden_wire,
         };
@@ -313,17 +333,36 @@ impl VerylGrammarTrait for CheckIdentifier {
         Ok(())
     }
 
-    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
+    fn enum_item(&mut self, arg: &EnumItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            match &*arg.struct_union {
+            self.check(&arg.identifier.identifier_token.token, Kind::EnumItem);
+        }
+        Ok(())
+    }
+
+    fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => match &*arg.struct_union {
                 StructUnion::Struct(_) => {
                     self.check(&arg.identifier.identifier_token.token, Kind::Struct);
+                    self.in_struct = true;
                 }
                 StructUnion::Union(_) => {
                     self.check(&arg.identifier.identifier_token.token, Kind::Union);
                 }
+            },
+            HandlerPoint::After => self.in_struct = false,
+        }
+        Ok(())
+    }
+
+    fn struct_union_item(&mut self, arg: &StructUnionItem) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            if self.in_struct {
+                self.check(&arg.identifier.identifier_token.token, Kind::StructItem);
+            } else {
+                self.check(&arg.identifier.identifier_token.token, Kind::UnionItem);
             }
-            self.check(&arg.identifier.identifier_token.token, Kind::Struct);
         }
         Ok(())
     }
