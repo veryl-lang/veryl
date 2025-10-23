@@ -1,4 +1,5 @@
 module veryl_testcase_Module14;
+    localparam int unsigned A = 1;
     localparam int unsigned X = 1;
 
     logic a  ; always_comb a   = 1;
@@ -22,8 +23,8 @@ module veryl_testcase_Module14;
     veryl_testcase_InterfaceA y ();
 
     // interface instantiation with parameter
-    veryl_testcase_InterfaceA #( .a (a), .b (10) ) yy  ();
-    veryl_testcase_InterfaceA #( .a (a), .b (10) ) xxx ();
+    veryl_testcase_InterfaceA #( .A (A), .B (10) ) yy  ();
+    veryl_testcase_InterfaceA #( .A (A), .B (10) ) xxx ();
 
     // interface array
     veryl_testcase_InterfaceA yyy [0:10-1] ();
@@ -43,8 +44,8 @@ module veryl_testcase_Module14C #(
 endmodule
 
 interface veryl_testcase_InterfaceA #(
-    parameter int unsigned a = 1,
-    parameter int unsigned b = 1
+    parameter int unsigned A = 1,
+    parameter int unsigned B = 1
 );
 endinterface
 //# sourceMappingURL=../map/14_inst.sv.map

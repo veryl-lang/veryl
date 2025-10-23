@@ -1,4 +1,5 @@
 module Module14 {
+    const A: u32 = 1;
     const X: u32 = 1;
 
     let a  : logic = 1;
@@ -22,8 +23,8 @@ module Module14 {
     inst y: InterfaceA;
 
     // interface instantiation with parameter
-    inst yy : InterfaceA #( a, b: 10 );
-    inst xxx: InterfaceA #( a, b: 10 );
+    inst yy : InterfaceA #( A, B: 10 );
+    inst xxx: InterfaceA #( A, B: 10 );
 
     // interface array
     inst yyy: InterfaceA [10];
@@ -41,6 +42,6 @@ module Module14C #(
 ) {}
 
 interface InterfaceA #(
-    param a: u32 = 1,
-    param b: u32 = 1,
+    param A: u32 = 1,
+    param B: u32 = 1,
 ) {}

@@ -192,11 +192,18 @@ impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     }
 }
 
+impl From<(&syntax_tree::Identifier, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (&syntax_tree::Identifier, &Namespace)) -> Self {
+        let (identifier, namespace) = value;
+        SymbolPathNamespace(identifier.into(), namespace.clone())
+    }
+}
+
 impl From<(&syntax_tree::Identifier, Option<&Namespace>)> for SymbolPathNamespace {
     fn from(value: (&syntax_tree::Identifier, Option<&Namespace>)) -> Self {
         let (identifier, namespace) = value;
         if let Some(namespace) = namespace {
-            SymbolPathNamespace(identifier.into(), namespace.clone())
+            (identifier, namespace).into()
         } else {
             identifier.into()
         }

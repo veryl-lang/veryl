@@ -18,6 +18,7 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
 enum Context {
     Assignment,
     PortConnection,
+    ParameterConnection,
 }
 
 #[derive(Default)]
@@ -62,15 +63,45 @@ impl CheckExpression {
         self.errors.push(error);
     }
 
-    fn check_compatibility(
+    fn evaluate_expression(
+        &mut self,
+        expression: &Expression,
+        in_type_expression: bool,
+    ) -> Evaluated {
+        let mut result = self.evaluator.expression(expression);
+        self.evaluated_error(&result.errors);
+
+        if result.errors.is_empty() && result.is_type() != in_type_expression {
+            let range: TokenRange = expression.into();
+            self.errors.push(AnalyzerError::invalid_factor(
+                None,
+                &result.r#type.to_string(),
+                &range,
+                &self.inst_context,
+            ));
+            result.set_unknown();
+        }
+
+        result
+    }
+
+    fn evaluate_connection(
         &mut self,
         _context: Context,
-        src: &Evaluated,
+        src: &Expression,
         dst: &Symbol,
         dst_last_select: &[Select],
         token: &TokenRange,
-    ) {
+    ) -> Evaluated {
+        let dst_type = dst.kind.get_type();
+        let in_type_expression = dst_type
+            .map(|x| matches!(x.kind, TypeKind::Type))
+            .unwrap_or(false);
+        let src = self.evaluate_expression(src, in_type_expression);
+
         if let Some(dst_type) = dst.kind.get_type()
+            && src.errors.is_empty()
+            && src.r#type != EvaluatedType::Type
             && src.r#type != EvaluatedType::Unknown
         {
             // check array dimension
@@ -104,7 +135,7 @@ impl CheckExpression {
 
             if let TypeKind::UserDefined(x) = &dst_type.kind {
                 let Some(dst_symbol) = x.symbol else {
-                    return;
+                    return src;
                 };
                 let dst_symbol = symbol_table::get(dst_symbol).unwrap();
                 if let SymbolKind::Modport(dst) = &dst_symbol.kind {
@@ -132,6 +163,8 @@ impl CheckExpression {
 
             // TODO type checks
         }
+
+        src
     }
 
     fn check_inst(&mut self, arg: &ComponentInstantiation) {
@@ -203,6 +236,12 @@ impl CheckExpression {
     fn get_overridden_params(&mut self, arg: &ComponentInstantiation) -> HashMap<StrId, Evaluated> {
         let mut ret = HashMap::new();
 
+        let Ok(component_namespace) = symbol_table::resolve(arg.scoped_identifier.as_ref())
+            .map(|x| x.found.inner_namespace())
+        else {
+            return ret;
+        };
+
         let params = if let Some(ref x) = arg.component_instantiation_opt1 {
             if let Some(x) = &x.inst_parameter.inst_parameter_opt {
                 x.inst_parameter_list.as_ref().into()
@@ -214,15 +253,30 @@ impl CheckExpression {
         };
 
         for param in params {
-            let value = if let Some(x) = &param.inst_parameter_item_opt {
-                self.evaluator.expression(&x.expression)
-            } else if let Ok(symbol) = symbol_table::resolve(param.identifier.as_ref()) {
-                symbol.found.evaluate()
-            } else {
-                Evaluated::create_unknown()
+            let name = param.identifier.identifier_token.token.text;
+
+            let Ok(target) =
+                symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
+                    .map(|x| x.found)
+            else {
+                ret.insert(name, Evaluated::create_unknown());
+                continue;
             };
 
-            let name = param.identifier.identifier_token.token.text;
+            let range: TokenRange = (&param).into();
+            let value = if let Some(x) = &param.inst_parameter_item_opt {
+                self.evaluate_connection(
+                    Context::ParameterConnection,
+                    &x.expression,
+                    &target,
+                    &[],
+                    &range,
+                )
+            } else {
+                let src: Expression = param.identifier.as_ref().into();
+                self.evaluate_connection(Context::ParameterConnection, &src, &target, &[], &range)
+            };
+
             ret.insert(name, value);
         }
 
@@ -248,18 +302,30 @@ impl CheckExpression {
         }
 
         for connect in connections {
-            let src = if let Some(x) = &connect.inst_port_item_opt {
-                self.evaluator.expression(&x.expression)
-            } else if let Ok(symbol) = symbol_table::resolve(connect.identifier.as_ref()) {
-                symbol.found.evaluate()
-            } else {
-                Evaluated::create_unknown()
-            };
-
             let token: TokenRange = (&connect).into();
             let dst = connect.identifier.identifier_token.token.text;
-            if let Some(dst) = ports.get(&dst) {
-                self.check_compatibility(Context::PortConnection, &src, dst, &[], &token);
+
+            match (connect.inst_port_item_opt, ports.get(&dst)) {
+                (Some(src), Some(dst)) => {
+                    self.evaluate_connection(
+                        Context::PortConnection,
+                        &src.expression,
+                        dst,
+                        &[],
+                        &token,
+                    );
+                }
+                (Some(src), _) => {
+                    self.evaluate_expression(&src.expression, false);
+                }
+                (_, Some(dst)) => {
+                    let src: Expression = connect.identifier.as_ref().into();
+                    self.evaluate_connection(Context::PortConnection, &src, dst, &[], &token);
+                }
+                (_, _) => {
+                    let src: Expression = connect.identifier.as_ref().into();
+                    self.evaluate_expression(&src, false);
+                }
             }
         }
     }
@@ -355,12 +421,11 @@ impl VerylGrammarTrait for CheckExpression {
                     };
 
                     if !port_default_available {
-                        let identifier = rr.found.token.to_string();
                         let token: TokenRange = arg.expression_identifier.as_ref().into();
                         let kind_name = rr.found.kind.to_kind_name();
 
                         self.errors.push(AnalyzerError::invalid_factor(
-                            &identifier,
+                            Some(&rr.found.token.to_string()),
                             &kind_name,
                             &token,
                             &self.inst_context,
@@ -376,11 +441,16 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
-
             if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
-                self.check_compatibility(Context::Assignment, &exp, &dst.found, &[], &arg.into());
+                self.evaluate_connection(
+                    Context::Assignment,
+                    &arg.expression,
+                    &dst.found,
+                    &[],
+                    &arg.into(),
+                );
+            } else {
+                self.evaluate_expression(&arg.expression, false);
             }
         }
 
@@ -392,8 +462,11 @@ impl VerylGrammarTrait for CheckExpression {
             && let HandlerPoint::Before = self.point
         {
             match arg.identifier_statement_group.as_ref() {
-                IdentifierStatementGroup::FunctionCall(_) => {
-                    // TODO function check
+                IdentifierStatementGroup::FunctionCall(x) => {
+                    self.evaluate_expression(
+                        &(arg.expression_identifier.as_ref(), x.function_call.as_ref()).into(),
+                        false,
+                    );
                 }
                 IdentifierStatementGroup::Assignment(x) => {
                     let token = arg.expression_identifier.identifier().token;
@@ -404,28 +477,30 @@ impl VerylGrammarTrait for CheckExpression {
                             (true, false)
                         };
 
+                    if !is_connect_operation {
+                        // Evaluate expressions in select of LHS
+                        self.evaluate_expression(&arg.expression_identifier.as_ref().into(), false);
+                    }
+
                     if is_connect_operation && !is_rhs_expression {
                         // RHS operand is modport so no checks will be skipped.
                         return Ok(());
                     }
 
-                    let exp = self.evaluator.expression(&x.assignment.expression);
-                    self.evaluated_error(&exp.errors);
-
-                    if is_connect_operation {
-                        // connect operation requires no compatibility check
-                        return Ok(());
-                    }
-
-                    if let Ok(dst) = symbol_table::resolve(arg.expression_identifier.as_ref()) {
-                        let dst_last_select = arg.expression_identifier.last_select();
-                        self.check_compatibility(
+                    if !is_connect_operation
+                        && let Ok(dst) = symbol_table::resolve(arg.expression_identifier.as_ref())
+                    {
+                        let last_select = arg.expression_identifier.last_select();
+                        self.evaluate_connection(
                             Context::Assignment,
-                            &exp,
+                            &x.assignment.expression,
                             &dst.found,
-                            &dst_last_select,
+                            &last_select,
                             &arg.into(),
                         );
+                    } else {
+                        // connect operation requires no compatibility check
+                        self.evaluate_expression(&x.assignment.expression, false);
                     }
                 }
             }
@@ -438,14 +513,12 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
+            self.evaluate_expression(&arg.expression, false);
 
             // TODO type check
 
             for x in &arg.if_statement_list {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x.expression, false);
 
                 // TODO type check
             }
@@ -459,8 +532,7 @@ impl VerylGrammarTrait for CheckExpression {
             && let HandlerPoint::Before = self.point
         {
             for x in &arg.if_reset_statement_list {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x.expression, false);
 
                 // TODO type check
             }
@@ -473,8 +545,7 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
+            self.evaluate_expression(&arg.expression, false);
 
             // TODO type check
         }
@@ -486,21 +557,18 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.range.expression);
-            self.evaluated_error(&exp.errors);
+            self.evaluate_expression(&arg.range.expression, false);
 
             // TODO type check
 
             if let Some(x) = &arg.range.range_opt {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x.expression, false);
 
                 // TODO type check
             }
 
             if let Some(x) = &arg.for_statement_opt0 {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x.expression, false);
 
                 // TODO type check
             }
@@ -513,8 +581,7 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
+            self.evaluate_expression(&arg.expression, false);
         }
 
         Ok(())
@@ -527,8 +594,7 @@ impl VerylGrammarTrait for CheckExpression {
             let range_items: Vec<RangeItem> = arg.into();
 
             for x in range_items {
-                let exp = self.evaluator.expression(&x.range.expression);
-                self.evaluated_error(&exp.errors);
+                let exp = self.evaluate_expression(&x.range.expression, false);
 
                 // TODO type check
 
@@ -540,8 +606,7 @@ impl VerylGrammarTrait for CheckExpression {
                 }
 
                 if let Some(x) = &x.range.range_opt {
-                    let exp = self.evaluator.expression(&x.expression);
-                    self.evaluated_error(&exp.errors);
+                    let exp = self.evaluate_expression(&x.expression, false);
 
                     // TODO type check
 
@@ -565,8 +630,7 @@ impl VerylGrammarTrait for CheckExpression {
             let expressions: Vec<Expression> = arg.into();
 
             for x in expressions {
-                let exp = self.evaluator.expression(&x);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x, false);
 
                 // TODO type check
             }
@@ -579,11 +643,16 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
-
             if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
-                self.check_compatibility(Context::Assignment, &exp, &dst.found, &[], &arg.into());
+                self.evaluate_connection(
+                    Context::Assignment,
+                    &arg.expression,
+                    &dst.found,
+                    &[],
+                    &arg.into(),
+                );
+            } else {
+                self.evaluate_expression(&arg.expression, false);
             }
         }
 
@@ -594,11 +663,18 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
-
             if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
-                self.check_compatibility(Context::Assignment, &exp, &dst.found, &[], &arg.into());
+                self.evaluate_connection(
+                    Context::Assignment,
+                    &arg.expression,
+                    &dst.found,
+                    &[],
+                    &arg.into(),
+                );
+            } else {
+                let type_expression =
+                    matches!(*arg.const_declaration_group, ConstDeclarationGroup::Type(_));
+                self.evaluate_expression(&arg.expression, type_expression);
             }
         }
 
@@ -609,25 +685,20 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
-
-            match arg.assign_destination.as_ref() {
-                AssignDestination::HierarchicalIdentifier(x) => {
-                    if let Ok(dst) = symbol_table::resolve(x.hierarchical_identifier.as_ref()) {
-                        let dst_last_select = x.hierarchical_identifier.last_select();
-                        self.check_compatibility(
-                            Context::Assignment,
-                            &exp,
-                            &dst.found,
-                            &dst_last_select,
-                            &arg.into(),
-                        );
-                    }
-                }
-                AssignDestination::LBraceAssignConcatenationListRBrace(_) => {
-                    // TODO check concatenation
-                }
+            if let AssignDestination::HierarchicalIdentifier(x) = arg.assign_destination.as_ref()
+                && let Ok(dst) = symbol_table::resolve(x.hierarchical_identifier.as_ref())
+            {
+                let last_select = x.hierarchical_identifier.last_select();
+                self.evaluate_connection(
+                    Context::Assignment,
+                    &arg.expression,
+                    &dst.found,
+                    &last_select,
+                    &arg.into(),
+                );
+            } else {
+                // TODO check concatenation
+                self.evaluate_expression(&arg.expression, false);
             }
         }
 
@@ -639,8 +710,7 @@ impl VerylGrammarTrait for CheckExpression {
             && let HandlerPoint::Before = self.point
             && let Some(x) = &arg.enum_item_opt
         {
-            let exp = self.evaluator.expression(&x.expression);
-            self.evaluated_error(&exp.errors);
+            self.evaluate_expression(&x.expression, false);
 
             // TODO type check
         }
@@ -670,9 +740,22 @@ impl VerylGrammarTrait for CheckExpression {
             && let HandlerPoint::Before = self.point
         {
             if let Some(x) = &arg.with_parameter_item_opt {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
-
+                let type_expression = matches!(
+                    *arg.with_parameter_item_group0,
+                    WithParameterItemGroup0::Type(_)
+                );
+                if !type_expression && let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref())
+                {
+                    self.evaluate_connection(
+                        Context::ParameterConnection,
+                        &x.expression,
+                        &dst.found,
+                        &[],
+                        &arg.into(),
+                    );
+                } else {
+                    self.evaluate_expression(&x.expression, type_expression);
+                }
                 // TODO type check
             } else if !self.in_proto {
                 self.errors.push(AnalyzerError::missing_default_argument(
@@ -685,23 +768,58 @@ impl VerylGrammarTrait for CheckExpression {
         Ok(())
     }
 
-    fn port_type_concrete(&mut self, arg: &PortTypeConcrete) -> Result<(), ParolError> {
+    fn with_generic_parameter_item(
+        &mut self,
+        arg: &WithGenericParameterItem,
+    ) -> Result<(), ParolError> {
+        if !self.disable
+            && matches!(&*arg.generic_bound, GenericBound::Type(_))
+            && let Some(x) = &arg.with_generic_parameter_item_opt
+            && let HandlerPoint::Before = self.point
+        {
+            let expression: Expression = match &*x.with_generic_argument_item {
+                WithGenericArgumentItem::GenericArgIdentifier(x) => {
+                    x.generic_arg_identifier.as_ref().into()
+                }
+                WithGenericArgumentItem::FixedType(x) => x.fixed_type.as_ref().into(),
+                WithGenericArgumentItem::Number(x) => x.number.as_ref().into(),
+                WithGenericArgumentItem::BooleanLiteral(x) => x.boolean_literal.as_ref().into(),
+            };
+            self.evaluate_expression(&expression, true);
+        }
+        Ok(())
+    }
+
+    fn port_declaration_item(&mut self, arg: &PortDeclarationItem) -> Result<(), ParolError> {
         if !self.disable {
             match self.point {
                 HandlerPoint::Before => {
-                    self.port_direction = Some(arg.direction.as_ref().into());
+                    if let PortDeclarationItemGroup::PortTypeConcrete(x) =
+                        &*arg.port_declaration_item_group
+                    {
+                        let port_type = &x.port_type_concrete;
+                        self.port_direction = Some(port_type.direction.as_ref().into());
 
-                    if let Some(x) = &arg.port_type_concrete_opt0 {
-                        let exp = self.evaluator.expression(&x.port_default_value.expression);
-                        self.evaluated_error(&exp.errors);
-
-                        // TODO type check
+                        if let Some(x) = &port_type.port_type_concrete_opt0 {
+                            let default_value = &x.port_default_value.expression;
+                            if let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
+                                let range = port_type.as_ref().into();
+                                self.evaluate_connection(
+                                    Context::Assignment,
+                                    default_value,
+                                    &dst.found,
+                                    &[],
+                                    &range,
+                                );
+                            } else {
+                                self.evaluate_expression(default_value, false);
+                            }
+                        }
                     }
                 }
                 HandlerPoint::After => self.port_direction = None,
             }
         }
-
         Ok(())
     }
 
@@ -723,8 +841,7 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.expression);
-            self.evaluated_error(&exp.errors);
+            let exp = self.evaluate_expression(&arg.expression, false);
 
             let mut already_enabled = false;
             if let Some(value) = exp.get_value() {
@@ -741,8 +858,7 @@ impl VerylGrammarTrait for CheckExpression {
             // TODO type check
 
             for x in &arg.generate_if_declaration_list {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                let exp = self.evaluate_expression(&x.expression, false);
 
                 if let Some(value) = exp.get_value() {
                     if value == 0.into() || already_enabled {
@@ -775,21 +891,18 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let exp = self.evaluator.expression(&arg.range.expression);
-            self.evaluated_error(&exp.errors);
+            self.evaluate_expression(&arg.range.expression, false);
 
             // TODO type check
 
             if let Some(x) = &arg.range.range_opt {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x.expression, false);
 
                 // TODO type check
             }
 
             if let Some(x) = &arg.generate_for_declaration_opt0 {
-                let exp = self.evaluator.expression(&x.expression);
-                self.evaluated_error(&exp.errors);
+                self.evaluate_expression(&x.expression, false);
 
                 // TODO type check
             }

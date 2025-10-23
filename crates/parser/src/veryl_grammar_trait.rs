@@ -177,7 +177,7 @@ impl From<&AssignDestination> for Vec<HierarchicalIdentifier> {
     }
 }
 
-impl From<&Identifier> for Expression {
+impl From<&Identifier> for ScopedIdentifier {
     fn from(value: &Identifier) -> Self {
         let scoped_identifier_group =
             Box::new(ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(
@@ -186,26 +186,146 @@ impl From<&Identifier> for Expression {
                     scoped_identifier_opt: None,
                 },
             ));
-        let scoped_identifier = Box::new(ScopedIdentifier {
+        Self {
             scoped_identifier_group,
             scoped_identifier_list: vec![],
-        });
-        let expression_identifier = Box::new(ExpressionIdentifier {
-            scoped_identifier,
+        }
+    }
+}
+
+impl From<&Identifier> for ExpressionIdentifier {
+    fn from(value: &Identifier) -> Self {
+        let scoped_identifier: ScopedIdentifier = value.into();
+        (&scoped_identifier).into()
+    }
+}
+
+impl From<&ScopedIdentifier> for ExpressionIdentifier {
+    fn from(value: &ScopedIdentifier) -> Self {
+        Self {
+            scoped_identifier: Box::new(value.clone()),
             expression_identifier_opt: None,
             expression_identifier_list: vec![],
             expression_identifier_list0: vec![],
-        });
-        let identifier_factor = Box::new(IdentifierFactor {
-            expression_identifier,
+        }
+    }
+}
+
+impl From<&GenericArgIdentifier> for ExpressionIdentifier {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let exp_identifier_list: Vec<_> = value
+            .generic_arg_identifier_list
+            .iter()
+            .map(|x| ExpressionIdentifierList0 {
+                dot: x.dot.clone(),
+                identifier: x.identifier.clone(),
+                expression_identifier_list0_list: vec![],
+            })
+            .collect();
+        Self {
+            scoped_identifier: value.scoped_identifier.clone(),
+            expression_identifier_opt: None,
+            expression_identifier_list: vec![],
+            expression_identifier_list0: exp_identifier_list,
+        }
+    }
+}
+
+impl From<&Number> for Factor {
+    fn from(value: &Number) -> Self {
+        Factor::Number(FactorNumber {
+            number: Box::new(value.clone()),
+        })
+    }
+}
+
+impl From<&BooleanLiteral> for Factor {
+    fn from(value: &BooleanLiteral) -> Self {
+        Factor::BooleanLiteral(FactorBooleanLiteral {
+            boolean_literal: Box::new(value.clone()),
+        })
+    }
+}
+
+impl From<&Identifier> for Factor {
+    fn from(value: &Identifier) -> Self {
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.into()),
             identifier_factor_opt: None,
-        });
-        let factor = Box::new(Factor::IdentifierFactor(FactorIdentifierFactor {
-            identifier_factor,
-        }));
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<&ExpressionIdentifier> for Factor {
+    fn from(value: &ExpressionIdentifier) -> Self {
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.clone()),
+            identifier_factor_opt: None,
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<&GenericArgIdentifier> for Factor {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.into()),
+            identifier_factor_opt: None,
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<(&ExpressionIdentifier, &FunctionCall)> for Factor {
+    fn from(value: (&ExpressionIdentifier, &FunctionCall)) -> Self {
+        let function_call = IdentifierFactorOptGroupFunctionCall {
+            function_call: Box::new(value.1.clone()),
+        };
+        let identifier_factor_opt_group = IdentifierFactorOptGroup::FunctionCall(function_call);
+        let identifier_factor_opt = IdentifierFactorOpt {
+            identifier_factor_opt_group: Box::new(identifier_factor_opt_group),
+        };
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.0.clone()),
+            identifier_factor_opt: Some(identifier_factor_opt),
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<&FixedType> for Factor {
+    fn from(value: &FixedType) -> Self {
+        let fixed_type = FactorTypeGroupFixedType {
+            fixed_type: Box::new(value.clone()),
+        };
+        let factor_type_group = FactorTypeGroup::FixedType(fixed_type);
+        let factor_type = FactorType {
+            factor_type_group: Box::new(factor_type_group),
+        };
+        let factor_type_factor = FactorTypeFactor {
+            factor_type_factor_list: vec![],
+            factor_type: Box::new(factor_type),
+        };
+        Factor::FactorTypeFactor(FactorFactorTypeFactor {
+            factor_type_factor: Box::new(factor_type_factor),
+        })
+    }
+}
+
+impl From<Factor> for Expression {
+    fn from(value: Factor) -> Self {
         let expression13 = Box::new(Expression13 {
             expression13_list: vec![],
-            factor,
+            factor: Box::new(value),
         });
         let expression12 = Box::new(Expression12 {
             expression13,
@@ -260,6 +380,55 @@ impl From<&Identifier> for Expression {
             expression01,
         });
         Expression { if_expression }
+    }
+}
+
+impl From<&Number> for Expression {
+    fn from(value: &Number) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&BooleanLiteral> for Expression {
+    fn from(value: &BooleanLiteral) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&Identifier> for Expression {
+    fn from(value: &Identifier) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&ExpressionIdentifier> for Expression {
+    fn from(value: &ExpressionIdentifier) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<(&ExpressionIdentifier, &FunctionCall)> for Expression {
+    fn from(value: (&ExpressionIdentifier, &FunctionCall)) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&GenericArgIdentifier> for Expression {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&FixedType> for Expression {
+    fn from(value: &FixedType) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
     }
 }
 
