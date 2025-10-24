@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>gray_counter</title>
+        <title>fifo_controller</title>
 
 
         <!-- Custom HTML head -->
@@ -175,41 +175,60 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h2 id="gray_counter"><a class="header" href="#gray_counter">gray_counter</a></h2>
-<p>Value counter using Gray Encoding</p>
+                        <h2 id="fifo_controller"><a class="header" href="#fifo_controller">fifo_controller</a></h2>
 <h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
 <tr>
-    <th class="table_list_item">WIDTH</th>
+    <th class="table_list_item">TYPE</th>
+    <td class="table_list_item"><span class="hljs-type">type</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">DEPTH</th>
     <td class="table_list_item"><span class="hljs-type">u32</span></td>
-    <td class="table_list_item"> Counter width
-</td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item">MAX_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<WIDTH></span></td>
-    <td class="table_list_item"> Max value of counter (in binary)
-</td>
+    <th class="table_list_item">THRESHOLD</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item">MIN_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<WIDTH></span></td>
-    <td class="table_list_item"> Min value of counter (in binary)
-</td>
+    <th class="table_list_item">FLAG_FF_OUT</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item">INITIAL_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<WIDTH></span></td>
-    <td class="table_list_item"> Initial value of counter (in binary)
-</td>
+    <th class="table_list_item">DATA_FF_OUT</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item">WRAP_AROUND</th>
-    <td class="table_list_item"><span class="hljs-type">bit</span></td>
-    <td class="table_list_item"> Whether counter is wrap around
-</td>
+    <th class="table_list_item">PUSH_ON_CLEAR</th>
+    <td class="table_list_item"><span class="hljs-type">bool</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">RAM_WORDS</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">RAM_POINTER_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">MATCH_COUNT_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">POINTER_WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
 </tr>
 </tbody>
 </table>
@@ -221,71 +240,91 @@
     <th class="table_list_item">i_clk</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-type">clock</span></td>
-    <td class="table_list_item"> Clock
-</td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">i_rst</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-type">reset</span></td>
-    <td class="table_list_item"> Reset
-</td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
     <th class="table_list_item">i_clear</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-type">logic</span></td>
-    <td class="table_list_item"> Clear counter
-</td>
+    <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item">i_set</th>
-    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic</span></td>
-    <td class="table_list_item"> Set counter to a value
-</td>
-</tr>
-<tr>
-    <th class="table_list_item">i_set_value</th>
-    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
-    <td class="table_list_item"> Value used by i_set
-</td>
-</tr>
-<tr>
-    <th class="table_list_item">i_up</th>
-    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic</span></td>
-    <td class="table_list_item"> Count up
-</td>
-</tr>
-<tr>
-    <th class="table_list_item">i_down</th>
-    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic</span></td>
-    <td class="table_list_item"> Count down
-</td>
-</tr>
-<tr>
-    <th class="table_list_item">o_count</th>
-    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
-    <td class="table_list_item"> Count value
-</td>
-</tr>
-<tr>
-    <th class="table_list_item">o_count_next</th>
-    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">COUNT </span></td>
-    <td class="table_list_item"> Count value for the next clock cycle
-</td>
-</tr>
-<tr>
-    <th class="table_list_item">o_wrap_around</th>
+    <th class="table_list_item">o_empty</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-type">logic</span></td>
-    <td class="table_list_item"> Indicator for wrap around
-</td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_almost_full</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_full</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_word_count</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">COUNTER </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_push</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_data</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">TYPE </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_pop</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_write_pointer</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">RAM_POINTER </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_write_to_ff</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_write_to_ram</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_read_pointer</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">RAM_POINTER </span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_read_from_ram</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic</span></td>
+    <td class="table_list_item"></td>
 </tr>
 </tbody>
 </table>
@@ -294,11 +333,11 @@
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="fifo_controller.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="fifo.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="gray_decoder.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="gray_counter.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -308,11 +347,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="fifo_controller.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="fifo.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="gray_decoder.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="gray_counter.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
