@@ -1,4 +1,4 @@
-module fifo_controller #(
+pub module fifo_controller #(
     param TYPE             : type = logic                                    ,
     param DEPTH            : u32  = 8                                        ,
     param THRESHOLD        : u32  = DEPTH                                    ,
