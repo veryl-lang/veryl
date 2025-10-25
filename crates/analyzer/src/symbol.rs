@@ -240,6 +240,18 @@ impl Symbol {
                         self.create_evaluated_with_error()
                     }
                 }
+                SymbolKind::ProtoConst(x) => {
+                    if matches!(x.r#type.kind, TypeKind::Type) {
+                        Evaluated::create_type(&self.token.into())
+                    } else {
+                        Evaluated::create_unknown_static()
+                    }
+                }
+                SymbolKind::Struct(_)
+                | SymbolKind::Union(_)
+                | SymbolKind::TypeDef(_)
+                | SymbolKind::ProtoTypeDef(_)
+                | SymbolKind::Enum(_) => Evaluated::create_type(&self.token.into()),
                 SymbolKind::EnumMember(x) => {
                     let value = x.value.value();
                     let SymbolKind::Enum(r#enum) = self.get_parent().unwrap().kind else {
@@ -261,6 +273,8 @@ impl Symbol {
                         .unwrap_or(false)
                     {
                         Evaluated::create_unknown_static()
+                    } else if matches!(x.bound, GenericBoundKind::Type) {
+                        Evaluated::create_type(&self.token.into())
                     } else {
                         self.create_evaluated_with_error()
                     }
@@ -281,7 +295,7 @@ impl Symbol {
                 SymbolKind::Instance(x) => {
                     let mut evaluator = Evaluator::new(&[]);
                     if let Ok(symbol) =
-                        symbol_table::resolve((&x.type_name.mangled_path(), &self.namespace))
+                        symbol_table::resolve((&x.type_name.generic_path(), &self.namespace))
                     {
                         if let SymbolKind::Interface(_) = symbol.found.kind {
                             if let Some(array) = evaluator.expression_list(&x.array) {
@@ -344,7 +358,7 @@ impl Symbol {
         let mut ret = Evaluated::create_unknown();
         ret.errors.push(EvaluatedError::InvalidFactor {
             kind: self.kind.to_kind_name(),
-            token: self.token,
+            token: self.token.into(),
         });
         ret
     }

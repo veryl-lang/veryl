@@ -1,8 +1,10 @@
 use crate::symbol::{GenericMap, SymbolId, SymbolKind, Type, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveError, ResolveResult};
+use itertools::join;
 use num_bigint::BigInt;
 use num_traits::{Num, ToPrimitive};
+use std::fmt;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
@@ -20,6 +22,7 @@ pub enum EvaluatedValue {
     FixedArray(Vec<isize>),
     Unknown,
     UnknownStatic,
+    Type(TokenRange),
 }
 
 impl EvaluatedValue {
@@ -47,7 +50,22 @@ pub enum EvaluatedType {
     Bit(EvaluatedTypeBit),
     Logic(EvaluatedTypeLogic),
     UserDefined(EvaluatedTypeUserDefined),
+    Type,
     Unknown,
+}
+
+impl fmt::Display for EvaluatedType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            EvaluatedType::Clock(x) => x.fmt(f),
+            EvaluatedType::Reset(x) => x.fmt(f),
+            EvaluatedType::Bit(x) => x.fmt(f),
+            EvaluatedType::Logic(x) => x.fmt(f),
+            EvaluatedType::UserDefined(x) => x.fmt(f),
+            EvaluatedType::Type => "type".to_string().fmt(f),
+            EvaluatedType::Unknown => "unknown".to_string().fmt(f),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -62,6 +80,30 @@ pub enum EvaluatedTypeClockKind {
     Implicit,
     Posedge,
     Negedge,
+}
+
+impl fmt::Display for EvaluatedTypeClock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+
+        match self.kind {
+            EvaluatedTypeClockKind::Implicit => text.push_str("clock"),
+            EvaluatedTypeClockKind::Posedge => text.push_str("clock_posedge"),
+            EvaluatedTypeClockKind::Negedge => text.push_str("clock_negedge"),
+        }
+        if !self.width.is_empty() {
+            text.push('<');
+            text.push_str(&join(&self.width, ", "));
+            text.push('>');
+        }
+        if !self.array.is_empty() {
+            text.push('[');
+            text.push_str(&join(&self.array, ", "));
+            text.push(']');
+        }
+
+        text.fmt(f)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -80,11 +122,60 @@ pub enum EvaluatedTypeResetKind {
     SyncLow,
 }
 
+impl fmt::Display for EvaluatedTypeReset {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+
+        match self.kind {
+            EvaluatedTypeResetKind::Implicit => text.push_str("reset"),
+            EvaluatedTypeResetKind::AsyncHigh => text.push_str("reset_async_high"),
+            EvaluatedTypeResetKind::AsyncLow => text.push_str("reset_async_low"),
+            EvaluatedTypeResetKind::SyncHigh => text.push_str("reset_sync_high"),
+            EvaluatedTypeResetKind::SyncLow => text.push_str("reset_sync_low"),
+        }
+        if !self.width.is_empty() {
+            text.push('<');
+            text.push_str(&join(&self.width, ", "));
+            text.push('>');
+        }
+        if !self.array.is_empty() {
+            text.push('[');
+            text.push_str(&join(&self.array, ", "));
+            text.push(']');
+        }
+
+        text.fmt(f)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeBit {
     pub signed: bool,
     pub width: Vec<usize>,
     pub array: Vec<usize>,
+}
+
+impl fmt::Display for EvaluatedTypeBit {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+
+        if self.signed {
+            text.push_str("signed ");
+        }
+        text.push_str("bit");
+        if !self.width.is_empty() {
+            text.push('<');
+            text.push_str(&join(&self.width, ", "));
+            text.push('>');
+        }
+        if !self.array.is_empty() {
+            text.push('[');
+            text.push_str(&join(&self.array, ", "));
+            text.push(']');
+        }
+
+        text.fmt(f)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -94,6 +185,29 @@ pub struct EvaluatedTypeLogic {
     pub array: Vec<usize>,
 }
 
+impl fmt::Display for EvaluatedTypeLogic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+
+        if self.signed {
+            text.push_str("signed ");
+        }
+        text.push_str("logic");
+        if !self.width.is_empty() {
+            text.push('<');
+            text.push_str(&join(&self.width, ", "));
+            text.push('>');
+        }
+        if !self.array.is_empty() {
+            text.push('[');
+            text.push_str(&join(&self.array, ", "));
+            text.push(']');
+        }
+
+        text.fmt(f)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EvaluatedTypeUserDefined {
     pub symbol: SymbolId,
@@ -101,11 +215,65 @@ pub struct EvaluatedTypeUserDefined {
     pub array: Vec<usize>,
 }
 
+impl fmt::Display for EvaluatedTypeUserDefined {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = String::new();
+
+        let type_name = symbol_table::get(self.symbol)
+            .map(|x| x.token.to_string())
+            .unwrap();
+        text.push_str(&type_name);
+        if !self.width.is_empty() {
+            text.push('<');
+            text.push_str(&join(&self.width, ", "));
+            text.push('>');
+        }
+        if !self.array.is_empty() {
+            text.push('[');
+            text.push_str(&join(&self.array, ", "));
+            text.push(']');
+        }
+
+        text.fmt(f)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum EvaluatedError {
-    InvalidFactor { kind: String, token: Token },
+    InvalidFactor { kind: String, token: TokenRange },
     CallNonFunction { kind: String, token: Token },
     InvalidSelect { kind: String, range: TokenRange },
+}
+
+fn is_invalid_type_factor(evaluated: &mut Evaluated) -> bool {
+    if let EvaluatedValue::Type(token) = evaluated.value {
+        evaluated.errors.push(EvaluatedError::InvalidFactor {
+            kind: "type".to_string(),
+            token,
+        });
+        return true;
+    }
+
+    false
+}
+
+const TYPE_QUERY_SYSTEM_FUNCTIONS: [&str; 10] = [
+    "$typename",
+    "$bits",
+    "$dimensions",
+    "$unpacked_dimensions",
+    "$left",
+    "$right",
+    "$low",
+    "$high",
+    "$increment",
+    "$size",
+];
+
+fn is_type_query_system_function(func_name: &str) -> bool {
+    TYPE_QUERY_SYSTEM_FUNCTIONS
+        .binary_search(&func_name)
+        .is_ok()
 }
 
 fn reduction<T: Fn(BigInt, BigInt) -> BigInt>(
@@ -138,6 +306,10 @@ impl Evaluated {
                 | EvaluatedValue::FixedArray(_)
                 | EvaluatedValue::UnknownStatic
         )
+    }
+
+    pub fn is_type(&self) -> bool {
+        matches!(self.value, EvaluatedValue::Type(_))
     }
 
     pub fn is_clock(&self) -> bool {
@@ -182,7 +354,7 @@ impl Evaluated {
             EvaluatedType::Bit(x) => Some(x.width.clone()),
             EvaluatedType::Logic(x) => Some(x.width.clone()),
             EvaluatedType::UserDefined(x) => Some(x.width.clone()),
-            EvaluatedType::Unknown => None,
+            EvaluatedType::Type | EvaluatedType::Unknown => None,
         }
     }
 
@@ -193,7 +365,7 @@ impl Evaluated {
             EvaluatedType::Bit(x) => Some(x.array.clone()),
             EvaluatedType::Logic(x) => Some(x.array.clone()),
             EvaluatedType::UserDefined(x) => Some(x.array.clone()),
-            EvaluatedType::Unknown => None,
+            EvaluatedType::Type | EvaluatedType::Unknown => None,
         }
     }
 
@@ -204,8 +376,7 @@ impl Evaluated {
             EvaluatedType::Bit(x) => Some(&x.width),
             EvaluatedType::Logic(x) => Some(&x.width),
             // TODO calc width of user defined type
-            EvaluatedType::UserDefined(_) => None,
-            EvaluatedType::Unknown => None,
+            EvaluatedType::UserDefined(_) | EvaluatedType::Type | EvaluatedType::Unknown => None,
         };
         if let Some(width) = width {
             if width.is_empty() {
@@ -231,7 +402,7 @@ impl Evaluated {
             EvaluatedType::Bit(x) => x.width = width,
             EvaluatedType::Logic(x) => x.width = width,
             EvaluatedType::UserDefined(x) => x.width = width,
-            EvaluatedType::Unknown => (),
+            EvaluatedType::Type | EvaluatedType::Unknown => (),
         }
     }
 
@@ -242,7 +413,7 @@ impl Evaluated {
             EvaluatedType::Bit(x) => x.array = array,
             EvaluatedType::Logic(x) => x.array = array,
             EvaluatedType::UserDefined(x) => x.array = array,
-            EvaluatedType::Unknown => (),
+            EvaluatedType::Type | EvaluatedType::Unknown => (),
         }
     }
 
@@ -317,6 +488,14 @@ impl Evaluated {
             width,
             array,
         });
+    }
+
+    pub fn create_type(token: &TokenRange) -> Evaluated {
+        Self {
+            value: EvaluatedValue::Type(*token),
+            r#type: EvaluatedType::Type,
+            errors: vec![],
+        }
     }
 
     pub fn create_variable(
@@ -432,94 +611,91 @@ impl Evaluated {
         single: bool,
         range: TokenRange,
     ) -> Evaluated {
-        let value = self.get_value();
-        let width = self.get_width();
-        let array = self.get_array();
-        if let (Some(width), Some(array)) = (width, array) {
-            if let Some(select_array) = array.first() {
-                // select array
-
-                let mut rest: Vec<_> = array[1..].to_vec();
-                if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
-                    if beg > end {
-                        self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: format!("wrong index order [{beg}:{end}]"),
-                            range,
-                        });
-                        self.set_unknown();
-                    } else if end >= *select_array as isize {
-                        self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: format!("out of range [{beg}:{end}] > {select_array}"),
-                            range,
-                        });
-                        self.set_unknown();
+        if is_invalid_type_factor(&mut beg) | is_invalid_type_factor(&mut end) {
+            self.set_unknown();
+        } else if let Some(array) = self.get_array()
+            && let Some(select_array) = array.first()
+        {
+            // select array
+            let mut rest: Vec<_> = array[1..].to_vec();
+            if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
+                if beg > end {
+                    self.errors.push(EvaluatedError::InvalidSelect {
+                        kind: format!("wrong index order [{beg}:{end}]"),
+                        range,
+                    });
+                    self.set_unknown();
+                } else if end >= *select_array as isize {
+                    self.errors.push(EvaluatedError::InvalidSelect {
+                        kind: format!("out of range [{beg}:{end}] > {select_array}"),
+                        range,
+                    });
+                    self.set_unknown();
+                } else {
+                    if single {
+                        self.set_array(rest);
                     } else {
-                        if single {
-                            self.set_array(rest);
-                        } else {
-                            let mut new_array = vec![(end - beg + 1) as usize];
-                            new_array.append(&mut rest);
-                            self.set_array(new_array);
-                        }
-                        self.set_unknown();
+                        let mut new_array = vec![(end - beg + 1) as usize];
+                        new_array.append(&mut rest);
+                        self.set_array(new_array);
                     }
-                } else if single {
-                    self.set_array(rest);
                     self.set_unknown();
                 }
+            } else if single {
+                self.set_array(rest);
+                self.set_unknown();
+            }
+        } else if let Some(width) = self.get_width() {
+            // select width
+            let select_width = width.first().unwrap_or(&0);
+            let mut rest = if width.is_empty() {
+                vec![]
             } else {
-                // select width
+                width[1..].to_vec()
+            };
 
-                let select_width = width.first().unwrap_or(&0);
-                let mut rest = if width.is_empty() {
-                    vec![]
+            if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
+                if end > beg {
+                    self.errors.push(EvaluatedError::InvalidSelect {
+                        kind: format!("wrong index order [{beg}:{end}]"),
+                        range,
+                    });
+                    self.set_unknown();
+                } else if beg >= *select_width as isize {
+                    self.errors.push(EvaluatedError::InvalidSelect {
+                        kind: format!("out of range [{beg}:{end}] > {select_width}"),
+                        range,
+                    });
+                    self.set_unknown();
                 } else {
-                    width[1..].to_vec()
-                };
-
-                if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
-                    if end > beg {
-                        self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: format!("wrong index order [{beg}:{end}]"),
-                            range,
-                        });
-                        self.set_unknown();
-                    } else if beg >= *select_width as isize {
-                        self.errors.push(EvaluatedError::InvalidSelect {
-                            kind: format!("out of range [{beg}:{end}] > {select_width}"),
-                            range,
-                        });
-                        self.set_unknown();
+                    let part_size: usize = if rest.is_empty() {
+                        1
                     } else {
-                        let part_size: usize = if rest.is_empty() {
-                            1
-                        } else {
-                            rest.iter().product()
-                        };
+                        rest.iter().product()
+                    };
 
-                        let end_bit = end * part_size as isize;
-                        let beg_bit = beg * part_size as isize;
+                    let end_bit = end * part_size as isize;
+                    let beg_bit = beg * part_size as isize;
 
-                        if let Some(value) = value {
-                            let mask = !(BigInt::from(1) << (beg_bit - end_bit + 1));
-                            let new_value = (value >> end_bit) & mask;
-                            self.set_value(new_value);
-                        }
-
-                        let new_width = if beg == end {
-                            if rest.is_empty() { vec![1] } else { rest }
-                        } else {
-                            let mut new_width = vec![(beg - end + 1) as usize];
-                            new_width.append(&mut rest);
-                            new_width
-                        };
-
-                        self.set_width(new_width);
+                    if let Some(value) = self.get_value() {
+                        let mask = !(BigInt::from(1) << (beg_bit - end_bit + 1));
+                        let new_value = (value >> end_bit) & mask;
+                        self.set_value(new_value);
                     }
-                } else if single {
-                    let new_width = if rest.is_empty() { vec![1] } else { rest };
+
+                    let new_width = if beg == end {
+                        if rest.is_empty() { vec![1] } else { rest }
+                    } else {
+                        let mut new_width = vec![(beg - end + 1) as usize];
+                        new_width.append(&mut rest);
+                        new_width
+                    };
+
                     self.set_width(new_width);
                 }
+            } else if single {
+                let new_width = if rest.is_empty() { vec![1] } else { rest };
+                self.set_width(new_width);
             }
         } else {
             self.set_unknown();
@@ -542,28 +718,31 @@ impl Evaluated {
     ) -> Evaluated {
         // TODO array error
 
-        let is_4state = left.is_4state() | right.is_4state();
-
-        let mut ret = match (
-            left.get_value(),
-            right.get_value(),
-            left.get_total_width(),
-            right.get_total_width(),
-        ) {
-            (Some(value0), Some(value1), Some(width0), Some(width1)) => {
-                let value = calc_value(value0, value1);
-                let width = calc_width(width0, width1, context_width);
-                if let Some(value) = value {
-                    Evaluated::create_fixed(value, false, vec![width], vec![])
-                } else {
+        let mut ret = if is_invalid_type_factor(&mut left) | is_invalid_type_factor(&mut right) {
+            Evaluated::create_unknown()
+        } else {
+            let is_4state = left.is_4state() | right.is_4state();
+            match (
+                left.get_value(),
+                right.get_value(),
+                left.get_total_width(),
+                right.get_total_width(),
+            ) {
+                (Some(value0), Some(value1), Some(width0), Some(width1)) => {
+                    let value = calc_value(value0, value1);
+                    let width = calc_width(width0, width1, context_width);
+                    if let Some(value) = value {
+                        Evaluated::create_fixed(value, false, vec![width], vec![])
+                    } else {
+                        Evaluated::create_variable(false, is_4state, vec![width], vec![])
+                    }
+                }
+                (_, _, Some(width0), Some(width1)) => {
+                    let width = calc_width(width0, width1, context_width);
                     Evaluated::create_variable(false, is_4state, vec![width], vec![])
                 }
+                _ => Evaluated::create_unknown(),
             }
-            (_, _, Some(width0), Some(width1)) => {
-                let width = calc_width(width0, width1, context_width);
-                Evaluated::create_variable(false, is_4state, vec![width], vec![])
-            }
-            _ => Evaluated::create_unknown(),
         };
 
         ret.errors.append(&mut left.errors);
@@ -578,23 +757,25 @@ impl Evaluated {
     ) -> Evaluated {
         // TODO array error
 
-        let is_4state = left.is_4state();
+        if !is_invalid_type_factor(&mut left) {
+            let is_4state = left.is_4state();
 
-        match (left.get_value(), left.get_total_width()) {
-            (Some(value0), Some(width0)) => {
-                let value = calc_value(value0);
-                let width = calc_width(width0);
-                if let Some(value) = value {
-                    left.set_fixed(value, false, vec![width], vec![]);
-                } else {
+            match (left.get_value(), left.get_total_width()) {
+                (Some(value0), Some(width0)) => {
+                    let value = calc_value(value0);
+                    let width = calc_width(width0);
+                    if let Some(value) = value {
+                        left.set_fixed(value, false, vec![width], vec![]);
+                    } else {
+                        left.set_variable(false, is_4state, vec![width], vec![]);
+                    }
+                }
+                (_, Some(width0)) => {
+                    let width = calc_width(width0);
                     left.set_variable(false, is_4state, vec![width], vec![]);
                 }
+                _ => left.set_unknown(),
             }
-            (_, Some(width0)) => {
-                let width = calc_width(width0);
-                left.set_variable(false, is_4state, vec![width], vec![]);
-            }
-            _ => left.set_unknown(),
         }
 
         left
@@ -1424,34 +1605,10 @@ impl Evaluator {
             Factor::IdentifierFactor(x) => {
                 if let Some(args) = &x.identifier_factor.identifier_factor_opt {
                     match args.identifier_factor_opt_group.as_ref() {
-                        IdentifierFactorOptGroup::FunctionCall(args) => {
-                            let args = &args.function_call.function_call_opt;
-                            let func = x
-                                .identifier_factor
-                                .expression_identifier
-                                .identifier()
-                                .to_string();
-
-                            if func.starts_with("$") {
-                                self.system_function(&func, args)
-                            } else {
-                                let mut ret = Evaluated::create_unknown();
-
-                                if let Ok(symbol) = symbol_table::resolve(
-                                    x.identifier_factor.expression_identifier.as_ref(),
-                                ) && !symbol.found.kind.is_function()
-                                {
-                                    ret.errors.push(EvaluatedError::CallNonFunction {
-                                        kind: symbol.found.kind.to_kind_name(),
-                                        token: symbol.found.token,
-                                    });
-                                }
-
-                                // TODO return type of function
-
-                                ret
-                            }
-                        }
+                        IdentifierFactorOptGroup::FunctionCall(func_call) => self.function_call(
+                            &x.identifier_factor.expression_identifier,
+                            &func_call.function_call,
+                        ),
                         IdentifierFactorOptGroup::StructConstructor(_) => {
                             Evaluated::create_unknown()
                         }
@@ -1475,22 +1632,63 @@ impl Evaluator {
             Factor::InsideExpression(_) => Evaluated::create_unknown(),
             Factor::OutsideExpression(_) => Evaluated::create_unknown(),
             Factor::TypeExpression(_) => Evaluated::create_unknown(),
-            Factor::FactorTypeFactor(_) => Evaluated::create_unknown(),
+            Factor::FactorTypeFactor(x) => {
+                Evaluated::create_type(&x.factor_type_factor.as_ref().into())
+            }
         }
     }
 
-    fn system_function(&mut self, name: &str, args: &Option<FunctionCallOpt>) -> Evaluated {
-        let args: Vec<ArgumentItem> = if let Some(x) = args {
-            x.argument_list.as_ref().into()
+    fn function_call(
+        &mut self,
+        identifier: &ExpressionIdentifier,
+        func_call: &FunctionCall,
+    ) -> Evaluated {
+        let func_name = identifier.identifier().to_string();
+
+        let args: Vec<_> = if let Some(args) = &func_call.function_call_opt {
+            let args: Vec<ArgumentItem> = args.argument_list.as_ref().into();
+            args.iter()
+                .map(|arg| {
+                    let mut arg = self.expression(&arg.argument_expression.expression);
+                    if !is_type_query_system_function(&func_name)
+                        && is_invalid_type_factor(&mut arg)
+                    {
+                        arg.set_unknown();
+                    }
+                    arg
+                })
+                .collect()
         } else {
-            Vec::new()
+            vec![]
         };
 
+        if let Some(error_arg) = args.iter().find(|x| !x.errors.is_empty()) {
+            error_arg.clone()
+        } else if func_name.starts_with("$") {
+            self.system_function(&func_name, &args)
+        } else {
+            let mut ret = Evaluated::create_unknown();
+
+            if let Ok(symbol) = symbol_table::resolve(identifier)
+                && !symbol.found.kind.is_function()
+            {
+                ret.errors.push(EvaluatedError::CallNonFunction {
+                    kind: symbol.found.kind.to_kind_name(),
+                    token: symbol.found.token,
+                });
+            }
+
+            // TODO return type of function
+
+            ret
+        }
+    }
+
+    fn system_function(&mut self, name: &str, args: &[Evaluated]) -> Evaluated {
         match name {
             "$clog2" => {
                 if let Some(arg) = args.first() {
-                    let arg = self.expression(&arg.argument_expression.expression);
-                    if let EvaluatedValue::Fixed(x) = arg.value {
+                    if let EvaluatedValue::Fixed(x) = &arg.value {
                         let tmp = x - BigInt::from(1);
                         let ret = tmp.bits().into();
                         Evaluated::create_fixed(ret, false, vec![32], vec![])
@@ -1506,22 +1704,26 @@ impl Evaluator {
     }
 
     fn do_concatenation(&mut self, mut x: Evaluated, mut y: Evaluated) -> Evaluated {
-        let mut ret = match (
-            x.get_value(),
-            y.get_value(),
-            x.get_total_width(),
-            y.get_total_width(),
-        ) {
-            (Some(value0), Some(value1), Some(width0), Some(width1)) => {
-                let width = width0 + width1;
-                let value = (value0 << width1) | value1;
-                Evaluated::create_fixed(value, false, vec![width], vec![])
-            }
-            _ => {
-                if x.is_known_static() && y.is_known_static() {
-                    Evaluated::create_unknown_static()
-                } else {
-                    Evaluated::create_unknown()
+        let mut ret = if is_invalid_type_factor(&mut x) | is_invalid_type_factor(&mut y) {
+            Evaluated::create_unknown()
+        } else {
+            match (
+                x.get_value(),
+                y.get_value(),
+                x.get_total_width(),
+                y.get_total_width(),
+            ) {
+                (Some(value0), Some(value1), Some(width0), Some(width1)) => {
+                    let width = width0 + width1;
+                    let value = (value0 << width1) | value1;
+                    Evaluated::create_fixed(value, false, vec![width], vec![])
+                }
+                _ => {
+                    if x.is_known_static() && y.is_known_static() {
+                        Evaluated::create_unknown_static()
+                    } else {
+                        Evaluated::create_unknown()
+                    }
                 }
             }
         };
@@ -1532,9 +1734,18 @@ impl Evaluator {
     }
 
     fn concatenation_item(&mut self, arg: &ConcatenationItem) -> Evaluated {
-        let e = self.expression(arg.expression.as_ref());
+        let mut e = self.expression(arg.expression.as_ref());
+        if is_invalid_type_factor(&mut e) {
+            return e;
+        }
+
         if let Some(cio) = &arg.concatenation_item_opt {
-            let c = self.expression(cio.expression.as_ref());
+            let mut c = self.expression(cio.expression.as_ref());
+            if is_invalid_type_factor(&mut c) {
+                c.set_unknown();
+                return c;
+            }
+
             if let Some(c) = c.value.get_value_isize() {
                 let mut tmp = Evaluated::create_fixed(0.into(), false, vec![0], vec![]);
                 for _ in 0..c {

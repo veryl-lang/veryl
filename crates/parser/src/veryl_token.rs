@@ -7,7 +7,7 @@ use paste::paste;
 use regex::Regex;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TokenSource {
     File { path: PathId, text: TextId },
     Builtin,
@@ -37,6 +37,16 @@ impl PartialEq<PathId> for TokenSource {
     }
 }
 
+impl PartialOrd<PathId> for TokenSource {
+    fn partial_cmp(&self, other: &PathId) -> Option<std::cmp::Ordering> {
+        match self {
+            TokenSource::File { path, .. } => Some(path.cmp(other)),
+            TokenSource::Generated(x) => Some(x.cmp(other)),
+            _ => None,
+        }
+    }
+}
+
 impl TokenSource {
     pub fn get_text(&self) -> String {
         if let TokenSource::File { text, .. } = self {
@@ -59,7 +69,7 @@ impl TokenSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Token {
     pub id: TokenId,
     pub text: StrId,
