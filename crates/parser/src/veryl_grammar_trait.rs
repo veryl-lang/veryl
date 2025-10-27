@@ -1,4 +1,5 @@
 pub use crate::generated::veryl_grammar_trait::*;
+use crate::resource_table::StrId;
 use crate::veryl_token::{VerylToken, is_anonymous_token};
 use paste::paste;
 use std::fmt;
@@ -432,6 +433,17 @@ impl From<&FixedType> for Expression {
     }
 }
 
+impl<'a> From<&'a StatementBlock> for Vec<&'a StatementBlockItem> {
+    fn from(value: &'a StatementBlock) -> Self {
+        let mut ret = vec![];
+        for x in &value.statement_block_list {
+            let mut x: Vec<_> = x.statement_block_group.as_ref().into();
+            ret.append(&mut x);
+        }
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -445,6 +457,8 @@ list_to_item!(Attribute);
 list_to_item!(Argument);
 list_to_item!(Concatenation);
 list_to_item!(AssignConcatenation);
+list_to_item!(ArrayLiteral);
+list_to_item!(StructConstructor);
 group_to_item!(Module);
 group_to_item!(Interface);
 group_to_item!(Generate);
@@ -700,6 +714,12 @@ impl fmt::Display for Direction {
     }
 }
 
+impl Identifier {
+    pub fn text(&self) -> StrId {
+        self.identifier_token.token.text
+    }
+}
+
 impl ScopedIdentifier {
     pub fn get_scope_depth(&self) -> usize {
         self.scoped_identifier_list.len() + 1
@@ -835,6 +855,26 @@ impl PublicDescriptionItem {
 }
 
 impl DescriptionItem {
+    pub fn is_generic(&self) -> bool {
+        match self {
+            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                match x.public_description_item.as_ref() {
+                    PublicDescriptionItem::ModuleDeclaration(x) => {
+                        x.module_declaration.module_declaration_opt.is_some()
+                    }
+                    PublicDescriptionItem::InterfaceDeclaration(x) => {
+                        x.interface_declaration.interface_declaration_opt.is_some()
+                    }
+                    PublicDescriptionItem::PackageDeclaration(x) => {
+                        x.package_declaration.package_declaration_opt.is_some()
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub fn identifier_token(&self) -> Option<VerylToken> {
         match self {
             DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {

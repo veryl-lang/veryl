@@ -1,7 +1,6 @@
 mod build;
 mod build_info;
 mod doc;
-mod env_var;
 mod format;
 mod git;
 mod lint;
@@ -18,7 +17,6 @@ mod tests;
 pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, SourceMapTarget, Target};
 pub use build_info::BuildInfo;
 pub use doc::Doc;
-pub use env_var::EnvVar;
 pub use format::Format;
 pub use git::Git;
 pub use lint::{Case, Lint};
