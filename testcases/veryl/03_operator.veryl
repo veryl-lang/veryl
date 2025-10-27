@@ -4,7 +4,7 @@ module Module03 {
     let _aa: logic = -1;
 
     // unary logical
-    let _b : logic = !1;
+    let _b : logic = !true;
     let _bb: logic = ~1;
 
     // unary reduce
@@ -46,6 +46,6 @@ module Module03 {
     let _ggggg: logic = 1 | 1;
 
     // binary logical
-    let _h : logic = 1 && 1;
-    let _hh: logic = 1 || 1;
+    let _h : logic = true && true;
+    let _hh: logic = true || true;
 }

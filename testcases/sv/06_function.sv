@@ -41,9 +41,9 @@ module veryl_testcase_Module06;
     // function with internal constants
     function automatic int unsigned FuncE() ;
         localparam int unsigned ParamE = 2 * ParamX;
-        logic [ParamE-1:0] a;
-        logic [ParamE-1:0] b;
-        logic [ParamE-1:0] c;
+        bit [ParamE-1:0] a;
+        bit [ParamE-1:0] b;
+        bit [ParamE-1:0] c;
         a = 0;
         b = 1;
 
@@ -85,6 +85,9 @@ module veryl_testcase_Module06;
     );
 
     veryl_testcase_Interface06 ab_if ();
+
+    always_comb ab_if.a = 0;
+    always_comb ab_if.b = 0;
 
     always_comb g = FuncD(ab_if.a, ab_if.b);
     always_comb h = FuncE();

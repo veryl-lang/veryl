@@ -68,7 +68,7 @@ impl CmdPublish {
             let mut errors =
                 context
                     .analyzer
-                    .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+                    .analyze_pass2(&path.prj, &path.src, &context.parser.veryl, None);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 

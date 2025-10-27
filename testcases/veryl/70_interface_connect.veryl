@@ -31,4 +31,7 @@ module Module70A (
     a: modport Interface70A::port     ,
     b: modport Interface70B::<8>::port,
     c: interface,
-) {}
+) {
+    assign a.en    = 0;
+    assign b.value = 0;
+}

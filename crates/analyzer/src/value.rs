@@ -1,3 +1,4 @@
+use crate::ir::{Type, TypeKind};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, Num, ToPrimitive};
 use std::fmt;
@@ -83,6 +84,20 @@ impl Value {
             mask_z,
             signed: false,
             width,
+        }
+    }
+
+    pub fn to_ir_type(&self) -> Type {
+        let kind = if self.is_x() | self.is_z() {
+            TypeKind::Logic
+        } else {
+            TypeKind::Bit
+        };
+        Type {
+            kind,
+            signed: self.signed,
+            width: vec![self.width],
+            array: vec![],
         }
     }
 }

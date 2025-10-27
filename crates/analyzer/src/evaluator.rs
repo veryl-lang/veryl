@@ -1,3 +1,4 @@
+use crate::analyzer_error::InvalidSelectKind;
 use crate::symbol::{GenericMap, SymbolId, SymbolKind, Type, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveError, ResolveResult};
@@ -240,9 +241,18 @@ impl fmt::Display for EvaluatedTypeUserDefined {
 
 #[derive(Clone, Debug)]
 pub enum EvaluatedError {
-    InvalidFactor { kind: String, token: TokenRange },
-    CallNonFunction { kind: String, token: Token },
-    InvalidSelect { kind: String, range: TokenRange },
+    InvalidFactor {
+        kind: String,
+        token: TokenRange,
+    },
+    CallNonFunction {
+        kind: String,
+        token: Token,
+    },
+    InvalidSelect {
+        kind: InvalidSelectKind,
+        range: TokenRange,
+    },
 }
 
 fn is_invalid_type_factor(evaluated: &mut Evaluated) -> bool {
@@ -609,7 +619,7 @@ impl Evaluated {
         mut beg: Evaluated,
         mut end: Evaluated,
         single: bool,
-        range: TokenRange,
+        _range: TokenRange,
     ) -> Evaluated {
         if is_invalid_type_factor(&mut beg) | is_invalid_type_factor(&mut end) {
             self.set_unknown();
@@ -619,17 +629,7 @@ impl Evaluated {
             // select array
             let mut rest: Vec<_> = array[1..].to_vec();
             if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
-                if beg > end {
-                    self.errors.push(EvaluatedError::InvalidSelect {
-                        kind: format!("wrong index order [{beg}:{end}]"),
-                        range,
-                    });
-                    self.set_unknown();
-                } else if end >= *select_array as isize {
-                    self.errors.push(EvaluatedError::InvalidSelect {
-                        kind: format!("out of range [{beg}:{end}] > {select_array}"),
-                        range,
-                    });
+                if (beg > end) || (end >= *select_array as isize) {
                     self.set_unknown();
                 } else {
                     if single {
@@ -655,17 +655,7 @@ impl Evaluated {
             };
 
             if let (Some(beg), Some(end)) = (beg.get_value_isize(), end.get_value_isize()) {
-                if end > beg {
-                    self.errors.push(EvaluatedError::InvalidSelect {
-                        kind: format!("wrong index order [{beg}:{end}]"),
-                        range,
-                    });
-                    self.set_unknown();
-                } else if beg >= *select_width as isize {
-                    self.errors.push(EvaluatedError::InvalidSelect {
-                        kind: format!("out of range [{beg}:{end}] > {select_width}"),
-                        range,
-                    });
+                if (end > beg) || (beg >= *select_width as isize) {
                     self.set_unknown();
                 } else {
                     let part_size: usize = if rest.is_empty() {

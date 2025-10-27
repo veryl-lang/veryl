@@ -329,7 +329,7 @@ fn check_inst(
     {
         let items: Vec<_> = x.inst_parameter_list.as_ref().into();
         for item in items {
-            connected_params.push(item.identifier.identifier_token.token.text);
+            connected_params.push(item.identifier.text());
         }
     }
 
@@ -339,7 +339,7 @@ fn check_inst(
     {
         let items: Vec<_> = x.inst_port_list.as_ref().into();
         for item in items {
-            connected_ports.push(item.identifier.identifier_token.token.text);
+            connected_ports.push(item.identifier.text());
         }
     }
 
