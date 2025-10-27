@@ -56,7 +56,7 @@ mod analyzer {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
-                    let _ = analyzer.analyze_pass1(&path.prj, &path.src, &ret.veryl);
+                    let _ = analyzer.analyze_pass1(&path.prj, &ret.veryl);
                 }
             }
         }
@@ -74,7 +74,7 @@ mod analyzer {
             let ret = Parser::parse(&input, &file).unwrap();
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
-            let errors = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
+            let errors = analyzer.analyze_pass1(&prj, &ret.veryl);
             dbg!(&errors);
             assert!(errors.is_empty());
 
@@ -82,13 +82,11 @@ mod analyzer {
             dbg!(&errors);
             assert!(errors.is_empty());
 
-            let errors = analyzer.analyze_pass2(&prj, &file, &ret.veryl);
+            let errors = analyzer.analyze_pass2(&prj, &ret.veryl, None);
             dbg!(&errors);
             assert!(errors.is_empty());
 
-            let info = Analyzer::analyze_post_pass2();
-
-            let errors = analyzer.analyze_pass3(&prj, &file, &ret.veryl, &info);
+            let errors = Analyzer::analyze_post_pass2();
             dbg!(&errors);
             assert!(errors.is_empty());
         }
@@ -126,7 +124,7 @@ mod formatter {
         let ret = Parser::parse(&input, &file).unwrap();
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
-        let _ = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
+        let _ = analyzer.analyze_pass1(&prj, &ret.veryl);
         let mut formatter = Formatter::new(&metadata);
         formatter.format(&ret.veryl);
         assert_eq!(original, formatter.as_str());
@@ -168,7 +166,7 @@ mod emitter {
                     let input = fs::read_to_string(&path.src).unwrap();
                     let ret = Parser::parse(&input, &path.src).unwrap();
                     let analyzer = Analyzer::new(&metadata);
-                    let _ = analyzer.analyze_pass1(&path.prj, &path.src, &ret.veryl);
+                    let _ = analyzer.analyze_pass1(&path.prj, &ret.veryl);
                 }
             }
         }
@@ -197,13 +195,12 @@ mod emitter {
             })
             .collect();
 
-        for (i, result) in parse_results.iter().enumerate() {
-            let (src, _, _) = &file_paths[i];
+        for result in &parse_results {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass1(&prj, src, &result.veryl);
+            let _ = analyzer.analyze_pass1(&prj, &result.veryl);
             let _ = Analyzer::analyze_post_pass1();
-            let _ = analyzer.analyze_pass2(&prj, src, &result.veryl);
+            let _ = analyzer.analyze_pass2(&prj, &result.veryl, None);
         }
 
         for (i, result) in parse_results.iter().enumerate() {
@@ -448,7 +445,7 @@ mod filelist {
             let parser = Parser::parse(&input, &path.src).unwrap();
 
             let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
+            let _ = analyzer.analyze_pass1(&path.prj, &parser.veryl);
             contexts.push((path, input, parser, analyzer));
         }
 
@@ -457,18 +454,14 @@ mod filelist {
         assert!(err.is_empty());
 
         for (path, _, parser, analyzer) in &contexts {
-            let err = analyzer.analyze_pass2(&path.prj, &path.src, &parser.veryl);
+            let err = analyzer.analyze_pass2(&path.prj, &parser.veryl, None);
             dbg!(&err);
             assert!(err.is_empty());
         }
 
-        let info = Analyzer::analyze_post_pass2();
-
-        for (path, _, parser, analyzer) in &contexts {
-            let err = analyzer.analyze_pass3(&path.prj, &path.src, &parser.veryl, &info);
-            dbg!(&err);
-            assert!(err.is_empty());
-        }
+        let err = Analyzer::analyze_post_pass2();
+        dbg!(&err);
+        assert!(err.is_empty());
 
         let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);
         let paths: Vec<_> = paths

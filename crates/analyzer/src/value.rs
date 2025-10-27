@@ -1,3 +1,4 @@
+use crate::ir::{Shape, Type, TypeKind};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, Num, ToPrimitive};
 use std::fmt;
@@ -84,6 +85,42 @@ impl Value {
             signed: false,
             width,
         }
+    }
+
+    pub fn to_ir_type(&self) -> Type {
+        let kind = if self.is_x() | self.is_z() {
+            TypeKind::Logic
+        } else {
+            TypeKind::Bit
+        };
+        Type {
+            kind,
+            signed: self.signed,
+            width: Shape::new(vec![Some(self.width)]),
+            array: Shape::default(),
+        }
+    }
+
+    pub fn trunc(&mut self, width: usize) {
+        let mask = gen_mask(width);
+        self.payload &= mask.clone();
+        self.mask_x &= mask.clone();
+        self.mask_z &= mask;
+        self.width = width;
+    }
+
+    pub fn concat(mut self, x: Value) -> Value {
+        self.payload <<= x.width;
+        self.mask_x <<= x.width;
+        self.mask_z <<= x.width;
+
+        self.payload |= x.payload;
+        self.mask_x |= x.mask_x;
+        self.mask_z |= x.mask_z;
+
+        self.width += x.width;
+
+        self
     }
 }
 

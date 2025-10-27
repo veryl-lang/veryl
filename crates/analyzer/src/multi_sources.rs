@@ -1,10 +1,10 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Source {
     pub path: String,
     pub text: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MultiSources {
     pub sources: Vec<Source>,
 }

@@ -8,9 +8,9 @@ fn format(metadata: &Metadata, code: &str) -> String {
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
 
-    analyzer.analyze_pass1(&"prj", &"", &parser.veryl);
+    analyzer.analyze_pass1(&"prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &"", &parser.veryl);
+    analyzer.analyze_pass2(&"prj", &parser.veryl, None);
 
     let mut formatter = Formatter::new(metadata);
     formatter.format(&parser.veryl);
