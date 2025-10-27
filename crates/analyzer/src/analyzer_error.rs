@@ -1,10 +1,11 @@
-use crate::evaluator::EvaluatedError;
 use crate::multi_sources::{MultiSources, Source};
 use miette::{self, Diagnostic, Severity, SourceSpan};
+use std::fmt;
 use thiserror::Error;
 use veryl_parser::token_range::TokenRange;
+use veryl_parser::veryl_token::TokenSource;
 
-#[derive(Error, Diagnostic, Debug)]
+#[derive(Error, Diagnostic, Debug, PartialEq, Eq)]
 pub enum AnalyzerError {
     #[diagnostic(severity(Error), code(anonymous_identifier_usage), help(""), url(""))]
     #[error("Anonymous identifier can't be placed at here")]
@@ -13,6 +14,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -33,6 +35,7 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -51,6 +54,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -68,6 +72,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -83,12 +88,9 @@ pub enum AnalyzerError {
         identifier: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Assigned")]
-        assign_pos0: SourceSpan,
-        #[label("Assigned too")]
-        assign_pos1: SourceSpan,
+        #[label(collection, "Assigned")]
+        error_locations: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -107,6 +109,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -125,6 +128,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_connect_operand), help(""), url(""))]
@@ -135,6 +139,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -150,6 +155,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -167,6 +173,43 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_operand),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand")
+    )]
+    #[error("{kind} cannot be used as a operand of {op} operator")]
+    InvalidOperand {
+        kind: String,
+        op: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        // TODO
+        //#[label(collection, "instantiated at")]
+        //inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(invalid_logical_operand),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand")
+    )]
+    #[error("{kind} should be 1-bit value")]
+    InvalidLogicalOperand {
+        kind: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -188,6 +231,7 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -198,13 +242,14 @@ pub enum AnalyzerError {
     )]
     #[error("invalid select caused by {kind}")]
     InvalidSelect {
-        kind: String,
+        kind: InvalidSelectKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -223,6 +268,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -237,6 +283,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -251,6 +298,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -265,6 +313,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -283,6 +332,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -300,6 +350,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -317,6 +368,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(multiple_default_clock), help(""), url(""))]
@@ -329,6 +381,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -346,6 +399,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -363,6 +417,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(unexpandable_modport), help(""), url(""))]
@@ -373,17 +428,18 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_port_default_value), help(""), url(""))]
-    #[error("#{direction} port #{identifier} cannot have a port default value")]
+    #[error("{kind}")]
     InvalidPortDefaultValue {
-        identifier: String,
-        direction: String,
+        kind: InvalidPortDefaultValueKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -401,6 +457,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(multiple_default_reset), help(""), url(""))]
@@ -413,6 +470,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -429,6 +487,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -443,6 +502,22 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_const_non_elaborative),
+        help(""),
+        url("")
+    )]
+    #[error("Const value cannot be used because it is not evaluable at elaboration time")]
+    InvalidConstNonElaborative {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_cast), help(""), url(""))]
@@ -454,6 +529,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -469,6 +545,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_type_declaration), help(""), url(""))]
@@ -478,6 +555,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -495,6 +573,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -512,6 +591,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -531,6 +611,26 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(mismatch_function_arg),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_function_arg"
+        )
+    )]
+    #[error("\"{src}\" type can't be used as an argument of function \"{name}\"")]
+    MismatchFunctionArg {
+        name: String,
+        src: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -550,6 +650,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -568,6 +669,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -585,6 +687,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -605,6 +708,7 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label("clock domain {other_domain}")]
         other_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -625,6 +729,7 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -639,6 +744,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -655,6 +761,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -671,6 +778,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -687,6 +795,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -702,10 +811,9 @@ pub enum AnalyzerError {
         name: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Not reset")]
-        reset: SourceSpan,
+        #[label(collection, "Not reset")]
+        error_locations: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -720,6 +828,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -736,6 +845,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -754,6 +864,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -769,6 +880,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -787,6 +899,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -801,6 +914,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -822,6 +936,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -837,6 +952,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_enum_variant_value), help(""), url(""))]
@@ -848,6 +964,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -863,6 +980,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -884,6 +1002,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invisible_identifier), help(""), url(""))]
@@ -894,6 +1013,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -911,21 +1031,23 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
         severity(Error),
-        code(referring_package_before_definition),
-        help("change order of package definitions"),
+        code(referring_before_definition),
+        help("move definition before reference point"),
         url("")
     )]
-    #[error("pakcakge {identifier} is referred before it is defined.")]
-    ReferringPackageBeforeDefinition {
+    #[error("{identifier} is referred before it is defined.")]
+    ReferringBeforeDefinition {
         identifier: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -945,6 +1067,7 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label("Definition")]
         definition_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -962,6 +1085,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_enbed), help(""), url(""))]
@@ -973,6 +1097,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(invalid_enbed_identifier), help(""), url(""))]
@@ -982,6 +1107,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -999,6 +1125,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1016,6 +1143,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1033,6 +1161,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1049,6 +1178,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1064,6 +1194,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1079,6 +1210,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(private_namespace), help(""), url(""))]
@@ -1089,6 +1221,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1103,6 +1236,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1119,6 +1253,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1135,6 +1270,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1149,6 +1285,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1164,6 +1301,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1179,6 +1317,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1196,6 +1335,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1212,6 +1352,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1225,10 +1366,9 @@ pub enum AnalyzerError {
         identifier: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Uncovered")]
-        uncovered: SourceSpan,
+        #[label(collection, "Covered")]
+        error_locations: Vec<SourceSpan>,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1246,6 +1386,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1262,6 +1403,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1278,6 +1420,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(infinite_recursion), help(""), url(""))]
@@ -1287,16 +1430,19 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(severity(Error), code(exceed_limit), help(""), url(""))]
-    #[error("exceed {kind} limit")]
+    #[error("exceed {kind} limit: {value}")]
     ExceedLimit {
         kind: String,
+        value: usize,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1312,6 +1458,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1330,6 +1477,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1344,6 +1492,7 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
     },
 
     #[diagnostic(
@@ -1358,6 +1507,25 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(unsupported_by_ir),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unsupported_by_ir"
+        )
+    )]
+    #[error("This description is not supported by IR @ {code}")]
+    UnsupportedByIr {
+        code: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
     },
 }
 
@@ -1404,10 +1572,121 @@ impl AnalyzerError {
         matches!(self.severity(), Some(Severity::Error) | None)
     }
 
+    pub fn token_source(&self) -> TokenSource {
+        match self {
+            AnalyzerError::AnonymousIdentifierUsage { token_source, .. } => *token_source,
+            AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
+            AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
+            AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::MultipleAssignment { token_source, .. } => *token_source,
+            AnalyzerError::InvalidAssignment { token_source, .. } => *token_source,
+            AnalyzerError::InvalidAssignmentToConst { token_source, .. } => *token_source,
+            AnalyzerError::InvalidConnectOperand { token_source, .. } => *token_source,
+            AnalyzerError::InvalidModifier { token_source, .. } => *token_source,
+            AnalyzerError::InvalidDirection { token_source, .. } => *token_source,
+            AnalyzerError::InvalidOperand { token_source, .. } => *token_source,
+            AnalyzerError::InvalidLogicalOperand { token_source, .. } => *token_source,
+            AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
+            AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
+            AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::InvalidImport { token_source, .. } => *token_source,
+            AnalyzerError::InvalidLsb { token_source, .. } => *token_source,
+            AnalyzerError::InvalidMsb { token_source, .. } => *token_source,
+            AnalyzerError::InvalidNumberCharacter { token_source, .. } => *token_source,
+            AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
+            AnalyzerError::InvalidClock { token_source, .. } => *token_source,
+            AnalyzerError::MultipleDefaultClock { token_source, .. } => *token_source,
+            AnalyzerError::InvalidModportVariableItem { token_source, .. } => *token_source,
+            AnalyzerError::InvalidModportFunctionItem { token_source, .. } => *token_source,
+            AnalyzerError::UnexpandableModport { token_source, .. } => *token_source,
+            AnalyzerError::InvalidPortDefaultValue { token_source, .. } => *token_source,
+            AnalyzerError::InvalidReset { token_source, .. } => *token_source,
+            AnalyzerError::MultipleDefaultReset { token_source, .. } => *token_source,
+            AnalyzerError::InvalidResetNonElaborative { token_source, .. } => *token_source,
+            AnalyzerError::InvalidCaseConditionNonElaborative { token_source, .. } => *token_source,
+            AnalyzerError::InvalidConstNonElaborative { token_source, .. } => *token_source,
+            AnalyzerError::InvalidCast { token_source, .. } => *token_source,
+            AnalyzerError::InvalidTest { token_source, .. } => *token_source,
+            AnalyzerError::InvalidTypeDeclaration { token_source, .. } => *token_source,
+            AnalyzerError::IncompatProto { token_source, .. } => *token_source,
+            AnalyzerError::MissingDefaultArgument { token_source, .. } => *token_source,
+            AnalyzerError::MismatchFunctionArity { token_source, .. } => *token_source,
+            AnalyzerError::MismatchFunctionArg { token_source, .. } => *token_source,
+            AnalyzerError::MismatchGenericsArity { token_source, .. } => *token_source,
+            AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
+            AnalyzerError::MismatchType { token_source, .. } => *token_source,
+            AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
+            AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
+            AnalyzerError::MissingIfReset { token_source, .. } => *token_source,
+            AnalyzerError::MissingPort { token_source, .. } => *token_source,
+            AnalyzerError::MissingClockSignal { token_source, .. } => *token_source,
+            AnalyzerError::MissingResetSignal { token_source, .. } => *token_source,
+            AnalyzerError::MissingResetStatement { token_source, .. } => *token_source,
+            AnalyzerError::MissingTri { token_source, .. } => *token_source,
+            AnalyzerError::MissingClockDomain { token_source, .. } => *token_source,
+            AnalyzerError::MixedFunctionArgument { token_source, .. } => *token_source,
+            AnalyzerError::SvKeywordUsage { token_source, .. } => *token_source,
+            AnalyzerError::SvWithImplicitReset { token_source, .. } => *token_source,
+            AnalyzerError::InvalidClockDomain { token_source, .. } => *token_source,
+            AnalyzerError::TooLargeEnumVariant { token_source, .. } => *token_source,
+            AnalyzerError::UnevaluatableEnumVariant { token_source, .. } => *token_source,
+            AnalyzerError::InvalidEnumVariant { token_source, .. } => *token_source,
+            AnalyzerError::TooLargeNumber { token_source, .. } => *token_source,
+            AnalyzerError::TooMuchEnumVariant { token_source, .. } => *token_source,
+            AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
+            AnalyzerError::UndefinedIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::ReferringBeforeDefinition { token_source, .. } => *token_source,
+            AnalyzerError::UnresolvableGenericArgument { token_source, .. } => *token_source,
+            AnalyzerError::UnknownAttribute { token_source, .. } => *token_source,
+            AnalyzerError::InvalidEmbed { token_source, .. } => *token_source,
+            AnalyzerError::InvalidEmbedIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::UnknownEmbedLang { token_source, .. } => *token_source,
+            AnalyzerError::UnknownEmbedWay { token_source, .. } => *token_source,
+            AnalyzerError::UnknownIncludeWay { token_source, .. } => *token_source,
+            AnalyzerError::UnknownMember { token_source, .. } => *token_source,
+            AnalyzerError::UnknownUnsafe { token_source, .. } => *token_source,
+            AnalyzerError::PrivateMember { token_source, .. } => *token_source,
+            AnalyzerError::PrivateNamespace { token_source, .. } => *token_source,
+            AnalyzerError::UnknownMsb { token_source, .. } => *token_source,
+            AnalyzerError::UnknownPort { token_source, .. } => *token_source,
+            AnalyzerError::UnknownParam { token_source, .. } => *token_source,
+            AnalyzerError::UnenclosedInnerIfExpression { token_source, .. } => *token_source,
+            AnalyzerError::UnusedVariable { token_source, .. } => *token_source,
+            AnalyzerError::UnusedReturn { token_source, .. } => *token_source,
+            AnalyzerError::UnassignVariable { token_source, .. } => *token_source,
+            AnalyzerError::UnassignableOutput { token_source, .. } => *token_source,
+            AnalyzerError::UncoveredBranch { token_source, .. } => *token_source,
+            AnalyzerError::ReservedIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::IncludeFailure { token_source, .. } => *token_source,
+            AnalyzerError::WrongSeparator { token_source, .. } => *token_source,
+            AnalyzerError::InfiniteRecursion { token_source, .. } => *token_source,
+            AnalyzerError::ExceedLimit { token_source, .. } => *token_source,
+            AnalyzerError::AmbiguousElsif { token_source, .. } => *token_source,
+            AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
+            AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
+                token_source, ..
+            } => *token_source,
+            AnalyzerError::FixedTypeWithSignedModifier { token_source, .. } => *token_source,
+            AnalyzerError::UnsupportedByIr { token_source, .. } => *token_source,
+        }
+    }
+
     pub fn anonymous_identifier_usage(token: &TokenRange) -> Self {
         AnalyzerError::AnonymousIdentifierUsage {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+
+    pub fn call_non_function(identifier: &str, kind: &str, token: &TokenRange) -> Self {
+        AnalyzerError::CallNonFunction {
+            identifier: identifier.to_string(),
+            kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            inst_context: vec![],
+            token_source: token.source(),
         }
     }
 
@@ -1417,6 +1696,7 @@ impl AnalyzerError {
             end: end.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1425,21 +1705,20 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
     pub fn multiple_assignment(
         identifier: &str,
         token: &TokenRange,
-        assign_pos0: &TokenRange,
-        assign_pos1: &TokenRange,
+        assigned: &[TokenRange],
     ) -> Self {
         AnalyzerError::MultipleAssignment {
             identifier: identifier.to_string(),
             input: source(token),
-            error_location: token.into(),
-            assign_pos0: assign_pos0.into(),
-            assign_pos1: assign_pos1.into(),
+            error_locations: assigned.iter().map(|x| x.into()).collect(),
+            token_source: token.source(),
         }
     }
 
@@ -1449,6 +1728,7 @@ impl AnalyzerError {
             kind: kind.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1458,6 +1738,7 @@ impl AnalyzerError {
             kind: kind.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1467,6 +1748,7 @@ impl AnalyzerError {
             reason: reason.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1476,6 +1758,7 @@ impl AnalyzerError {
             reason: reason.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1484,6 +1767,31 @@ impl AnalyzerError {
             kind: kind.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+
+    pub fn invalid_operand(kind: &str, op: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidOperand {
+            kind: kind.to_string(),
+            op: op.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+
+    pub fn invalid_logical_operand(op: bool, token: &TokenRange) -> Self {
+        let kind = if op {
+            "Operand of logical operator"
+        } else {
+            "Conditional expression"
+        };
+        AnalyzerError::InvalidLogicalOperand {
+            kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1500,6 +1808,22 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+            token_source: token.source(),
+        }
+    }
+
+    pub fn invalid_select(
+        kind: &InvalidSelectKind,
+        token: &TokenRange,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let (input, inst_context) = source_with_context(token, inst_context);
+        AnalyzerError::InvalidSelect {
+            kind: kind.clone(),
+            input,
+            error_location: token.into(),
+            inst_context,
+            token_source: token.source(),
         }
     }
 
@@ -1509,6 +1833,7 @@ impl AnalyzerError {
             rule: rule.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1516,6 +1841,7 @@ impl AnalyzerError {
         AnalyzerError::InvalidImport {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1523,6 +1849,7 @@ impl AnalyzerError {
         AnalyzerError::InvalidLsb {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1530,6 +1857,7 @@ impl AnalyzerError {
         AnalyzerError::InvalidMsb {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1539,6 +1867,7 @@ impl AnalyzerError {
             kind: kind.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1547,6 +1876,7 @@ impl AnalyzerError {
             kind: kind.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1555,6 +1885,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1563,6 +1894,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1571,6 +1903,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1579,6 +1912,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1586,6 +1920,7 @@ impl AnalyzerError {
         AnalyzerError::InvalidResetNonElaborative {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1593,6 +1928,15 @@ impl AnalyzerError {
         AnalyzerError::InvalidCaseConditionNonElaborative {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+
+    pub fn invalid_const_non_elaborative(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidConstNonElaborative {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1602,6 +1946,7 @@ impl AnalyzerError {
             to: to.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1610,6 +1955,7 @@ impl AnalyzerError {
             cause: cause.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1618,6 +1964,7 @@ impl AnalyzerError {
             kind: kind.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1626,6 +1973,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1634,6 +1982,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1642,19 +1991,19 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
     pub fn invalid_port_default_value(
-        identifier: &str,
-        direction: &str,
+        kind: InvalidPortDefaultValueKind,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::InvalidPortDefaultValue {
-            identifier: identifier.into(),
-            direction: direction.into(),
+            kind,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1665,6 +2014,7 @@ impl AnalyzerError {
             cause: cause.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1673,6 +2023,7 @@ impl AnalyzerError {
             identifier: identifier.into(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1688,6 +2039,17 @@ impl AnalyzerError {
             args,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+
+    pub fn mismatch_function_arg(name: &str, src: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MismatchFunctionArg {
+            name: name.to_string(),
+            src: src.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1703,6 +2065,7 @@ impl AnalyzerError {
             args,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1713,6 +2076,7 @@ impl AnalyzerError {
             actual: actual.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1728,6 +2092,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             other_location: other_token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1744,6 +2109,7 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+            token_source: token.source(),
         }
     }
 
@@ -1751,6 +2117,7 @@ impl AnalyzerError {
         AnalyzerError::MissingClockSignal {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1758,6 +2125,7 @@ impl AnalyzerError {
         AnalyzerError::MissingIfReset {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1765,15 +2133,16 @@ impl AnalyzerError {
         AnalyzerError::MissingResetSignal {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
-    pub fn missing_reset_statement(name: &str, token: &TokenRange, reset: &TokenRange) -> Self {
+    pub fn missing_reset_statement(name: &str, token: &TokenRange, tokens: &[TokenRange]) -> Self {
         AnalyzerError::MissingResetStatement {
             name: name.to_string(),
             input: source(token),
-            error_location: token.into(),
-            reset: reset.into(),
+            error_locations: tokens.iter().map(|x| x.into()).collect(),
+            token_source: token.source(),
         }
     }
 
@@ -1781,6 +2150,7 @@ impl AnalyzerError {
         AnalyzerError::MissingTri {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1788,6 +2158,7 @@ impl AnalyzerError {
         AnalyzerError::MissingClockDomain {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1797,6 +2168,7 @@ impl AnalyzerError {
             expected,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1806,6 +2178,7 @@ impl AnalyzerError {
             port: port.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1813,6 +2186,7 @@ impl AnalyzerError {
         AnalyzerError::MixedFunctionArgument {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1821,6 +2195,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1828,6 +2203,7 @@ impl AnalyzerError {
         AnalyzerError::SvWithImplicitReset {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1835,6 +2211,7 @@ impl AnalyzerError {
         AnalyzerError::InvalidClockDomain {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1850,6 +2227,7 @@ impl AnalyzerError {
             width,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1858,6 +2236,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1871,6 +2250,7 @@ impl AnalyzerError {
             encoding: encoding.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1879,6 +2259,7 @@ impl AnalyzerError {
             width,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1894,6 +2275,7 @@ impl AnalyzerError {
             width,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1902,6 +2284,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1910,14 +2293,16 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
-    pub fn referring_package_before_definition(identifier: &str, token: &TokenRange) -> Self {
-        AnalyzerError::ReferringPackageBeforeDefinition {
+    pub fn referring_before_definition(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::ReferringBeforeDefinition {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1931,6 +2316,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             definition_location: definition_token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1939,6 +2325,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1948,6 +2335,7 @@ impl AnalyzerError {
             lang: lang.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1955,6 +2343,7 @@ impl AnalyzerError {
         AnalyzerError::InvalidEmbedIdentifier {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1963,6 +2352,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1971,6 +2361,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1979,6 +2370,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1988,6 +2380,7 @@ impl AnalyzerError {
             member: member.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -1996,6 +2389,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2004,6 +2398,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2012,6 +2407,7 @@ impl AnalyzerError {
             name: name.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2019,6 +2415,7 @@ impl AnalyzerError {
         AnalyzerError::UnknownMsb {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2028,6 +2425,7 @@ impl AnalyzerError {
             port: port.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2037,6 +2435,7 @@ impl AnalyzerError {
             param: param.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2044,6 +2443,7 @@ impl AnalyzerError {
         AnalyzerError::UnenclosedInnerIfExpression {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2052,6 +2452,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2060,6 +2461,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2068,6 +2470,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2075,15 +2478,16 @@ impl AnalyzerError {
         AnalyzerError::UnassignableOutput {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
-    pub fn uncovered_branch(identifier: &str, token: &TokenRange, uncovered: &TokenRange) -> Self {
+    pub fn uncovered_branch(identifier: &str, token: &TokenRange, covered: &[TokenRange]) -> Self {
         AnalyzerError::UncoveredBranch {
             identifier: identifier.to_string(),
             input: source(token),
-            error_location: token.into(),
-            uncovered: uncovered.into(),
+            error_locations: covered.iter().map(|x| x.into()).collect(),
+            token_source: token.source(),
         }
     }
 
@@ -2092,6 +2496,7 @@ impl AnalyzerError {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2101,6 +2506,7 @@ impl AnalyzerError {
             cause: cause.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2111,6 +2517,7 @@ impl AnalyzerError {
             valid_separator: valid_separator.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2118,14 +2525,17 @@ impl AnalyzerError {
         AnalyzerError::InfiniteRecursion {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
-    pub fn exceed_limit(kind: &str, token: &TokenRange) -> Self {
+    pub fn exceed_limit(kind: &str, value: usize, token: &TokenRange) -> Self {
         AnalyzerError::ExceedLimit {
             kind: kind.to_string(),
+            value,
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2134,6 +2544,7 @@ impl AnalyzerError {
             cause: cause.to_string(),
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2141,6 +2552,7 @@ impl AnalyzerError {
         AnalyzerError::LastItemWithDefine {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2148,6 +2560,7 @@ impl AnalyzerError {
         AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
@@ -2155,39 +2568,67 @@ impl AnalyzerError {
         AnalyzerError::FixedTypeWithSignedModifier {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
         }
     }
 
-    pub fn evaluated_error(error: &EvaluatedError, inst_context: &[TokenRange]) -> Self {
-        match error {
-            EvaluatedError::InvalidFactor { kind, token } => {
-                let (input, inst_context) = source_with_context(token, inst_context);
-                AnalyzerError::InvalidFactor {
-                    identifier: None,
-                    kind: kind.clone(),
-                    input,
-                    error_location: token.into(),
-                    inst_context,
+    pub fn unsupported_by_ir(code: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnsupportedByIr {
+            code: code.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InvalidSelectKind {
+    WrongOrder { beg: usize, end: usize },
+    OutOfRange { beg: usize, end: usize, size: usize },
+    OutOfDimension { dim: usize, size: usize },
+}
+
+impl fmt::Display for InvalidSelectKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidSelectKind::WrongOrder { beg, end } => {
+                format!("wrong index order [{beg}:{end}]").fmt(f)
+            }
+            InvalidSelectKind::OutOfRange { beg, end, size } => {
+                if beg == end {
+                    format!("out of range [{beg}] > {size}").fmt(f)
+                } else {
+                    format!("out of range [{beg}:{end}] > {size}").fmt(f)
                 }
             }
-            EvaluatedError::CallNonFunction { kind, token } => {
-                let (input, inst_context) = source_with_context(&token.into(), inst_context);
-                AnalyzerError::CallNonFunction {
-                    identifier: token.to_string(),
-                    kind: kind.clone(),
-                    input,
-                    error_location: token.into(),
-                    inst_context,
-                }
+            InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InvalidPortDefaultValueKind {
+    NotGlobal,
+    InFunction,
+    NonAnonymousInOutput,
+    InvalidDirection(String),
+}
+
+impl fmt::Display for InvalidPortDefaultValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidPortDefaultValueKind::NotGlobal => {
+                "port default value should be accessable globally".fmt(f)
             }
-            EvaluatedError::InvalidSelect { kind, range } => {
-                let (input, inst_context) = source_with_context(range, inst_context);
-                AnalyzerError::InvalidSelect {
-                    kind: kind.to_string(),
-                    input,
-                    error_location: range.into(),
-                    inst_context,
-                }
+            InvalidPortDefaultValueKind::InFunction => {
+                "port default value in function is not supported".fmt(f)
+            }
+            InvalidPortDefaultValueKind::NonAnonymousInOutput => {
+                "Only '_' is supported for output default value".fmt(f)
+            }
+            InvalidPortDefaultValueKind::InvalidDirection(x) => {
+                format!("Port default value for {x} is not supported").fmt(f)
             }
         }
     }

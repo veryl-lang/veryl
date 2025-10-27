@@ -1,4 +1,3 @@
-use crate::evaluator::{Evaluated, EvaluatedValue};
 use crate::namespace::Namespace;
 use crate::sv_system_function;
 use crate::symbol::{
@@ -8,7 +7,6 @@ use crate::symbol::{
 use crate::symbol_path::{
     GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
 };
-use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use crate::{AnalyzerError, HashMap, namespace_table};
 use log::trace;
 use std::cell::RefCell;
@@ -69,7 +67,6 @@ pub struct SymbolTable {
     name_table: HashMap<StrId, Vec<SymbolId>>,
     symbol_table: HashMap<SymbolId, Symbol>,
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
-    var_ref_list: HashMap<VarRefAffiliation, Vec<VarRef>>,
     import_list: Vec<Import>,
     bind_list: Vec<Bind>,
 }
@@ -567,7 +564,6 @@ impl SymbolTable {
                         )
                     };
                     if included && symbol.namespace.depth() >= max_depth {
-                        symbol.evaluate();
                         context.found = Some(symbol);
                         context.imported = imported;
                         max_depth = symbol.namespace.depth();
@@ -887,47 +883,13 @@ impl SymbolTable {
     pub fn get_all(&self) -> Vec<Symbol> {
         let mut ret = Vec::new();
         for symbol in self.symbol_table.values() {
-            symbol.evaluate();
             ret.push(symbol.clone());
         }
         ret
     }
 
     pub fn dump(&self) -> String {
-        for symbol in self.symbol_table.values() {
-            symbol.evaluate();
-        }
         format!("{self}")
-    }
-
-    pub fn dump_assign_list(&self) -> String {
-        let assign_list = self.get_assign_list();
-
-        let mut ret = "AssignList [\n".to_string();
-
-        let mut path_width = 0;
-        let mut pos_width = 0;
-        for assign in &assign_list {
-            path_width = path_width.max(assign.path.to_string().len());
-            pos_width = pos_width.max(assign.position.to_string().len());
-        }
-
-        for assign in &assign_list {
-            let last_token = assign.position.0.last().unwrap().token();
-
-            ret.push_str(&format!(
-                "    {:path_width$} / {:pos_width$} @ {}:{}:{}\n",
-                assign.path,
-                assign.position,
-                last_token.source,
-                last_token.line,
-                last_token.column,
-                path_width = path_width,
-                pos_width = pos_width,
-            ));
-        }
-        ret.push(']');
-        ret
     }
 
     pub fn drop(&mut self, file_path: PathId) {
@@ -948,12 +910,6 @@ impl SymbolTable {
 
         for (_, symbol) in self.symbol_table.iter_mut() {
             symbol.references.retain(|x| x.source != file_path);
-        }
-
-        for (affiliation, list) in self.var_ref_list.iter_mut() {
-            if affiliation.token().source == file_path {
-                list.clear();
-            }
         }
     }
 
@@ -1192,47 +1148,27 @@ impl SymbolTable {
         self.project_local_table.get(&prj).cloned()
     }
 
-    pub fn add_var_ref(&mut self, var_ref: &VarRef) {
-        self.var_ref_list
-            .entry(var_ref.affiliation)
-            .and_modify(|x| x.push(var_ref.clone()))
-            .or_insert(vec![var_ref.clone()]);
-    }
-
-    pub fn get_var_ref_list(&self) -> HashMap<VarRefAffiliation, Vec<VarRef>> {
-        self.var_ref_list.clone()
-    }
-
-    pub fn get_assign_list(&self) -> Vec<Assign> {
-        self.var_ref_list
-            .values()
-            .flat_map(|l| l.iter().filter(|r| r.is_assign()))
-            .map(Assign::new)
-            .collect()
-    }
-
     pub fn clear(&mut self) {
         self.clone_from(&Self::new());
     }
 
-    pub fn clear_evaluated_cache(&mut self, path: &Namespace) {
-        for x in self.symbol_table.values_mut() {
-            if x.namespace.included(path) {
-                x.evaluated.borrow_mut().take();
+    fn check_unused_variable(&self) -> Vec<AnalyzerError> {
+        let mut ret = vec![];
+        for symbol in self.symbol_table.values() {
+            if let SymbolKind::Variable(_) = symbol.kind
+                && symbol.references.is_empty()
+                && !symbol.allow_unused
+            {
+                let name = symbol.token.to_string();
+                if !name.starts_with('_') {
+                    ret.push(AnalyzerError::unused_variable(
+                        &symbol.token.to_string(),
+                        &symbol.token.into(),
+                    ));
+                }
             }
         }
-    }
-
-    pub fn push_override(&mut self, id: SymbolId, value: Evaluated) {
-        if let Some(x) = self.symbol_table.get_mut(&id) {
-            x.overrides.push(value);
-        }
-    }
-
-    pub fn pop_override(&mut self, id: SymbolId) {
-        if let Some(x) = self.symbol_table.get_mut(&id) {
-            x.overrides.pop();
-        }
+        ret
     }
 }
 
@@ -1257,23 +1193,14 @@ impl fmt::Display for SymbolTable {
         for (k, v) in &vec {
             for id in *v {
                 let symbol = self.symbol_table.get(id).unwrap();
-                let evaluated = if let Some(evaluated) = symbol.evaluated.borrow().as_ref() {
-                    match evaluated.value {
-                        EvaluatedValue::Unknown => "".to_string(),
-                        _ => format!(" ( {evaluated:?} )"),
-                    }
-                } else {
-                    "".to_string()
-                };
                 writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$} {{ref: {:reference_width$}, import: {:import_width$}}}: {}{},",
+                    "    {:symbol_width$} @ {:namespace_width$} {{ref: {:reference_width$}, import: {:import_width$}}}: {},",
                     k,
                     symbol.namespace,
                     symbol.references.len(),
                     symbol.imported.len(),
                     symbol.kind,
-                    evaluated,
                     symbol_width = symbol_width,
                     namespace_width = namespace_width,
                     reference_width = reference_width,
@@ -1633,10 +1560,6 @@ pub fn dump() -> String {
     SYMBOL_TABLE.with(|f| f.borrow().dump())
 }
 
-pub fn dump_assign_list() -> String {
-    SYMBOL_TABLE.with(|f| f.borrow().dump_assign_list())
-}
-
 pub fn drop(file_path: PathId) {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
@@ -1692,39 +1615,13 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
-pub fn add_var_ref(var_ref: &VarRef) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().add_var_ref(var_ref))
-}
-
-pub fn get_var_ref_list() -> HashMap<VarRefAffiliation, Vec<VarRef>> {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().get_var_ref_list())
-}
-
-pub fn get_assign_list() -> Vec<Assign> {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().get_assign_list())
-}
-
 pub fn clear() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().clear())
 }
 
-pub fn clear_evaluated_cache(path: &Namespace) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().clear_evaluated_cache(path))
-}
-
-pub fn push_override(id: SymbolId, value: Evaluated) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().push_override(id, value))
-}
-
-pub fn pop_override(id: SymbolId) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().pop_override(id))
+pub fn check_unused_variable() -> Vec<AnalyzerError> {
+    SYMBOL_TABLE.with(|f| f.borrow().check_unused_variable())
 }
 
 #[cfg(test)]
@@ -1804,7 +1701,7 @@ mod tests {
         let metadata = Metadata::create_default("prj").unwrap();
         let parser = Parser::parse(&CODE, &"").unwrap();
         let analyzer = Analyzer::new(&metadata);
-        analyzer.analyze_pass1(&"prj", &"", &parser.veryl);
+        analyzer.analyze_pass1(&"prj", &parser.veryl);
     }
 
     #[track_caller]

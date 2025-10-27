@@ -1,5 +1,6 @@
 use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
+use crate::conv::Context;
 use crate::namespace::Namespace;
 use crate::symbol::{
     Direction, EnumProperty, FunctionProperty, InterfaceProperty, ModportProperty, ModuleProperty,
@@ -10,17 +11,15 @@ use crate::symbol::{
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
-use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
 pub enum ProtoIncompatible {
     MissingParam(StrId),
     MissingPort(StrId),
     MissingGenericParam(StrId),
     MissingVar(StrId),
-    MissingConst(StrId),
     MissingTypedef(StrId),
     MissignMember(StrId),
     MissingFunction(StrId),
@@ -58,9 +57,6 @@ impl ProtoIncompatible {
             }
             ProtoIncompatible::MissingVar(x) => {
                 format!("variable {x} is missing")
-            }
-            ProtoIncompatible::MissingConst(x) => {
-                format!("const {x} is missing")
             }
             ProtoIncompatible::MissingTypedef(x) => {
                 format!("type definition {x} is missing")
@@ -696,6 +692,7 @@ fn check_members_compat(actual: &[SymbolId], proto: &[SymbolId]) -> Vec<ProtoInc
         array: Vec::new(),
         array_type: None,
         is_const: false,
+        token: TokenRange::default(),
     };
 
     let actual_members: HashMap<_, _> = actual
@@ -738,109 +735,62 @@ fn check_members_compat(actual: &[SymbolId], proto: &[SymbolId]) -> Vec<ProtoInc
     ret
 }
 
-#[derive(Default)]
-pub struct CheckProto {
-    pub errors: Vec<AnalyzerError>,
-    point: HandlerPoint,
-}
+pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIdentifier) {
+    let actual_symbol = if let Ok(symbol) = symbol_table::resolve(actual) {
+        symbol.found
+    } else {
+        return;
+    };
+    let proto_symbol = if let Ok(symbol) = symbol_table::resolve(proto) {
+        symbol.found
+    } else {
+        return;
+    };
 
-impl CheckProto {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn check_proto(&mut self, actual: &Identifier, proto: &ScopedIdentifier) {
-        let actual_symbol = if let Ok(symbol) = symbol_table::resolve(actual) {
-            symbol.found
-        } else {
-            return;
-        };
-        let proto_symbol = if let Ok(symbol) = symbol_table::resolve(proto) {
-            symbol.found
-        } else {
-            return;
-        };
-
-        let mut errors = Vec::new();
-        match (&actual_symbol.kind, &proto_symbol.kind) {
-            (SymbolKind::Module(actual), SymbolKind::ProtoModule(proto)) => {
-                errors.append(&mut check_module_compat(actual, proto));
-            }
-            (SymbolKind::Module(_), _) => {
-                self.errors.push(AnalyzerError::mismatch_type(
-                    &proto_symbol.token.to_string(),
-                    "proto module",
-                    &proto_symbol.kind.to_kind_name(),
-                    &proto.identifier().token.into(),
-                ));
-            }
-            (SymbolKind::Interface(actual), SymbolKind::ProtoInterface(proto)) => {
-                errors.append(&mut check_interface_compat(actual, proto));
-            }
-            (SymbolKind::Interface(_), _) => {
-                self.errors.push(AnalyzerError::mismatch_type(
-                    &proto_symbol.token.to_string(),
-                    "proto interface",
-                    &proto_symbol.kind.to_kind_name(),
-                    &proto.identifier().token.into(),
-                ));
-            }
-            (SymbolKind::Package(actual), SymbolKind::ProtoPackage(proto)) => {
-                errors.append(&mut check_package_compat(actual, proto));
-            }
-            (SymbolKind::Package(_), _) => {
-                self.errors.push(AnalyzerError::mismatch_type(
-                    &proto_symbol.token.to_string(),
-                    "proto package",
-                    &proto_symbol.kind.to_kind_name(),
-                    &proto.identifier().token.into(),
-                ));
-            }
-            _ => {}
-        };
-
-        for error in errors {
-            self.errors.push(AnalyzerError::incompat_proto(
-                &actual_symbol.token.to_string(),
+    let mut errors = Vec::new();
+    match (&actual_symbol.kind, &proto_symbol.kind) {
+        (SymbolKind::Module(actual), SymbolKind::ProtoModule(proto)) => {
+            errors.append(&mut check_module_compat(actual, proto));
+        }
+        (SymbolKind::Module(_), _) => {
+            context.insert_error(AnalyzerError::mismatch_type(
                 &proto_symbol.token.to_string(),
-                &error.cause(),
-                &actual_symbol.token.into(),
+                "proto module",
+                &proto_symbol.kind.to_kind_name(),
+                &proto.identifier().token.into(),
             ));
         }
-    }
-}
-
-impl Handler for CheckProto {
-    fn set_point(&mut self, p: HandlerPoint) {
-        self.point = p;
-    }
-}
-
-impl VerylGrammarTrait for CheckProto {
-    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point
-            && let Some(ref x) = arg.module_declaration_opt0
-        {
-            self.check_proto(&arg.identifier, &x.scoped_identifier);
+        (SymbolKind::Interface(actual), SymbolKind::ProtoInterface(proto)) => {
+            errors.append(&mut check_interface_compat(actual, proto));
         }
-        Ok(())
-    }
-
-    fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point
-            && let Some(ref x) = arg.interface_declaration_opt0
-        {
-            self.check_proto(&arg.identifier, &x.scoped_identifier);
+        (SymbolKind::Interface(_), _) => {
+            context.insert_error(AnalyzerError::mismatch_type(
+                &proto_symbol.token.to_string(),
+                "proto interface",
+                &proto_symbol.kind.to_kind_name(),
+                &proto.identifier().token.into(),
+            ));
         }
-        Ok(())
-    }
-
-    fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point
-            && let Some(ref x) = arg.package_declaration_opt0
-        {
-            self.check_proto(&arg.identifier, &x.scoped_identifier);
+        (SymbolKind::Package(actual), SymbolKind::ProtoPackage(proto)) => {
+            errors.append(&mut check_package_compat(actual, proto));
         }
-        Ok(())
+        (SymbolKind::Package(_), _) => {
+            context.insert_error(AnalyzerError::mismatch_type(
+                &proto_symbol.token.to_string(),
+                "proto package",
+                &proto_symbol.kind.to_kind_name(),
+                &proto.identifier().token.into(),
+            ));
+        }
+        _ => {}
+    };
+
+    for error in errors {
+        context.insert_error(AnalyzerError::incompat_proto(
+            &actual_symbol.token.to_string(),
+            &proto_symbol.token.to_string(),
+            &error.cause(),
+            &actual_symbol.token.into(),
+        ));
     }
 }

@@ -1,3 +1,4 @@
+use crate::ir::VarPath;
 use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
@@ -10,7 +11,7 @@ use std::fmt;
 use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
-use veryl_parser::veryl_token::{Token, TokenSource};
+use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_token};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolPath(pub SVec<StrId>);
@@ -147,6 +148,15 @@ impl From<&Token> for SymbolPathNamespace {
     }
 }
 
+impl From<&Vec<Token>> for SymbolPathNamespace {
+    fn from(value: &Vec<Token>) -> Self {
+        let namespace = namespace_table::get(value[0].id).unwrap_or_default();
+        let path: Vec<_> = value.iter().map(|x| x.text).collect();
+        let path = SymbolPath::new(&path);
+        SymbolPathNamespace(path, namespace)
+    }
+}
+
 impl From<&SymbolPathNamespace> for SymbolPathNamespace {
     fn from(value: &SymbolPathNamespace) -> Self {
         value.clone()
@@ -162,6 +172,14 @@ impl From<(&SymbolPath, &Namespace)> for SymbolPathNamespace {
 impl From<(&Token, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&Token, &Namespace)) -> Self {
         let path = SymbolPath::new(&[value.0.text]);
+        SymbolPathNamespace(path, value.1.clone())
+    }
+}
+
+impl From<(&Vec<Token>, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (&Vec<Token>, &Namespace)) -> Self {
+        let path: Vec<_> = value.0.iter().map(|x| x.text).collect();
+        let path = SymbolPath::new(&path);
         SymbolPathNamespace(path, value.1.clone())
     }
 }
@@ -248,6 +266,13 @@ impl From<&GenericSymbolPathNamespace> for SymbolPathNamespace {
     }
 }
 
+impl From<&GenericSymbolPath> for SymbolPathNamespace {
+    fn from(value: &GenericSymbolPath) -> Self {
+        let namespace = namespace_table::get(value.paths[0].base.id).unwrap_or_default();
+        SymbolPathNamespace(value.generic_path(), namespace)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericSymbolPathNamespace(pub GenericSymbolPath, pub Namespace);
 
@@ -258,7 +283,7 @@ impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamespace {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GenericSymbolPathKind {
     Identifier,
     TypeLiteral,
@@ -276,14 +301,14 @@ impl fmt::Display for GenericSymbolPathKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericSymbolPath {
     pub paths: Vec<GenericSymbol>,
     pub kind: GenericSymbolPathKind,
     pub range: TokenRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericSymbol {
     pub base: Token,
     pub arguments: Vec<GenericSymbolPath>,
@@ -456,6 +481,38 @@ impl GenericSymbolPath {
 
     pub fn to_literal(&self) -> Option<Literal> {
         literal_table::get(&self.paths[0].base.id)
+    }
+
+    pub fn to_generic_maps(&self) -> Vec<GenericMap> {
+        let mut ret = vec![];
+
+        let mut full_path = vec![];
+        for path in &self.paths {
+            full_path.push(path.base);
+            if let Ok(symbol) = symbol_table::resolve(&full_path) {
+                let params = symbol.found.generic_parameters();
+
+                let mut map = GenericMap::default();
+
+                for (i, (name, value)) in params.into_iter().enumerate() {
+                    if let Some(x) = path.arguments.get(i) {
+                        map.map.insert(name, x.clone());
+                    } else if let Some(x) = value.default_value {
+                        map.map.insert(name, x);
+                    }
+                }
+
+                ret.push(map);
+            }
+        }
+
+        ret
+    }
+
+    pub fn is_anonymous(&self) -> bool {
+        self.paths.len() == 1
+            && self.paths[0].arguments.is_empty()
+            && is_anonymous_token(&self.paths[0].base)
     }
 
     pub fn is_resolvable(&self) -> bool {
@@ -645,6 +702,18 @@ impl GenericSymbolPath {
                 }
             }
         }
+    }
+
+    pub fn to_var_path(&self) -> Option<VarPath> {
+        let mut ret = VarPath::default();
+        for path in &self.paths {
+            if path.arguments.is_empty() {
+                ret.push(path.base());
+            } else {
+                return None;
+            }
+        }
+        Some(ret)
     }
 }
 

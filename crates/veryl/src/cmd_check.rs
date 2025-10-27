@@ -79,7 +79,7 @@ impl CmdCheck {
             let parser = Parser::parse(&input, &path.src)?;
 
             let analyzer = Analyzer::new(metadata);
-            let mut errors = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
 
             let context = Context::new(path.clone(), input, parser, analyzer)?;
@@ -89,25 +89,20 @@ impl CmdCheck {
         let mut errors = Analyzer::analyze_post_pass1();
         check_error = check_error.append(&mut errors).check_err()?;
 
+        let mut analyzer_context = veryl_analyzer::Context::default();
         for context in &contexts {
             let path = &context.path;
-            let mut errors =
-                context
-                    .analyzer
-                    .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+            let mut errors = context.analyzer.analyze_pass2(
+                &path.prj,
+                &context.parser.veryl,
+                &mut analyzer_context,
+                None,
+            );
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
-        let info = Analyzer::analyze_post_pass2();
-
-        for context in &contexts {
-            let path = &context.path;
-            let mut errors =
-                context
-                    .analyzer
-                    .analyze_pass3(&path.prj, &path.src, &context.parser.veryl, &info);
-            check_error = check_error.append(&mut errors).check_err()?;
-        }
+        let mut errors = Analyzer::analyze_post_pass2();
+        check_error = check_error.append(&mut errors).check_err()?;
 
         let _ = check_error.check_all()?;
         Ok(true)
