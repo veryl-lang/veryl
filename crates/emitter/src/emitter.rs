@@ -11,7 +11,7 @@ use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
-    GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
+    Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind,
 };
 use veryl_analyzer::symbol_path::{
     FixedTypeKind, GenericSymbolPath, GenericSymbolPathKind, SymbolPath,
@@ -3363,7 +3363,7 @@ impl VerylWalker for Emitter {
                 match lhs_symbol.found.kind {
                     SymbolKind::Variable(x) => !matches!(
                         x.affiliation,
-                        VariableAffiliation::StatementBlock | VariableAffiliation::Function
+                        Affiliation::StatementBlock | Affiliation::Function
                     ),
                     _ => true,
                 }

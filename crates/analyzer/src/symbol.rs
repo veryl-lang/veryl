@@ -1,9 +1,11 @@
 use crate::HashMap;
 use crate::attribute::EnumEncodingItem;
+use crate::conv::{Context, Conv};
 use crate::definition_table::DefinitionId;
 use crate::evaluator::{
     Evaluated, EvaluatedError, EvaluatedTypeClockKind, EvaluatedTypeResetKind, Evaluator,
 };
+use crate::ir::{self, ValueVariant};
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol_path::{GenericSymbolPath, SymbolPath};
@@ -238,7 +240,7 @@ impl Symbol {
                         }
                         evaluator.expression(value)
                     } else {
-                        self.create_evaluated_with_error()
+                        self.create_evaluated_with_error(true)
                     }
                 }
                 SymbolKind::ProtoConst(x) => {
@@ -277,22 +279,23 @@ impl Symbol {
                     } else if matches!(x.bound, GenericBoundKind::Type) {
                         Evaluated::create_type(&self.token.into())
                     } else {
-                        self.create_evaluated_with_error()
+                        self.create_evaluated_with_error(false)
                     }
                 }
-                SymbolKind::Module(_)
-                | SymbolKind::ProtoModule(_)
-                | SymbolKind::Interface(_)
+                // InvalidFactor error by IR
+                SymbolKind::Block
+                | SymbolKind::ClockDomain
                 | SymbolKind::Function(_)
-                | SymbolKind::Block
-                | SymbolKind::Package(_)
+                | SymbolKind::GenericInstance(_)
+                | SymbolKind::Interface(_)
                 | SymbolKind::Modport(_)
                 | SymbolKind::ModportFunctionMember(_)
+                | SymbolKind::Module(_)
                 | SymbolKind::Namespace
+                | SymbolKind::Package(_)
+                | SymbolKind::ProtoModule(_)
                 | SymbolKind::SystemFunction(_)
-                | SymbolKind::GenericInstance(_)
-                | SymbolKind::ClockDomain
-                | SymbolKind::Test(_) => self.create_evaluated_with_error(),
+                | SymbolKind::Test(_) => self.create_evaluated_with_error(false),
                 SymbolKind::Instance(x) => {
                     let mut evaluator = Evaluator::new(&[]);
                     if let Ok(symbol) =
@@ -308,10 +311,10 @@ impl Symbol {
                                     }
                                 }
                                 SymbolKind::SystemVerilog => Evaluated::create_unknown(),
-                                _ => self.create_evaluated_with_error(),
+                                _ => self.create_evaluated_with_error(true),
                             }
                         } else {
-                            self.create_evaluated_with_error()
+                            self.create_evaluated_with_error(true)
                         }
                     } else {
                         Evaluated::create_unknown()
@@ -361,12 +364,14 @@ impl Symbol {
         }
     }
 
-    fn create_evaluated_with_error(&self) -> Evaluated {
+    fn create_evaluated_with_error(&self, emit_error: bool) -> Evaluated {
         let mut ret = Evaluated::create_unknown();
-        ret.errors.push(EvaluatedError::InvalidFactor {
-            kind: self.kind.to_kind_name(),
-            token: self.token.into(),
-        });
+        if emit_error {
+            ret.errors.push(EvaluatedError::InvalidFactor {
+                kind: self.kind.to_kind_name(),
+                token: self.token.into(),
+            });
+        }
         ret
     }
 
@@ -1015,6 +1020,18 @@ impl SymbolKind {
         }
     }
 
+    pub fn get_generic_parameters(&self) -> &[SymbolId] {
+        match self {
+            SymbolKind::Module(x) => &x.generic_parameters,
+            SymbolKind::Interface(x) => &x.generic_parameters,
+            SymbolKind::Function(x) => &x.generic_parameters,
+            SymbolKind::Package(x) => &x.generic_parameters,
+            SymbolKind::Struct(x) => &x.generic_parameters,
+            SymbolKind::Union(x) => &x.generic_parameters,
+            _ => &[],
+        }
+    }
+
     pub fn get_definition(&self) -> Option<DefinitionId> {
         match self {
             SymbolKind::Module(x) => Some(x.definition),
@@ -1190,6 +1207,14 @@ impl Direction {
             _ => *self,
         }
     }
+
+    pub fn is_input(&self) -> bool {
+        self == &Direction::Input
+    }
+
+    pub fn is_output(&self) -> bool {
+        self == &Direction::Output
+    }
 }
 
 impl fmt::Display for Direction {
@@ -1304,6 +1329,154 @@ impl Type {
         }
 
         Some((self.clone(), None))
+    }
+
+    pub fn to_ir_type(&self, context: &mut Context) -> Option<ir::Type> {
+        let kind = match &self.kind {
+            TypeKind::Clock => ir::TypeKind::Clock,
+            TypeKind::ClockPosedge => ir::TypeKind::ClockPosedge,
+            TypeKind::ClockNegedge => ir::TypeKind::ClockNegedge,
+            TypeKind::Reset => ir::TypeKind::Reset,
+            TypeKind::ResetAsyncHigh => ir::TypeKind::ResetAsyncHigh,
+            TypeKind::ResetAsyncLow => ir::TypeKind::ResetAsyncLow,
+            TypeKind::ResetSyncHigh => ir::TypeKind::ResetSyncHigh,
+            TypeKind::ResetSyncLow => ir::TypeKind::ResetSyncLow,
+            TypeKind::Bit
+            | TypeKind::U8
+            | TypeKind::U16
+            | TypeKind::U32
+            | TypeKind::U64
+            | TypeKind::I8
+            | TypeKind::I16
+            | TypeKind::I32
+            | TypeKind::I64
+            | TypeKind::F32
+            | TypeKind::F64 => ir::TypeKind::Bit,
+            TypeKind::Bool | TypeKind::Logic => ir::TypeKind::Logic,
+            TypeKind::Type => ir::TypeKind::Type,
+            TypeKind::String => ir::TypeKind::Unknown,
+            TypeKind::UserDefined(x) => {
+                if let Some(x) = x.path.to_var_path()
+                    && let Some(x) = context.var_paths.get(&x)
+                {
+                    if let ValueVariant::Type(x) = &x.1.value {
+                        let mut ret = x.clone();
+
+                        let mut width = vec![];
+                        for w in &self.width {
+                            let expr: ir::Expression = Conv::conv(context, w);
+                            let value = expr.eval_type(context, None);
+                            width.push(value.get_value()?.to_usize());
+                        }
+                        width.append(&mut ret.width);
+                        ret.width = width;
+
+                        let mut array = vec![];
+                        for w in &self.array {
+                            let expr: ir::Expression = Conv::conv(context, w);
+                            let value = expr.eval_type(context, None);
+                            array.push(value.get_value()?.to_usize());
+                        }
+                        array.append(&mut ret.array);
+                        ret.array = array;
+
+                        return Some(ret);
+                    } else {
+                        ir::TypeKind::Unknown
+                    }
+                } else if let Some(id) = x.symbol {
+                    if let Some(symbol) = symbol_table::get(id) {
+                        // TODO union is not supported
+                        if !matches!(
+                            symbol.kind,
+                            SymbolKind::Struct(_) | SymbolKind::Modport(_) | SymbolKind::Enum(_)
+                        ) {
+                            return None;
+                        }
+                    }
+                    ir::TypeKind::UserDefined(id)
+                } else {
+                    ir::TypeKind::Unknown
+                }
+            }
+            TypeKind::AbstractInterface(_) => ir::TypeKind::Unknown,
+            TypeKind::Any => ir::TypeKind::Unknown,
+        };
+
+        let signed = match &self.kind {
+            TypeKind::I8 | TypeKind::I16 | TypeKind::I32 | TypeKind::I64 => true,
+            TypeKind::Bit | TypeKind::Logic => self.is_signed(),
+            _ => false,
+        };
+
+        let width = match &self.kind {
+            TypeKind::U8 => vec![8],
+            TypeKind::U16 => vec![16],
+            TypeKind::U32 => vec![32],
+            TypeKind::U64 => vec![64],
+            TypeKind::I8 => vec![8],
+            TypeKind::I16 => vec![16],
+            TypeKind::I32 => vec![32],
+            TypeKind::I64 => vec![64],
+            TypeKind::F32 => vec![32],
+            TypeKind::F64 => vec![64],
+            TypeKind::Clock
+            | TypeKind::ClockPosedge
+            | TypeKind::ClockNegedge
+            | TypeKind::Reset
+            | TypeKind::ResetAsyncHigh
+            | TypeKind::ResetAsyncLow
+            | TypeKind::ResetSyncHigh
+            | TypeKind::ResetSyncLow
+            | TypeKind::Bit
+            | TypeKind::Bool
+            | TypeKind::Logic => {
+                let mut ret = vec![];
+
+                if self.width.is_empty() {
+                    ret.push(1);
+                } else {
+                    for w in &self.width {
+                        let expr: ir::Expression = Conv::conv(context, w);
+                        let value = expr.eval_type(context, None);
+                        ret.push(value.get_value()?.to_usize());
+                    }
+                }
+
+                ret
+            }
+            TypeKind::UserDefined(_) => {
+                let mut ret = vec![];
+
+                for w in &self.width {
+                    let expr: ir::Expression = Conv::conv(context, w);
+                    let value = expr.eval_type(context, None);
+                    ret.push(value.get_value()?.to_usize());
+                }
+
+                ret
+            }
+            TypeKind::Type | TypeKind::String | TypeKind::AbstractInterface(_) => {
+                // TODO packed array is forbidden
+                vec![]
+            }
+            TypeKind::Any => vec![],
+        };
+
+        let mut array = vec![];
+
+        for w in &self.array {
+            let expr: ir::Expression = Conv::conv(context, w);
+            let value = expr.eval_type(context, None);
+            array.push(value.get_value()?.to_usize());
+        }
+
+        Some(ir::Type {
+            kind,
+            signed,
+            width,
+            array,
+        })
     }
 }
 
@@ -1868,7 +2041,7 @@ impl fmt::Display for ClockDomain {
 #[derive(Debug, Clone)]
 pub struct VariableProperty {
     pub r#type: Type,
-    pub affiliation: VariableAffiliation,
+    pub affiliation: Affiliation,
     pub prefix: Option<String>,
     pub suffix: Option<String>,
     pub clock_domain: ClockDomain,
@@ -1876,12 +2049,18 @@ pub struct VariableProperty {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VariableAffiliation {
+pub enum Affiliation {
     Module,
     Interface,
     Package,
     StatementBlock,
     Function,
+    Modport,
+    ProtoModule,
+    ProtoInterface,
+    ProtoPackage,
+    AlwaysComb,
+    AlwaysFf,
 }
 
 #[derive(Debug, Clone)]
@@ -1943,6 +2122,15 @@ impl ParameterKind {
             "localparam".to_string()
         } else {
             "parameter".to_string()
+        }
+    }
+}
+
+impl From<&ParameterKind> for ir::VarKind {
+    fn from(value: &ParameterKind) -> Self {
+        match value {
+            ParameterKind::Param => ir::VarKind::Param,
+            ParameterKind::Const => ir::VarKind::Const,
         }
     }
 }
@@ -2034,6 +2222,7 @@ pub struct AliasInterfaceProperty {
 
 #[derive(Debug, Clone)]
 pub struct FunctionProperty {
+    pub affiliation: Affiliation,
     pub range: TokenRange,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,

@@ -1,3 +1,4 @@
+use crate::ir::VarPath;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolKind};
@@ -256,7 +257,7 @@ impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamesapce {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FixedTypeKind {
     U8,
     U16,
@@ -403,7 +404,7 @@ impl From<&syntax_tree::FixedType> for FixedTypeKind {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GenericSymbolPathKind {
     Identifier,
     FixedType(FixedTypeKind),
@@ -431,14 +432,28 @@ impl fmt::Display for GenericSymbolPathKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericSymbolPath {
     pub paths: Vec<GenericSymbol>,
     pub kind: GenericSymbolPathKind,
     pub range: TokenRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl GenericSymbolPath {
+    pub fn to_var_path(&self) -> Option<VarPath> {
+        let mut ret = VarPath::default();
+        for path in &self.paths {
+            if path.arguments.is_empty() {
+                ret.push(path.base());
+            } else {
+                return None;
+            }
+        }
+        Some(ret)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericSymbol {
     pub base: Token,
     pub arguments: Vec<GenericSymbolPath>,
