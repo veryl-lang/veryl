@@ -77,6 +77,9 @@ install:
 gen_sv:
 	cargo run --bin veryl -- build
 
+gen_ir:
+	cargo run --bin veryl -- dump --ir
+
 fmt_veryl:
 	cargo run --bin veryl -- fmt
 
