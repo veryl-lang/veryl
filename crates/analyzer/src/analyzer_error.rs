@@ -171,6 +171,40 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_operand),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand")
+    )]
+    #[error("{kind} cannot be used as a operand of {op} operator")]
+    InvalidOperand {
+        kind: String,
+        op: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        // TODO
+        //#[label(collection, "instantiated at")]
+        //inst_context: Vec<SourceSpan>,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(invalid_logical_operand),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand")
+    )]
+    #[error("{kind} should be 1-bit value")]
+    InvalidLogicalOperand {
+        kind: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_factor),
         help("remove {kind} from expression"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_factor")
@@ -376,10 +410,14 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(severity(Error), code(invalid_port_default_value), help(""), url(""))]
-    #[error("#{direction} port #{identifier} cannot have a port default value")]
+    #[error("{}", match .factor {
+        Some(x) => format!("{} can't be used in port default value", x),
+        None => format!("{} port {} cannot have a port default value", .direction, .identifier),
+    })]
     InvalidPortDefaultValue {
         identifier: String,
         direction: String,
+        factor: Option<String>,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1487,6 +1525,28 @@ impl AnalyzerError {
         }
     }
 
+    pub fn invalid_operand(kind: &str, op: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidOperand {
+            kind: kind.to_string(),
+            op: op.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_logical_operand(op: bool, token: &TokenRange) -> Self {
+        let kind = if op {
+            "Operand of logical operator"
+        } else {
+            "Conditional expression"
+        };
+        AnalyzerError::InvalidLogicalOperand {
+            kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn invalid_factor(
         identifier: Option<&str>,
         kind: &str,
@@ -1648,11 +1708,13 @@ impl AnalyzerError {
     pub fn invalid_port_default_value(
         identifier: &str,
         direction: &str,
+        factor: Option<&str>,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::InvalidPortDefaultValue {
             identifier: identifier.into(),
             direction: direction.into(),
+            factor: factor.map(|x| x.to_string()),
             input: source(token),
             error_location: token.into(),
         }

@@ -16,7 +16,7 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1(&"prj", &"", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &"", &parser.veryl, None));
     let info = Analyzer::analyze_post_pass2();
     errors.append(&mut analyzer.analyze_pass3(&"prj", &"", &parser.veryl, &info));
     dbg!(&errors);
@@ -1084,6 +1084,45 @@ fn invalid_port_default_value() {
         errors[0],
         AnalyzerError::InvalidPortDefaultValue { .. }
     ));
+
+    let code = r#"
+    module ModuleA #(
+        param A: bit = 0
+    )(
+        a: input logic = A,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        a: input logic,
+        b: input logic = a,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    package PackageA {
+        const A: bit = 0;
+    }
+    module ModuleA (
+        a: input  logic = PackageA::A,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -3442,6 +3481,86 @@ fn mismatch_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = 0,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[1],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<t: u32> {
+        const A: type = t;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[1],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<t: type> {
+        const A: type = t;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32  = 0;
+        const B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[1],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic;
+        const B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        const A: type;
+    }
+    module ModuleA::<PKG: ProtoPkgA> {
+        const A: type = PKG::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        type A;
+    }
+    module ModuleA::<PKG: ProtoPkgA> {
+        const A: type = PKG::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -5049,7 +5168,7 @@ fn uknown_param() {
 fn unenclosed_inner_if_expression() {
     let code = r#"
     module ModuleA {
-        let _a: u32 = if if 1 ? 2 : 3 ? 4 : 5;
+        let _a: u32 = if if 1'b0 ? 1'b0 : 1'b1 ? 4 : 5;
     }
     "#;
 
@@ -5061,7 +5180,7 @@ fn unenclosed_inner_if_expression() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = if (if 1 ? 2 : 3) ? 4 : 5;
+        let _a: u32 = if (if 1'b1 ? 1'b0 : 1'b1) ? 4 : 5;
     }
     "#;
 
@@ -5070,7 +5189,7 @@ fn unenclosed_inner_if_expression() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = if 1 ? if 2 ? 3 : 4 : 5;
+        let _a: u32 = if 1'b1 ? if 1'b0 ? 3 : 4 : 5;
     }
     "#;
 
@@ -5082,7 +5201,7 @@ fn unenclosed_inner_if_expression() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = if 1 ? (if 2 ? 3 : 4) : 5;
+        let _a: u32 = if 1'b1 ? (if 1'b0 ? 3 : 4) : 5;
     }
     "#;
 
@@ -5290,13 +5409,13 @@ fn unassign_variable() {
         var a: logic;
         var b: logic;
         always_comb {
-            if 1 {
+            if true {
                 let c: logic = 1;
                 a = c;
             } else {
                 a = 0;
             }
-            if 1 {
+            if true {
                 var c: logic;
                 b = c;
             } else {
@@ -6038,7 +6157,80 @@ fn reset_value_non_elaborative() {
 }
 
 #[test]
-fn invalid_factor_kind() {
+fn invalid_operand() {
+    let code = r#"
+    module ModuleA {
+        const a: logic = +logic;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[1], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[2], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = {logic};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[2], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[2], AnalyzerError::InvalidOperand { .. }));
+}
+
+#[test]
+fn invalid_logical_operand() {
+    let code = r#"
+    module ModuleA {
+        let _a: logic = 1 && 1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidLogicalOperand { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic<2> = 1;
+        let _b: logic = true && a;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidLogicalOperand { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic<2> = 1;
+        let _b: logic = true && a[0];
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_factor() {
     let code = r#"
     module ModuleA {
         function f (
@@ -6063,6 +6255,18 @@ fn invalid_factor_kind() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
 
+    let code = r#"
+    module ModuleA {
+        let a: logic = ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+}
+
+#[test]
+fn invalid_factor_kind() {
     //TODO this case should be detected as type mismatch
     //let code = r#"
     //interface InterfaceA {
@@ -6083,146 +6287,6 @@ fn invalid_factor_kind() {
     //
     //let errors = analyze(code);
     //assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param A: bit = 0
-    )(
-        a: input logic = A,
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        let a: logic = ModuleA;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA (
-        a: input logic,
-        b: input logic = a,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    package PackageA {
-        const A: bit = 0;
-    }
-    module ModuleA (
-        a: input  logic = PackageA::A,
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        const A: type = logic + logic;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        const A: type = {logic};
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA::<t: u32> {
-        const A: type = t;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA::<t: type> {
-        const A: type = t;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        const A: u32  = 0;
-        const B: type = A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        const A: type = logic;
-        const B: type = A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    proto package ProtoPkgA {
-        const A: type;
-    }
-    module ModuleA::<PKG: ProtoPkgA> {
-        const A: type = PKG::A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    proto package ProtoPkgA {
-        type A;
-    }
-    module ModuleA::<PKG: ProtoPkgA> {
-        const A: type = PKG::A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        let _a: logic = logic + logic;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param T: type = 0,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
 
     let code = r#"
     module ModuleA #(

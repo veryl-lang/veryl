@@ -4,6 +4,7 @@ use log::info;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use veryl_analyzer::Analyzer;
+use veryl_analyzer::ir::Ir;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
@@ -37,11 +38,15 @@ impl CmdDump {
 
         Analyzer::analyze_post_pass1();
 
+        let mut ir = Ir::default();
         for context in &contexts {
             let path = &context.path;
-            context
-                .analyzer
-                .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+            context.analyzer.analyze_pass2(
+                &path.prj,
+                &path.src,
+                &context.parser.veryl,
+                Some(&mut ir),
+            );
         }
 
         let info = Analyzer::analyze_post_pass2();
@@ -79,6 +84,10 @@ impl CmdDump {
 
         if self.opt.unsafe_table {
             println!("{}", veryl_analyzer::unsafe_table::dump());
+        }
+
+        if self.opt.ir {
+            println!("{}", ir);
         }
 
         Ok(true)

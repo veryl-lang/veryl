@@ -253,7 +253,7 @@ impl VerylGrammarTrait for CheckClockDomain {
                 let domain = self.check_expr_clock_domains(&arg.identifier.identifier_token.token);
                 let range: TokenRange = arg.identifier.as_ref().into();
                 self.inst_clock_domains
-                    .insert(arg.identifier.identifier_token.token.text, (domain, range));
+                    .insert(arg.identifier.text(), (domain, range));
             }
         }
         Ok(())

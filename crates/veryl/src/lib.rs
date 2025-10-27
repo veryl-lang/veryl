@@ -266,4 +266,8 @@ pub struct OptDump {
     /// output unsafe table
     #[arg(long)]
     pub unsafe_table: bool,
+
+    /// output IR
+    #[arg(long)]
+    pub ir: bool,
 }

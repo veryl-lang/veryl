@@ -65,6 +65,7 @@ impl VerylGrammarTrait for CheckPort {
                     self.errors.push(AnalyzerError::invalid_port_default_value(
                         &arg.identifier.identifier_token.to_string(),
                         &direction.to_string(),
+                        None,
                         &x.port_default_value.expression.as_ref().into(),
                     ));
                 }

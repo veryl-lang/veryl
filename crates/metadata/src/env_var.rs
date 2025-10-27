@@ -3,7 +3,7 @@ use std::env;
 #[derive(Clone, Debug)]
 pub struct EnvVar {
     pub analyzer_pass1_enables: [bool; 8],
-    pub analyzer_pass2_enables: [bool; 13],
+    pub analyzer_pass2_enables: [bool; 8],
     pub analyzer_pass3_enables: [bool; 3],
 }
 
@@ -15,9 +15,9 @@ impl Default for EnvVar {
             [true; 8]
         };
         let analyzer_pass2_enables = if let Ok(x) = env::var("ANALYZER_PASS2_ENABLES") {
-            parse_bit_flag(&x).unwrap_or([true; 13])
+            parse_bit_flag(&x).unwrap_or([true; 8])
         } else {
-            [true; 13]
+            [true; 8]
         };
         let analyzer_pass3_enables = if let Ok(x) = env::var("ANALYZER_PASS3_ENABLES") {
             parse_bit_flag(&x).unwrap_or([true; 3])
