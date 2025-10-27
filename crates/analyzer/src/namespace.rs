@@ -8,7 +8,7 @@ use crate::{HashMap, SVec, svec};
 use std::collections::BTreeSet;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, VerylToken};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct DefineContext {
@@ -20,11 +20,22 @@ impl DefineContext {
     pub fn exclusive(&self, value: &DefineContext) -> bool {
         !self.pos.is_disjoint(&value.neg) || !self.neg.is_disjoint(&value.pos)
     }
+
+    pub fn is_default(&self) -> bool {
+        self.pos.is_empty()
+    }
 }
 
 impl From<Token> for DefineContext {
     fn from(token: Token) -> Self {
         let attrs = attribute_table::get(&token);
+        attrs.as_slice().into()
+    }
+}
+
+impl From<&VerylToken> for DefineContext {
+    fn from(token: &VerylToken) -> Self {
+        let attrs = attribute_table::get(&token.token);
         attrs.as_slice().into()
     }
 }

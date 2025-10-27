@@ -41,7 +41,7 @@ impl CmdMigrate {
 
                 let parser = Parser::parse(migrator.as_str(), &path.src)?;
                 let analyzer = Analyzer::new(metadata);
-                let _ = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
+                let _ = analyzer.analyze_pass1(&path.prj, &parser.veryl);
 
                 let mut formatter = Formatter::new(metadata);
                 formatter.format(&parser.veryl);

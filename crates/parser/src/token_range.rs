@@ -1,9 +1,9 @@
 use crate::resource_table::{PathId, TokenId};
 use crate::veryl_grammar_trait::*;
-use crate::veryl_token::{Token, VerylToken};
+use crate::veryl_token::{Token, TokenSource, VerylToken};
 use paste::paste;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenRange {
     pub beg: Token,
     pub end: Token,
@@ -47,6 +47,10 @@ impl TokenRange {
     pub fn set_end(&mut self, value: TokenRange) {
         self.end = value.end;
     }
+
+    pub fn source(&self) -> TokenSource {
+        self.beg.source
+    }
 }
 
 impl From<&TokenRange> for miette::SourceSpan {
@@ -75,6 +79,14 @@ impl From<&Token> for TokenRange {
     fn from(value: &Token) -> Self {
         let beg = *value;
         let end = *value;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&VerylToken> for TokenRange {
+    fn from(value: &VerylToken) -> Self {
+        let beg = value.token;
+        let end = value.token;
         TokenRange { beg, end }
     }
 }
@@ -878,6 +890,15 @@ impl From<&IfStatement> for TokenRange {
 }
 impl_token_ext!(IfStatement);
 
+impl From<&IfStatementList> for TokenRange {
+    fn from(value: &IfStatementList) -> Self {
+        let mut ret: TokenRange = value.r#else.as_ref().into();
+        ret.set_end(value.statement_block.as_ref().into());
+        ret
+    }
+}
+impl_token_ext!(IfStatementList);
+
 impl From<&IfResetStatement> for TokenRange {
     fn from(value: &IfResetStatement) -> Self {
         let mut ret: TokenRange = value.if_reset.as_ref().into();
@@ -892,6 +913,15 @@ impl From<&IfResetStatement> for TokenRange {
     }
 }
 impl_token_ext!(IfResetStatement);
+
+impl From<&IfResetStatementList> for TokenRange {
+    fn from(value: &IfResetStatementList) -> Self {
+        let mut ret: TokenRange = value.r#else.as_ref().into();
+        ret.set_end(value.statement_block.as_ref().into());
+        ret
+    }
+}
+impl_token_ext!(IfResetStatementList);
 
 impl_token_range!(ReturnStatement, r#return, semicolon);
 impl_token_range!(BreakStatement, r#break, semicolon);
@@ -975,6 +1005,17 @@ impl_token_range_enum!(AttributeItem, identifier, string_literal);
 impl_token_range!(LetDeclaration, r#let, semicolon);
 impl_token_range!(VarDeclaration, var, semicolon);
 impl_token_range!(ConstDeclaration, r#const, semicolon);
+
+impl From<&ConstDeclarationGroup> for TokenRange {
+    fn from(value: &ConstDeclarationGroup) -> Self {
+        match value {
+            ConstDeclarationGroup::Type(x) => x.r#type.as_ref().into(),
+            ConstDeclarationGroup::ArrayType(x) => x.array_type.as_ref().into(),
+        }
+    }
+}
+impl_token_ext!(ConstDeclarationGroup);
+
 impl_token_range!(TypeDefDeclaration, r#type, semicolon);
 impl_token_range!(AlwaysFfDeclaration, always_ff, statement_block);
 impl_token_range!(AlwaysFfEventList, l_paren, r_paren);
@@ -1208,6 +1249,16 @@ impl From<&PortDeclarationItem> for TokenRange {
 }
 impl_token_ext!(PortDeclarationItem);
 
+impl From<&PortDeclarationItemGroup> for TokenRange {
+    fn from(value: &PortDeclarationItemGroup) -> Self {
+        match value {
+            PortDeclarationItemGroup::PortTypeConcrete(x) => x.port_type_concrete.as_ref().into(),
+            PortDeclarationItemGroup::PortTypeAbstract(x) => x.port_type_abstract.as_ref().into(),
+        }
+    }
+}
+impl_token_ext!(PortDeclarationItemGroup);
+
 impl From<&PortTypeConcrete> for TokenRange {
     fn from(value: &PortTypeConcrete) -> Self {
         let mut ret: TokenRange = value.direction.as_ref().into();
@@ -1406,6 +1457,17 @@ impl_token_range_enum!(
     import_declaration
 );
 impl_token_range!(ProtoConstDeclaration, r#const, semicolon);
+
+impl From<&ProtoConstDeclarationGroup> for TokenRange {
+    fn from(value: &ProtoConstDeclarationGroup) -> Self {
+        match value {
+            ProtoConstDeclarationGroup::Type(x) => x.r#type.as_ref().into(),
+            ProtoConstDeclarationGroup::ArrayType(x) => x.array_type.as_ref().into(),
+        }
+    }
+}
+impl_token_ext!(ProtoConstDeclarationGroup);
+
 impl_token_range!(ProtoTypeDefDeclaration, r#type, semicolon);
 impl_token_range!(ProtoFunctionDeclaration, function, semicolon);
 impl_token_range!(ProtoAliasDeclaration, alias, semicolon);

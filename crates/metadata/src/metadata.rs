@@ -1,7 +1,6 @@
 use crate::build::{Build, Target};
 use crate::build_info::BuildInfo;
 use crate::doc::Doc;
-use crate::env_var::EnvVar;
 use crate::format::Format;
 use crate::git::Git;
 use crate::lint::Lint;
@@ -63,8 +62,6 @@ pub struct Metadata {
     pub lockfile: Lockfile,
     #[serde(skip)]
     pub build_info: BuildInfo,
-    #[serde(skip)]
-    pub env_var: EnvVar,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]

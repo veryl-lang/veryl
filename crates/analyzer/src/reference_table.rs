@@ -230,11 +230,10 @@ impl ReferenceTable {
                     || package_token.line == base_token.line
                         && package_token.column > base_token.column);
             if referecne_before_definition {
-                self.errors
-                    .push(AnalyzerError::referring_package_before_definition(
-                        &package_token.to_string(),
-                        token_range,
-                    ));
+                self.errors.push(AnalyzerError::referring_before_definition(
+                    &package_token.to_string(),
+                    token_range,
+                ));
             }
         }
     }

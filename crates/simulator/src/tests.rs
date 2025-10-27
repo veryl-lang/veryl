@@ -2,7 +2,7 @@ use crate::Simulator;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::symbol_path::SymbolPath;
-use veryl_analyzer::{Analyzer, AnalyzerError, definition_table, symbol_table};
+use veryl_analyzer::{Analyzer, AnalyzerError, Context, definition_table, symbol_table};
 use veryl_metadata::Metadata;
 use veryl_parser::{Parser, resource_table};
 
@@ -13,13 +13,13 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &"", &parser.veryl));
-    let info = Analyzer::analyze_post_pass2();
-    errors.append(&mut analyzer.analyze_pass3(&"prj", &"", &parser.veryl, &info));
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None));
+    errors.append(&mut Analyzer::analyze_post_pass2());
     dbg!(&errors);
     errors
 }

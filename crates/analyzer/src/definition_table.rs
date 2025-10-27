@@ -1,7 +1,9 @@
 use crate::HashMap;
 use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
-use veryl_parser::veryl_grammar_trait::{InterfaceDeclaration, ModuleDeclaration};
+use veryl_parser::veryl_grammar_trait::{
+    FunctionDeclaration, InterfaceDeclaration, ModuleDeclaration, ProtoModuleDeclaration,
+};
 use veryl_parser::veryl_token::TokenSource;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -21,6 +23,8 @@ pub fn new_definition_id() -> DefinitionId {
 pub enum Definition {
     Module(ModuleDeclaration),
     Interface(InterfaceDeclaration),
+    Function(FunctionDeclaration),
+    ProtoModule(ProtoModuleDeclaration),
 }
 
 impl Definition {
@@ -35,6 +39,20 @@ impl Definition {
             }
             Definition::Interface(x) => {
                 if let TokenSource::File { path, .. } = x.interface.interface_token.token.source {
+                    Some(path)
+                } else {
+                    None
+                }
+            }
+            Definition::Function(x) => {
+                if let TokenSource::File { path, .. } = x.function.function_token.token.source {
+                    Some(path)
+                } else {
+                    None
+                }
+            }
+            Definition::ProtoModule(x) => {
+                if let TokenSource::File { path, .. } = x.module.module_token.token.source {
                     Some(path)
                 } else {
                     None
@@ -61,7 +79,7 @@ impl DefinitionTable {
     }
 
     pub fn drop(&mut self, path: PathId) {
-        self.table.retain(|_, x| x.get_path() == Some(path));
+        self.table.retain(|_, x| x.get_path() != Some(path));
     }
 }
 

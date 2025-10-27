@@ -45,7 +45,7 @@ impl CmdBuild {
             let parser = Parser::parse(&input, &path.src)?;
 
             let analyzer = Analyzer::new(metadata);
-            let mut errors = analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
+            let mut errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
             check_error = check_error.append(&mut errors).check_err()?;
 
             let context = Context::new(path.clone(), input, parser, analyzer)?;
@@ -70,35 +70,29 @@ impl CmdBuild {
             Self::check_skip(metadata, &mut contexts);
         }
 
+        let mut analyzer_context = veryl_analyzer::Context::default();
         for context in &contexts {
             if !context.skip {
                 let path = &context.path;
-                let mut errors =
-                    context
-                        .analyzer
-                        .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+                let mut errors = context.analyzer.analyze_pass2(
+                    &path.prj,
+                    &context.parser.veryl,
+                    &mut analyzer_context,
+                    None,
+                );
                 check_error = check_error.append(&mut errors).check_err()?;
             }
         }
 
         debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
 
-        let info = Analyzer::analyze_post_pass2();
+        let mut errors = Analyzer::analyze_post_pass2();
+        check_error = check_error.append(&mut errors).check_err()?;
 
-        for context in &contexts {
-            if !context.skip {
-                let path = &context.path;
-                let mut errors = context.analyzer.analyze_pass3(
-                    &path.prj,
-                    &path.src,
-                    &context.parser.veryl,
-                    &info,
-                );
-                check_error = check_error.append(&mut errors).check_err()?;
-            }
-        }
-
-        debug!("Executed analyze_pass3 ({} milliseconds)", stopwatch.lap());
+        debug!(
+            "Executed analyze_post_pass2 ({} milliseconds)",
+            stopwatch.lap()
+        );
 
         let temp_dir = if let Target::Bundle { .. } = &metadata.build.target {
             Some(TempDir::new().into_diagnostic()?)

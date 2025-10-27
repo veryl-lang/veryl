@@ -1,5 +1,5 @@
 use crate::Formatter;
-use veryl_analyzer::Analyzer;
+use veryl_analyzer::{Analyzer, Context};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
@@ -7,10 +7,11 @@ use veryl_parser::Parser;
 fn format(metadata: &Metadata, code: &str) -> String {
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
+    let mut context = Context::default();
 
-    analyzer.analyze_pass1(&"prj", &"", &parser.veryl);
+    analyzer.analyze_pass1(&"prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &"", &parser.veryl);
+    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None);
 
     let mut formatter = Formatter::new(metadata);
     formatter.format(&parser.veryl);

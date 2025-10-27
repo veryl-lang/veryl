@@ -1,6 +1,6 @@
-use crate::namespace::Namespace;
-use crate::symbol_path::SymbolPath;
+use crate::conv::Context;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
+use std::thread;
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
@@ -12,15 +12,44 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &"", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &"", &parser.veryl));
-    let info = Analyzer::analyze_post_pass2();
-    errors.append(&mut analyzer.analyze_pass3(&"prj", &"", &parser.veryl, &info));
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None));
+    errors.append(&mut Analyzer::analyze_post_pass2());
     dbg!(&errors);
     errors
+}
+
+#[track_caller]
+fn analyze_with_large_stack(code: &str) -> Vec<AnalyzerError> {
+    let code = code.to_string();
+
+    // cargo test uses 2MB stack by default
+    // some tests like recursive check need more stack size
+    let builder = thread::Builder::new().stack_size(16 * 1024 * 1024);
+    let handler = builder
+        .spawn(move || {
+            symbol_table::clear();
+            attribute_table::clear();
+
+            let metadata = Metadata::create_default("prj").unwrap();
+            let parser = Parser::parse(&code, &"").unwrap();
+            let analyzer = Analyzer::new(&metadata);
+            let mut context = Context::default();
+
+            let mut errors = vec![];
+            errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+            errors.append(&mut Analyzer::analyze_post_pass1());
+            errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None));
+            errors.append(&mut Analyzer::analyze_post_pass2());
+            dbg!(&errors);
+            errors
+        })
+        .unwrap();
+    handler.join().unwrap()
 }
 
 #[test]
@@ -446,7 +475,10 @@ fn clock_connection_check() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
 
     let code = r#"
     module ModuleA {
@@ -469,7 +501,7 @@ fn clock_connection_check() {
 fn reset_connection_check() {
     let code = r#"
     module ModuleA (
-        clk: input logic
+        clk: input clock
     ) {
         inst u: ModuleB (
             clk,
@@ -482,7 +514,10 @@ fn reset_connection_check() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
 }
 
 #[test]
@@ -713,6 +748,25 @@ fn multiple_assignment() {
     ));
 
     let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        always_comb {
+            a = 0;
+        }
+        always_comb {
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleAssignment { .. }
+    ));
+
+    let code = r#"
     module ModuleA () {
         var w: logic<2>;
         if 1 :g {
@@ -729,6 +783,269 @@ fn multiple_assignment() {
         o: output logic,
     ) {
         assign o = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic<10>;
+
+        always_ff {
+            a = 0;
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic<10>;
+
+        always_ff {
+            a[1:0] = 0;
+            a[9:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic<4>;
+
+        always_ff {
+            a[3:0] = 0;
+            a[3:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic<10>;
+
+        always_ff {
+            a = 0;
+        }
+        always_ff {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic<10>;
+
+        always_ff {
+            a[1:0] = 0;
+        }
+        always_ff {
+            a[9:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic<10>;
+
+        always_ff {
+            a[3:0] = 0;
+        }
+        always_ff {
+            a[3:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            a = 0;
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            a[1:0] = 0;
+            a[9:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            a[3:0] = 0;
+            a[9:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            a = 0;
+        }
+        always_comb {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            a[1:0] = 0;
+        }
+        always_comb {
+            a[9:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            a[3:0] = 0;
+        }
+        always_comb {
+            a[9:2] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MultipleAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: logic[8];
+        let b: logic<3> = 0;
+
+        always_ff {
+            a[0] = 0;
+            if b != 0 {
+                a[b] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        var b: logic;
+        modport mst {
+            a: output,
+            b: output,
+        }
+    }
+    
+    module ModuleA {
+        inst u: InterfaceA [2];
+    
+        inst x0: ModuleB (
+            p: u[0],
+        );
+    
+        inst x1: ModuleB (
+            p: u[1],
+        );
+    }
+    
+    module ModuleB (
+        p: modport InterfaceA::mst,
+    ) {
+        assign p.a = 0;
+        assign p.b = 0;
     }
     "#;
 
@@ -764,6 +1081,20 @@ fn invalid_assignment() {
         }
     }
     "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidAssignment { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        always_comb {
+            let y: logic = 1;
+            y = 0;
+        }
+    }"#;
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidAssignment { .. }));
@@ -1116,6 +1447,45 @@ fn invalid_port_default_value() {
         errors[0],
         AnalyzerError::InvalidPortDefaultValue { .. }
     ));
+
+    let code = r#"
+    module ModuleA #(
+        param A: bit = 0
+    )(
+        a: input logic = A,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        a: input logic,
+        b: input logic = a,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidPortDefaultValue { .. }
+    ));
+
+    let code = r#"
+    package PackageA {
+        const A: bit = 0;
+    }
+    module ModuleA (
+        a: input  logic = PackageA::A,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -1226,28 +1596,80 @@ fn mismatch_function_arity() {
         errors[0],
         AnalyzerError::MismatchFunctionArity { .. }
     ));
+
+    //let code = r#"
+    //module ModuleA {
+    //    initial {
+    //        $readmemh();
+    //    }
+    //}
+    //"#;
+
+    //let errors = analyze(code);
+    //assert!(matches!(
+    //    errors[0],
+    //    AnalyzerError::MismatchFunctionArity { .. }
+    //));
+}
+
+#[test]
+fn mismatch_function_arg() {
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $clog2(logic);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArg { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        always_comb {
+            $clog2(logic);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArg { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $bits(logic);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
 fn missing_default_generic_argument() {
     let code = r#"
     module ModuleA {
-        function FuncA::<A: u32> () -> logic<A> {}
+        function FuncA::<A: u32> () -> logic<A> { return 0; }
         let _a: logic = FuncA::<1>();
 
-        function FuncB::<A: u32, B: u32, C: u32> () -> logic<A + B + C> {}
+        function FuncB::<A: u32, B: u32, C: u32> () -> logic<A + B + C> { return 0; }
         let _b: logic = FuncB::<1, 2, 3>();
 
-        function FuncC::<A: u32 = 1> () -> logic<A> {}
+        function FuncC::<A: u32 = 1> () -> logic<A> { return 0; }
         let _c: logic = FuncC::<>();
 
-        function FuncD::<A: u32 = 1, B: u32 = 2, C: u32 = 3> () -> logic<A + B + C> {}
+        function FuncD::<A: u32 = 1, B: u32 = 2, C: u32 = 3> () -> logic<A + B + C> { return 0; }
         let _d: logic = FuncD::<>();
 
-        function FuncE::<A: u32, B: u32 = 2, C: u32 = 3> () -> logic<A + B + C> {}
+        function FuncE::<A: u32, B: u32 = 2, C: u32 = 3> () -> logic<A + B + C> { return 0; }
         let _e: logic = FuncE::<1>();
 
-        function FuncF::<A: u32, B: u32, C: u32 = 3> () -> logic<A + B + C> {}
+        function FuncF::<A: u32, B: u32, C: u32 = 3> () -> logic<A + B + C> { return 0; }
         let _f: logic = FuncF::<1, 2>();
     }
     "#;
@@ -2661,6 +3083,7 @@ fn mismatch_type() {
         }
 
         inst if_a: InterfaceA;
+        assign if_a.a = 0;
         let _a: logic = FuncA::<if_a>();
     }
     "#;
@@ -3155,8 +3578,8 @@ fn mismatch_type() {
         function FuncB::<T: type>() -> T {
             return 0 as T;
         }
-        let _a_0: u32 = FuncA::<PKG::W>();
-        let _a_1: u32 = FuncA::<WIDTH>();
+        let _a_0: logic<32> = FuncA::<PKG::W>();
+        let _a_1: logic<32> = FuncA::<WIDTH>();
         let _b_0: u32 = FuncB::<PKG::T>();
         let _b_1: u32 = FuncB::<TYPE>();
     }
@@ -3293,6 +3716,53 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<WIDTH: u32> {
+        let _a: logic<WIDTH> = 0 as WIDTH;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package Proto {
+        const X: u32;
+    }
+    
+    package Package for Proto {
+        const X: u32 = 1;
+    }
+    
+    interface InterfaceA::<PKG: Proto> {
+        var a: logic;
+        modport master {
+            a: output,
+        }
+    }
+    
+    module ModuleC {
+        inst u: ModuleA::<Package>;
+    }
+    
+    module ModuleA::<PKG: Proto> {
+        inst a: InterfaceA::<PKG>;
+    
+        inst u: ModuleB::<PKG> (
+            p: a,
+        );
+    }
+    
+    module ModuleB::<PKG: Proto> (
+        p: modport InterfaceA::<PKG>::master,
+    ) {
+        assign p.a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -3414,21 +3884,12 @@ fn mismatch_assignment() {
             a: input
         }
     }
-    interface InterfaceB {
-        var a: logic;
-        modport mp {
-            a: input
-        }
-    }
     module ModuleA (
         a: modport InterfaceA::mp,
     ) {}
     module ModuleB {
-        inst b: InterfaceB;
+        inst y: ModuleA (a: 0);
     }
-    bind ModuleB <- u: ModuleA (
-        a: b,
-    );
     "#;
 
     let errors = analyze(code);
@@ -3436,6 +3897,36 @@ fn mismatch_assignment() {
         errors[0],
         AnalyzerError::MismatchAssignment { .. }
     ));
+
+    //let code = r#"
+    //interface InterfaceA {
+    //    var a: logic;
+    //    modport mp {
+    //        a: input
+    //    }
+    //}
+    //interface InterfaceB {
+    //    var a: logic;
+    //    modport mp {
+    //        a: input
+    //    }
+    //}
+    //module ModuleA (
+    //    a: modport InterfaceA::mp,
+    //) {}
+    //module ModuleB {
+    //    inst b: InterfaceB;
+    //}
+    //bind ModuleB <- u: ModuleA (
+    //    a: b,
+    //);
+    //"#;
+
+    //let errors = analyze(code);
+    //assert!(matches!(
+    //    errors[0],
+    //    AnalyzerError::MismatchAssignment { .. }
+    //));
 
     let code = r#"
     module ModuleA {
@@ -3489,9 +3980,176 @@ fn mismatch_assignment() {
     module ModuleB {
         inst bus_if: InterfaceA::<8>;
 
+        assign bus_if.ready = 1;
+
         inst u: ModuleA::<InterfaceA::<8>> (
             bus_if: bus_if,
         );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = 0,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<t: u32> {
+        const A: type = t;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<t: type> {
+        const A: type = t;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32  = 0;
+        const B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic;
+        const B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        const A: type;
+    }
+    module ModuleA::<PKG: ProtoPkgA> {
+        const A: type = PKG::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        type A;
+    }
+    module ModuleA::<PKG: ProtoPkgA> {
+        const A: type = PKG::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = logic,
+    ) {}
+    module ModuleB {
+        inst u: ModuleA #(T: 0);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = logic,
+    ) {}
+    module ModuleB::<t: u32> {
+        inst u: ModuleA #(T: t);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<T: type = 0> {
+    }
+    alias module A = ModuleA::<>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA #(
+        param N: u32 = 1,
+    ){
+        var a: logic;
+        modport mp {
+            a: input
+        }
+    }
+    module ModuleA (
+        a: modport InterfaceA::mp,
+    ) {}
+    module ModuleB {
+        inst x: InterfaceA #( N: 10 );
+        assign x.a = 0;
+        inst y: ModuleA (a: x);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32    = 8 ;
+        const B: bit<A> = '0;
+        const C: bit<A> = B + 1 as A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32 = 0;
+        const B: u32 = $sv::pkg::a | A;
     }
     "#;
 
@@ -3503,8 +4161,8 @@ fn mismatch_assignment() {
 fn missing_if_reset() {
     let code = r#"
     module ModuleA (
-        clk: input logic,
-        rst: input logic,
+        clk: input clock,
+        rst: input reset,
     ) {
         always_ff(clk, rst) {
         }
@@ -3765,6 +4423,70 @@ fn missing_reset_statement() {
         errors[0],
         AnalyzerError::MissingResetStatement { .. }
     ));
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        var a: logic<2>;
+
+        always_ff(clk, rst) {
+            if_reset {
+                a[0] = 0;
+            } else {
+                a[0] = 1;
+            }
+        }
+
+        assign a[1] = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        var a: logic;
+
+        always_ff(clk, rst) {
+            if_reset {
+                a = 0;
+            } else {
+                let x: logic = 1;
+                a = x;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: $sv::StructA;
+    
+        always_ff {
+            if_reset {
+                a.a = 0;
+                a.b = 0;
+            } else {
+                a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -4393,10 +5115,42 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<D: u32> #() {
+        var a: logic<D>;
+        let _b: logic = a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    //let code = r#"
+    //interface InterfaceA {
+    //    var x: logic;
+    //    modport master {
+    //        x: output,
+    //    }
+    //}
+
+    //module ModuleA {
+    //    let _a: logic = b.x;
+    //
+    //    inst b: InterfaceA;
+    //    assign b.x = 0;
+    //}
+    //"#;
+
+    //let errors = analyze(code);
+    //assert!(matches!(
+    //    errors[0],
+    //    AnalyzerError::UndefinedIdentifier { .. }
+    //));
 }
 
 #[test]
-fn referring_package_before_definition() {
+fn referring_before_definition() {
     let code = r#"
     module ModuleA {
         const A: u32 = PakcageB::B;
@@ -4409,7 +5163,7 @@ fn referring_package_before_definition() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+        AnalyzerError::ReferringBeforeDefinition { .. }
     ));
 
     let code = r#"
@@ -4424,7 +5178,7 @@ fn referring_package_before_definition() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+        AnalyzerError::ReferringBeforeDefinition { .. }
     ));
 
     let code = r#"
@@ -4439,7 +5193,7 @@ fn referring_package_before_definition() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+        AnalyzerError::ReferringBeforeDefinition { .. }
     ));
 
     let code = r#"
@@ -4452,8 +5206,81 @@ fn referring_package_before_definition() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::ReferringPackageBeforeDefinition { .. }
+        AnalyzerError::ReferringBeforeDefinition { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        assign a = 1;
+        var a: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic = b + 1;
+        var b: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic = c.x;
+    
+        struct StructA {
+            x: logic,
+        }
+    
+        var c: StructA;
+        assign c = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    proto package ProtoPkg {
+        const INFO     : bool;
+        const INFO_TYPE: type;
+    }
+    
+    package PackageA::<info: bool = false, info_type: type = bool,> for ProtoPkg {
+        const INFO     : bool = info;
+        const INFO_TYPE: type = info_type;
+    }
+    
+    module ModuleA::<PKG: ProtoPkg> {
+        import PKG::*;
+    
+        let info: INFO_TYPE = 0;
+        let _a  : logic     = info;
+    
+        const X: logic = INFO;
+    }
+    
+    module ModuleB {
+        inst u: ModuleA::<PackageA::<>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -4765,6 +5592,7 @@ fn unknown_member() {
     }
     module ModuleA {
         inst u: InterfaceA::<1>;
+        assign u.a = 0;
         let _a: logic = u.a;
     }
     "#;
@@ -4782,6 +5610,7 @@ fn unknown_member() {
     alias interface InterfaceB = InterfaceA::<1>;
     module ModuleA {
         inst u: InterfaceB;
+        assign u.a = 1;
         let _a: logic = u.a;
     }
     "#;
@@ -5266,6 +6095,19 @@ fn unknown_msb() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<N: u32> {
+        function FuncA (
+            x: input logic<N>,
+        ) -> logic {
+            return x[msb];
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -5306,7 +6148,7 @@ fn uknown_param() {
 fn unenclosed_inner_if_expression() {
     let code = r#"
     module ModuleA {
-        let _a: u32 = if if 1 ? 2 : 3 ? 4 : 5;
+        let _a: u32 = if if 1'b0 ? 1'b0 : 1'b1 ? 4 : 5;
     }
     "#;
 
@@ -5318,7 +6160,7 @@ fn unenclosed_inner_if_expression() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = if (if 1 ? 2 : 3) ? 4 : 5;
+        let _a: u32 = if (if 1'b1 ? 1'b0 : 1'b1) ? 4 : 5;
     }
     "#;
 
@@ -5327,7 +6169,7 @@ fn unenclosed_inner_if_expression() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = if 1 ? if 2 ? 3 : 4 : 5;
+        let _a: u32 = if 1'b1 ? if 1'b0 ? 3 : 4 : 5;
     }
     "#;
 
@@ -5339,7 +6181,7 @@ fn unenclosed_inner_if_expression() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = if 1 ? (if 2 ? 3 : 4) : 5;
+        let _a: u32 = if 1'b1 ? (if 1'b0 ? 3 : 4) : 5;
     }
     "#;
 
@@ -5547,13 +6389,13 @@ fn unassign_variable() {
         var a: logic;
         var b: logic;
         always_comb {
-            if 1 {
+            if true {
                 let c: logic = 1;
                 a = c;
             } else {
                 a = 0;
             }
-            if 1 {
+            if true {
                 var c: logic;
                 b = c;
             } else {
@@ -5882,6 +6724,138 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<4, 4>;
+        for i in 0..4: g {
+            always_comb {
+                a[i] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param A: type = logic,
+    ) (
+        o: output A,
+    ) {
+        assign o = '0;
+    }
+    
+    module ModuleB {
+        struct StructA {
+            x: logic,
+            y: logic,
+        }
+    
+        var a: StructA;
+    
+        inst u0: ModuleA #(
+            A: StructA,
+        ) (
+            o: a,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic,
+            y: logic,
+        }
+
+        var a: StructA;
+
+        inst u: $sv::SvModule (
+            a: a,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mst {
+            a: output,
+        }
+    }
+
+    module ModuleA {
+        inst a: InterfaceA;
+
+        inst u: $sv::SvModule (
+            a: a,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PackageA {
+        struct StructA {
+            x: logic,
+            y: logic,
+        }
+    }
+    
+    interface InterfaceA {
+        var a: logic            ;
+        var b: PackageA::StructA;
+        modport mst {
+            a: output,
+            b: output,
+        }
+    }
+    
+    module ModuleA {
+        inst a: InterfaceA;
+    
+        inst u: ModuleB (
+            p: a,
+        );
+    }
+    
+    module ModuleB (
+        p: modport InterfaceA::mst,
+    ) {
+        assign p.a = 0;
+        assign p.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_sel: input logic<2>,
+    ){
+        var a: logic<4>;
+
+        always_ff {
+            a[i_sel] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -5966,6 +6940,31 @@ fn unassignable_output() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var y: logic<2>;
+        inst u: $sv::SvModule (
+            x: y[0],
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var y: logic;
+        var z: logic;
+        inst u: $sv::SvModule (
+            x: {y, z},
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -6001,7 +7000,7 @@ fn uncovered_branch() {
     assert!(errors.is_empty());
 
     let code = r#"
-    module ModuleB {
+    module ModuleA {
         var a: logic;
         let x: logic = 1;
 
@@ -6017,7 +7016,7 @@ fn uncovered_branch() {
     assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
 
     let code = r#"
-    module ModuleC {
+    module ModuleA {
         var a: logic;
         let x: logic = 1;
         let y: logic = 1;
@@ -6036,6 +7035,43 @@ fn uncovered_branch() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+        var b: logic;
+
+        always_comb {
+            if b {
+                a[0] = 1;
+            } else {
+                a[1] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+
+        always_comb {
+            if true {
+                a[0] = 1;
+                a[1] = 1;
+            } else {
+                a[0] = 1;
+                a[1] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     // TODO
     // Adapt 'traverse_assignable_symbol' to interface/struct/union members
@@ -6060,6 +7096,79 @@ fn uncovered_branch() {
     //
     //let errors = analyze(code);
     //assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+
+        always_comb {
+            if true {
+                a[0] = 1;
+            } else {
+                a[0] = 1;
+            }
+            if true {
+                a[1] = 1;
+            } else {
+                a[1] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        always_comb {
+            a = 0;
+
+            if true {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        always_comb {
+            a = 0;
+
+            if true {
+            } else if true {
+            } else {
+                a = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        initial {
+            if true {
+                $readmemh("a.hex", a);
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -6292,10 +7401,229 @@ fn reset_value_non_elaborative() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<A: u32> (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        const B: u32 = A + 1;
+        var _a: logic<B>;
+        always_ff {
+            if_reset {
+                _a = 0 as B;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
-fn invalid_factor_kind() {
+fn const_value_non_elaborative() {
+    let code = r#"
+    module ModuleA (
+        a: input logic,
+    ) {
+        const x: logic = a;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidConstNonElaborative { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            X: u32,
+            Y: u32,
+        }
+        const x: StructA = StructA'{
+            X: 1,
+            Y: 2,
+        };
+        const y: logic = x.X + x.Y;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PackageA {
+        struct StructA {
+            X: u32,
+            Y: u32,
+        }
+        function FuncA -> StructA {
+            var ret: StructA;
+            ret.X = 1;
+            ret.Y = 2;
+            return ret;
+        }
+    }
+    module ModuleA {
+        const x: PackageA::StructA = PackageA::FuncA();
+        const y: logic = x.X;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const y: logic = $sv::func();
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_operand() {
+    let code = r#"
+    module ModuleA {
+        const a: logic = +logic;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = {logic};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+}
+
+#[test]
+fn invalid_logical_operand() {
+    let code = r#"
+    module ModuleA {
+        let _a: logic = 1 && 1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidLogicalOperand { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic<2> = 1;
+        let _b: logic = true && a;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidLogicalOperand { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let a: logic<2> = 1;
+        let _b: logic = true && a[0];
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<A: u32> {
+        var a: logic<A>;
+    
+        always_comb {
+            if a[0] {}
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic,
+            y: logic,
+        }
+        var a: StructA;
+        assign a = 0;
+    
+        always_comb {
+            if a[0] {}
+            if a.x {}
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic   ;
+        var b: logic<2>;
+    
+        always_comb {
+            a = 0;
+            b = 0;
+            if b[a] {}
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+        always_comb {
+            a = if 1'b1 | 1'b1 ? 0 : 0;
+        }
+
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const X : u32      = $sv::pkg::X;
+        let a : logic<2> = 1;
+        let _b: logic    = a[X - 1] && 1'b1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_factor() {
     let code = r#"
     module ModuleA {
         function f (
@@ -6320,38 +7648,6 @@ fn invalid_factor_kind() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
 
-    //TODO this case should be detected as type mismatch
-    //let code = r#"
-    //interface InterfaceA {
-    //    var a: logic;
-    //    modport master {
-    //        a: input,
-    //    }
-    //}
-    //module ModuleA (
-    //    b: modport InterfaceA::master,
-    //) {
-    //    var a: logic;
-    //    always_comb {
-    //        a = b;
-    //    }
-    //}
-    //"#;
-    //
-    //let errors = analyze(code);
-    //assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param A: bit = 0
-    )(
-        a: input logic = A,
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
     let code = r#"
     module ModuleA {
         let a: logic = ModuleA;
@@ -6360,200 +7656,6 @@ fn invalid_factor_kind() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA (
-        a: input logic,
-        b: input logic = a,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    package PackageA {
-        const A: bit = 0;
-    }
-    module ModuleA (
-        a: input  logic = PackageA::A,
-    ){}
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        const A: type = logic + logic;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        const A: type = {logic};
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA::<t: u32> {
-        const A: type = t;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA::<t: type> {
-        const A: type = t;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        const A: u32  = 0;
-        const B: type = A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        const A: type = logic;
-        const B: type = A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    proto package ProtoPkgA {
-        const A: type;
-    }
-    module ModuleA::<PKG: ProtoPkgA> {
-        const A: type = PKG::A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    proto package ProtoPkgA {
-        type A;
-    }
-    module ModuleA::<PKG: ProtoPkgA> {
-        const A: type = PKG::A;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        let _a: logic = logic + logic;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param T: type = 0,
-    ) {}
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param T: type = logic,
-    ) {}
-    module ModuleB {
-        inst u: ModuleA #(T: 0);
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param T: type = logic,
-    ) {}
-    module ModuleB::<t: u32> {
-        inst u: ModuleA #(T: t);
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA #(
-        param T: type = logic,
-    ) {}
-    module ModuleB::<t: type> {
-        inst u: ModuleA #(T: t);
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA::<T: type = 0> {
-    }
-    alias module A = ModuleA::<>;
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        let _a: u32 = $clog2(logic);
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        always_comb {
-            $clog2(logic);
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
-
-    let code = r#"
-    module ModuleA {
-        let _a: u32 = $bits(logic);
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleA {
@@ -6582,6 +7684,42 @@ fn invalid_factor_kind() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
     assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+}
+
+#[test]
+fn invalid_factor_kind() {
+    //TODO this case should be detected as type mismatch
+    //let code = r#"
+    //interface InterfaceA {
+    //    var a: logic;
+    //    modport master {
+    //        a: input,
+    //    }
+    //}
+    //module ModuleA (
+    //    b: modport InterfaceA::master,
+    //) {
+    //    var a: logic;
+    //    always_comb {
+    //        a = b;
+    //    }
+    //}
+    //"#;
+    //
+    //let errors = analyze(code);
+    //assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = logic,
+    ) {}
+    module ModuleB::<t: type> {
+        inst u: ModuleA #(T: t);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module Y (
@@ -6614,6 +7752,7 @@ fn invalid_factor_kind() {
 
     module X {
         inst x: InterfaceB;
+        assign x.a = 0;
         inst u: Y (
             a: x,
         );
@@ -6675,6 +7814,8 @@ fn invalid_factor_kind() {
         always_comb {
             a_if.master <> b_if.slave;
         }
+        assign a_if.ready = 1;
+        assign b_if.valid = 1;
     }
     "#;
 
@@ -6700,26 +7841,16 @@ fn call_non_function() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::CallNonFunction { .. }));
-}
 
-#[test]
-fn invalid_assignment_to_const() {
     let code = r#"
-    module ModuleA (
-        i_clk: input clock,
-        i_rst: input reset,
-    ) {
-        always_comb {
-            let y: logic = 1;
-            y = 0;
-        }
+    module ModuleA {
+        var a: logic;
+
+        assign a = $sv::pkg::func() + 1;
     }"#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidAssignmentToConst { .. }
-    ));
+    assert!(errors.is_empty());
 }
 
 // TODO disable until adding expression type check
@@ -7050,6 +8181,50 @@ fn invalid_select() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic<2> = 1;
+        let _b: logic<2> = _a[0][0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic[2] = '{1, 1};
+        let _b: logic[2] = _a[0][0][0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module module_a {
+        let _a: logic<32> = 0;
+        let _b: logic<16> = _a[1 step 16];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module module_a {
+        enum EnumA {
+            X,
+            Y,
+        }
+        let _a: EnumA = 0;
+        let _b: logic = _a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7389,7 +8564,7 @@ fn sv_keyword_usage() {
 fn sv_with_implicit_reset() {
     let code = r#"
     module ModuleA {
-        var rst: reset;
+        let rst: reset = 0;
 
         inst u: $sv::Module (
             rst,
@@ -7405,7 +8580,7 @@ fn sv_with_implicit_reset() {
 
     let code = r#"
     module ModuleB {
-        var rst: reset_async_low;
+        let rst: reset_async_low = 0;
 
         inst u: $sv::Module (
             rst,
@@ -7418,7 +8593,7 @@ fn sv_with_implicit_reset() {
 
     let code = r#"
     module ModuleA {
-        var rst: reset;
+        let rst: reset = 0;
 
         inst u: $sv::Module (
             rst: rst as reset_sync_high,
@@ -7466,7 +8641,7 @@ fn unresolvable_generic_argument() {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
+            .any(|e| matches!(e, AnalyzerError::ReferringBeforeDefinition { .. }))
     );
 
     let code = r#"
@@ -7652,115 +8827,6 @@ fn wrong_seperator() {
 }
 
 #[test]
-fn evaluator() {
-    let code = r#"
-    module ModuleA {
-        const A: u32 = 0;
-        const B: u32 = 1 + 2 - 3 + 4 * 3 / 2;
-        const C: u32 = 2 ** 2 + 5 % 2 + (1 << 3) + (16 >> 3);
-        const D: u32 = (1 >: 0) + (1 >= 1) + (3 <: 5) + (10 <= 10) + (3 == 3) + (5 != 2);
-        const E: u32 = (1 && 1) + (1 || 0) + (1 & 1) + (1 | 0) + (1 ^ 0) + ~(1 ^~ 0);
-        const F: u32 = &4'hf + |4'h1 + ~&4'h1 + ~|4'h0 + ^4'h8 + ~^4'h6;
-        const G: u32 = A + B + C + D + E + F;
-        const H: u32 = {1'b1, 2'h1, 2'd2 repeat 3};
-        const I: u32 = if B == 6 ? 10 : 20;
-        const J: u32 = $clog2(12);
-        const K: u32 = B[2:1];
-        const L: u32 = $clog2(8);
-        const M: bit<128> = 128'hffff_ffff_ffff_ffff_ffff_ffff_ffff_fff0 + 1;
-    }
-    "#;
-
-    let _ = analyze(code);
-
-    let namespace: Namespace = "prj::ModuleA".into();
-
-    let a = symbol_table::resolve((&Into::<SymbolPath>::into("A"), &namespace)).unwrap();
-    let b = symbol_table::resolve((&Into::<SymbolPath>::into("B"), &namespace)).unwrap();
-    let c = symbol_table::resolve((&Into::<SymbolPath>::into("C"), &namespace)).unwrap();
-    let d = symbol_table::resolve((&Into::<SymbolPath>::into("D"), &namespace)).unwrap();
-    let e = symbol_table::resolve((&Into::<SymbolPath>::into("E"), &namespace)).unwrap();
-    let f = symbol_table::resolve((&Into::<SymbolPath>::into("F"), &namespace)).unwrap();
-    let g = symbol_table::resolve((&Into::<SymbolPath>::into("G"), &namespace)).unwrap();
-    let h = symbol_table::resolve((&Into::<SymbolPath>::into("H"), &namespace)).unwrap();
-    let i = symbol_table::resolve((&Into::<SymbolPath>::into("I"), &namespace)).unwrap();
-    let j = symbol_table::resolve((&Into::<SymbolPath>::into("J"), &namespace)).unwrap();
-    let k = symbol_table::resolve((&Into::<SymbolPath>::into("K"), &namespace)).unwrap();
-    let l = symbol_table::resolve((&Into::<SymbolPath>::into("L"), &namespace)).unwrap();
-    let m = symbol_table::resolve((&Into::<SymbolPath>::into("M"), &namespace)).unwrap();
-
-    let a = a.found.evaluate();
-    let b = b.found.evaluate();
-    let c = c.found.evaluate();
-    let d = d.found.evaluate();
-    let e = e.found.evaluate();
-    let f = f.found.evaluate();
-    let g = g.found.evaluate();
-    let h = h.found.evaluate();
-    let i = i.found.evaluate();
-    let j = j.found.evaluate();
-    let k = k.found.evaluate();
-    let l = l.found.evaluate();
-    let m = m.found.evaluate();
-
-    assert_eq!(
-        (a.get_value(), a.get_total_width()),
-        (Some(0.into()), Some(32))
-    );
-    assert_eq!(
-        (b.get_value(), b.get_total_width()),
-        (Some(6.into()), Some(32))
-    );
-    assert_eq!(
-        (c.get_value(), c.get_total_width()),
-        (Some(15.into()), Some(32))
-    );
-    assert_eq!(
-        (d.get_value(), d.get_total_width()),
-        (Some(6.into()), Some(32))
-    );
-    assert_eq!(
-        (e.get_value(), e.get_total_width()),
-        (Some(6.into()), Some(32))
-    );
-    assert_eq!(
-        (f.get_value(), f.get_total_width()),
-        (Some(6.into()), Some(32))
-    );
-    assert_eq!(
-        (g.get_value(), g.get_total_width()),
-        (Some(39.into()), Some(32))
-    );
-    assert_eq!(
-        (h.get_value(), h.get_total_width()),
-        (Some(362.into()), Some(9))
-    );
-    assert_eq!(
-        (i.get_value(), i.get_total_width()),
-        (Some(10.into()), Some(32))
-    );
-    assert_eq!(
-        (j.get_value(), j.get_total_width()),
-        (Some(4.into()), Some(32))
-    );
-    assert_eq!(
-        (k.get_value(), k.get_total_width()),
-        (Some(3.into()), Some(2))
-    );
-    assert_eq!(
-        (l.get_value(), l.get_total_width()),
-        (Some(3.into()), Some(32))
-    );
-    assert_eq!(
-        (m.get_value(), m.get_total_width()),
-        (
-            Some(0xffff_ffff_ffff_ffff_ffff_ffff_ffff_fff1u128.into()),
-            Some(128)
-        )
-    );
-}
-
-#[test]
 fn skip_disabled_generate_block() {
     let code = r#"
     module ModuleA {
@@ -7809,8 +8875,45 @@ fn exceed_limit() {
     }
     "#;
 
+    let errors = analyze_with_large_stack(code);
+    assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic = {1 repeat 10000000};
+    }
+    "#;
+
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var _a: logic<10000000>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+
+        always_comb {
+            for i: u32 in 0..10 {
+                if i == 0 {
+                    a[i] = 0;
+                } else {
+                    a[i] = a[i-1];
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -8461,6 +9564,7 @@ fn unsigned_loop_variable_in_descending_order_for_loop() {
     module ModuleA {
         var _a: logic<10>;
         always_comb {
+            _a = 0;
             for i: i32 in rev 0..10 {
                 _a += i;
             }
@@ -8477,6 +9581,7 @@ fn unsigned_loop_variable_in_descending_order_for_loop() {
 
         var _a: logic<10>;
         always_comb {
+            _a = 0;
             for i: my_type in rev 0..10 {
                 _a += i;
             }
