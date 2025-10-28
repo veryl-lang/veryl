@@ -10613,7 +10613,7 @@ pub struct Operator05 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Operator05Term {
-    pub operator05_term: crate::veryl_token::Token, /* \^~|\^|~\^ */
+    pub operator05_term: crate::veryl_token::Token, /* \^|~\^ */
 }
 
 ///
@@ -14908,7 +14908,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 22:
     ///
-    /// `Operator05Term: "\^~|\^|~\^" : Token;`
+    /// `Operator05Term: "\^|~\^" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn operator05_term(&mut self, operator05_term: &ParseTreeType<'t>) -> Result<()> {

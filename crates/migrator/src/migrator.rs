@@ -102,4 +102,17 @@ impl VerylWalker for Migrator {
             }
         }
     }
+
+    /// Semantic action for non-terminal 'Operator05'
+    fn operator05(&mut self, arg: &Operator05) {
+        let token = arg.operator05_token.token.text.to_string();
+        match token.as_str() {
+            "^~" => {
+                self.token(&arg.operator05_token.replace("~^"));
+            }
+            _ => {
+                self.token(&arg.operator05_token);
+            }
+        }
+    }
 }
