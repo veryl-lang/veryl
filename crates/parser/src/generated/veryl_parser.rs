@@ -180,7 +180,7 @@ scanner! {
             token r"\+|-" => 20; // "Operator10Term"
             token r"<<<|>>>|<<|>>" => 21; // "Operator09Term"
             token r"<=|>=|<:|>:" => 22; // "Operator08Term"
-            token r"===|==\?|!==|!=\?|==|!=" => 23; // "Operator07Term"
+            token r"==\?|!=\?|==|!=" => 23; // "Operator07Term"
             token r"&&" => 24; // "Operator03Term"
             token r"\|\|" => 25; // "Operator02Term"
             token r"&" => 26; // "Operator06Term"
@@ -33418,7 +33418,7 @@ pub const PRODUCTIONS: &[Production; 1146] = &[
         lhs: 498,
         production: &[ParseType::T(22)],
     },
-    // 18 - Operator07Term: "===|==\?|!==|!=\?|==|!=";
+    // 18 - Operator07Term: "==\?|!=\?|==|!=";
     Production {
         lhs: 495,
         production: &[ParseType::T(23)],

@@ -131,10 +131,8 @@ impl Preprocessor for Veryl {
                                         chapter_success = false;
                                     }
                                     Ok(ret) if in_playground => {
-                                        let metadata: Metadata = toml::from_str(
-                                            &Metadata::create_default_toml("codeblock").unwrap(),
-                                        )
-                                        .unwrap();
+                                        let metadata =
+                                            Metadata::create_default("codeblock").unwrap();
                                         let prj = &metadata.project.name;
 
                                         let analyzer = Analyzer::new(&metadata);

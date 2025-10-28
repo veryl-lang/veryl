@@ -67,7 +67,7 @@ Operator11Term        : <INITIAL                                                
 Operator10Term        : <INITIAL                                                       >"\+|-"                                                                                : Token;
 Operator09Term        : <INITIAL                                                       >"<<<|>>>|<<|>>"                                                                       : Token;
 Operator08Term        : <INITIAL                                                       >"<=|>=|<:|>:"                                                                         : Token;
-Operator07Term        : <INITIAL                                                       >"===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator07Term        : <INITIAL                                                       >"==\?|!=\?|==|!="                                                                     : Token;
 Operator03Term        : <INITIAL                                                       >"&&"                                                                                  : Token;
 Operator02Term        : <INITIAL                                                       >"\|\|"                                                                                : Token;
 Operator06Term        : <INITIAL                                                       >"&"                                                                                   : Token;

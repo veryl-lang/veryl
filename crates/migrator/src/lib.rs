@@ -11,3 +11,6 @@ pub use migrator::Migrator;
 pub use parol_runtime::ParolError;
 pub use parser::Parser;
 pub use parser_error::ParserError;
+
+#[cfg(test)]
+mod tests;
