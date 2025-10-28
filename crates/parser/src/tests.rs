@@ -81,7 +81,7 @@ fn identifier() {
 #[test]
 fn expression() {
     success("let a: u32 = 1 && 1 || 1 & 1 ^ 1 ~^ 1 ^~ 1 | 1;");
-    success("let a: u32 = 1 <: 1 <= 1 >: 1 >= 1 == 1 != 1 === 1 !== 1 ==? 1 !=? 1;");
+    success("let a: u32 = 1 <: 1 <= 1 >: 1 >= 1 == 1 != 1 ==? 1 !=? 1;");
     success("let a: u32 = 1 << 1 >> 1 <<< 1 >>> 1;");
     success("let a: u32 = 1 ** 1 * 1 / 1 % 1 + 1 - 1;");
     success("let a: u32 = +-!~&|^~&~|~^^~1;");

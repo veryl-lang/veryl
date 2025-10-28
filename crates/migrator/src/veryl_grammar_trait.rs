@@ -1,8 +1,7 @@
 pub use crate::generated::veryl_grammar_trait::*;
-use crate::veryl_token::{Token, TokenRange, is_anonymous_token};
+use crate::veryl_token::{VerylToken, is_anonymous_token};
 use paste::paste;
 use std::fmt;
-use veryl_parser::resource_table::TokenId;
 
 macro_rules! list_group_to_item {
     ($x:ident) => {
@@ -178,7 +177,7 @@ impl From<&AssignDestination> for Vec<HierarchicalIdentifier> {
     }
 }
 
-impl From<&Identifier> for Expression {
+impl From<&Identifier> for ScopedIdentifier {
     fn from(value: &Identifier) -> Self {
         let scoped_identifier_group =
             Box::new(ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(
@@ -187,26 +186,146 @@ impl From<&Identifier> for Expression {
                     scoped_identifier_opt: None,
                 },
             ));
-        let scoped_identifier = Box::new(ScopedIdentifier {
+        Self {
             scoped_identifier_group,
             scoped_identifier_list: vec![],
-        });
-        let expression_identifier = Box::new(ExpressionIdentifier {
-            scoped_identifier,
+        }
+    }
+}
+
+impl From<&Identifier> for ExpressionIdentifier {
+    fn from(value: &Identifier) -> Self {
+        let scoped_identifier: ScopedIdentifier = value.into();
+        (&scoped_identifier).into()
+    }
+}
+
+impl From<&ScopedIdentifier> for ExpressionIdentifier {
+    fn from(value: &ScopedIdentifier) -> Self {
+        Self {
+            scoped_identifier: Box::new(value.clone()),
             expression_identifier_opt: None,
             expression_identifier_list: vec![],
             expression_identifier_list0: vec![],
-        });
-        let identifier_factor = Box::new(IdentifierFactor {
-            expression_identifier,
+        }
+    }
+}
+
+impl From<&GenericArgIdentifier> for ExpressionIdentifier {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let exp_identifier_list: Vec<_> = value
+            .generic_arg_identifier_list
+            .iter()
+            .map(|x| ExpressionIdentifierList0 {
+                dot: x.dot.clone(),
+                identifier: x.identifier.clone(),
+                expression_identifier_list0_list: vec![],
+            })
+            .collect();
+        Self {
+            scoped_identifier: value.scoped_identifier.clone(),
+            expression_identifier_opt: None,
+            expression_identifier_list: vec![],
+            expression_identifier_list0: exp_identifier_list,
+        }
+    }
+}
+
+impl From<&Number> for Factor {
+    fn from(value: &Number) -> Self {
+        Factor::Number(FactorNumber {
+            number: Box::new(value.clone()),
+        })
+    }
+}
+
+impl From<&BooleanLiteral> for Factor {
+    fn from(value: &BooleanLiteral) -> Self {
+        Factor::BooleanLiteral(FactorBooleanLiteral {
+            boolean_literal: Box::new(value.clone()),
+        })
+    }
+}
+
+impl From<&Identifier> for Factor {
+    fn from(value: &Identifier) -> Self {
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.into()),
             identifier_factor_opt: None,
-        });
-        let factor = Box::new(Factor::IdentifierFactor(FactorIdentifierFactor {
-            identifier_factor,
-        }));
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<&ExpressionIdentifier> for Factor {
+    fn from(value: &ExpressionIdentifier) -> Self {
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.clone()),
+            identifier_factor_opt: None,
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<&GenericArgIdentifier> for Factor {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.into()),
+            identifier_factor_opt: None,
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<(&ExpressionIdentifier, &FunctionCall)> for Factor {
+    fn from(value: (&ExpressionIdentifier, &FunctionCall)) -> Self {
+        let function_call = IdentifierFactorOptGroupFunctionCall {
+            function_call: Box::new(value.1.clone()),
+        };
+        let identifier_factor_opt_group = IdentifierFactorOptGroup::FunctionCall(function_call);
+        let identifier_factor_opt = IdentifierFactorOpt {
+            identifier_factor_opt_group: Box::new(identifier_factor_opt_group),
+        };
+        let identifier_factor = IdentifierFactor {
+            expression_identifier: Box::new(value.0.clone()),
+            identifier_factor_opt: Some(identifier_factor_opt),
+        };
+        Factor::IdentifierFactor(FactorIdentifierFactor {
+            identifier_factor: Box::new(identifier_factor),
+        })
+    }
+}
+
+impl From<&FixedType> for Factor {
+    fn from(value: &FixedType) -> Self {
+        let fixed_type = FactorTypeGroupFixedType {
+            fixed_type: Box::new(value.clone()),
+        };
+        let factor_type_group = FactorTypeGroup::FixedType(fixed_type);
+        let factor_type = FactorType {
+            factor_type_group: Box::new(factor_type_group),
+        };
+        let factor_type_factor = FactorTypeFactor {
+            factor_type_factor_list: vec![],
+            factor_type: Box::new(factor_type),
+        };
+        Factor::FactorTypeFactor(FactorFactorTypeFactor {
+            factor_type_factor: Box::new(factor_type_factor),
+        })
+    }
+}
+
+impl From<Factor> for Expression {
+    fn from(value: Factor) -> Self {
         let expression13 = Box::new(Expression13 {
             expression13_list: vec![],
-            factor,
+            factor: Box::new(value),
         });
         let expression12 = Box::new(Expression12 {
             expression13,
@@ -261,6 +380,55 @@ impl From<&Identifier> for Expression {
             expression01,
         });
         Expression { if_expression }
+    }
+}
+
+impl From<&Number> for Expression {
+    fn from(value: &Number) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&BooleanLiteral> for Expression {
+    fn from(value: &BooleanLiteral) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&Identifier> for Expression {
+    fn from(value: &Identifier) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&ExpressionIdentifier> for Expression {
+    fn from(value: &ExpressionIdentifier) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<(&ExpressionIdentifier, &FunctionCall)> for Expression {
+    fn from(value: (&ExpressionIdentifier, &FunctionCall)) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&GenericArgIdentifier> for Expression {
+    fn from(value: &GenericArgIdentifier) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
+    }
+}
+
+impl From<&FixedType> for Expression {
+    fn from(value: &FixedType) -> Self {
+        let factor: Factor = value.into();
+        factor.into()
     }
 }
 
@@ -429,6 +597,96 @@ impl Expression {
     }
 }
 
+impl ModuleDeclaration {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        for x in &self.module_declaration_list {
+            ret.append(&mut x.module_group.collect_import_declarations());
+        }
+        ret
+    }
+}
+
+impl ModuleGroup {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        match &*self.module_group_group {
+            ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
+                for x in &x.module_group_group_list {
+                    ret.append(&mut x.module_group.collect_import_declarations());
+                }
+            }
+            ModuleGroupGroup::ModuleItem(x) => {
+                if let GenerateItem::ImportDeclaration(x) = &*x.module_item.generate_item {
+                    ret.push(x.import_declaration.as_ref().clone());
+                }
+            }
+        }
+
+        ret
+    }
+}
+
+impl InterfaceDeclaration {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        for x in &self.interface_declaration_list {
+            ret.append(&mut x.interface_group.collect_import_declarations());
+        }
+        ret
+    }
+}
+
+impl InterfaceGroup {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        match &*self.interface_group_group {
+            InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
+                for x in &x.interface_group_group_list {
+                    ret.append(&mut x.interface_group.collect_import_declarations());
+                }
+            }
+            InterfaceGroupGroup::InterfaceItem(x) => {
+                if let InterfaceItem::GenerateItem(x) = &*x.interface_item
+                    && let GenerateItem::ImportDeclaration(x) = &*x.generate_item
+                {
+                    ret.push(x.import_declaration.as_ref().clone());
+                }
+            }
+        }
+        ret
+    }
+}
+
+impl PackageDeclaration {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        for x in &self.package_declaration_list {
+            ret.append(&mut x.package_group.collect_import_declarations());
+        }
+        ret
+    }
+}
+
+impl PackageGroup {
+    pub fn collect_import_declarations(&self) -> Vec<ImportDeclaration> {
+        let mut ret = Vec::new();
+        match &*self.package_group_group {
+            PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
+                for x in &x.package_group_group_list {
+                    ret.append(&mut x.package_group.collect_import_declarations());
+                }
+            }
+            PackageGroupGroup::PackageItem(x) => {
+                if let PackageItem::ImportDeclaration(x) = &*x.package_item {
+                    ret.push(x.import_declaration.as_ref().clone());
+                }
+            }
+        }
+        ret
+    }
+}
+
 impl fmt::Display for Direction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let token = match self {
@@ -439,6 +697,12 @@ impl fmt::Display for Direction {
             Direction::Import(x) => &x.import.import_token,
         };
         token.fmt(f)
+    }
+}
+
+impl ScopedIdentifier {
+    pub fn get_scope_depth(&self) -> usize {
+        self.scoped_identifier_list.len() + 1
     }
 }
 
@@ -528,113 +792,68 @@ impl AlwaysFfDeclaration {
     }
 }
 
-pub trait FirstToken {
-    fn token(&self) -> Token;
-    fn id(&self) -> TokenId {
-        self.token().id
-    }
-    fn line(&self) -> u32 {
-        self.token().line
-    }
-}
-
-impl FirstToken for LBrace {
-    fn token(&self) -> Token {
-        self.l_brace_token.token
-    }
-}
-
-impl FirstToken for QuoteLBrace {
-    fn token(&self) -> Token {
-        self.quote_l_brace_token.token
-    }
-}
-
-impl FirstToken for RBrace {
-    fn token(&self) -> Token {
-        self.r_brace_token.token
+impl ProtoDeclaration {
+    pub fn identifier_token(&self) -> VerylToken {
+        match &*self.proto_declaration_group {
+            ProtoDeclarationGroup::ProtoModuleDeclaration(x) => x
+                .proto_module_declaration
+                .identifier
+                .identifier_token
+                .clone(),
+            ProtoDeclarationGroup::ProtoInterfaceDeclaration(x) => x
+                .proto_interface_declaration
+                .identifier
+                .identifier_token
+                .clone(),
+            ProtoDeclarationGroup::ProtoPackageDeclaration(x) => x
+                .proto_package_declaration
+                .identifier
+                .identifier_token
+                .clone(),
+        }
     }
 }
 
-impl FirstToken for Comma {
-    fn token(&self) -> Token {
-        self.comma_token.token
-    }
-}
-
-impl FirstToken for Expression {
-    fn token(&self) -> Token {
-        let range: TokenRange = self.into();
-        range.beg
-    }
-}
-
-impl FirstToken for StructConstructorItem {
-    fn token(&self) -> Token {
-        self.identifier.as_ref().token()
-    }
-}
-
-impl FirstToken for ConcatenationItem {
-    fn token(&self) -> Token {
-        self.expression.as_ref().token()
-    }
-}
-
-impl FirstToken for ArrayLiteralItem {
-    fn token(&self) -> Token {
-        match self.array_literal_item_group.as_ref() {
-            ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
-                x.expression.as_ref().token()
+impl PublicDescriptionItem {
+    pub fn identifier_token(&self) -> VerylToken {
+        match self {
+            PublicDescriptionItem::ModuleDeclaration(x) => {
+                x.module_declaration.identifier.identifier_token.clone()
             }
-            ArrayLiteralItemGroup::DefaulColonExpression(x) => x.defaul.default_token.token,
+            PublicDescriptionItem::InterfaceDeclaration(x) => {
+                x.interface_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::PackageDeclaration(x) => {
+                x.package_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::AliasDeclaration(x) => {
+                x.alias_declaration.identifier.identifier_token.clone()
+            }
+            PublicDescriptionItem::ProtoDeclaration(x) => x.proto_declaration.identifier_token(),
         }
     }
 }
 
-impl FirstToken for Number {
-    fn token(&self) -> Token {
+impl DescriptionItem {
+    pub fn identifier_token(&self) -> Option<VerylToken> {
         match self {
-            Number::IntegralNumber(x) => x.integral_number.token(),
-            Number::RealNumber(x) => x.real_number.token(),
+            DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
+                Some(x.public_description_item.identifier_token())
+            }
+            DescriptionItem::ImportDeclaration(_) => None,
+            DescriptionItem::BindDeclaration(x) => Some(
+                x.bind_declaration
+                    .component_instantiation
+                    .identifier
+                    .identifier_token
+                    .clone(),
+            ),
+            DescriptionItem::EmbedDeclaration(x) => {
+                Some(x.embed_declaration.identifier.identifier_token.clone())
+            }
+            DescriptionItem::IncludeDeclaration(x) => {
+                Some(x.include_declaration.identifier.identifier_token.clone())
+            }
         }
-    }
-}
-
-impl FirstToken for IntegralNumber {
-    fn token(&self) -> Token {
-        match self {
-            IntegralNumber::BaseLess(x) => x.base_less.base_less_token.token,
-            IntegralNumber::Based(x) => x.based.based_token.token,
-            IntegralNumber::AllBit(x) => x.all_bit.all_bit_token.token,
-        }
-    }
-}
-
-impl FirstToken for RealNumber {
-    fn token(&self) -> Token {
-        match self {
-            RealNumber::Exponent(x) => x.exponent.exponent_token.token,
-            RealNumber::FixedPoint(x) => x.fixed_point.fixed_point_token.token,
-        }
-    }
-}
-
-impl FirstToken for Identifier {
-    fn token(&self) -> Token {
-        self.identifier_token.token
-    }
-}
-
-impl FirstToken for IfExpression {
-    fn token(&self) -> Token {
-        let range: TokenRange = self.into();
-        range.beg
-    }
-}
-
-impl FirstToken for RangeItem {
-    fn token(&self) -> Token {
-        self.range.expression.token()
     }
 }

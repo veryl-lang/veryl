@@ -53,7 +53,7 @@
 /*   15 */ Operator10Term: "\+|-" : Token;
 /*   16 */ Operator09Term: "<<<|>>>|<<|>>" : Token;
 /*   17 */ Operator08Term: "<=|>=|<:|>:" : Token;
-/*   18 */ Operator07Term: "===|==\?|!==|!=\?|==|!=" : Token;
+/*   18 */ Operator07Term: "==\?|!=\?|==|!=" : Token;
 /*   19 */ Operator03Term: "&&" : Token;
 /*   20 */ Operator02Term: "\|\|" : Token;
 /*   21 */ Operator06Term: "&" : Token;

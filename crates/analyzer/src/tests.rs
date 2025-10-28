@@ -9,8 +9,7 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
 

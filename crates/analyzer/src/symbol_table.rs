@@ -1741,8 +1741,7 @@ mod tests {
     "##;
 
     fn parse() {
-        let metadata: Metadata =
-            toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+        let metadata = Metadata::create_default("prj").unwrap();
         let parser = Parser::parse(&CODE, &"").unwrap();
         let analyzer = Analyzer::new(&metadata);
         analyzer.analyze_pass1(&"prj", &"", &parser.veryl);

@@ -382,6 +382,11 @@ target = {{type = "directory", path = "target"}}"###
         ))
     }
 
+    pub fn create_default(name: &str) -> Result<Metadata, MetadataError> {
+        let metadata: Metadata = toml::from_str(&Self::create_default_toml(name)?)?;
+        Ok(metadata)
+    }
+
     pub fn create_default_gitignore() -> &'static str {
         r#".build/
 "#

@@ -37,8 +37,6 @@ module veryl_testcase_Module03;
     logic _ffff      ; always_comb _ffff       = 1 >= 1;
     logic _fffff     ; always_comb _fffff      = 1 == 1;
     logic _ffffff    ; always_comb _ffffff     = 1 != 1;
-    logic _fffffff   ; always_comb _fffffff    = 1 === 1;
-    logic _ffffffff  ; always_comb _ffffffff   = 1 !== 1;
     logic _fffffffff ; always_comb _fffffffff  = 1 ==? 1;
     logic _ffffffffff; always_comb _ffffffffff = 1 !=? 1;
 

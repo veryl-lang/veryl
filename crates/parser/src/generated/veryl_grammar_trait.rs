@@ -10669,7 +10669,7 @@ pub struct Operator07 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Operator07Term {
-    pub operator07_term: crate::veryl_token::Token, /* ===|==\?|!==|!=\?|==|!= */
+    pub operator07_term: crate::veryl_token::Token, /* ==\?|!=\?|==|!= */
 }
 
 ///
@@ -14832,7 +14832,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 18:
     ///
-    /// `Operator07Term: "===|==\?|!==|!=\?|==|!=" : Token;`
+    /// `Operator07Term: "==\?|!=\?|==|!=" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn operator07_term(&mut self, operator07_term: &ParseTreeType<'t>) -> Result<()> {

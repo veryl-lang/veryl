@@ -37,8 +37,6 @@ module Module03 {
     let _ffff      : logic = 1 >= 1;
     let _fffff     : logic = 1 == 1;
     let _ffffff    : logic = 1 != 1;
-    let _fffffff   : logic = 1 === 1;
-    let _ffffffff  : logic = 1 !== 1;
     let _fffffffff : logic = 1 ==? 1;
     let _ffffffffff: logic = 1 !=? 1;
 
