@@ -751,6 +751,12 @@ impl SymbolTable {
         }
 
         let mut namespace = namespace.clone();
+
+        // Remove anonymous blocks
+        namespace
+            .paths
+            .retain(|x| x.to_string().find('@').is_none());
+
         let path = namespace.pop().map(|x| SymbolPath::new(&[x]))?;
         let context = ResolveContext::new(&namespace);
         let params = self
