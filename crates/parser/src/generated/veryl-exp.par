@@ -57,7 +57,7 @@
 /*   19 */ Operator03Term: "&&" : Token;
 /*   20 */ Operator02Term: "\|\|" : Token;
 /*   21 */ Operator06Term: "&" : Token;
-/*   22 */ Operator05Term: "\^~|\^|~\^" : Token;
+/*   22 */ Operator05Term: "\^|~\^" : Token;
 /*   23 */ Operator04Term: "\|" : Token;
 /*   24 */ UnaryOperatorTerm: "~&|~\||!|~" : Token;
 /*   25 */ ColonColonLAngleTerm: <INITIAL, Generic>'::<' : Token;

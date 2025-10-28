@@ -43,3 +43,18 @@ fn migrate_ne() {
 
     migrate(code, exp);
 }
+
+#[test]
+fn migrate_xnor() {
+    let code = r#"
+    module A {
+        let a: logic = (1 ^~ 1);
+    }"#;
+
+    let exp = r#"
+    module A {
+        let a: logic = (1 ~^ 1);
+    }"#;
+
+    migrate(code, exp);
+}

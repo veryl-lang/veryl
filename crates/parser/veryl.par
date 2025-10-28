@@ -71,7 +71,7 @@ Operator07Term        : <INITIAL                                                
 Operator03Term        : <INITIAL                                                       >"&&"                                                                                  : Token;
 Operator02Term        : <INITIAL                                                       >"\|\|"                                                                                : Token;
 Operator06Term        : <INITIAL                                                       >"&"                                                                                   : Token;
-Operator05Term        : <INITIAL                                                       >"\^~|\^|~\^"                                                                          : Token;
+Operator05Term        : <INITIAL                                                       >"\^|~\^"                                                                              : Token;
 Operator04Term        : <INITIAL                                                       >"\|"                                                                                  : Token;
 UnaryOperatorTerm     : <INITIAL                                                       >"~&|~\||!|~"                                                                          : Token;
 ColonColonLAngleTerm  : <INITIAL, Generic                                              >'::<'                                                                                 : Token;

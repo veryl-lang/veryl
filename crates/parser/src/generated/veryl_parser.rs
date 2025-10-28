@@ -184,7 +184,7 @@ scanner! {
             token r"&&" => 24; // "Operator03Term"
             token r"\|\|" => 25; // "Operator02Term"
             token r"&" => 26; // "Operator06Term"
-            token r"\^~|\^|~\^" => 27; // "Operator05Term"
+            token r"\^|~\^" => 27; // "Operator05Term"
             token r"\|" => 28; // "Operator04Term"
             token r"~&|~\||!|~" => 29; // "UnaryOperatorTerm"
             token r"::<" => 30; // "ColonColonLAngleTerm"
@@ -33438,7 +33438,7 @@ pub const PRODUCTIONS: &[Production; 1146] = &[
         lhs: 492,
         production: &[ParseType::T(26)],
     },
-    // 22 - Operator05Term: "\^~|\^|~\^";
+    // 22 - Operator05Term: "\^|~\^";
     Production {
         lhs: 489,
         production: &[ParseType::T(27)],
