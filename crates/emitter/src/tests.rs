@@ -2294,3 +2294,80 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn package_alias_defined_in_module() {
+    let code = r#"
+proto package a_proto_pkg {
+    struct a_struct {
+        a: u32,
+    }
+    const A: a_struct;
+}
+package a_pkg::<A_VALUE: u32> for a_proto_pkg {
+    struct a_struct {
+        a: u32,
+    }
+    const A: a_struct = a_struct'{ a: A_VALUE };
+}
+
+proto package b_proto_pkg {
+    const B: u32;
+}
+package b_pkg::<B_VALUE: u32> for b_proto_pkg {
+    const B: u32 = B_VALUE;
+}
+
+module c_module::<PKG: b_proto_pkg> {
+}
+
+module d_module::<A_PKG: a_proto_pkg> {
+    import A_PKG::*;
+    alias package B_PKG = b_pkg::<A.a>;
+    inst u: c_module::<B_PKG>;
+}
+
+alias package A_PKG    = a_pkg::<32>;
+alias module  D_MODULE = d_module::<A_PKG>;
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__32;
+    typedef struct packed {
+        int unsigned a;
+    } a_struct;
+    localparam a_struct A = '{a: 32};
+endpackage
+
+
+package prj___b_pkg____a_pkg__32_A_a;
+    localparam int unsigned B = prj___a_pkg__32::A.a;
+endpackage
+
+module prj___c_module____b_pkg____a_pkg__32_A_a;
+endmodule
+
+module prj___d_module____a_pkg__32;
+    import prj___a_pkg__32::*;
+
+
+
+    prj___c_module____b_pkg____a_pkg__32_A_a u ();
+endmodule
+
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
