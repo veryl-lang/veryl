@@ -4762,6 +4762,37 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package foo_proto_pkg {
+        const WIDTH: u32;
+        struct foo_struct {
+        foo: logic<WIDTH>,
+        }
+    }
+    package foo_pkg::<W: u32> for foo_proto_pkg {
+        const WIDTH: u32 = W;
+        struct foo_struct {
+        foo: logic<WIDTH>,
+        }
+    }
+    interface foo_if::<PKG: foo_proto_pkg> {
+        var foo: PKG::foo_struct;
+        modport mp {
+            foo: input,
+        }
+    }
+    module foo_module::<PKG: foo_proto_pkg> {
+        inst foo: foo_if::<PKG>;
+        var _foo: logic;
+        always_comb {
+            _foo = foo.foo.foo;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
