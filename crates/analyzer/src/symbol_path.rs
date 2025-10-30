@@ -434,6 +434,7 @@ impl GenericSymbolPath {
                 && let Some(mut alias_target) = symbol.found.alias_target()
             {
                 alias_target.apply_map(&generic_maps);
+                alias_target.resolve_imported(&namespace, Some(&generic_maps));
                 if (i + 1) < self.paths.len() {
                     for j in (i + 1)..self.paths.len() {
                         alias_target.paths.push(self.paths[j].clone());
@@ -561,11 +562,20 @@ impl GenericSymbolPath {
             return;
         }
         if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), namespace)) {
-            if matches!(symbol.found.kind, SymbolKind::EnumMember(_)) {
+            if self.len() > 1
+                && matches!(
+                    symbol.found.kind,
+                    SymbolKind::EnumMember(_)
+                        | SymbolKind::StructMember(_)
+                        | SymbolKind::UnionMember(_)
+                )
+            {
                 // The parent enum declaration is imported but not the enum member.
                 // Therefore, we need to execute `resolve_imported` to the parent enum declaration.
                 // see:
                 // https://github.com/veryl-lang/veryl/issues/1721#issuecomment-2986758880
+                //
+                // This is also applied for struct/union member.
                 let member_path = self.paths.pop().unwrap();
                 if namespace.matched(&symbol.found.namespace) {
                     // For case that the given namespace is matched with the enum declaration
