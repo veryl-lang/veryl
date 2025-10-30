@@ -13,7 +13,9 @@ use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
 };
-use veryl_analyzer::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
+use veryl_analyzer::symbol_path::{
+    FixedTypeKind, GenericSymbolPath, GenericSymbolPathKind, SymbolPath,
+};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
@@ -2176,7 +2178,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Bool'
     fn bool(&mut self, arg: &Bool) {
-        self.veryl_token(&arg.bool_token.replace("logic"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.bool_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'Clock'
@@ -2226,12 +2229,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'F32'
     fn f32(&mut self, arg: &F32) {
-        self.veryl_token(&arg.f32_token.replace("shortreal"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.f32_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'F64'
     fn f64(&mut self, arg: &F64) {
-        self.veryl_token(&arg.f64_token.replace("real"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.f64_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'False'
@@ -2241,22 +2246,26 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'I8'
     fn i8(&mut self, arg: &I8) {
-        self.veryl_token(&arg.i8_token.replace("byte signed"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.i8_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'I16'
     fn i16(&mut self, arg: &I16) {
-        self.veryl_token(&arg.i16_token.replace("shortint signed"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.i16_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'I32'
     fn i32(&mut self, arg: &I32) {
-        self.veryl_token(&arg.i32_token.replace("int signed"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.i32_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'I64'
     fn i64(&mut self, arg: &I64) {
-        self.veryl_token(&arg.i64_token.replace("longint signed"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.i64_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'Lsb'
@@ -2294,22 +2303,26 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'U8'
     fn u8(&mut self, arg: &U8) {
-        self.veryl_token(&arg.u8_token.replace("byte unsigned"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.u8_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'U16'
     fn u16(&mut self, arg: &U16) {
-        self.veryl_token(&arg.u16_token.replace("shortint unsigned"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.u16_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'U32'
     fn u32(&mut self, arg: &U32) {
-        self.veryl_token(&arg.u32_token.replace("int unsigned"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.u32_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'U64'
     fn u64(&mut self, arg: &U64) {
-        self.veryl_token(&arg.u64_token.replace("longint unsigned"));
+        let kind: FixedTypeKind = arg.into();
+        self.veryl_token(&arg.u64_token.replace(&kind.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'Identifier'
@@ -2410,10 +2423,16 @@ impl VerylWalker for Emitter {
                 }
                 (Err(_), path) if !path.is_resolvable() => {
                     // emit literal by generics
-                    let text = if let GenericSymbolPathKind::Boolean(x) = path.kind {
-                        if x { "1'b1" } else { "1'b0" }
-                    } else {
-                        &path.base_path(0).0[0].to_string()
+                    let text = match path.kind {
+                        GenericSymbolPathKind::Boolean(x) => {
+                            if x {
+                                "1'b1"
+                            } else {
+                                "1'b0"
+                            }
+                        }
+                        GenericSymbolPathKind::FixedType(x) => &x.to_sv_string(),
+                        _ => &path.base_path(0).0[0].to_string(),
                     };
                     self.identifier(&Identifier {
                         identifier_token: arg.identifier().replace(text),

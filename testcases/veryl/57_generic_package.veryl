@@ -35,6 +35,10 @@ package Package57F::<M: ProtoModule57F> for ProtoPackage57F {
     alias module InstModule = M;
 }
 
+package Package57G::<T: type> {
+    type TYPE = T;
+}
+
 module Module57 {
     import Package57E::Y;
     import Package57B::<5>::*;
@@ -53,4 +57,8 @@ module Module57 {
     assign _d.d1 = 1;
 
     inst u: Package57F::<Module57F>::InstModule;
+
+    let _e: Package57G::<i32>::TYPE  = 0;
+    let _f: Package57G::<u32>::TYPE  = 0;
+    let _g: Package57G::<bool>::TYPE = false;
 }
