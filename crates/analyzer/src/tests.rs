@@ -6169,6 +6169,22 @@ fn invalid_factor_kind() {
     assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
     assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
 
+    let code = r#"
+    module Y (
+        a: modport $sv::InterfaceA::slave,
+    ) {}
+
+    module X {
+        inst x: $sv::InterfaceA;
+        inst u: Y (
+            a: x,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     // This will be reported as Mismatch Type error.
     //    let code = r#"
     //    module ModuleA::<T: type> {
