@@ -6185,6 +6185,30 @@ fn invalid_factor_kind() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport slave {
+            a: input,
+        }
+    }
+    alias interface InterfaceB = InterfaceA;
+
+    module Y (
+        a: modport InterfaceA::slave,
+    ) {}
+
+    module X {
+        inst x: InterfaceB;
+        inst u: Y (
+            a: x,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     // This will be reported as Mismatch Type error.
     //    let code = r#"
     //    module ModuleA::<T: type> {

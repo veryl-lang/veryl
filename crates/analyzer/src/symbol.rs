@@ -171,7 +171,8 @@ impl Symbol {
             | SymbolKind::Interface(_)
             | SymbolKind::ProtoInterface(_)
             | SymbolKind::Package(_)
-            | SymbolKind::ProtoPackage(_) => Some(symbol.clone()),
+            | SymbolKind::ProtoPackage(_)
+            | SymbolKind::SystemVerilog => Some(symbol.clone()),
             SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
@@ -297,16 +298,20 @@ impl Symbol {
                     if let Ok(symbol) =
                         symbol_table::resolve((&x.type_name.generic_path(), &self.namespace))
                     {
-                        match symbol.found.kind {
-                            SymbolKind::Interface(_) => {
-                                if let Some(array) = evaluator.expression_list(&x.array) {
-                                    Evaluated::create_user_defined(symbol.found.id, vec![], array)
-                                } else {
-                                    Evaluated::create_unknown()
+                        if let Some(symbol) = Symbol::trace_component_symbol(&symbol.found) {
+                            match symbol.kind {
+                                SymbolKind::Interface(_) => {
+                                    if let Some(array) = evaluator.expression_list(&x.array) {
+                                        Evaluated::create_user_defined(symbol.id, vec![], array)
+                                    } else {
+                                        Evaluated::create_unknown()
+                                    }
                                 }
+                                SymbolKind::SystemVerilog => Evaluated::create_unknown(),
+                                _ => self.create_evaluated_with_error(),
                             }
-                            SymbolKind::SystemVerilog => Evaluated::create_unknown(),
-                            _ => self.create_evaluated_with_error(),
+                        } else {
+                            self.create_evaluated_with_error()
                         }
                     } else {
                         Evaluated::create_unknown()
