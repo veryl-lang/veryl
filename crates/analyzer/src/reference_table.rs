@@ -235,9 +235,6 @@ impl ReferenceTable {
         generic_maps: Option<&Vec<GenericMap>>,
     ) {
         let mut path = path.clone();
-        if let Some(maps) = generic_maps {
-            path.apply_map(maps);
-        }
 
         let orig_len = path.len();
         path.resolve_imported(namespace, generic_maps);
@@ -309,7 +306,7 @@ impl ReferenceTable {
                         self.add_generic_reference(&symbol.found, namespace, &path, i);
                         return;
                     } else {
-                        self.insert_generic_instance(&path, i, &args, &symbol.found);
+                        self.insert_generic_instance(&path, i, namespace, &args, &symbol.found);
                     }
                 }
                 Err(err) => {
@@ -327,6 +324,7 @@ impl ReferenceTable {
         &mut self,
         path: &GenericSymbolPath,
         ith: usize,
+        namespace: &Namespace,
         generic_args: &[GenericSymbolPath],
         target: &Symbol,
     ) {
@@ -355,14 +353,56 @@ impl ReferenceTable {
                 continue;
             }
 
-            self.generic_symbol_path(
-                path,
-                &target.inner_namespace(),
-                false,
-                Some(target.token),
-                Some(&map),
-            );
+            let mut path = path.clone();
+            path.apply_map(&map);
+
+            let target_namespace = target.inner_namespace();
+            if let Some(path) = Self::append_project_path(&path, namespace, &target_namespace) {
+                self.generic_symbol_path(
+                    &path,
+                    &target_namespace,
+                    false,
+                    Some(target.token),
+                    Some(&map),
+                );
+            } else {
+                self.generic_symbol_path(
+                    &path,
+                    &target_namespace,
+                    false,
+                    Some(target.token),
+                    Some(&map),
+                );
+            };
         }
+    }
+
+    fn append_project_path(
+        path: &GenericSymbolPath,
+        current_namespace: &Namespace,
+        next_namespace: &Namespace,
+    ) -> Option<GenericSymbolPath> {
+        if current_namespace.paths[0] == next_namespace.paths[0] {
+            // both namespaces belong to the same project
+            return None;
+        }
+
+        let symbol = symbol_table::resolve((&path.base_path(0), current_namespace))
+            .map(|x| x.found)
+            .ok()?;
+        if !symbol.is_component(true) {
+            return None;
+        }
+
+        let project_symbol = symbol_table::find_project_symbol(current_namespace.paths[0])?;
+        let project_path = GenericSymbol {
+            base: project_symbol.token,
+            arguments: vec![],
+        };
+        let mut path = path.clone();
+        path.paths.insert(0, project_path);
+
+        Some(path)
     }
 
     fn add_generic_reference(
@@ -386,7 +426,7 @@ impl ReferenceTable {
             let mut path = path.clone();
             let ith = path.len() - 1;
             path.apply_map(&[map]);
-            self.insert_generic_instance(&path, ith, &path.paths[ith].arguments, symbol);
+            self.insert_generic_instance(&path, ith, namespace, &path.paths[ith].arguments, symbol);
         }
 
         let kind = match target.kind {

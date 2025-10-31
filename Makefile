@@ -42,6 +42,13 @@ release_win:
 	mv -v ./support/sourcemap-resolver/target/x86_64-pc-windows-msvc/release/sourcemap-resolver.exe ./
 	7z a ${ZIP_NAME}-x86_64-windows.zip $(addsuffix .exe, ${BIN_NAMES}) sourcemap-resolver.exe
 
+release_win_aarch64:
+	cargo build --locked --release --target=aarch64-pc-windows-msvc $(addprefix --bin , ${BIN_NAMES})
+	cargo build --locked --release --target=aarch64-pc-windows-msvc --manifest-path ./support/sourcemap-resolver/Cargo.toml
+	mv -v $(addsuffix .exe, $(addprefix target/aarch64-pc-windows-msvc/release/, ${BIN_NAMES})) ./
+	mv -v ./support/sourcemap-resolver/target/aarch64-pc-windows-msvc/release/sourcemap-resolver.exe ./
+	7z a ${ZIP_NAME}-aarch64-windows.zip $(addsuffix .exe, ${BIN_NAMES}) sourcemap-resolver.exe
+
 release_mac:
 	cargo build --locked --release --target=x86_64-apple-darwin  $(addprefix --bin , ${BIN_NAMES})
 	cargo build --locked --release --target=aarch64-apple-darwin $(addprefix --bin , ${BIN_NAMES})

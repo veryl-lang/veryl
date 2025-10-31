@@ -178,6 +178,13 @@ impl From<(&SVec<StrId>, &Namespace)> for SymbolPathNamespace {
     }
 }
 
+impl From<(StrId, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (StrId, &Namespace)) -> Self {
+        let path = SymbolPath::new(&[value.0]);
+        SymbolPathNamespace(path, value.1.clone())
+    }
+}
+
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {
         let namespace = namespace_table::get(value.identifier_token.token.id).unwrap_or_default();
@@ -185,11 +192,18 @@ impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     }
 }
 
+impl From<(&syntax_tree::Identifier, &Namespace)> for SymbolPathNamespace {
+    fn from(value: (&syntax_tree::Identifier, &Namespace)) -> Self {
+        let (identifier, namespace) = value;
+        SymbolPathNamespace(identifier.into(), namespace.clone())
+    }
+}
+
 impl From<(&syntax_tree::Identifier, Option<&Namespace>)> for SymbolPathNamespace {
     fn from(value: (&syntax_tree::Identifier, Option<&Namespace>)) -> Self {
         let (identifier, namespace) = value;
         if let Some(namespace) = namespace {
-            SymbolPathNamespace(identifier.into(), namespace.clone())
+            (identifier, namespace).into()
         } else {
             identifier.into()
         }
@@ -243,9 +257,156 @@ impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamesapce {
 }
 
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]
+pub enum FixedTypeKind {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
+    Bool,
+    String,
+}
+
+impl fmt::Display for FixedTypeKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+            Self::Bool => "bool",
+            Self::String => "string",
+        };
+        text.fmt(f)
+    }
+}
+
+impl FixedTypeKind {
+    pub fn to_sv_string(&self) -> String {
+        let text = match self {
+            Self::U8 => "byte unsigned",
+            Self::U16 => "shortint unsigned",
+            Self::U32 => "int unsigned",
+            Self::U64 => "longint unsigned",
+            Self::I8 => "byte signed",
+            Self::I16 => "shortint signed",
+            Self::I32 => "int signed",
+            Self::I64 => "longint signed",
+            Self::F32 => "shortreal",
+            Self::F64 => "real",
+            Self::Bool => "logic",
+            Self::String => "string",
+        };
+        text.to_string()
+    }
+}
+
+impl From<&syntax_tree::U8> for FixedTypeKind {
+    fn from(_value: &syntax_tree::U8) -> Self {
+        Self::U8
+    }
+}
+
+impl From<&syntax_tree::U16> for FixedTypeKind {
+    fn from(_value: &syntax_tree::U16) -> Self {
+        Self::U16
+    }
+}
+
+impl From<&syntax_tree::U32> for FixedTypeKind {
+    fn from(_value: &syntax_tree::U32) -> Self {
+        Self::U32
+    }
+}
+
+impl From<&syntax_tree::U64> for FixedTypeKind {
+    fn from(_value: &syntax_tree::U64) -> Self {
+        Self::U64
+    }
+}
+
+impl From<&syntax_tree::I8> for FixedTypeKind {
+    fn from(_value: &syntax_tree::I8) -> Self {
+        Self::I8
+    }
+}
+
+impl From<&syntax_tree::I16> for FixedTypeKind {
+    fn from(_value: &syntax_tree::I16) -> Self {
+        Self::I16
+    }
+}
+
+impl From<&syntax_tree::I32> for FixedTypeKind {
+    fn from(_value: &syntax_tree::I32) -> Self {
+        Self::I32
+    }
+}
+
+impl From<&syntax_tree::I64> for FixedTypeKind {
+    fn from(_value: &syntax_tree::I64) -> Self {
+        Self::I64
+    }
+}
+
+impl From<&syntax_tree::F32> for FixedTypeKind {
+    fn from(_value: &syntax_tree::F32) -> Self {
+        Self::F32
+    }
+}
+
+impl From<&syntax_tree::F64> for FixedTypeKind {
+    fn from(_value: &syntax_tree::F64) -> Self {
+        Self::F64
+    }
+}
+
+impl From<&syntax_tree::Bool> for FixedTypeKind {
+    fn from(_value: &syntax_tree::Bool) -> Self {
+        Self::Bool
+    }
+}
+
+impl From<&syntax_tree::Strin> for FixedTypeKind {
+    fn from(_value: &syntax_tree::Strin) -> Self {
+        Self::String
+    }
+}
+
+impl From<&syntax_tree::FixedType> for FixedTypeKind {
+    fn from(value: &syntax_tree::FixedType) -> Self {
+        match value {
+            syntax_tree::FixedType::U8(x) => x.u8.as_ref().into(),
+            syntax_tree::FixedType::U16(x) => x.u16.as_ref().into(),
+            syntax_tree::FixedType::U32(x) => x.u32.as_ref().into(),
+            syntax_tree::FixedType::U64(x) => x.u64.as_ref().into(),
+            syntax_tree::FixedType::I8(x) => x.i8.as_ref().into(),
+            syntax_tree::FixedType::I16(x) => x.i16.as_ref().into(),
+            syntax_tree::FixedType::I32(x) => x.i32.as_ref().into(),
+            syntax_tree::FixedType::I64(x) => x.i64.as_ref().into(),
+            syntax_tree::FixedType::F32(x) => x.f32.as_ref().into(),
+            syntax_tree::FixedType::F64(x) => x.f64.as_ref().into(),
+            syntax_tree::FixedType::Bool(x) => x.bool.as_ref().into(),
+            syntax_tree::FixedType::Strin(x) => x.strin.as_ref().into(),
+        }
+    }
+}
+
+#[derive(Copy, Debug, Clone, PartialEq, Eq)]
 pub enum GenericSymbolPathKind {
     Identifier,
-    FixedType,
+    FixedType(FixedTypeKind),
     IntegerBased,
     IntegerBaseLess,
     IntegerAllBit,
@@ -258,7 +419,7 @@ impl fmt::Display for GenericSymbolPathKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
             GenericSymbolPathKind::Identifier => "identifier".to_string(),
-            GenericSymbolPathKind::FixedType => "fixed type".to_string(),
+            GenericSymbolPathKind::FixedType(x) => x.to_string(),
             GenericSymbolPathKind::IntegerBased => "integer based".to_string(),
             GenericSymbolPathKind::IntegerBaseLess => "integer base less".to_string(),
             GenericSymbolPathKind::IntegerAllBit => "integer all bit".to_string(),
@@ -420,6 +581,7 @@ impl GenericSymbolPath {
                 && let Some(mut alias_target) = symbol.found.alias_target()
             {
                 alias_target.apply_map(&generic_maps);
+                alias_target.resolve_imported(&namespace, Some(&generic_maps));
                 if (i + 1) < self.paths.len() {
                     for j in (i + 1)..self.paths.len() {
                         alias_target.paths.push(self.paths[j].clone());
@@ -547,11 +709,20 @@ impl GenericSymbolPath {
             return;
         }
         if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), namespace)) {
-            if matches!(symbol.found.kind, SymbolKind::EnumMember(_)) {
+            if self.len() > 1
+                && matches!(
+                    symbol.found.kind,
+                    SymbolKind::EnumMember(_)
+                        | SymbolKind::StructMember(_)
+                        | SymbolKind::UnionMember(_)
+                )
+            {
                 // The parent enum declaration is imported but not the enum member.
                 // Therefore, we need to execute `resolve_imported` to the parent enum declaration.
                 // see:
                 // https://github.com/veryl-lang/veryl/issues/1721#issuecomment-2986758880
+                //
+                // This is also applied for struct/union member.
                 let member_path = self.paths.pop().unwrap();
                 if namespace.matched(&symbol.found.namespace) {
                     // For case that the given namespace is matched with the enum declaration
@@ -634,28 +805,15 @@ impl From<&Token> for GenericSymbolPath {
 
 impl From<&syntax_tree::FixedType> for GenericSymbolPath {
     fn from(value: &syntax_tree::FixedType) -> Self {
-        let token = match value {
-            syntax_tree::FixedType::U8(x) => x.u8.u8_token.token,
-            syntax_tree::FixedType::U16(x) => x.u16.u16_token.token,
-            syntax_tree::FixedType::U32(x) => x.u32.u32_token.token,
-            syntax_tree::FixedType::U64(x) => x.u64.u64_token.token,
-            syntax_tree::FixedType::I8(x) => x.i8.i8_token.token,
-            syntax_tree::FixedType::I16(x) => x.i16.i16_token.token,
-            syntax_tree::FixedType::I32(x) => x.i32.i32_token.token,
-            syntax_tree::FixedType::I64(x) => x.i64.i64_token.token,
-            syntax_tree::FixedType::F32(x) => x.f32.f32_token.token,
-            syntax_tree::FixedType::F64(x) => x.f64.f64_token.token,
-            syntax_tree::FixedType::Bool(x) => x.bool.bool_token.token,
-            syntax_tree::FixedType::Strin(x) => x.strin.string_token.token,
-        };
-
+        let token: TokenRange = value.into();
+        let kind: FixedTypeKind = value.into();
         GenericSymbolPath {
             paths: vec![GenericSymbol {
-                base: token,
+                base: token.beg,
                 arguments: Vec::new(),
             }],
-            kind: GenericSymbolPathKind::FixedType,
-            range: token.into(),
+            kind: GenericSymbolPathKind::FixedType(kind),
+            range: token,
         }
     }
 }

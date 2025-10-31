@@ -93,7 +93,7 @@ fn check_generic_type_arg(
     namespace: &Namespace,
     base: &Symbol,
 ) -> Option<AnalyzerError> {
-    if matches!(arg.kind, GenericSymbolPathKind::FixedType) {
+    if matches!(arg.kind, GenericSymbolPathKind::FixedType(_)) {
         None
     } else if arg.is_resolvable() {
         let Ok(symbol) = symbol_table::resolve((&arg.generic_path(), namespace)) else {
@@ -473,11 +473,11 @@ fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
     };
 
     match &symbol.kind {
-        SymbolKind::AliasModule(x) => {
+        SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
             return resolve_inst_type(&InstTypeSource::Path(path));
         }
-        SymbolKind::AliasInterface(x) => {
+        SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
             return resolve_inst_type(&InstTypeSource::Path(path));
         }

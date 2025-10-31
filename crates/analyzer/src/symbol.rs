@@ -159,33 +159,58 @@ impl Symbol {
         self.namespace.get_symbol()
     }
 
-    pub fn get_parent_package(&self) -> Option<Symbol> {
+    pub fn get_parent_component(&self) -> Option<Symbol> {
         let parent = self.get_parent()?;
-        Symbol::trace_package_symbol(&parent)
+        Symbol::trace_component_symbol(&parent)
     }
 
-    fn trace_package_symbol(symbol: &Symbol) -> Option<Symbol> {
+    fn trace_component_symbol(symbol: &Symbol) -> Option<Symbol> {
         match &symbol.kind {
-            SymbolKind::Package(_) | SymbolKind::ProtoPackage(_) => Some(symbol.clone()),
+            SymbolKind::Module(_)
+            | SymbolKind::ProtoModule(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::ProtoInterface(_)
+            | SymbolKind::Package(_)
+            | SymbolKind::ProtoPackage(_)
+            | SymbolKind::SystemVerilog => Some(symbol.clone()),
+            SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
+                Symbol::trace_component_symbol(&symbol.found)
+            }
+            SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
+                let symbol =
+                    symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
+                Symbol::trace_component_symbol(&symbol.found)
+            }
             SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
                 let symbol =
                     symbol_table::resolve((&x.target.generic_path(), &symbol.namespace)).ok()?;
-                Symbol::trace_package_symbol(&symbol.found)
+                Symbol::trace_component_symbol(&symbol.found)
             }
             SymbolKind::GenericInstance(x) => {
                 let symbol = symbol_table::get(x.base)?;
-                Symbol::trace_package_symbol(&symbol)
+                Symbol::trace_component_symbol(&symbol)
             }
             SymbolKind::GenericParameter(x) => {
                 if let Some(ProtoBound::ProtoPackage(x)) =
                     x.bound.resolve_proto_bound(&symbol.namespace)
                 {
-                    Symbol::trace_package_symbol(&x)
+                    Symbol::trace_component_symbol(&x)
                 } else {
                     None
                 }
             }
             _ => None,
+        }
+    }
+
+    pub fn get_parent_package(&self) -> Option<Symbol> {
+        let parent = self.get_parent_component()?;
+        if parent.is_package(true) {
+            Some(parent)
+        } else {
+            None
         }
     }
 
@@ -216,6 +241,18 @@ impl Symbol {
                         self.create_evaluated_with_error()
                     }
                 }
+                SymbolKind::ProtoConst(x) => {
+                    if matches!(x.r#type.kind, TypeKind::Type) {
+                        Evaluated::create_type(&self.token.into())
+                    } else {
+                        Evaluated::create_unknown_static()
+                    }
+                }
+                SymbolKind::Struct(_)
+                | SymbolKind::Union(_)
+                | SymbolKind::TypeDef(_)
+                | SymbolKind::ProtoTypeDef(_)
+                | SymbolKind::Enum(_) => Evaluated::create_type(&self.token.into()),
                 SymbolKind::EnumMember(x) => {
                     let value = x.value.value();
                     let SymbolKind::Enum(r#enum) = self.get_parent().unwrap().kind else {
@@ -237,6 +274,8 @@ impl Symbol {
                         .unwrap_or(false)
                     {
                         Evaluated::create_unknown_static()
+                    } else if matches!(x.bound, GenericBoundKind::Type) {
+                        Evaluated::create_type(&self.token.into())
                     } else {
                         self.create_evaluated_with_error()
                     }
@@ -257,13 +296,19 @@ impl Symbol {
                 SymbolKind::Instance(x) => {
                     let mut evaluator = Evaluator::new(&[]);
                     if let Ok(symbol) =
-                        symbol_table::resolve((&x.type_name.mangled_path(), &self.namespace))
+                        symbol_table::resolve((&x.type_name.generic_path(), &self.namespace))
                     {
-                        if let SymbolKind::Interface(_) = symbol.found.kind {
-                            if let Some(array) = evaluator.expression_list(&x.array) {
-                                Evaluated::create_user_defined(symbol.found.id, vec![], array)
-                            } else {
-                                Evaluated::create_unknown()
+                        if let Some(symbol) = Symbol::trace_component_symbol(&symbol.found) {
+                            match symbol.kind {
+                                SymbolKind::Interface(_) => {
+                                    if let Some(array) = evaluator.expression_list(&x.array) {
+                                        Evaluated::create_user_defined(symbol.id, vec![], array)
+                                    } else {
+                                        Evaluated::create_unknown()
+                                    }
+                                }
+                                SymbolKind::SystemVerilog => Evaluated::create_unknown(),
+                                _ => self.create_evaluated_with_error(),
                             }
                         } else {
                             self.create_evaluated_with_error()
@@ -320,7 +365,7 @@ impl Symbol {
         let mut ret = Evaluated::create_unknown();
         ret.errors.push(EvaluatedError::InvalidFactor {
             kind: self.kind.to_kind_name(),
-            token: self.token,
+            token: self.token.into(),
         });
         ret
     }
@@ -366,16 +411,28 @@ impl Symbol {
     }
 
     pub fn generic_table(&self, arguments: &[GenericSymbolPath]) -> GenericTable {
-        let generic_parameters = self.generic_parameters();
+        let params = self.generic_parameters();
+        let n_args = arguments.len();
         let mut ret = HashMap::default();
 
+        let match_arity = if params.len() > n_args {
+            params[n_args].1.default_value.is_some()
+        } else {
+            params.len() == n_args
+        };
+        if !match_arity {
+            // Too many or too few generic args are given.
+            // Return empty generic table.
+            return ret;
+        }
+
         for (i, arg) in arguments.iter().enumerate() {
-            if let Some((p, _)) = generic_parameters.get(i) {
+            if let Some((p, _)) = params.get(i) {
                 ret.insert(*p, arg.clone());
             }
         }
 
-        for param in generic_parameters.iter().skip(arguments.len()) {
+        for param in params.iter().skip(n_args) {
             ret.insert(param.0, param.1.default_value.as_ref().unwrap().clone());
         }
 
@@ -598,6 +655,33 @@ impl Symbol {
                     x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_package(true);
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    pub fn is_component(&self, include_proto: bool) -> bool {
+        match &self.kind {
+            SymbolKind::Module(_)
+            | SymbolKind::AliasModule(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::AliasInterface(_)
+            | SymbolKind::Package(_)
+            | SymbolKind::AliasPackage(_) => return true,
+            SymbolKind::ProtoModule(_)
+            | SymbolKind::ProtoInterface(_)
+            | SymbolKind::ProtoPackage(_) => return include_proto,
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                return symbol.is_component(false);
+            }
+            SymbolKind::GenericParameter(x) => {
+                if let Some(ProtoBound::ProtoInterface(x)) =
+                    x.bound.resolve_proto_bound(&self.namespace)
+                {
+                    return x.is_component(true);
                 }
             }
             _ => {}

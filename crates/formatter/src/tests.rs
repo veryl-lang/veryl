@@ -34,8 +34,7 @@ fn empty_body_with_comment() {
 }
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = format(&metadata, &code);
     assert_eq!(ret, expect);
@@ -51,8 +50,7 @@ fn empty_body_with_comment() {
 }
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = format(&metadata, &code);
     assert_eq!(ret, expect);
@@ -68,8 +66,7 @@ fn empty_body_with_comment() {
 }
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = format(&metadata, &code);
     assert_eq!(ret, expect);
@@ -117,8 +114,7 @@ module ModuleB {
 }
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = format(&metadata, &code);
 
@@ -155,8 +151,8 @@ package PackageA {
 }
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
     metadata.format.indent_width = 2;
 
     let ret = format(&metadata, &code);
@@ -174,8 +170,8 @@ module ModuleB () {
 }
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
     metadata.format.indent_width = 2;
 
     let ret = format(&metadata, &code);

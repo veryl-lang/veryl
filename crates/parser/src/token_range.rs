@@ -3,7 +3,7 @@ use crate::veryl_grammar_trait::*;
 use crate::veryl_token::{Token, VerylToken};
 use paste::paste;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenRange {
     pub beg: Token,
     pub end: Token,
@@ -1285,6 +1285,11 @@ impl From<&GenerateIfDeclaration> for TokenRange {
 }
 impl_token_ext!(GenerateIfDeclaration);
 
+impl_token_range!(
+    GenerateIfDeclarationList,
+    r#else,
+    generate_optional_named_block
+);
 impl_token_range!(GenerateForDeclaration, r#for, generate_named_block);
 impl_token_range!(GenerateBlockDeclaration, generate_named_block);
 impl_token_range!(GenerateNamedBlock, colon, r_brace);

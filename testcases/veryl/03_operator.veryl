@@ -8,13 +8,12 @@ module Module03 {
     let _bb: logic = ~1;
 
     // unary reduce
-    let _c      : logic = &1;
-    let _cc     : logic = |1;
-    let _ccc    : logic = ^1;
-    let _cccc   : logic = ~&1;
-    let _ccccc  : logic = ~|1;
-    let _cccccc : logic = ~^1;
-    let _ccccccc: logic = ^~1;
+    let _c     : logic = &1;
+    let _cc    : logic = |1;
+    let _ccc   : logic = ^1;
+    let _cccc  : logic = ~&1;
+    let _ccccc : logic = ~|1;
+    let _cccccc: logic = ~^1;
 
     // binary arithmetic
     let _d     : logic = 1 ** 1;
@@ -37,8 +36,6 @@ module Module03 {
     let _ffff      : logic = 1 >= 1;
     let _fffff     : logic = 1 == 1;
     let _ffffff    : logic = 1 != 1;
-    let _fffffff   : logic = 1 === 1;
-    let _ffffffff  : logic = 1 !== 1;
     let _fffffffff : logic = 1 ==? 1;
     let _ffffffffff: logic = 1 !=? 1;
 
@@ -46,7 +43,6 @@ module Module03 {
     let _g    : logic = 1 & 1;
     let _gg   : logic = 1 ^ 1;
     let _ggg  : logic = 1 ~^ 1;
-    let _gggg : logic = 1 ^~ 1;
     let _ggggg: logic = 1 | 1;
 
     // binary logical

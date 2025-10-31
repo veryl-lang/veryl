@@ -86,8 +86,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.clock_type = ClockType::PosEdge;
     metadata.build.reset_type = ResetType::AsyncHigh;
@@ -165,8 +164,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.clock_type = ClockType::NegEdge;
     metadata.build.reset_type = ResetType::SyncLow;
@@ -218,8 +216,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
     metadata.build.clock_posedge_suffix = Some("_p".to_string());
     metadata.build.reset_low_suffix = Some("_x".to_string());
 
@@ -268,8 +265,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
     metadata.build.clock_posedge_suffix = Some("_p".to_string());
     metadata.build.reset_low_suffix = Some("_x".to_string());
 
@@ -314,8 +310,7 @@ endinterface
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.omit_project_prefix = true;
 
@@ -379,8 +374,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.omit_project_prefix = true;
     metadata.build.expand_inside_operation = true;
@@ -415,8 +409,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.omit_project_prefix = true;
     metadata.build.expand_inside_operation = true;
@@ -467,8 +460,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.omit_project_prefix = true;
     metadata.build.expand_inside_operation = true;
@@ -509,8 +501,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.reset_type = ResetType::AsyncHigh;
 
@@ -550,8 +541,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.reset_type = ResetType::SyncLow;
 
@@ -729,8 +719,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
 
     metadata.build.emit_cond_type = true;
 
@@ -831,8 +820,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -927,8 +915,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1011,8 +998,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1107,8 +1093,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1174,8 +1159,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1217,8 +1201,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1403,8 +1386,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1635,8 +1617,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1759,8 +1740,8 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
     metadata.build.flatten_array_interface = true;
 
     let ret = if cfg!(windows) {
@@ -1813,8 +1794,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -1871,8 +1851,8 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
     metadata.build.hashed_mangled_name = true;
 
     let ret = if cfg!(windows) {
@@ -1921,8 +1901,8 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let mut metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
     metadata.build.hashed_mangled_name = true;
 
     let ret = if cfg!(windows) {
@@ -1981,8 +1961,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2037,8 +2016,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2079,8 +2057,7 @@ endpackage
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2128,8 +2105,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2180,8 +2156,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2211,14 +2186,13 @@ module prj___ModuleA__false;
     logic _a; always_comb _a = 1'b0;
 endmodule
 module prj_ModuleB;
-    prj___ModuleA__true u0 ();
+    prj___ModuleA__true  u0 ();
     prj___ModuleA__false u1 ();
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2255,8 +2229,7 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")
@@ -2310,8 +2283,84 @@ endmodule
 //# sourceMappingURL=test.sv.map
 "#;
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn package_alias_defined_in_module() {
+    let code = r#"
+proto package a_proto_pkg {
+    struct a_struct {
+        a: u32,
+    }
+    const A: a_struct;
+}
+package a_pkg::<A_VALUE: u32> for a_proto_pkg {
+    struct a_struct {
+        a: u32,
+    }
+    const A: a_struct = a_struct'{ a: A_VALUE };
+}
+
+proto package b_proto_pkg {
+    const B: u32;
+}
+package b_pkg::<B_VALUE: u32> for b_proto_pkg {
+    const B: u32 = B_VALUE;
+}
+
+module c_module::<PKG: b_proto_pkg> {
+}
+
+module d_module::<A_PKG: a_proto_pkg> {
+    import A_PKG::*;
+    alias package B_PKG = b_pkg::<A.a>;
+    inst u: c_module::<B_PKG>;
+}
+
+alias package A_PKG    = a_pkg::<32>;
+alias module  D_MODULE = d_module::<A_PKG>;
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__32;
+    typedef struct packed {
+        int unsigned a;
+    } a_struct;
+    localparam a_struct A = '{a: 32};
+endpackage
+
+
+package prj___b_pkg____a_pkg__32_A_a;
+    localparam int unsigned B = prj___a_pkg__32::A.a;
+endpackage
+
+module prj___c_module____b_pkg____a_pkg__32_A_a;
+endmodule
+
+module prj___d_module____a_pkg__32;
+    import prj___a_pkg__32::*;
+
+
+
+    prj___c_module____b_pkg____a_pkg__32_A_a u ();
+endmodule
+
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")

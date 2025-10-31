@@ -751,6 +751,12 @@ impl SymbolTable {
         }
 
         let mut namespace = namespace.clone();
+
+        // Remove anonymous blocks
+        namespace
+            .paths
+            .retain(|x| x.to_string().find('@').is_none());
+
         let path = namespace.pop().map(|x| SymbolPath::new(&[x]))?;
         let context = ResolveContext::new(&namespace);
         let params = self
@@ -1107,6 +1113,16 @@ impl SymbolTable {
                 x.symbol = Some(type_id);
             }
         }
+    }
+
+    pub fn find_project_symbol(&self, prj: StrId) -> Option<Symbol> {
+        for symbol in self.symbol_table.values() {
+            if matches!(symbol.kind, SymbolKind::Namespace) && symbol.token.text == prj {
+                return Some(symbol.clone());
+            }
+        }
+
+        None
     }
 
     pub fn add_project_local(&mut self, prj: StrId, from: StrId, to: StrId) {
@@ -1609,6 +1625,10 @@ pub fn resolve_user_defined() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
 }
 
+pub fn find_project_symbol(prj: StrId) -> Option<Symbol> {
+    SYMBOL_TABLE.with(|f| f.borrow().find_project_symbol(prj))
+}
+
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_project_local(prj, from, to))
@@ -1727,8 +1747,7 @@ mod tests {
     "##;
 
     fn parse() {
-        let metadata: Metadata =
-            toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+        let metadata = Metadata::create_default("prj").unwrap();
         let parser = Parser::parse(&CODE, &"").unwrap();
         let analyzer = Analyzer::new(&metadata);
         analyzer.analyze_pass1(&"prj", &"", &parser.veryl);

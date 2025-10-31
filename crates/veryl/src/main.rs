@@ -6,7 +6,6 @@ use log::debug;
 use log::{Level, LevelFilter};
 use miette::{IntoDiagnostic, Result};
 use std::process::ExitCode;
-use std::str::FromStr;
 use veryl_metadata::Metadata;
 
 use veryl::*;
@@ -75,8 +74,7 @@ fn main() -> Result<ExitCode> {
     let (mut metadata, dot_build_lock) = match opt.command {
         Commands::New(_) | Commands::Init(_) => {
             // dummy metadata
-            let metadata = Metadata::create_default_toml("dummy").unwrap();
-            (Metadata::from_str(&metadata)?, None)
+            (Metadata::create_default("dummy").unwrap(), None)
         }
         _ => {
             let metadata_path = Metadata::search_from_current()?;

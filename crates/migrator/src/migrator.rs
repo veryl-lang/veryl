@@ -87,22 +87,31 @@ impl VerylWalker for Migrator {
         self.token(arg);
     }
 
-    /// Semantic action for non-terminal 'BackQuote'
-    fn back_quote(&mut self, arg: &BackQuote) {
-        self.token(&arg.back_quote_token.replace("'"));
+    /// Semantic action for non-terminal 'Operator07'
+    fn operator07(&mut self, arg: &Operator07) {
+        let token = arg.operator07_token.token.text.to_string();
+        match token.as_str() {
+            "===" => {
+                self.token(&arg.operator07_token.replace("=="));
+            }
+            "!==" => {
+                self.token(&arg.operator07_token.replace("!="));
+            }
+            _ => {
+                self.token(&arg.operator07_token);
+            }
+        }
     }
 
-    /// Semantic action for non-terminal 'GenericBound'
-    fn generic_bound(&mut self, arg: &GenericBound) {
-        match arg {
-            GenericBound::Const(x) => self.token(&x.r#const.const_token.replace("u32")),
-            GenericBound::Type(x) => self.r#type(&x.r#type),
-            GenericBound::InstScopedIdentifier(x) => {
-                self.inst(&x.inst);
-                self.scoped_identifier(&x.scoped_identifier);
+    /// Semantic action for non-terminal 'Operator05'
+    fn operator05(&mut self, arg: &Operator05) {
+        let token = arg.operator05_token.token.text.to_string();
+        match token.as_str() {
+            "^~" => {
+                self.token(&arg.operator05_token.replace("~^"));
             }
-            GenericBound::ScopedIdentifier(x) => {
-                self.scoped_identifier(&x.scoped_identifier);
+            _ => {
+                self.token(&arg.operator05_token);
             }
         }
     }

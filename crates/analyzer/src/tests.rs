@@ -9,8 +9,7 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
 
-    let metadata: Metadata =
-        toml::from_str(&Metadata::create_default_toml("prj").unwrap()).unwrap();
+    let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
 
@@ -680,6 +679,29 @@ fn multiple_assignment() {
         errors[0],
         AnalyzerError::MultipleAssignment { .. }
     ));
+
+    let code = r#"
+    module ModuleA () {
+        var w: logic<2>;
+        if 1 :g {
+            assign w[0] = 1'b1;
+            inst u: ModuleB (
+                o: w[1],
+            );
+        } else {
+            assign w = '0;
+        }
+    }
+
+    module ModuleB (
+        o: output logic,
+    ) {
+        assign o = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -1378,6 +1400,24 @@ fn mismatch_generics_arity() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if::<W: u32> {
+        var a: logic<W>;
+        modport mp {
+            a: input
+        }
+    }
+    module b_module (
+        aif: modport a_if::mp,
+    ){}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchGenericsArity { .. }
+    ));
 }
 
 #[test]
@@ -3118,6 +3158,48 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package FooPkg::<A: bool = true, B: bool = false> {
+    }
+    module BarModule {
+        import FooPkg::<false, true>::*;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto module ProtoModuleA (
+        i_d: input  logic,
+        o_d: output logic,
+    );
+    module ModuleA for ProtoModuleA (
+        i_d: input  logic,
+        o_d: output logic,
+    ) {
+        assign o_d = i_d;
+    }
+    proto package ProtoPackageA {
+        alias module A: ProtoModuleA;
+    }
+    package PackageA {
+        alias module A = ModuleA;
+    }
+    module ModuleB::<PKG_A: ProtoPackageA> (
+        i_d: input  logic,
+        o_d: output logic,
+    ) {
+        inst u: PKG_A::A (
+            i_d: i_d,
+            o_d: o_d,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -3584,6 +3666,15 @@ fn invalid_clock_domain() {
         errors[0],
         AnalyzerError::InvalidClockDomain { .. }
     ));
+
+    let code = r#"
+    module ModuleA {
+        inst u: 'a $sv::InterfaceA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -4666,6 +4757,37 @@ fn unknown_member() {
     }
     module ModuleA::<PKG: BarProtoPkg> {
         let _foo: PKG::Foo = PKG::Foo'{ foo: 0 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package foo_proto_pkg {
+        const WIDTH: u32;
+        struct foo_struct {
+        foo: logic<WIDTH>,
+        }
+    }
+    package foo_pkg::<W: u32> for foo_proto_pkg {
+        const WIDTH: u32 = W;
+        struct foo_struct {
+        foo: logic<WIDTH>,
+        }
+    }
+    interface foo_if::<PKG: foo_proto_pkg> {
+        var foo: PKG::foo_struct;
+        modport mp {
+            foo: input,
+        }
+    }
+    module foo_module::<PKG: foo_proto_pkg> {
+        inst foo: foo_if::<PKG>;
+        var _foo: logic;
+        always_comb {
+            _foo = foo.foo.foo;
+        }
     }
     "#;
 
@@ -5846,6 +5968,277 @@ fn invalid_factor_kind() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = {logic};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA::<t: u32> {
+        const A: type = t;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA::<t: type> {
+        const A: type = t;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32  = 0;
+        const B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic;
+        const B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        const A: type;
+    }
+    module ModuleA::<PKG: ProtoPkgA> {
+        const A: type = PKG::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        type A;
+    }
+    module ModuleA::<PKG: ProtoPkgA> {
+        const A: type = PKG::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic = logic + logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = 0,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = logic,
+    ) {}
+    module ModuleB {
+        inst u: ModuleA #(T: 0);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = logic,
+    ) {}
+    module ModuleB::<t: u32> {
+        inst u: ModuleA #(T: t);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param T: type = logic,
+    ) {}
+    module ModuleB::<t: type> {
+        inst u: ModuleA #(T: t);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<T: type = 0> {
+    }
+    alias module A = ModuleA::<>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $clog2(logic);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA {
+        always_comb {
+            $clog2(logic);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $bits(logic);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let a : logic<2> = 0;
+        let _b: logic = a[logic];
+        let _c: logic = a[1:logic];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+        var b: logic<2>;
+
+        always_comb {
+            a[logic:0] = 0;
+            b[1:logic] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+    assert!(matches!(errors[1], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    module Y (
+        a: modport $sv::InterfaceA::slave,
+    ) {}
+
+    module X {
+        inst x: $sv::InterfaceA;
+        inst u: Y (
+            a: x,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport slave {
+            a: input,
+        }
+    }
+    alias interface InterfaceB = InterfaceA;
+
+    module Y (
+        a: modport InterfaceA::slave,
+    ) {}
+
+    module X {
+        inst x: InterfaceB;
+        inst u: Y (
+            a: x,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // This will be reported as Mismatch Type error.
+    //    let code = r#"
+    //    module ModuleA::<T: type> {
+    //    }
+    //    alias module A = ModuleA::<0>;
+    //    "#;
+    //
+    //    let errors = analyze(code);
+    //    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    // This will be reported as Mismatch Type error.
+    //    let code = r#"
+    //    module ModuleA {
+    //        const A: u32 = 0;
+    //        type T = A;
+    //    }
+    //    "#;
+    //
+    //    let errors = analyze(code);
+    //    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    // This will be reported as Mismatch Type error.
+    //    let code = r#"
+    //    module ModuleA::<t: u32> {
+    //        type T = t;
+    //    }
+    //    "#;
+    //
+    //    let errors = analyze(code);
+    //    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
 }
 
 #[test]
@@ -6522,6 +6915,28 @@ fn sv_keyword_usage() {
     module ModuleA {
         var r#always: logic;
         assign r#always = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA {
+        struct event {
+            x: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA {
+        struct X {
+            event: logic,
+        }
     }
     "#;
 

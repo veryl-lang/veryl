@@ -175,9 +175,12 @@ pub enum AnalyzerError {
         help("remove {kind} from expression"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_factor")
     )]
-    #[error("{identifier} of kind \"{kind}\" cannot be used as a factor in an expression")]
+    #[error("{} cannot be used as a factor in an expression", match .identifier {
+        Some(x) => format!("{} of \"{}\"", x, .kind),
+        None => format!("{}", .kind),
+    })]
     InvalidFactor {
-        identifier: String,
+        identifier: Option<String>,
         kind: String,
         #[source_code]
         input: MultiSources,
@@ -1485,14 +1488,14 @@ impl AnalyzerError {
     }
 
     pub fn invalid_factor(
-        identifier: &str,
+        identifier: Option<&str>,
         kind: &str,
         token: &TokenRange,
         inst_context: &[TokenRange],
     ) -> Self {
         let (input, inst_context) = source_with_context(token, inst_context);
         AnalyzerError::InvalidFactor {
-            identifier: identifier.to_string(),
+            identifier: identifier.map(|x| x.to_string()),
             kind: kind.to_string(),
             input,
             error_location: token.into(),
@@ -2158,9 +2161,9 @@ impl AnalyzerError {
     pub fn evaluated_error(error: &EvaluatedError, inst_context: &[TokenRange]) -> Self {
         match error {
             EvaluatedError::InvalidFactor { kind, token } => {
-                let (input, inst_context) = source_with_context(&token.into(), inst_context);
+                let (input, inst_context) = source_with_context(token, inst_context);
                 AnalyzerError::InvalidFactor {
-                    identifier: token.to_string(),
+                    identifier: None,
                     kind: kind.clone(),
                     input,
                     error_location: token.into(),
