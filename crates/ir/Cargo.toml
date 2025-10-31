@@ -1,0 +1,16 @@
+[package]
+name                  = "veryl-ir"
+version               = "0.16.5"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition.workspace     = true
+
+[dependencies]
+num-bigint   = {workspace = true}
+num-traits   = {workspace = true}
+veryl-parser = {version = "0.16.5", path = "../parser"}

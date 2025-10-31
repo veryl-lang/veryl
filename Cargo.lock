@@ -5524,6 +5524,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "veryl-ir"
+version = "0.16.5"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "veryl-parser",
+]
+
+[[package]]
 name = "veryl-ls"
 version = "0.16.5"
 dependencies = [
