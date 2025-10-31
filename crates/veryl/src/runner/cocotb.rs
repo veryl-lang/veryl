@@ -199,7 +199,7 @@ try:
 except ImportError:
     try:
         from importlib_metadata import version
-    except ImportError as e:
+    except ImportError:
         raise RuntimeError("Use Python 3.8+ or install importlib_metadata")
 
 cocotb_version = version("cocotb")
