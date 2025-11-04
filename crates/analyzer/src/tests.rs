@@ -2608,6 +2608,9 @@ fn mismatch_type() {
     let code = r#"
     interface InterfaceA {
         var a: logic;
+        modport mp {
+            a: input,
+        }
     }
     module ModuleA {
         function FuncA::<IF: inst InterfaceA>() -> logic {
@@ -2625,9 +2628,15 @@ fn mismatch_type() {
     let code = r#"
     interface InerfaceA {
         var a: logic;
+        modport mp {
+            a: input,
+        }
     }
     interface InterfaceB {
         var b: logic;
+        modport mp {
+            b: input,
+        }
     }
     module ModuleA {
         function FuncA::<IF: inst InerfaceA>() -> logic {

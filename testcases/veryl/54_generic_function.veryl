@@ -32,4 +32,7 @@ module Module54 {
 
 interface Interface54 {
     var a: logic;
+    modport mp {
+        a: input,
+    }
 }

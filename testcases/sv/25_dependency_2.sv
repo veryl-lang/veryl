@@ -1,13 +1,10 @@
-package veryl_testcase___Package25__1;
-    localparam int unsigned C = 1;
-endpackage
 
 
 
 
-module veryl_testcase_Module25
+module veryl_testcase_Module25A
     import veryl_sample4___bar_pkg__32::*;
-    import veryl_sample4___baz_pkg____Package25__1_C::*;
+    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C::*;
 (
     input var logic                    i_clk  ,
     input var logic                    i_rst_n,
@@ -35,4 +32,18 @@ module veryl_testcase_Module25
 
     veryl_sample4___bar_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR__veryl_sample4___bar_pkg__32 u2 ();
 endmodule
-//# sourceMappingURL=../map/25_dependency.sv.map
+
+module veryl_testcase___Module25B____Package25__1;
+    import veryl_testcase___Package25__1::*;
+
+
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u3       ();
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u4       ();
+    always_comb u3.qux.s = '0;
+    always_comb u4.qux.s = '0;
+endmodule
+
+module veryl_testcase_Module25C;
+    veryl_testcase___Module25B____Package25__1 u5 ();
+endmodule
+//# sourceMappingURL=../map/25_dependency_2.sv.map

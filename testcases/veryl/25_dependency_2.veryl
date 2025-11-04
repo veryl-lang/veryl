@@ -1,12 +1,8 @@
-package Package25::<V: u32> {
-    const C: u32 = V;
-}
-
 alias package barpkg = veryl_sample4::bar_pkg::<32>;
 alias package foopkg = veryl_sample4::foo_pkg::<barpkg::BAR>;
 alias package bazpkg = veryl_sample4::baz_pkg::<Package25::<1>::C>;
 
-module Module25 (
+module Module25A (
     i_clk : input   clock                         ,
     i_rst : input   reset                         ,
     in_if : modport veryl_sample3::data_if::mp_in ,
@@ -32,4 +28,17 @@ module Module25 (
     );
 
     inst u2: veryl_sample4::bar_module::<foopkg, barpkg>;
+}
+
+module Module25B::<PKG: ProtoPackage25> {
+    import PKG::*;
+
+    inst u3      : veryl_sample4::qux_if::<PKG::S>;
+    inst u4      : veryl_sample4::qux_if::<S>;
+    assign u3.qux.s = '0;
+    assign u4.qux.s = '0;
+}
+
+module Module25C {
+    inst u5: Module25B::<Package25::<1>>;
 }
