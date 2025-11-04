@@ -59,6 +59,9 @@ release_mac:
 	zip -j ${ZIP_NAME}-aarch64-mac.zip $(addprefix target/aarch64-apple-darwin/release/, ${BIN_NAMES}) \
 		                               ./support/sourcemap-resolver/target/aarch64-apple-darwin/release/sourcemap-resolver
 
+release_version:
+	echo "$(VERSION)" > version
+
 release_rpm:
 	mkdir -p target
 	cargo rpm build

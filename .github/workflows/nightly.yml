@@ -58,10 +58,13 @@ jobs:
     - name: Build for Windows aarch64
       if: matrix.os == 'windows-11-arm'
       run: make release_win_aarch64
+    - name: Create version file
+      run: make release_version
     - name: Move archives
       run: |
         mkdir -p upload
         mv *.zip upload
+        mv version upload
     - name: Upload
       uses: ryand56/r2-upload-action@latest
       with:
