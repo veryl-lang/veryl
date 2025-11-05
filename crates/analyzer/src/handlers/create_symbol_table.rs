@@ -468,20 +468,6 @@ impl CreateSymbolTable {
     }
 
     fn expand_modport_default_member(&mut self, interface_id: SymbolId) {
-        // collect all members in modport for default member
-        let mut directions = HashMap::new();
-        for id in &self.modport_ids {
-            let mp = symbol_table::get(*id).unwrap();
-            if let SymbolKind::Modport(ref x) = mp.kind {
-                for x in &x.members {
-                    let member = symbol_table::get(*x).unwrap();
-                    if let SymbolKind::ModportVariableMember(x) = &member.kind {
-                        directions.insert((mp.token.text, member.token.text), x.direction);
-                    }
-                }
-            }
-        }
-
         let interface_namesapce = symbol_table::get(interface_id)
             .map(|x| x.inner_namespace())
             .unwrap();
@@ -490,11 +476,7 @@ impl CreateSymbolTable {
             if let SymbolKind::Modport(ref x) = mp.kind {
                 // add default members
                 let mut members = x.members.clone();
-                members.append(&mut self.get_modport_default_members(
-                    &mp,
-                    &interface_namesapce,
-                    &directions,
-                ));
+                members.append(&mut self.get_modport_default_members(&mp, &interface_namesapce));
 
                 let property = ModportProperty {
                     interface: interface_id,
@@ -512,13 +494,16 @@ impl CreateSymbolTable {
         &mut self,
         mp: &Symbol,
         interface_namesapce: &Namespace,
-        directions: &HashMap<(StrId, StrId), SymDirection>,
     ) -> Vec<SymbolId> {
         let mut ret = Vec::new();
 
         if let SymbolKind::Modport(ref x) = mp.kind
             && let Some(ref default) = x.default
         {
+            let default_member_directions = Self::collect_modport_default_member_target_directions(
+                default,
+                interface_namesapce,
+            );
             let explicit_members: HashSet<_> = x
                 .members
                 .iter()
@@ -547,9 +532,9 @@ impl CreateSymbolTable {
                 let direction = match default {
                     SymModportDefault::Input => Some(SymDirection::Input),
                     SymModportDefault::Output => Some(SymDirection::Output),
-                    SymModportDefault::Same(tgt) => directions.get(&(tgt.text, *text)).copied(),
-                    SymModportDefault::Converse(tgt) => {
-                        directions.get(&(tgt.text, *text)).map(|x| x.converse())
+                    SymModportDefault::Same(_) => default_member_directions.get(text).copied(),
+                    SymModportDefault::Converse(_) => {
+                        default_member_directions.get(text).map(|x| x.converse())
                     }
                 };
 
@@ -571,6 +556,32 @@ impl CreateSymbolTable {
                     }
                 }
             }
+        }
+
+        ret
+    }
+
+    fn collect_modport_default_member_target_directions(
+        default: &SymModportDefault,
+        namespace: &Namespace,
+    ) -> HashMap<StrId, SymDirection> {
+        let mut ret: HashMap<_, _> = HashMap::new();
+
+        match default {
+            SymModportDefault::Same(target) | SymModportDefault::Converse(target) => {
+                if let Ok(mp_symbol) = symbol_table::resolve((target, namespace))
+                    && let SymbolKind::Modport(modport) = mp_symbol.found.kind
+                {
+                    for member in &modport.members {
+                        if let Some(member_symbol) = symbol_table::get(*member)
+                            && let SymbolKind::ModportVariableMember(member) = member_symbol.kind
+                        {
+                            ret.insert(member_symbol.token.text, member.direction);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
 
         ret

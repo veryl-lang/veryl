@@ -4802,6 +4802,35 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface IfA {
+        var a: logic;
+        var b: logic;
+        var c: logic;
+        modport mp_a {
+            a: input,
+        }
+        modport mp_b {
+            b: input,
+            ..same(mp_a)
+        }
+        modport mp_c {
+            c: input,
+            ..same(mp_b)
+        }
+    }
+    module ModuleA (
+        if_a: modport IfA::mp_c,
+    ) {
+        let _a: logic = if_a.a;
+        let _b: logic = if_a.b;
+        let _c: logic = if_a.c;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

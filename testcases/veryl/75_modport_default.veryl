@@ -43,6 +43,10 @@ interface Interface75 {
         ..same(master)
     }
 
+    modport slave2 {
+        ..converse(master2)
+    }
+
     modport partial_same {
         a: output,
         ..same(master)
