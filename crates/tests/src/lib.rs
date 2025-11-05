@@ -1,5 +1,8 @@
 #[cfg(test)]
-const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency", "68_std"];
+const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency_1", "25_dependency_2"];
+
+#[cfg(test)]
+const STD_TESTS: [&str; 1] = ["68_std"];
 
 #[cfg(test)]
 static DEPENDENCY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -30,7 +33,13 @@ mod analyzer {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        let _lock = if crate::DEPENDENCY_TESTS.contains(&name) {
+        if crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name {
+            return;
+        }
+
+        let needs_sub_project =
+            crate::DEPENDENCY_TESTS.contains(&name) || crate::STD_TESTS.contains(&name);
+        let _lock = if needs_sub_project {
             Some(crate::DEPENDENCY_LOCK.lock())
         } else {
             None
@@ -39,7 +48,7 @@ mod analyzer {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        if crate::DEPENDENCY_TESTS.contains(&name) {
+        if needs_sub_project {
             let paths = metadata.paths::<&str>(&[], false, true).unwrap();
             let dependency_path = metadata.project_dependencies_path();
             for path in paths {
@@ -52,29 +61,37 @@ mod analyzer {
             }
         }
 
-        let file = format!("../../testcases/veryl/{}.veryl", name);
-        let input = fs::read_to_string(&file).unwrap();
+        let files = if crate::DEPENDENCY_TESTS.contains(&name) {
+            crate::DEPENDENCY_TESTS.to_vec()
+        } else {
+            vec![name]
+        };
 
-        let ret = Parser::parse(&input, &file).unwrap();
-        let prj = &metadata.project.name;
-        let analyzer = Analyzer::new(&metadata);
-        let errors = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
-        dbg!(&errors);
-        assert!(errors.is_empty());
+        for file in &files {
+            let file = format!("../../testcases/veryl/{}.veryl", file);
+            let input = fs::read_to_string(&file).unwrap();
 
-        let errors = Analyzer::analyze_post_pass1();
-        dbg!(&errors);
-        assert!(errors.is_empty());
+            let ret = Parser::parse(&input, &file).unwrap();
+            let prj = &metadata.project.name;
+            let analyzer = Analyzer::new(&metadata);
+            let errors = analyzer.analyze_pass1(&prj, &file, &ret.veryl);
+            dbg!(&errors);
+            assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass2(&prj, &file, &ret.veryl);
-        dbg!(&errors);
-        assert!(errors.is_empty());
+            let errors = Analyzer::analyze_post_pass1();
+            dbg!(&errors);
+            assert!(errors.is_empty());
 
-        let info = Analyzer::analyze_post_pass2();
+            let errors = analyzer.analyze_pass2(&prj, &file, &ret.veryl);
+            dbg!(&errors);
+            assert!(errors.is_empty());
 
-        let errors = analyzer.analyze_pass3(&prj, &file, &ret.veryl, &info);
-        dbg!(&errors);
-        assert!(errors.is_empty());
+            let info = Analyzer::analyze_post_pass2();
+
+            let errors = analyzer.analyze_pass3(&prj, &file, &ret.veryl, &info);
+            dbg!(&errors);
+            assert!(errors.is_empty());
+        }
     }
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));
@@ -128,7 +145,13 @@ mod emitter {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        let _lock = if crate::DEPENDENCY_TESTS.contains(&name) {
+        if crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name {
+            return;
+        }
+
+        let needs_sub_project =
+            crate::DEPENDENCY_TESTS.contains(&name) || crate::STD_TESTS.contains(&name);
+        let _lock = if needs_sub_project {
             Some(crate::DEPENDENCY_LOCK.lock())
         } else {
             None
@@ -137,7 +160,7 @@ mod emitter {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        if crate::DEPENDENCY_TESTS.contains(&name) {
+        if needs_sub_project {
             let paths = metadata.paths::<&str>(&[], false, true).unwrap();
             let dependency_path = metadata.project_dependencies_path();
             for path in paths {
@@ -150,35 +173,60 @@ mod emitter {
             }
         }
 
-        let src_path = PathBuf::from(format!("../../testcases/veryl/{}.veryl", name));
-        let dst_path = PathBuf::from(format!("../../testcases/sv/{}.sv", name));
-        let map_path = PathBuf::from(format!("../../testcases/map/{}.sv.map", name));
-
-        let input = fs::read_to_string(&src_path).unwrap();
-        let ret = Parser::parse(&input, &src_path).unwrap();
-        let prj = &metadata.project.name;
-        let analyzer = Analyzer::new(&metadata);
-        let _ = analyzer.analyze_pass1(&prj, &src_path, &ret.veryl);
-        let _ = Analyzer::analyze_post_pass1();
-        let _ = analyzer.analyze_pass2(&prj, &src_path, &ret.veryl);
-        let mut emitter = Emitter::new(&metadata, &src_path, &dst_path, &map_path);
-        emitter.emit(&prj, &ret.veryl);
-
-        let out_code = emitter.as_str();
-        let ref_code = fs::read_to_string(&dst_path).unwrap();
-
-        assert_eq!(ref_code, out_code);
-
-        let out_map = String::from_utf8(emitter.source_map().to_bytes().unwrap()).unwrap();
-        let ref_map = if cfg!(target_os = "windows") {
-            fs::read_to_string(&map_path)
-                .unwrap()
-                .replace("\\n", "\\r\\n")
+        let names = if crate::DEPENDENCY_TESTS.contains(&name) {
+            crate::DEPENDENCY_TESTS.to_vec()
         } else {
-            fs::read_to_string(&map_path).unwrap()
+            vec![name]
         };
 
-        assert_eq!(ref_map, out_map);
+        let file_paths: Vec<_> = names
+            .iter()
+            .map(|name| {
+                let src_path = PathBuf::from(format!("../../testcases/veryl/{}.veryl", name));
+                let dst_path = PathBuf::from(format!("../../testcases/sv/{}.sv", name));
+                let map_path = PathBuf::from(format!("../../testcases/map/{}.sv.map", name));
+                (src_path, dst_path, map_path)
+            })
+            .collect();
+
+        let parse_results: Vec<_> = file_paths
+            .iter()
+            .map(|(src, _, _)| {
+                let input = fs::read_to_string(&src).unwrap();
+                Parser::parse(&input, &src).unwrap()
+            })
+            .collect();
+
+        for (i, result) in parse_results.iter().enumerate() {
+            let (src, _, _) = &file_paths[i];
+            let prj = &metadata.project.name;
+            let analyzer = Analyzer::new(&metadata);
+            let _ = analyzer.analyze_pass1(&prj, src, &result.veryl);
+            let _ = Analyzer::analyze_post_pass1();
+            let _ = analyzer.analyze_pass2(&prj, src, &result.veryl);
+        }
+
+        for (i, result) in parse_results.iter().enumerate() {
+            let (src, dst, map) = &file_paths[i];
+            let prj = &metadata.project.name;
+
+            let mut emitter = Emitter::new(&metadata, src, dst, map);
+            emitter.emit(&prj, &result.veryl);
+
+            let out_code = emitter.as_str();
+            let ref_code = fs::read_to_string(dst).unwrap();
+
+            assert_eq!(ref_code, out_code);
+
+            let out_map = String::from_utf8(emitter.source_map().to_bytes().unwrap()).unwrap();
+            let ref_map = if cfg!(target_os = "windows") {
+                fs::read_to_string(map).unwrap().replace("\\n", "\\r\\n")
+            } else {
+                fs::read_to_string(map).unwrap()
+            };
+
+            assert_eq!(ref_map, out_map);
+        }
     }
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));

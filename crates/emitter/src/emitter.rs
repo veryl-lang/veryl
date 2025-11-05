@@ -5921,23 +5921,26 @@ pub fn resolve_generic_path(
     let mut path = path.clone();
     path.resolve_imported(namespace, generic_maps);
 
-    for i in 0..path.len() {
-        let base = path.base_path(i);
-        if let Ok(symbol) = symbol_table::resolve((&base, namespace)) {
-            if !symbol.found.kind.is_generic() {
-                continue;
-            }
+    let path_symbols: Vec<_> = (0..path.len())
+        .filter_map(|i| {
+            symbol_table::resolve((&path.slice(i).generic_path(), namespace))
+                .map(|x| (i, x.found))
+                .ok()
+        })
+        .collect();
 
-            let params = symbol.found.generic_parameters();
-            let n_args = path.paths[i].arguments.len();
+    for (i, symbol) in &path_symbols {
+        if symbol.kind.is_generic() {
+            let params = symbol.generic_parameters();
+            let n_args = path.paths[*i].arguments.len();
 
             for param in params.iter().skip(n_args) {
-                path.paths[i]
+                path.paths[*i]
                     .arguments
                     .push(param.1.default_value.as_ref().unwrap().clone());
             }
 
-            for arg in &mut path.paths[i].arguments {
+            for arg in &mut path.paths[*i].arguments {
                 if let Some(unaliased_arg) = arg.unaliased_path() {
                     *arg = unaliased_arg;
                 }
@@ -5947,6 +5950,12 @@ pub fn resolve_generic_path(
 
     if let Some(maps) = generic_maps {
         path.apply_map(maps);
+    }
+
+    for (i, symbol) in &path_symbols {
+        for arg in &mut path.paths[*i].arguments {
+            arg.append_project_path(namespace, &symbol.namespace);
+        }
     }
 
     let result = symbol_table::resolve((&path.mangled_path(), namespace));

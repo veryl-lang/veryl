@@ -1,0 +1,13 @@
+proto package ProtoPackage25 {
+    const C: u32;
+    struct S {
+        s: logic<C>,
+    }
+}
+
+package Package25::<V: u32> for ProtoPackage25 {
+    const C: u32 = V;
+    struct S {
+        s: logic<C>,
+    }
+}

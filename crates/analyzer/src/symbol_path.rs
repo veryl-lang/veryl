@@ -787,6 +787,34 @@ impl GenericSymbolPath {
             self.paths.insert(i, path.clone());
         }
     }
+
+    pub fn append_project_path(&mut self, namespace: &Namespace, target_namespace: &Namespace) {
+        if namespace.paths[0] == target_namespace.paths[0] {
+            return;
+        }
+
+        if !symbol_table::resolve((&self.base_path(0), namespace))
+            .map(|x| x.found.is_component(true))
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        let Some(project_symbol) = symbol_table::find_project_symbol(namespace.paths[0]) else {
+            return;
+        };
+        let project_path = GenericSymbol {
+            base: project_symbol.token,
+            arguments: vec![],
+        };
+        self.paths.insert(0, project_path);
+
+        for path in &mut self.paths {
+            for arg in &mut path.arguments {
+                arg.append_project_path(namespace, target_namespace);
+            }
+        }
+    }
 }
 
 impl From<&Token> for GenericSymbolPath {
@@ -900,6 +928,22 @@ impl From<&syntax_tree::Identifier> for GenericSymbolPath {
             kind: GenericSymbolPathKind::Identifier,
             range: value.into(),
         }
+    }
+}
+
+impl From<&syntax_tree::HierarchicalIdentifier> for GenericSymbolPath {
+    fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
+        let mut path: Self = value.identifier.as_ref().into();
+
+        for x in &value.hierarchical_identifier_list0 {
+            path.paths.push(GenericSymbol {
+                base: x.identifier.identifier_token.token,
+                arguments: vec![],
+            });
+        }
+
+        path.range = value.into();
+        path
     }
 }
 

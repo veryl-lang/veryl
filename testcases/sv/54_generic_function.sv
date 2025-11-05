@@ -42,5 +42,8 @@ endmodule
 
 interface veryl_testcase_Interface54;
     logic a;
+    modport mp (
+        input a
+    );
 endinterface
 //# sourceMappingURL=../map/54_generic_function.sv.map

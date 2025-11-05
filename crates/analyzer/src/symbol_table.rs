@@ -6,7 +6,7 @@ use crate::symbol::{
     GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TypeKind,
 };
 use crate::symbol_path::{
-    GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath, SymbolPathNamespace,
+    GenericSymbol, GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath, SymbolPathNamespace,
 };
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use crate::{AnalyzerError, HashMap, namespace_table};
@@ -774,7 +774,12 @@ impl SymbolTable {
                 let TypeKind::UserDefined(x) = x.kind else {
                     continue;
                 };
-                map.insert(key, x.path);
+                if let Some(path) = self.append_project_prefix_to_generic_bound(&x.path, &namespace)
+                {
+                    map.insert(key, path);
+                } else {
+                    map.insert(key, x.path);
+                }
             }
         }
 
@@ -828,6 +833,34 @@ impl SymbolTable {
             }
             _ => Vec::new(),
         }
+    }
+
+    fn append_project_prefix_to_generic_bound(
+        &self,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) -> Option<GenericSymbolPath> {
+        let context = ResolveContext::new(namespace);
+        let symbol = self.resolve(&path.generic_path(), &[], context).ok()?;
+        if !matches!(
+            symbol.found.kind,
+            SymbolKind::ProtoModule(_)
+                | SymbolKind::ProtoInterface(_)
+                | SymbolKind::ProtoPackage(_)
+        ) {
+            return None;
+        }
+
+        let project_symbol = self.find_project_symbol(namespace.paths[0])?;
+        let project_path = GenericSymbol {
+            base: project_symbol.token,
+            arguments: vec![],
+        };
+
+        let mut path = path.clone();
+        path.paths.insert(0, project_path);
+
+        Some(path)
     }
 
     pub fn get_all(&self) -> Vec<Symbol> {
