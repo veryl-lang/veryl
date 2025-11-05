@@ -117,12 +117,8 @@ module test_lfsr_galois;
         initial $info("Spawning LFSR of Size %d", i);
         lfsr_galois_bench #(.SIZE(i)) u_lfsr(.i_clk, .done(done[i]), .working(working[i]));
     end
-    default clocking
-      @(posedge i_clk);
-    endclocking
 
-    initial forever begin
-        ##4
+    initial forever @(posedge i_clk) begin
         if (&done) begin
             if (|working) begin
                 $info("Finishing Simulations with \033[32m100%% Success\033[0m");
@@ -149,12 +145,6 @@ module lfsr_galois_bench #(parameter SIZE=64) (input i_clk, output logic done, o
 
   std_lfsr_galois #(.SIZE(SIZE)) dut (.*);
 
-
-  default clocking
-    @(posedge i_clk);
-  endclocking
-
-
   initial begin
     int outvecs [logic[SIZE-1:0]];
     working = 1'b1;
@@ -164,7 +154,8 @@ module lfsr_galois_bench #(parameter SIZE=64) (input i_clk, output logic done, o
     i_set = 1'b1;
     i_setval = 16'h0001;
 
-    ##2;
+    @(posedge i_clk);
+    @(posedge i_clk);
 
     i_set = 1'b0;
     limit = '1;
@@ -172,7 +163,7 @@ module lfsr_galois_bench #(parameter SIZE=64) (input i_clk, output logic done, o
     limit[SIZE] = 1'b0;
 
     for (int i = 0; i < limit; i += 1) begin
-      ##1;
+      @(posedge i_clk);
       assert(0 == outvecs.exists(o_val));
       working &= !outvecs.exists(o_val);
       outvecs[o_val] = 1'b1;

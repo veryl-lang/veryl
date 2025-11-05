@@ -61,6 +61,7 @@ module test_countones;
         end
       end
       $display("Done verifying countones#(%2d)", i);
+      done[i] = 1'b1;
     end
   end
 

@@ -176,6 +176,8 @@ pub enum SimType {
     Verilator,
     /// Synopsys VCS
     Vcs,
+    /// Altair DSim
+    Dsim,
     /// AMD Vivado Simulator
     Vivado,
 }
@@ -183,6 +185,7 @@ pub enum SimType {
 impl From<SimType> for veryl_metadata::SimType {
     fn from(x: SimType) -> Self {
         match x {
+            SimType::Dsim => veryl_metadata::SimType::Dsim,
             SimType::Verilator => veryl_metadata::SimType::Verilator,
             SimType::Vcs => veryl_metadata::SimType::Vcs,
             SimType::Vivado => veryl_metadata::SimType::Vivado,
