@@ -7,6 +7,8 @@ pub struct Test {
     #[serde(default)]
     pub simulator: SimType,
     #[serde(default)]
+    pub dsim: DsimProperty,
+    #[serde(default)]
     pub vcs: VcsProperty,
     #[serde(default)]
     pub verilator: VerilatorProperty,
@@ -27,8 +29,19 @@ pub enum SimType {
     Verilator,
     #[serde(rename = "vcs")]
     Vcs,
+    #[serde(rename = "dsim")]
+    Dsim,
     #[serde(rename = "vivado")]
     Vivado,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DsimProperty {
+    #[serde(default)]
+    pub compile_args: Vec<String>,
+    #[serde(default)]
+    pub simulate_args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

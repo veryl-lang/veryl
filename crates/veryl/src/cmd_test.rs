@@ -1,5 +1,5 @@
 use crate::cmd_build::CmdBuild;
-use crate::runner::{Cocotb, CocotbSource, Vcs, Verilator, Vivado};
+use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{OptBuild, OptTest};
 use log::{error, info};
 use miette::Result;
@@ -54,6 +54,7 @@ impl CmdTest {
                 TestType::Inline => match sim_type {
                     SimType::Verilator => Verilator::new().runner(),
                     SimType::Vcs => Vcs::new().runner(),
+                    SimType::Dsim => Dsim::new().runner(),
                     SimType::Vivado => Vivado::new().runner(),
                 },
                 TestType::CocotbEmbed(ref x) => {

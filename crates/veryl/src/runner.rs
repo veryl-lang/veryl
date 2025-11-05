@@ -10,10 +10,12 @@ use veryl_parser::resource_table::{PathId, StrId};
 use veryl_sourcemap::SourceMap;
 
 mod cocotb;
+mod dsim;
 mod vcs;
 mod verilator;
 mod vivado;
 pub use cocotb::*;
+pub use dsim::*;
 pub use vcs::*;
 pub use verilator::*;
 pub use vivado::*;

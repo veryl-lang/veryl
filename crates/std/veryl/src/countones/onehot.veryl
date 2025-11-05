@@ -92,6 +92,7 @@ module test_onehot;
         end
       end
       $display("Done verifying onehot#(%2d)", i);
+      done[i] = 1'b1;
     end
   end
 
@@ -99,6 +100,6 @@ module test_onehot;
     if (done == '1)
       $finish;
   end
-  
+
 endmodule
 }}}
