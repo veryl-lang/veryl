@@ -59,6 +59,13 @@ interface veryl_testcase_Interface75;
         output d
     );
 
+    modport slave2 (
+        output a,
+        output b,
+        input  c,
+        input  d
+    );
+
     modport partial_same (
         output a,
         input  b,
