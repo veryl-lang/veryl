@@ -5034,6 +5034,24 @@ fn unused_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface IfA {
+        var a: logic;
+        modport mp {
+            ..input
+        }
+    }
+    interface IfB {
+        var b: logic;
+        modport mp {
+            ..output
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

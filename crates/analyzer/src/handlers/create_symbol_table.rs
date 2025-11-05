@@ -557,6 +557,7 @@ impl CreateSymbolTable {
                     let path = mp.token.source.get_path().unwrap();
                     let token = Token::generate(*text, path);
                     namespace_table::insert(token.id, path, &namespace);
+                    symbol_table::add_reference(*id, &token);
 
                     let property = ModportVariableMemberProperty {
                         direction,
