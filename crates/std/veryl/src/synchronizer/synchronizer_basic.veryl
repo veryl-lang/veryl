@@ -1,0 +1,93 @@
+/// Basic synchronizer implementation using single-bit FF scheme
+pub module synchronizer_basic for synchronizer #(
+    param WIDTH        : u32        = 8 ,
+    param INITIAL_VALUE: bit<WIDTH> = '0,
+    param STAGES       : u32        = 2 ,
+) (
+    i_clk: input  'd clock       ,
+    i_rst: input  'd reset       ,
+    i_d  : input  's logic<WIDTH>,
+    o_d  : output 'd logic<WIDTH>,
+) {
+    for i in 0..WIDTH :g {
+        var rg: 'd logic<STAGES>;
+
+        always_comb {
+            o_d[i] = rg[msb];
+        }
+
+        unsafe (cdc) {
+            always_ff {
+                if_reset {
+                    rg = {INITIAL_VALUE[i] repeat STAGES};
+                } else {
+                    rg = {rg, i_d[i]} as STAGES;
+                }
+            }
+        }
+    }
+}
+
+#[test(test_synchronizer_basic)]
+embed (inline) sv{{{
+module test_synchronizer_basic;
+`ifndef VERILATOR
+    timeunit 1ns/1ps;
+
+    localparam int WIDTH  = 8;
+    localparam int STAGES = 2;
+
+    bit               clk_s;
+    bit               clk_d;
+    bit               rst_n;
+    bit               do_check;
+    logic [WIDTH-1:0] d;
+    logic [WIDTH-1:0] q;
+
+    always #(501ps) begin
+        clk_s ^= 1;
+    end
+
+    always #(500ps) begin
+        clk_d ^= 1;
+    end
+
+    initial begin
+        rst_n    = 1;
+        do_check = 0;
+        @(posedge clk_d);
+        rst_n = 0;
+        @(posedge clk_d);
+        @(posedge clk_d);
+        rst_n = 1;
+
+        repeat (STAGES) begin
+        @(posedge clk_d);
+        end
+        do_check = 1;
+
+        repeat (200) begin
+        @(posedge clk_d);
+        end
+        $finish;
+    end
+
+    always @(posedge clk_s) begin
+        d <= $urandom;
+    end
+
+    ast_match_data:
+    assert property (
+        @(posedge clk_d) disable iff (!do_check)
+        q == $past(d, STAGES)
+    );
+
+    std_synchronizer_basic duv (
+        .i_clk (clk_d),
+        .i_rst (rst_n),
+        .i_d   (d    ),
+        .o_d   (q    )
+    );
+`endif
+endmodule
+}}}

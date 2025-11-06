@@ -1,6 +1,7 @@
 pub proto module synchronizer #(
-    param WIDTH : u32 = 8,
-    param STAGES: u32 = 2,
+    param WIDTH        : u32        = 8 ,
+    param INITIAL_VALUE: bit<WIDTH> = '0,
+    param STAGES       : u32        = 2 ,
 ) (
     i_clk: input  'd clock       ,
     i_rst: input  'd reset       ,
