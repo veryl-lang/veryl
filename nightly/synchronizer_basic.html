@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>std</title>
+        <title>synchronizer_basic</title>
 
 
         <!-- Custom HTML head -->
@@ -175,194 +175,72 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="std"><a class="header" href="#std">std</a></h1>
-<p>Veryl Standard Library</p>
-<table align="center" class="table_list">
-<tbody>
-<tr>
-    <th class="table_list_item">Version</th>
-    <td class="table_list_item">0.0.1</td>
-</tr>
-<tr>
-    <th class="table_list_item">Repository</th>
-    <td class="table_list_item"><a href="https://github.com/veryl-lang/std">https://github.com/veryl-lang/std</a></td>
-</tr>
-<tr>
-    <th class="table_list_item">License</th>
-    <td class="table_list_item">MIT OR Apache-2.0</td>
-</tr>
-</tbody>
-</table>
-<h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
+                        <h2 id="synchronizer_basic"><a class="header" href="#synchronizer_basic">synchronizer_basic</a></h2>
+<p>Basic synchronizer implementation using single-bit FF scheme</p>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
 <tr>
-    <th class="table_list_item"><a href="async_fifo.html">async_fifo::&lt;S&gt;</a></th>
-    <td class="table_list_item"> Asynchronous FIFO
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="async_handshake.html">async_handshake::&lt;S&gt;</a></th>
-    <td class="table_list_item"> Asynchronous handshake
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="binary_decoder.html">binary_decoder</a></th>
-    <td class="table_list_item"> A binary decoder.
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="binary_encoder.html">binary_encoder</a></th>
-    <td class="table_list_item"> A binary encoder.
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="counter.html">counter</a></th>
-    <td class="table_list_item"> Value counter
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="countones.html">countones</a></th>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="delay.html">delay</a></th>
-    <td class="table_list_item"> Delay input by configured cycle
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="demux.html">demux</a></th>
+    <th class="table_list_item">INITIAL_VALUE</th>
+    <td class="table_list_item"><span class="hljs-type">bit<WIDTH></span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="edge_detector.html">edge_detector</a></th>
-    <td class="table_list_item"> Edge detector
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="fifo.html">fifo</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="fifo_controller.html">fifo_controller</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="gray_counter.html">gray_counter</a></th>
-    <td class="table_list_item"> Value counter using Gray Encoding
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="gray_decoder.html">gray_decoder</a></th>
-    <td class="table_list_item"> Converts a Gray encoded bit vector to a binary encoded bit-vector
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="gray_encoder.html">gray_encoder</a></th>
-    <td class="table_list_item"> Converts a binary encoded bit vector to a Gray encoded bit-vector
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="lfsr_galois.html">lfsr_galois</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="mux.html">mux</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="onehot.html">onehot</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="ram.html">ram</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="slicer.html">slicer</a></th>
-    <td class="table_list_item"></td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="synchronizer_basic.html">synchronizer_basic</a></th>
-    <td class="table_list_item"> Basic synchronizer implementation using single-bit FF scheme
-</td>
-</tr>
-</tbody>
-</table>
-<h2 id="module-prototypes"><a class="header" href="#module-prototypes">Module Prototypes</a></h2>
-<hr />
-<table class="table_list">
-<tbody>
-<tr>
-    <th class="table_list_item"><a href="synchronizer.html">synchronizer</a></th>
+    <th class="table_list_item">STAGES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
     <td class="table_list_item"></td>
 </tr>
 </tbody>
 </table>
-<h2 id="interfaces"><a class="header" href="#interfaces">Interfaces</a></h2>
+<h3 id="clock-domains"><a class="header" href="#clock-domains">Clock Domains</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
 <tr>
-    <th class="table_list_item"><a href="axi3_if.html">axi3_if::&lt;PKG&gt;</a></th>
-    <td class="table_list_item">### AXI3 bus interface
-</td>
+    <th class="table_list_item">'d</th>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="axi4_if.html">axi4_if::&lt;PKG&gt;</a></th>
-    <td class="table_list_item">### AXI4 bus interface
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="axi4_lite_if.html">axi4_lite_if::&lt;PKG&gt;</a></th>
-    <td class="table_list_item">### AXI4-Lite bus interface
-</td>
+    <th class="table_list_item">'s</th>
 </tr>
 </tbody>
 </table>
-<h2 id="packages"><a class="header" href="#packages">Packages</a></h2>
+<h3 id="ports"><a class="header" href="#ports">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
 <tr>
-    <th class="table_list_item"><a href="axi3_config.html">axi3_config</a></th>
-    <td class="table_list_item">### AXI3 configuration definitions
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="axi3_pkg.html">axi3_pkg::&lt;ADDR_W, DATA_W_BYTES, ID_W&gt;</a></th>
-    <td class="table_list_item">### AXI3 bus package
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="axi4_config.html">axi4_config</a></th>
-    <td class="table_list_item">### AXI4 configuration definitions
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="axi4_lite_config.html">axi4_lite_config</a></th>
-    <td class="table_list_item">### AXI4-Lite configuration definitions
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="axi4_lite_pkg.html">axi4_lite_pkg::&lt;ADDR_W, DATA_W_BYTES, ID_W&gt;</a></th>
-    <td class="table_list_item">### AXI4-Lite bus package
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="axi4_pkg.html">axi4_pkg::&lt;ADDR_W, DATA_W_BYTES, ID_W, AWUSER_W, WUSER_W, BUSER_W, ARUSER_W, RUSER_W&gt;</a></th>
-    <td class="table_list_item">### AXI4 bus package
-</td>
-</tr>
-<tr>
-    <th class="table_list_item"><a href="selector_pkg.html">selector_pkg</a></th>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
-    <th class="table_list_item"><a href="types.html">types</a></th>
-    <td class="table_list_item"> A package for pre-defined types
-</td>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_d</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<WIDTH></span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_d</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<WIDTH></span></td>
+    <td class="table_list_item"></td>
 </tr>
 </tbody>
 </table>
@@ -371,8 +249,11 @@
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="slicer.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
 
-                            <a rel="next prefetch" href="modules.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="proto_modules.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -382,8 +263,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="slicer.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
 
-                    <a rel="next prefetch" href="modules.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="proto_modules.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
