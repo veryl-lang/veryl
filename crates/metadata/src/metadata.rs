@@ -388,7 +388,14 @@ target = {{type = "directory", path = "target"}}"###
     }
 
     pub fn create_default_gitignore() -> &'static str {
-        r#".build/
+        r#"# Build output
+.build/
+/target
+/dependencies
+*.f
+
+# Verilator
+obj_dir/
 "#
     }
 
