@@ -2945,6 +2945,24 @@ fn mismatch_type() {
     assert!(matches!(errors[1], AnalyzerError::MismatchType { .. }));
 
     let code = r#"
+    interface IfA {
+        var a: logic;
+        modport mp_0 {
+            a: input,
+            ..same(mp_0)
+        }
+        modport mp_1 {
+            a: input,
+            ..converse(mp_1)
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+    assert!(matches!(errors[1], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
     proto package ProtoPkg {}
     proto package Pkg {
         alias interface Interface: ProtoPkg;

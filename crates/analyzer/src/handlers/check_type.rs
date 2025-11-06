@@ -28,7 +28,7 @@ pub struct CheckType {
     in_generic_parameter: bool,
     in_generic_inst_parameter: bool,
     in_modport: bool,
-    in_modport_default_member: bool,
+    modport_name: Option<Token>,
     in_alias_module: bool,
     in_alias_interface: bool,
     in_alias_package: bool,
@@ -565,25 +565,6 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
-    fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point
-            && let Ok(symbol) = symbol_table::resolve(arg)
-        {
-            // Check modport default member type
-            if self.in_modport_default_member
-                && !matches!(symbol.found.kind, SymbolKind::Modport(_))
-            {
-                self.errors.push(AnalyzerError::mismatch_type(
-                    &symbol.found.token.to_string(),
-                    "modport",
-                    &symbol.found.kind.to_kind_name(),
-                    &arg.identifier_token.token.into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if let Ok(symbol) = symbol_table::resolve(arg) {
@@ -806,10 +787,44 @@ impl VerylGrammarTrait for CheckType {
         Ok(())
     }
 
-    fn modport_default(&mut self, _arg: &ModportDefault) -> Result<(), ParolError> {
+    fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => self.in_modport_default_member = true,
-            HandlerPoint::After => self.in_modport_default_member = false,
+            HandlerPoint::Before => self.modport_name = Some(arg.identifier.identifier_token.token),
+            HandlerPoint::After => self.modport_name = None,
+        }
+        Ok(())
+    }
+
+    fn modport_default(&mut self, arg: &ModportDefault) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && let Some(modport_name) = self.modport_name
+        {
+            let default_member_identifier = match arg {
+                ModportDefault::ConverseLParenIdentifierRParen(x) => x.identifier.as_ref(),
+                ModportDefault::SameLParenIdentifierRParen(x) => x.identifier.as_ref(),
+                _ => return Ok(()),
+            };
+            let Ok(symbol) = symbol_table::resolve(default_member_identifier) else {
+                return Ok(());
+            };
+
+            if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
+                // Check modport default member type
+                self.errors.push(AnalyzerError::mismatch_type(
+                    &symbol.found.token.to_string(),
+                    "modport",
+                    &symbol.found.kind.to_kind_name(),
+                    &default_member_identifier.identifier_token.token.into(),
+                ));
+            } else if symbol.found.token.text == modport_name.text {
+                // Check self reference
+                self.errors.push(AnalyzerError::mismatch_type(
+                    &symbol.found.token.to_string(),
+                    "other modport",
+                    "ownself",
+                    &default_member_identifier.identifier_token.token.into(),
+                ));
+            }
         }
         Ok(())
     }
