@@ -168,7 +168,7 @@ impl VerylGrammarTrait for CheckAnonymous {
                 true
             } else if is_wildcard {
                 symbol.found.is_package(false)
-            } else {
+            } else if symbol.full_path.len() >= 2 {
                 let package_symbol = symbol
                     .full_path
                     .get(symbol.full_path.len() - 2)
@@ -177,6 +177,8 @@ impl VerylGrammarTrait for CheckAnonymous {
                 // The preceding symbol must be a package or
                 // a proto-package referenced through a generic parameter.
                 package_symbol.is_package(false) && symbol.found.is_importable(true)
+            } else {
+                false
             };
 
             if !is_valid_import {

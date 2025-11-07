@@ -833,6 +833,17 @@ fn invalid_import() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+    }
+    module ModuleA {
+        import PkgA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
 }
 
 #[test]
