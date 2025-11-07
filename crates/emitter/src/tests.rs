@@ -2371,3 +2371,95 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn case_statement() {
+    let code = r#"
+module ModuleA {
+    const A: bit   = 0;
+    const B: u32   = 1;
+    const C: logic = 2;
+
+    var _a: u32;
+    var _b: u32;
+    var _c: u32;
+
+    always_comb {
+        case 0 {
+            A      : _a = 0;
+            B      : _a = 1;
+            2      : _a = 2;
+            A + 1  : _a = 3;
+            B - 1  : _a = 4;
+            default: _a = 5;
+        }
+
+        case 1 {
+            A      : _b = 0;
+            B      : _b = 1;
+            C      : _b = 2;
+            3      : _b = 3;
+            default: _b = 4;
+        }
+
+        case 2 {
+            A      : _c = 0;
+            B      : _c = 1;
+            2      : _c = 2;
+            3..=4  : _c = 3;
+            default: _c = 4;
+        }
+    }
+}
+"#;
+
+    let expect = r#"prj_ModuleA;
+    localparam bit          A = 0;
+    localparam int unsigned B = 1;
+    localparam logic        C = 2;
+
+    int unsigned _a;
+    int unsigned _b;
+    int unsigned _c;
+
+    always_comb begin
+        case (0)
+            A      : _a = 0;
+            B      : _a = 1;
+            2      : _a = 2;
+            A + 1  : _a = 3;
+            B - 1  : _a = 4;
+            default: _a = 5;
+        endcase
+
+        case (1) inside
+            A      : _b = 0;
+            B      : _b = 1;
+            C      : _b = 2;
+            3      : _b = 3;
+            default: _b = 4;
+        endcase
+
+        case (2) inside
+            A      : _c = 0;
+            B      : _c = 1;
+            2      : _c = 2;
+            [3:4  ]: _c = 3;
+            default: _c = 4;
+        endcase
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
