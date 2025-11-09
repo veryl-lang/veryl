@@ -82,3 +82,15 @@ https://docs.rs/veryl-analyzer/latest/veryl_analyzer/evaluator/struct.Evaluator.
 取ってきたい構文要素がどのように入っているかを追うにはこちらが便利かもしれません。
 
 https://github.com/veryl-lang/veryl/blob/master/crates/parser/veryl.par
+
+(2025/11/10追記)
+現在 #2005 にてIRの導入試行中です。これは型検査やシミュレータのための中間表現を想定していて
+
+* ジェネリクス
+* generate
+* パラメータオーバーライド
+* 構造体、interface、unpack配列
+
+あたりを解決し、全ての代入がpacked logicに対するものに展開された表現になる予定です。
+いまのところシミュレータが必要とする未評価フラグや変数と対応する代入式の対応表などはIRの構造として入っていないので、必要に応じて加えたり変えたりしてもらって大丈夫です。
+（型検査はおそらくIR生成中に行われて、IRの最終的な利用者はシミュレータが主になると思われるので）
