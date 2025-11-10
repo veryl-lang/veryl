@@ -8,8 +8,9 @@ use veryl_parser::Parser;
 #[cfg(target_os = "linux")]
 mod perf;
 
-const EXCLUDES: [&str; 4] = [
-    r"25_dependency.veryl",
+const EXCLUDES: [&str; 5] = [
+    r"25_dependency_1.veryl",
+    r"25_dependency_2.veryl",
     r"52_include.veryl",
     r"67_cocotb.veryl",
     r"68_std.veryl",
