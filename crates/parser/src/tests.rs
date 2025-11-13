@@ -1,4 +1,5 @@
 use crate::Parser;
+use miette::Diagnostic;
 
 #[track_caller]
 fn success(code: &str) {
@@ -14,6 +15,13 @@ fn failure(code: &str) {
     let parser = Parser::parse(&code, &"");
     dbg!(code);
     assert!(parser.is_err());
+}
+
+#[track_caller]
+fn help_message(code: &str) -> String {
+    let parser = Parser::parse(&code, &"");
+    let err = parser.err().unwrap();
+    err.help().unwrap().to_string()
 }
 
 #[test]
@@ -170,4 +178,66 @@ fn generic_arg() {
     inst u: ModuleA::<Pkg::C[0]>;
     "#;
     failure(code);
+}
+
+#[test]
+fn parse_error_help() {
+    let code = r#"
+    module ModuleA {
+        let a: logic = 1 < 0;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "If you mean \"less than operator\", please use '<:'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        let a: logic = 1 > 0;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "If you mean \"greater than operator\", please use '>:'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        for i: u32 in 0..10 {
+        }
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "generate-for declaration doesn't need type specifier (e.g. 'for i in 0..10 {')"
+    );
+
+    let code = r#"
+    module ModuleA {
+        always_comb {
+            {a, b} = 1;
+        }
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "bit concatenation at the left-hand side in block is not allowed, please use 'assign' declaration"
+    );
+
+    let code = r#"
+    module ModuleA {
+        if x {
+        }
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "The first arm of generate-if declaration needs label (e.g. 'if x :label {')"
+    );
 }

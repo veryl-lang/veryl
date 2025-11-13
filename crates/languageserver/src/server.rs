@@ -819,7 +819,14 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
     let (severity, message) = if let Some(x) = err.downcast_ref::<ParserError>() {
         let msg = match x {
             ParserError::SyntaxError(x) => {
-                format!("Syntax Error: {x}")
+                use miette::Diagnostic;
+                if let Some(help) = x.help()
+                    && !help.to_string().is_empty()
+                {
+                    format!("Syntax Error: {x}\nhelp: {help}")
+                } else {
+                    format!("Syntax Error: {x}")
+                }
             }
             ParserError::ParserError(x) => {
                 format!("Syntax Error: {x}")

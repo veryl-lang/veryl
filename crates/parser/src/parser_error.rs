@@ -19,7 +19,7 @@ pub enum ParserError {
 }
 
 #[derive(Error, Diagnostic, Debug)]
-#[diagnostic(help(""), code(ParserError::SyntaxError))]
+#[diagnostic(code(ParserError::SyntaxError))]
 pub struct SyntaxError {
     pub cause: String,
     #[source_code]
@@ -27,38 +27,75 @@ pub struct SyntaxError {
     #[label("Error location")]
     pub error_location: SourceSpan,
     pub unexpected_tokens: Vec<UnexpectedToken>,
-    pub expected_tokens: TokenVec,
+    pub expected_tokens: ExpectedTokens,
+    #[help]
+    pub help: String,
 }
 
 impl std::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if !self.unexpected_tokens.is_empty() {
             let token = self.unexpected_tokens[0].token_type;
-            if token == TokenType::LAngle {
-                f.write_str(&format!(
-                    "Unexpected token: '{token}', do you mean \"less than operator '<:'\" ?"
-                ))
-            } else if token == TokenType::RAngle {
-                f.write_str(&format!(
-                    "Unexpected token: '{token}', do you mean \"greater than operator '>:'\" ?"
-                ))
-            } else {
-                f.write_str(&format!("Unexpected token: '{token}'"))
-            }
+            f.write_str(&format!("Unexpected token: '{token}'"))
         } else {
             f.write_str("Syntax Error")
         }
     }
 }
 
+fn l_angle(unexpected_token: TokenType, _expected_tokens: &ExpectedTokens) -> bool {
+    unexpected_token == TokenType::LAngle
+}
+
+fn r_angle(unexpected_token: TokenType, _expected_tokens: &ExpectedTokens) -> bool {
+    unexpected_token == TokenType::RAngle
+}
+
+fn colon_instead_of_in(unexpected_token: TokenType, expected_tokens: &ExpectedTokens) -> bool {
+    unexpected_token == TokenType::Colon && expected_tokens.any(TokenType::In)
+}
+
+fn comma_instead_of_assignment_operator(
+    unexpected_token: TokenType,
+    expected_tokens: &ExpectedTokens,
+) -> bool {
+    unexpected_token == TokenType::Comma && expected_tokens.any(TokenType::AssignmentOperator)
+}
+
+fn l_brace_instead_of_colon(unexpected_token: TokenType, expected_tokens: &ExpectedTokens) -> bool {
+    unexpected_token == TokenType::LBrace && expected_tokens.any(TokenType::Colon)
+}
+
 impl From<parol_runtime::SyntaxError> for SyntaxError {
     fn from(value: parol_runtime::SyntaxError) -> Self {
+        let unexpected_tokens: Vec<_> = UnexpectedTokens(value.unexpected_tokens).into();
+        let expected_tokens: ExpectedTokens = (&value.expected_tokens).into();
+
+        let mut help = String::new();
+        if !unexpected_tokens.is_empty() {
+            let token = unexpected_tokens[0].token_type;
+            if l_angle(token, &expected_tokens) {
+                help = "If you mean \"less than operator\", please use '<:'".to_string();
+            } else if r_angle(token, &expected_tokens) {
+                help = "If you mean \"greater than operator\", please use '>:'".to_string();
+            } else if colon_instead_of_in(token, &expected_tokens) {
+                help = "generate-for declaration doesn't need type specifier (e.g. 'for i in 0..10 {')".to_string();
+            } else if comma_instead_of_assignment_operator(token, &expected_tokens) {
+                help = "bit concatenation at the left-hand side in block is not allowed, please use 'assign' declaration".to_string();
+            } else if l_brace_instead_of_colon(token, &expected_tokens) {
+                help =
+                    "The first arm of generate-if declaration needs label (e.g. 'if x :label {')"
+                        .to_string();
+            }
+        }
+
         Self {
             cause: value.cause,
             input: value.input.map(|e| FileSource(*e).into()).unwrap(),
             error_location: Location(*value.error_location).into(),
-            unexpected_tokens: UnexpectedTokens(value.unexpected_tokens).into(),
-            expected_tokens: value.expected_tokens,
+            unexpected_tokens,
+            expected_tokens,
+            help,
         }
     }
 }
@@ -460,5 +497,20 @@ impl From<UnexpectedTokens> for Vec<UnexpectedToken> {
                 token: Location(v.token).into(),
             })
             .collect::<Vec<UnexpectedToken>>()
+    }
+}
+
+#[derive(Debug)]
+pub struct ExpectedTokens(Vec<TokenType>);
+
+impl ExpectedTokens {
+    pub fn any(&self, x: TokenType) -> bool {
+        self.0.contains(&x)
+    }
+}
+
+impl From<&TokenVec> for ExpectedTokens {
+    fn from(value: &TokenVec) -> Self {
+        ExpectedTokens(value.iter().map(|x| x.as_str().into()).collect())
     }
 }
