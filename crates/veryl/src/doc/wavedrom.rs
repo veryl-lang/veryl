@@ -4,9 +4,9 @@
 // Released under the MPL-2.0 license
 
 use crate::doc::utils::escape_html;
-use mdbook::book::{Book, BookItem, Chapter};
-use mdbook::errors::Result;
-use mdbook::preprocess::{Preprocessor, PreprocessorContext};
+use mdbook_driver::book::{Book, BookItem, Chapter};
+use mdbook_driver::errors::Result;
+use mdbook_preprocessor::{Preprocessor, PreprocessorContext};
 use pulldown_cmark::{CodeBlockKind::*, Event, Options, Parser, Tag, TagEnd};
 
 pub struct Wavedrom;
@@ -33,8 +33,8 @@ impl Preprocessor for Wavedrom {
         res.unwrap_or(Ok(())).map(|_| book)
     }
 
-    fn supports_renderer(&self, renderer: &str) -> bool {
-        renderer == "html"
+    fn supports_renderer(&self, renderer: &str) -> Result<bool> {
+        Ok(renderer == "html")
     }
 }
 
