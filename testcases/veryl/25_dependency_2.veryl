@@ -30,15 +30,33 @@ module Module25A (
     inst u2: veryl_sample4::bar_module::<foopkg, barpkg>;
 }
 
-module Module25B::<PKG: ProtoPackage25> {
+module Module25B::<PKG: ProtoPackage25> (
+    if3: modport veryl_sample4::qux_if::<PKG::S>::mp,
+    if4: modport veryl_sample4::qux_if::<S>::mp     ,
+) {
     import PKG::*;
 
-    inst u3      : veryl_sample4::qux_if::<PKG::S>;
-    inst u4      : veryl_sample4::qux_if::<S>;
-    assign u3.qux.s = '0;
-    assign u4.qux.s = '0;
+    inst u5: veryl_sample4::qux_if::<PKG::S>;
+    inst u6: veryl_sample4::qux_if::<S>;
+
+    assign u5.qux.s = '0;
+    assign u6.qux.s = '0;
+
+    let _a: logic = if3.qux.s;
+    let _b: logic = if4.qux.s;
+
+    :g {
+        let _c: logic = if3.qux.s;
+        let _d: logic = if4.qux.s;
+        let _e: logic = u5.qux.s;
+        let _f: logic = u6.qux.s;
+    }
 }
 
 module Module25C {
-    inst u5: Module25B::<Package25::<1>>;
+    inst qux_if: veryl_sample4::qux_if::<Package25::<1>::S>;
+    inst u5: Module25B::<Package25::<1>> (
+        if3: qux_if,
+        if4: qux_if,
+    );
 }

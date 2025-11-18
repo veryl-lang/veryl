@@ -33,17 +33,36 @@ module veryl_testcase_Module25A
     veryl_sample4___bar_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR__veryl_sample4___bar_pkg__32 u2 ();
 endmodule
 
-module veryl_testcase___Module25B____Package25__1;
+module veryl_testcase___Module25B____Package25__1
     import veryl_testcase___Package25__1::*;
+(
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp if3,
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp if4
+);
 
 
-    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u3       ();
-    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u4       ();
-    always_comb u3.qux.s = '0;
-    always_comb u4.qux.s = '0;
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u5 ();
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u6 ();
+
+    always_comb u5.qux.s = '0;
+    always_comb u6.qux.s = '0;
+
+    logic _a; always_comb _a = if3.qux.s;
+    logic _b; always_comb _b = if4.qux.s;
+
+    if (1) begin :g
+        logic _c; always_comb _c = if3.qux.s;
+        logic _d; always_comb _d = if4.qux.s;
+        logic _e; always_comb _e = u5.qux.s;
+        logic _f; always_comb _f = u6.qux.s;
+    end
 endmodule
 
 module veryl_testcase_Module25C;
-    veryl_testcase___Module25B____Package25__1 u5 ();
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S qux_if ();
+    veryl_testcase___Module25B____Package25__1 u5 (
+        .if3 (qux_if),
+        .if4 (qux_if)
+    );
 endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map

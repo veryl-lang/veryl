@@ -152,9 +152,12 @@ impl SymbolTable {
                 return Ok(context);
             }
 
+            let mut path = x.path.clone();
+            path.resolve_imported(&context.namespace, None);
+
             let symbol = self.resolve(
-                &x.path.generic_path(),
-                &x.path.generic_arguments(),
+                &path.generic_path(),
+                &path.generic_arguments(),
                 context.push(),
             )?;
             match &symbol.found.kind {
@@ -817,6 +820,12 @@ impl SymbolTable {
                 .iter()
                 .map(|x| get_generic_bound(self, *x))
                 .collect(),
+            SymbolKind::Block => {
+                let Some(parent) = symbol.get_parent() else {
+                    return Vec::new();
+                };
+                self.collect_generic_bounds(&parent)
+            }
             SymbolKind::Struct(x) => x
                 .generic_parameters
                 .iter()
