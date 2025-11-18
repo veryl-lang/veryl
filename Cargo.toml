@@ -40,7 +40,7 @@ futures         = "0.3.31"
 fxhash          = "0.2.1"
 handlebars      = "6.3"
 log             = "0.4.28"
-mdbook          = "0.4.51"
+mdbook          = "0.5.0"
 miette          = {version = "7.6"}
 once_cell       = "1.21"
 parol_runtime   = "4.0"
