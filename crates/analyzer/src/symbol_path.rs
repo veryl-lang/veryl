@@ -105,7 +105,7 @@ impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
 impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
         let path: GenericSymbolPath = value.into();
-        path.mangled_path()
+        path.generic_path()
     }
 }
 

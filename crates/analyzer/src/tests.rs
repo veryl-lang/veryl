@@ -5889,6 +5889,26 @@ fn anonymous_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA::<T: type> {
+        const TYPE: type = T;
+    }
+    module ModuleB::<T: type> (
+        b: output T,
+    ) {
+        assign b = 0 as T;
+    }
+    module ModuleC {
+        import PkgA::<bool>::*;
+        inst u: ModuleB::<TYPE> (
+            b: _,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7217,8 +7237,9 @@ fn unresolvable_generic_argument() {
     }
     module ModuleA {
         import PkgB::*;
+        var _a: logic;
         always_comb {
-            PkgC::Func::<PkgB::FOO.bar>();
+            _a = PkgC::Func::<PkgB::FOO.bar>();
         }
     }
     "#;
