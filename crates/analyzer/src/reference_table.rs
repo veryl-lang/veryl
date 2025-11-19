@@ -307,19 +307,29 @@ impl ReferenceTable {
                         args.push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
+                    let target_symbol = symbol.found;
+                    let target_namespace = target_symbol.inner_namespace();
                     for (j, arg) in args.iter_mut().enumerate() {
                         if let Some(unaliased_arg) = arg.unaliased_path() {
-                            path.paths[i].replace_generic_argument(j, unaliased_arg.clone());
                             *arg = unaliased_arg;
                         }
+                        arg.append_project_path(namespace, &target_namespace);
+                        path.paths[i].replace_generic_argument(j, arg.clone());
                     }
 
                     if path.is_generic_reference() {
                         // some unaliased generic args are still generic references.
-                        self.add_generic_reference(&symbol.found, namespace, &path, i);
+                        self.add_generic_reference(&target_symbol, namespace, &path, i);
                         return;
                     } else {
-                        self.insert_generic_instance(&path, i, namespace, &args, &symbol.found);
+                        self.insert_generic_instance(
+                            &path,
+                            i,
+                            namespace,
+                            &args,
+                            &target_symbol,
+                            &target_namespace,
+                        );
                     }
                 }
                 Err(err) => {
@@ -327,6 +337,7 @@ impl ReferenceTable {
                     if single_path && !path.is_resolvable() {
                         return;
                     }
+
                     self.push_resolve_error(err, &path.range, generics_token, None);
                 }
             }
@@ -340,16 +351,11 @@ impl ReferenceTable {
         namespace: &Namespace,
         generic_args: &[GenericSymbolPath],
         target: &Symbol,
+        target_namespace: &Namespace,
     ) {
-        let target_namespace = target.inner_namespace();
-        let mut generic_args = generic_args.to_owned();
-        for args in &mut generic_args {
-            args.append_project_path(namespace, &target_namespace);
-        }
-
         let instance_path = GenericSymbol {
             base: path.paths[ith].base,
-            arguments: generic_args,
+            arguments: generic_args.to_owned(),
         };
 
         let Some((token, symbol)) = instance_path.get_generic_instance(target) else {
@@ -374,11 +380,11 @@ impl ReferenceTable {
 
             let mut path = path.clone();
             path.apply_map(&map);
-            path.append_project_path(namespace, &target_namespace);
+            path.append_project_path(namespace, target_namespace);
 
             self.generic_symbol_path(
                 &path,
-                &target_namespace,
+                target_namespace,
                 false,
                 Some(&target.token),
                 Some(&map),
@@ -407,7 +413,14 @@ impl ReferenceTable {
             let mut path = path.clone();
             let ith = path.len() - 1;
             path.apply_map(&[map]);
-            self.insert_generic_instance(&path, ith, namespace, &path.paths[ith].arguments, symbol);
+            self.insert_generic_instance(
+                &path,
+                ith,
+                namespace,
+                &path.paths[ith].arguments,
+                symbol,
+                &symbol.inner_namespace(),
+            );
         }
 
         let kind = match target.kind {
