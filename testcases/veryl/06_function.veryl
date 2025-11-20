@@ -36,6 +36,18 @@ module Module06 {
         return {ab_if.a, ab_if.b};
     }
 
+    // function with internal constants
+    function FuncE () -> u32 {
+        const ParamE: u32 = 2 * ParamX;
+
+        let a: logic<ParamE> = 0;
+        let b: logic<ParamE> = 1;
+        var c: logic<ParamE>;
+
+        c = a + b;
+        return c;
+    }
+
     let a: logic<ParamX> = 1;
     var b: logic<ParamX>;
     var c: logic<ParamX>;
@@ -43,6 +55,7 @@ module Module06 {
     var e: logic<ParamX>;
     var f: logic<ParamX>;
     var g: logic<2>     ;
+    var h: u32          ;
 
     // function call
     assign c = FuncA(a, b);
@@ -71,4 +84,5 @@ module Module06 {
     inst ab_if: Interface06;
 
     assign g = FuncD(ab_if);
+    assign h = FuncE();
 }
