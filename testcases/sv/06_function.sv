@@ -38,13 +38,27 @@ module veryl_testcase_Module06;
         return {__ab_if_a, __ab_if_b};
     endfunction
 
-    logic [ParamX-1:0] a; always_comb a = 1;
-    logic [ParamX-1:0] b;
-    logic [ParamX-1:0] c;
-    logic [ParamX-1:0] d;
-    logic [ParamX-1:0] e;
-    logic [ParamX-1:0] f;
-    logic [2-1:0]      g;
+    // function with internal constants
+    function automatic int unsigned FuncE() ;
+        localparam int unsigned ParamE = 2 * ParamX;
+        logic [ParamE-1:0] a;
+        logic [ParamE-1:0] b;
+        logic [ParamE-1:0] c;
+        a = 0;
+        b = 1;
+
+        c = a + b;
+        return c;
+    endfunction
+
+    logic        [ParamX-1:0] a; always_comb a = 1;
+    logic        [ParamX-1:0] b;
+    logic        [ParamX-1:0] c;
+    logic        [ParamX-1:0] d;
+    logic        [ParamX-1:0] e;
+    logic        [ParamX-1:0] f;
+    logic        [2-1:0]      g;
+    int unsigned              h;
 
     // function call
     always_comb c = FuncA(a, b);
@@ -73,5 +87,6 @@ module veryl_testcase_Module06;
     veryl_testcase_Interface06 ab_if ();
 
     always_comb g = FuncD(ab_if.a, ab_if.b);
+    always_comb h = FuncE();
 endmodule
 //# sourceMappingURL=../map/06_function.sv.map

@@ -998,11 +998,7 @@ impl Emitter {
         let mut n_newlines = 0;
         for x in &statement_block_list {
             for x in x {
-                if is_var_declaration(x) || is_let_statement(x) {
-                    self.newline_list(n_newlines);
-                    base += self.statement_variable_declatation_only(x);
-                    n_newlines += 1;
-                }
+                (base, n_newlines) = self.emit_declaration_in_statement_block(x, base, n_newlines);
             }
         }
 
@@ -1024,7 +1020,10 @@ impl Emitter {
                     self.attribute(&x.attribute);
                 }
 
-                if !is_var_declaration(x) {
+                if matches!(
+                    x,
+                    StatementBlockItem::LetStatement(_) | StatementBlockItem::Statement(_)
+                ) {
                     if i != 0 || ifdef_attributes.is_empty() {
                         self.newline_list(base + n_newlines);
                         n_newlines += 1;
@@ -1033,9 +1032,6 @@ impl Emitter {
                     match &x {
                         StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
                         StatementBlockItem::Statement(x) => self.statement(&x.statement),
-                        StatementBlockItem::ConstDeclaration(x) => {
-                            self.const_declaration(&x.const_declaration)
-                        }
                         _ => unreachable!(),
                     }
                 }
@@ -1049,12 +1045,21 @@ impl Emitter {
         self.token(&arg.r_brace.r_brace_token.replace(end_kw));
     }
 
-    fn statement_variable_declatation_only(&mut self, arg: &StatementBlockItem) -> usize {
+    fn emit_declaration_in_statement_block(
+        &mut self,
+        arg: &StatementBlockItem,
+        base: usize,
+        n_newlines: usize,
+    ) -> (usize, usize) {
+        if matches!(arg, StatementBlockItem::Statement(_)) {
+            return (base, n_newlines);
+        }
+
+        self.newline_list(n_newlines);
         self.clear_adjust_line();
         match arg {
             StatementBlockItem::VarDeclaration(x) => {
                 self.var_declaration(&x.var_declaration);
-                1
             }
             StatementBlockItem::LetStatement(x) => {
                 let x = &x.let_statement;
@@ -1066,10 +1071,14 @@ impl Emitter {
                     self.array(&x.array);
                 }
                 self.str(";");
-                1
             }
-            _ => 0,
+            StatementBlockItem::ConstDeclaration(x) => {
+                self.const_declaration(&x.const_declaration);
+            }
+            _ => {}
         }
+
+        (base + 1, n_newlines + 1)
     }
 
     fn cond_type_prefix(&self, token: &Token) -> (Option<String>, bool) {
@@ -2064,14 +2073,6 @@ impl Emitter {
 
         self.token(&token.replace(&name));
     }
-}
-
-fn is_var_declaration(arg: &StatementBlockItem) -> bool {
-    matches!(arg, StatementBlockItem::VarDeclaration(_))
-}
-
-fn is_let_statement(arg: &StatementBlockItem) -> bool {
-    matches!(arg, StatementBlockItem::LetStatement(_))
 }
 
 fn calc_emitted_width(number: &str, base: u32) -> Option<usize> {
@@ -3307,7 +3308,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'LetStatement'
     fn let_statement(&mut self, arg: &LetStatement) {
-        // Variable declaration is moved to statement_variable_declatation_only
+        // Variable declaration is moved to emit_declaration_in_statement_block
         //self.scalar_type(&arg.array_type.scalar_type);
         //self.space(1);
         //self.identifier(&arg.identifier);
