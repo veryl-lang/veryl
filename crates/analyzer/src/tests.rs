@@ -3390,6 +3390,58 @@ fn mismatch_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoA {
+        const WIDTH: u32;
+
+        var ready: logic       ;
+        var valid: logic       ;
+        var data : logic<WIDTH>;
+
+        function ack() -> logic ;
+
+        modport master {
+            ready: input ,
+            valid: output,
+            data : output,
+            ack  : import,
+        }
+    }
+    interface InterfaceA::<W: u32> for ProtoA {
+        const WIDTH: u32 = W;
+
+        var ready: logic       ;
+        var valid: logic       ;
+        var data : logic<WIDTH>;
+
+        function ack () -> logic {
+            return ready && valid;
+        }
+
+        modport master {
+            ready: input ,
+            valid: output,
+            data : output,
+            ack  : import,
+        }
+    }
+    module ModuleA::<BUS_IF: ProtoA> (
+        bus_if: modport BUS_IF::master,
+    ) {
+        connect bus_if <> 0;
+    }
+    module ModuleB {
+        inst bus_if: InterfaceA::<8>;
+
+        inst u: ModuleA::<InterfaceA::<8>> (
+            bus_if: bus_if,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

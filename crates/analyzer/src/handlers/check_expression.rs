@@ -142,7 +142,7 @@ impl CheckExpression {
                     let dst_interface = symbol_table::get(dst.interface).unwrap();
                     if let EvaluatedType::UserDefined(src) = &src.r#type {
                         let src_symbol = symbol_table::get(src.symbol).unwrap();
-                        if dst.interface != src.symbol {
+                        if !Self::match_interface(&dst_interface, &src_symbol) {
                             self.errors.push(AnalyzerError::mismatch_assignment(
                                 &format!("instance of {}", src_symbol.token),
                                 &format!("modport of {}", dst_interface.token),
@@ -165,6 +165,14 @@ impl CheckExpression {
         }
 
         src
+    }
+
+    fn match_interface(dst: &Symbol, src: &Symbol) -> bool {
+        if matches!(dst.kind, SymbolKind::ProtoInterface(_)) {
+            src.proto().map(|x| x.id == dst.id).unwrap_or(false)
+        } else {
+            src.id == dst.id
+        }
     }
 
     fn check_inst(&mut self, arg: &ComponentInstantiation) {
