@@ -1,6 +1,7 @@
 use crate::doc::{Mermaid, Wavedrom};
 use handlebars::Handlebars;
-use mdbook::{Config, MDBook};
+use mdbook_driver::MDBook;
+use mdbook_driver::config::Config;
 use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
 use std::collections::HashSet;
