@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
-use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
@@ -252,10 +252,6 @@ impl ReferenceTable {
         let orig_len = path.len();
         path.resolve_imported(namespace, generic_maps);
 
-        if path.is_generic_reference() {
-            return;
-        }
-
         // Prefix paths added by `resolve_imported` have already been resolved.
         // They should be skipped.
         let prefix_len = path.len() - orig_len;
@@ -301,32 +297,34 @@ impl ReferenceTable {
                         continue;
                     }
 
-                    let mut args = path.paths[i].arguments.clone();
+                    if (params.len() + n_args) == 0 {
+                        continue;
+                    }
+
+                    let target_symbol = symbol.found;
+                    let target_namespace = target_symbol.inner_namespace();
+
+                    let mut args: Vec<_> = path.paths[i].arguments.drain(0..).collect();
                     for param in params.iter().skip(n_args) {
                         //  apply default value
                         args.push(param.1.default_value.as_ref().unwrap().clone());
                     }
 
-                    let target_symbol = symbol.found;
-                    let target_namespace = target_symbol.inner_namespace();
-                    for (j, arg) in args.iter_mut().enumerate() {
+                    for arg in args.iter_mut() {
                         if let Some(unaliased_arg) = arg.unaliased_path() {
                             *arg = unaliased_arg;
                         }
                         arg.append_project_path(namespace, &target_namespace);
-                        path.paths[i].replace_generic_argument(j, arg.clone());
                     }
 
+                    path.paths[i].arguments.append(&mut args);
                     if path.is_generic_reference() {
-                        // some unaliased generic args are still generic references.
-                        self.add_generic_reference(&target_symbol, namespace, &path, i);
-                        return;
+                        Self::add_generic_reference(&target_symbol, namespace, &path, i);
                     } else {
-                        self.insert_generic_instance(
+                        Self::insert_generic_instance(
                             &path,
                             i,
                             namespace,
-                            &args,
                             &target_symbol,
                             &target_namespace,
                         );
@@ -345,19 +343,13 @@ impl ReferenceTable {
     }
 
     fn insert_generic_instance(
-        &mut self,
         path: &GenericSymbolPath,
         ith: usize,
         namespace: &Namespace,
-        generic_args: &[GenericSymbolPath],
         target: &Symbol,
         target_namespace: &Namespace,
     ) {
-        let instance_path = GenericSymbol {
-            base: path.paths[ith].base,
-            arguments: generic_args.to_owned(),
-        };
-
+        let instance_path = &path.paths[ith];
         let Some((token, symbol)) = instance_path.get_generic_instance(target) else {
             return;
         };
@@ -382,24 +374,38 @@ impl ReferenceTable {
             path.apply_map(&map);
             path.append_project_path(namespace, target_namespace);
 
-            self.generic_symbol_path(
-                &path,
-                target_namespace,
-                false,
-                Some(&target.token),
-                Some(&map),
-            );
+            if let Ok(target) = symbol_table::resolve((&path.generic_path(), target_namespace)) {
+                let ith = path.len() - 1;
+                Self::insert_generic_instance(
+                    &path,
+                    ith,
+                    target_namespace,
+                    &target.found,
+                    &target.found.inner_namespace(),
+                );
+            }
         }
     }
 
     fn add_generic_reference(
-        &mut self,
         symbol: &Symbol,
         namespace: &Namespace,
         path: &GenericSymbolPath,
         ith: usize,
     ) {
-        let Some(mut target) = namespace.get_symbol() else {
+        fn get_parent_generic_component(namespace: &Namespace) -> Option<Symbol> {
+            let target = namespace.get_symbol()?;
+            if target.has_generic_paramters() {
+                Some(target)
+            } else {
+                get_parent_generic_component(&target.namespace)
+            }
+        }
+
+        let mut namespace = namespace.clone();
+        namespace.strip_anonymous_path();
+
+        let Some(mut target) = get_parent_generic_component(&namespace) else {
             return;
         };
         let path = path.slice(ith);
@@ -413,11 +419,10 @@ impl ReferenceTable {
             let mut path = path.clone();
             let ith = path.len() - 1;
             path.apply_map(&[map]);
-            self.insert_generic_instance(
+            Self::insert_generic_instance(
                 &path,
                 ith,
-                namespace,
-                &path.paths[ith].arguments,
+                &namespace,
                 symbol,
                 &symbol.inner_namespace(),
             );
