@@ -8,6 +8,9 @@ pub struct Format {
 
     #[serde(default = "default_max_width")]
     pub max_width: usize,
+
+    #[serde(default = "default_vertical_align")]
+    pub vertical_align: bool,
 }
 
 impl Default for Format {
@@ -22,4 +25,8 @@ fn default_indent_width() -> usize {
 
 fn default_max_width() -> usize {
     120
+}
+
+fn default_vertical_align() -> bool {
+    false
 }
