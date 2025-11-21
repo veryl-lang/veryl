@@ -73,10 +73,12 @@ impl CmdBuild {
         for context in &contexts {
             if !context.skip {
                 let path = &context.path;
-                let mut errors =
-                    context
-                        .analyzer
-                        .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+                let mut errors = context.analyzer.analyze_pass2(
+                    &path.prj,
+                    &path.src,
+                    &context.parser.veryl,
+                    None,
+                );
                 check_error = check_error.append(&mut errors).check_err()?;
             }
         }

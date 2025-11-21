@@ -27,7 +27,6 @@ pub struct CheckExpression {
     point: HandlerPoint,
     evaluator: Evaluator,
     port_direction: Option<Direction>,
-    in_proto: bool,
     in_input_port_default_value: bool,
     disable: bool,
     disable_block_beg: HashSet<TokenId>,
@@ -50,17 +49,17 @@ impl CheckExpression {
         }
     }
 
-    fn inst_history_error(&mut self, error: InstanceHistoryError, token: &TokenRange) {
-        let error = match error {
-            InstanceHistoryError::ExceedDepthLimit => {
-                AnalyzerError::exceed_limit("hierarchy depth limit", token)
-            }
-            InstanceHistoryError::ExceedTotalLimit => {
-                AnalyzerError::exceed_limit("total instance limit", token)
-            }
-            InstanceHistoryError::InfiniteRecursion => AnalyzerError::infinite_recursion(token),
-        };
-        self.errors.push(error);
+    fn inst_history_error(&mut self, _error: InstanceHistoryError, _token: &TokenRange) {
+        //let error = match error {
+        //    InstanceHistoryError::ExceedDepthLimit => {
+        //        AnalyzerError::exceed_limit("hierarchy depth limit", token)
+        //    }
+        //    InstanceHistoryError::ExceedTotalLimit => {
+        //        AnalyzerError::exceed_limit("total instance limit", token)
+        //    }
+        //    InstanceHistoryError::InfiniteRecursion => AnalyzerError::infinite_recursion(token),
+        //};
+        //self.errors.push(error);
     }
 
     fn evaluate_expression(
@@ -116,21 +115,21 @@ impl CheckExpression {
             }
 
             if src_array_dim != dst_array_dim {
-                self.errors.push(AnalyzerError::mismatch_assignment(
-                    &format!("{src_array_dim}-D array"),
-                    &format!("{dst_array_dim}-D array"),
-                    token,
-                    &self.inst_context,
-                ));
+                //self.errors.push(AnalyzerError::mismatch_assignment(
+                //    &format!("{src_array_dim}-D array"),
+                //    &format!("{dst_array_dim}-D array"),
+                //    token,
+                //    &self.inst_context,
+                //));
             }
 
             if dst_type.kind.is_2state() && src.is_4state() {
-                self.errors.push(AnalyzerError::mismatch_assignment(
-                    "4-state value",
-                    "2-state variable",
-                    token,
-                    &self.inst_context,
-                ));
+                //self.errors.push(AnalyzerError::mismatch_assignment(
+                //    "4-state value",
+                //    "2-state variable",
+                //    token,
+                //    &self.inst_context,
+                //));
             }
 
             if let TypeKind::UserDefined(x) = &dst_type.kind {
@@ -261,7 +260,7 @@ impl CheckExpression {
         };
 
         for param in params {
-            let name = param.identifier.identifier_token.token.text;
+            let name = param.identifier.text();
 
             let Ok(target) =
                 symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
@@ -311,7 +310,7 @@ impl CheckExpression {
 
         for connect in connections {
             let token: TokenRange = (&connect).into();
-            let dst = connect.identifier.identifier_token.token.text;
+            let dst = connect.identifier.text();
 
             match (connect.inst_port_item_opt, ports.get(&dst)) {
                 (Some(src), Some(dst)) => {
@@ -343,10 +342,6 @@ impl Handler for CheckExpression {
     fn set_point(&mut self, p: HandlerPoint) {
         self.point = p;
     }
-}
-
-fn is_if_expression(expression: &Expression) -> bool {
-    !expression.if_expression.if_expression_list.is_empty()
 }
 
 fn is_defined_in_package(full_path: &[SymbolId]) -> bool {
@@ -390,26 +385,6 @@ impl VerylGrammarTrait for CheckExpression {
         Ok(())
     }
 
-    fn if_expression(&mut self, arg: &IfExpression) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
-            for x in &arg.if_expression_list {
-                if is_if_expression(&x.expression) {
-                    let range: TokenRange = x.expression.as_ref().into();
-                    self.errors
-                        .push(AnalyzerError::unenclosed_inner_if_expression(&range));
-                }
-
-                if is_if_expression(&x.expression0) {
-                    let range: TokenRange = x.expression0.as_ref().into();
-                    self.errors
-                        .push(AnalyzerError::unenclosed_inner_if_expression(&range));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     fn identifier_factor(&mut self, arg: &IdentifierFactor) -> Result<(), ParolError> {
         if !self.disable
             && let HandlerPoint::Before = self.point
@@ -432,11 +407,11 @@ impl VerylGrammarTrait for CheckExpression {
                         let token: TokenRange = arg.expression_identifier.as_ref().into();
                         let kind_name = rr.found.kind.to_kind_name();
 
-                        self.errors.push(AnalyzerError::invalid_factor(
-                            Some(&rr.found.token.to_string()),
-                            &kind_name,
+                        self.errors.push(AnalyzerError::invalid_port_default_value(
+                            "",
+                            "",
+                            Some(&kind_name),
                             &token,
-                            &self.inst_context,
                         ));
                     }
                 }
@@ -746,31 +721,24 @@ impl VerylGrammarTrait for CheckExpression {
     fn with_parameter_item(&mut self, arg: &WithParameterItem) -> Result<(), ParolError> {
         if !self.disable
             && let HandlerPoint::Before = self.point
+            && let Some(x) = &arg.with_parameter_item_opt
         {
-            if let Some(x) = &arg.with_parameter_item_opt {
-                let type_expression = matches!(
-                    *arg.with_parameter_item_group0,
-                    WithParameterItemGroup0::Type(_)
+            let type_expression = matches!(
+                *arg.with_parameter_item_group0,
+                WithParameterItemGroup0::Type(_)
+            );
+            if !type_expression && let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref()) {
+                self.evaluate_connection(
+                    Context::ParameterConnection,
+                    &x.expression,
+                    &dst.found,
+                    &[],
+                    &arg.into(),
                 );
-                if !type_expression && let Ok(dst) = symbol_table::resolve(arg.identifier.as_ref())
-                {
-                    self.evaluate_connection(
-                        Context::ParameterConnection,
-                        &x.expression,
-                        &dst.found,
-                        &[],
-                        &arg.into(),
-                    );
-                } else {
-                    self.evaluate_expression(&x.expression, type_expression);
-                }
-                // TODO type check
-            } else if !self.in_proto {
-                self.errors.push(AnalyzerError::missing_default_argument(
-                    &arg.identifier.identifier_token.token.to_string(),
-                    &arg.identifier.as_ref().into(),
-                ));
+            } else {
+                self.evaluate_expression(&x.expression, type_expression);
             }
+            // TODO type check
         }
 
         Ok(())
@@ -916,28 +884,6 @@ impl VerylGrammarTrait for CheckExpression {
             }
         }
 
-        Ok(())
-    }
-
-    fn proto_module_declaration(
-        &mut self,
-        _arg: &ProtoModuleDeclaration,
-    ) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => self.in_proto = true,
-            HandlerPoint::After => self.in_proto = false,
-        }
-        Ok(())
-    }
-
-    fn proto_interface_declaration(
-        &mut self,
-        _arg: &ProtoInterfaceDeclaration,
-    ) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => self.in_proto = true,
-            HandlerPoint::After => self.in_proto = false,
-        }
         Ok(())
     }
 }

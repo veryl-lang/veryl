@@ -2,16 +2,16 @@ use crate::HashMap;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
+use crate::conv::{Context, Conv};
 use crate::handlers::check_expression::CheckExpression;
 use crate::handlers::*;
 use crate::instance_history;
+use crate::ir::Ir;
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::reference_table;
-use crate::symbol::{
-    Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
-};
+use crate::symbol::{Affiliation, Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use crate::type_dag;
@@ -168,7 +168,7 @@ impl AnalyzerPass3 {
 
             let non_state_variable = match &symbol.kind {
                 SymbolKind::Port(_) => true,
-                SymbolKind::Variable(x) => x.affiliation != VariableAffiliation::StatementBlock,
+                SymbolKind::Variable(x) => x.affiliation != Affiliation::StatementBlock,
                 _ => {
                     unreachable!()
                 }
@@ -377,11 +377,21 @@ impl Analyzer {
         ret
     }
 
+    fn create_ir(input: &Veryl, build_opt: &Build) -> (Ir, Vec<AnalyzerError>) {
+        let mut context = Context::default();
+        context.instance_history.depth_limit = build_opt.instance_depth_limit;
+        context.instance_history.total_limit = build_opt.instance_total_limit;
+        let ir: Ir = Conv::conv(&mut context, input);
+        let errors = context.drain_errors();
+        (ir, errors)
+    }
+
     pub fn analyze_pass2<T: AsRef<Path>>(
         &self,
         project_name: &str,
         _path: T,
         input: &Veryl,
+        ir: Option<&mut Ir>,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
@@ -392,6 +402,14 @@ impl Analyzer {
         let mut pass2 = AnalyzerPass2::new(&self.build_opt, &self.lint_opt, &self.env_var);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
+
+        // some pass2 errors are generated in create_ir
+        // The actual implementation is under crate/analyzer/src/ir/conv
+        let mut ir_result = Self::create_ir(input, &self.build_opt);
+        ret.append(&mut ir_result.1);
+        if let Some(x) = ir {
+            x.append(&mut ir_result.0);
+        }
 
         ret
     }
@@ -572,9 +590,9 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
                 }
             }
             SymbolKind::Variable(x)
-                if x.affiliation == VariableAffiliation::Module
-                    || x.affiliation == VariableAffiliation::Function
-                    || x.affiliation == VariableAffiliation::StatementBlock =>
+                if x.affiliation == Affiliation::Module
+                    || x.affiliation == Affiliation::Function
+                    || x.affiliation == Affiliation::StatementBlock =>
             {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
                     if let Some(id) = x.symbol {

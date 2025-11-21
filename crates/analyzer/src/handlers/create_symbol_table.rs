@@ -12,7 +12,7 @@ use crate::symbol::Direction as SymDirection;
 use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
-    AliasInterfaceProperty, AliasModuleProperty, AliasPackageProperty, ConnectTarget,
+    Affiliation, AliasInterfaceProperty, AliasModuleProperty, AliasPackageProperty, ConnectTarget,
     ConnectTargetIdentifier, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty,
     FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
     InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
@@ -20,8 +20,7 @@ use crate::symbol::{
     ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoInterfaceProperty,
     ProtoModuleProperty, ProtoPackageProperty, ProtoTypeDefProperty, StructMemberProperty,
     StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty,
-    TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty, VariableAffiliation,
-    VariableProperty,
+    TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce};
 use crate::symbol_table;
@@ -89,7 +88,7 @@ pub struct CreateSymbolTable {
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
     declaration_items: Vec<SymbolId>,
-    affiliation: Vec<VariableAffiliation>,
+    affiliation: Vec<Affiliation>,
     connect_target_identifiers: Vec<ConnectTargetIdentifier>,
     parameter_connects: HashMap<Token, ConnectTarget>,
     port_connects: HashMap<Token, ConnectTarget>,
@@ -301,8 +300,7 @@ impl CreateSymbolTable {
         };
         let can_be_default_clock = r#type.can_be_default_clock();
         let can_be_default_reest = r#type.can_be_default_reset();
-        let in_module_top_hierarchy = *self.affiliation.last().unwrap()
-            == VariableAffiliation::Module
+        let in_module_top_hierarchy = *self.affiliation.last().unwrap() == Affiliation::Module
             && self.namespace.depth() == self.module_namspace_depth;
 
         if let Some(default_modifier) = r#type.find_modifier(&TypeModifierKind::Default) {
@@ -590,7 +588,7 @@ impl CreateSymbolTable {
     fn push_declaration_item(&mut self, id: SymbolId) {
         if matches!(
             self.affiliation.last(),
-            Some(&VariableAffiliation::Interface) | Some(&VariableAffiliation::Package)
+            Some(&Affiliation::Interface) | Some(&Affiliation::Package)
         ) {
             self.declaration_items.push(id);
         }
@@ -824,7 +822,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::Before => {
                 let (_, name) = self.get_anonymous_block_name(None);
                 self.namespace.push(name);
-                self.affiliation.push(VariableAffiliation::StatementBlock);
+                self.affiliation.push(Affiliation::StatementBlock);
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -846,7 +844,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.let_statement_opt {
                 self.insert_clock_domain(&x.clock_domain)
-            } else if affiliation == VariableAffiliation::Module {
+            } else if affiliation == Affiliation::Module {
                 self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
             } else {
@@ -926,7 +924,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.let_declaration_opt {
                 self.insert_clock_domain(&x.clock_domain)
-            } else if affiliation == VariableAffiliation::Module {
+            } else if affiliation == Affiliation::Module {
                 self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
             } else {
@@ -963,7 +961,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
             let clock_domain = if let Some(ref x) = arg.var_declaration_opt {
                 self.insert_clock_domain(&x.clock_domain)
-            } else if affiliation == VariableAffiliation::Module {
+            } else if affiliation == Affiliation::Module {
                 self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
             } else {
@@ -984,7 +982,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             {
                 self.push_declaration_item(id);
                 self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
-                let text = arg.identifier.identifier_token.token.text;
+                let text = arg.identifier.text();
                 self.variable_ids.insert(text, id);
             }
         }
@@ -1046,8 +1044,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace
-                    .push(arg.identifier.identifier_token.token.text);
+                self.namespace.push(arg.identifier.text());
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
@@ -1142,7 +1139,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn enum_declaration(&mut self, arg: &EnumDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.token.text;
+                let name = arg.identifier.text();
                 self.namespace.push(name);
 
                 // default prefix
@@ -1253,7 +1250,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn struct_union_declaration(&mut self, arg: &StructUnionDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
+        let name = arg.identifier.text();
 
         match self.point {
             HandlerPoint::Before => {
@@ -1546,7 +1543,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
             {
                 let parameter = Parameter {
-                    name: arg.identifier.identifier_token.token.text,
+                    name: arg.identifier.text(),
                     symbol: id,
                 };
                 self.parameters.last_mut().unwrap().push(parameter);
@@ -1633,7 +1630,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
                     let clock_domain = if let Some(ref x) = x.port_type_concrete_opt {
                         self.insert_clock_domain(&x.clock_domain)
-                    } else if affiliation == VariableAffiliation::Module {
+                    } else if affiliation == Affiliation::Module {
                         self.check_missing_clock_domain(
                             &arg.identifier.identifier_token.token,
                             &r#type,
@@ -1661,13 +1658,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     let x = &x.port_type_abstract;
                     let clock_domain = if let Some(ref x) = x.port_type_abstract_opt {
                         self.insert_clock_domain(&x.clock_domain)
-                    } else if affiliation == VariableAffiliation::Module {
+                    } else if affiliation == Affiliation::Module {
                         SymClockDomain::Implicit
                     } else {
                         SymClockDomain::None
                     };
                     let kind = if let Some(ref x) = x.port_type_abstract_opt0 {
-                        TypeKind::AbstractInterface(Some(x.identifier.identifier_token.token.text))
+                        TypeKind::AbstractInterface(Some(x.identifier.text()))
                     } else {
                         TypeKind::AbstractInterface(None)
                     };
@@ -1713,7 +1710,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
+        let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
                 self.namespace.push(name);
@@ -1721,7 +1718,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.generic_context.push();
                 }
                 self.ports.push(Vec::new());
-                self.affiliation.push(VariableAffiliation::Function);
+                self.affiliation.push(Affiliation::Function);
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
@@ -1747,12 +1744,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     return Ok(());
                 }
 
+                let affiliation = self.affiliation.last().cloned().unwrap();
+
                 let range = TokenRange::new(
                     &arg.function.function_token,
                     &arg.statement_block.r_brace.r_brace_token,
                 );
 
                 let property = FunctionProperty {
+                    affiliation,
                     range,
                     generic_parameters,
                     generic_references,
@@ -1765,8 +1765,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::Function(property),
                     false,
                 ) {
-                    self.function_ids
-                        .insert(arg.identifier.identifier_token.token.text, id);
+                    self.function_ids.insert(arg.identifier.text(), id);
                     self.push_declaration_item(id);
                     self.pop_type_dag_cand(Some((id, Context::Function, false)));
                 } else {
@@ -1809,7 +1808,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
+        let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
                 self.namespace.push(name);
@@ -1818,7 +1817,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
-                self.affiliation.push(VariableAffiliation::Module);
+                self.affiliation.push(Affiliation::Module);
                 self.module_namspace_depth = self.namespace.depth();
                 self.function_ids.clear();
                 self.exist_clock_without_domain = false;
@@ -1913,7 +1912,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     false,
                 );
 
-                let name = arg.identifier.identifier_token.token.text;
+                let name = arg.identifier.text();
                 self.default_block = Some(name);
                 self.namespace.push(name);
 
@@ -1942,7 +1941,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         SymbolKind::Block,
                         false,
                     );
-                    x.identifier.identifier_token.token.text
+                    x.identifier.text()
                 } else {
                     let (_, name) = self.get_anonymous_block_name(self.default_block);
                     name
@@ -1958,7 +1957,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
+        let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
                 self.namespace.push(name);
@@ -1966,7 +1965,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.generic_context.push();
                 }
                 self.parameters.push(Vec::new());
-                self.affiliation.push(VariableAffiliation::Interface);
+                self.affiliation.push(Affiliation::Interface);
                 self.variable_ids.clear();
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
@@ -2025,14 +2024,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn package_declaration(&mut self, arg: &PackageDeclaration) -> Result<(), ParolError> {
-        let name = arg.identifier.identifier_token.token.text;
+        let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
                 self.namespace.push(name);
                 if arg.package_declaration_opt.is_some() {
                     self.generic_context.push();
                 }
-                self.affiliation.push(VariableAffiliation::Package);
+                self.affiliation.push(Affiliation::Package);
                 self.function_ids.clear();
                 self.apply_file_scope_import();
                 self.push_type_dag_cand();
@@ -2124,9 +2123,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace
-                    .push(arg.identifier.identifier_token.token.text);
-                self.affiliation.push(VariableAffiliation::Module);
+                self.namespace.push(arg.identifier.text());
+                self.affiliation.push(Affiliation::Module);
                 self.in_proto = true;
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
@@ -2160,9 +2158,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
     ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace
-                    .push(arg.identifier.identifier_token.token.text);
-                self.affiliation.push(VariableAffiliation::Interface);
+                self.namespace.push(arg.identifier.text());
+                self.affiliation.push(Affiliation::Interface);
                 self.parameters.push(Vec::new());
                 self.function_ids.clear();
                 self.apply_file_scope_import();
@@ -2196,9 +2193,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
     ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace
-                    .push(arg.identifier.identifier_token.token.text);
-                self.affiliation.push(VariableAffiliation::Package);
+                self.namespace.push(arg.identifier.text());
+                self.affiliation.push(Affiliation::Package);
                 self.function_ids.clear();
                 self.apply_file_scope_import();
             }
@@ -2280,13 +2276,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
     ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                let name = arg.identifier.identifier_token.token.text;
+                let name = arg.identifier.text();
                 self.namespace.push(name);
                 if arg.proto_function_declaration_opt.is_some() {
                     self.generic_context.push();
                 }
                 self.ports.push(Vec::new());
-                self.affiliation.push(VariableAffiliation::Function);
+                self.affiliation.push(Affiliation::Function);
             }
             HandlerPoint::After => {
                 self.namespace.pop();
@@ -2310,10 +2306,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     return Ok(());
                 }
 
+                let affiliation = self.affiliation.last().cloned().unwrap();
+
                 let range =
                     TokenRange::new(&arg.function.function_token, &arg.semicolon.semicolon_token);
 
                 let property = FunctionProperty {
+                    affiliation,
                     range,
                     generic_parameters,
                     generic_references,
@@ -2326,8 +2325,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::ProtoFunction(property),
                     false,
                 ) {
-                    self.function_ids
-                        .insert(arg.identifier.identifier_token.token.text, id);
+                    self.function_ids.insert(arg.identifier.text(), id);
                     self.push_declaration_item(id);
                 }
             }
