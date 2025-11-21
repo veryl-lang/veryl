@@ -150,6 +150,10 @@ impl Namespace {
         self.paths = paths;
     }
 
+    pub fn strip_anonymous_path(&mut self) {
+        self.paths.retain(|x| x.to_string().find('@').is_none());
+    }
+
     pub fn get_symbol(&self) -> Option<Symbol> {
         let mut namespace = self.clone();
         if let Some(path) = namespace.pop()
