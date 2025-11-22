@@ -488,6 +488,22 @@ impl Symbol {
         }
     }
 
+    pub fn has_generic_paramters(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Function(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Module(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Interface(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Package(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Struct(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::Union(x) => !x.generic_parameters.is_empty(),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                symbol.has_generic_paramters()
+            }
+            _ => false,
+        }
+    }
+
     pub fn generic_references(&self) -> Vec<GenericSymbolPath> {
         let references = match &self.kind {
             SymbolKind::Function(x) => &x.generic_references,
