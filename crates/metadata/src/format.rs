@@ -28,5 +28,5 @@ fn default_max_width() -> usize {
 }
 
 fn default_vertical_align() -> bool {
-    false
+    true
 }
