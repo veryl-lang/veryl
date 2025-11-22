@@ -73,10 +73,12 @@ impl Formatter {
     }
 
     pub fn format(&mut self, input: &Veryl) {
-        self.mode = Mode::Align;
-        self.veryl(input);
-        self.aligner.finish_group();
-        self.aligner.gather_additions();
+        if self.format_opt.vertical_align {
+            self.mode = Mode::Align;
+            self.veryl(input);
+            self.aligner.finish_group();
+            self.aligner.gather_additions();
+        }
         self.mode = Mode::Emit;
         self.veryl(input);
     }

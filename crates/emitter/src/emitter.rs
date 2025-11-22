@@ -173,11 +173,13 @@ impl Emitter {
 
     pub fn emit(&mut self, project_name: &str, input: &Veryl) {
         namespace_table::set_default(&[project_name.into()]);
-        self.mode = Mode::Align;
-        self.duplicated_index = 0;
-        self.veryl(input);
-        self.aligner.finish_group();
-        self.aligner.gather_additions();
+        if self.format_opt.vertical_align {
+            self.mode = Mode::Align;
+            self.duplicated_index = 0;
+            self.veryl(input);
+            self.aligner.finish_group();
+            self.aligner.gather_additions();
+        }
         self.mode = Mode::Emit;
         self.duplicated_index = 0;
         self.veryl(input);
