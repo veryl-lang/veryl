@@ -442,6 +442,7 @@ pub struct GenericSymbolPath {
 pub struct GenericSymbol {
     pub base: Token,
     pub arguments: Vec<GenericSymbolPath>,
+    pub is_member_reference: bool,
 }
 
 impl GenericSymbol {
@@ -498,12 +499,6 @@ impl GenericSymbol {
             let symbol = Symbol::new(&token, kind, &base.namespace, false, DocComment::default());
 
             Some((token, symbol))
-        }
-    }
-
-    pub fn replace_generic_argument(&mut self, index: usize, value: GenericSymbolPath) {
-        if index < self.arguments.len() {
-            self.arguments[index] = value;
         }
     }
 }
@@ -611,6 +606,24 @@ impl GenericSymbolPath {
         Some(ret)
     }
 
+    pub fn path_without_member_referecne(&self) -> GenericSymbolPath {
+        let paths: Vec<_> = self
+            .paths
+            .clone()
+            .into_iter()
+            .filter(|x| !x.is_member_reference)
+            .collect();
+        let range = TokenRange {
+            beg: paths.first().map(|x| x.base).unwrap(),
+            end: paths.last().map(|x| x.base).unwrap(),
+        };
+        GenericSymbolPath {
+            paths,
+            kind: self.kind,
+            range,
+        }
+    }
+
     pub fn is_resolvable(&self) -> bool {
         self.kind == GenericSymbolPathKind::Identifier
     }
@@ -664,10 +677,17 @@ impl GenericSymbolPath {
         }
 
         let head = &self.paths[0];
-        if let Ok(symbol) = symbol_table::resolve(&head.base)
-            && matches!(symbol.found.kind, SymbolKind::GenericParameter(_))
-        {
-            return true;
+        match symbol_table::resolve(&head.base) {
+            Ok(symbol) => {
+                if matches!(symbol.found.kind, SymbolKind::GenericParameter(_)) {
+                    return true;
+                }
+            }
+            _ => {
+                // The symbol pointed by the path may be imported.
+                // Such symbol should be treated as a generic reference.
+                return true;
+            }
         }
 
         for path in &self.paths {
@@ -708,21 +728,14 @@ impl GenericSymbolPath {
         if !self.is_resolvable() {
             return;
         }
-        if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), namespace)) {
-            if self.len() > 1
-                && matches!(
-                    symbol.found.kind,
-                    SymbolKind::EnumMember(_)
-                        | SymbolKind::StructMember(_)
-                        | SymbolKind::UnionMember(_)
-                )
-            {
+
+        let path = self.path_without_member_referecne();
+        if let Ok(symbol) = symbol_table::resolve((&path.generic_path(), namespace)) {
+            if self.len() > 1 && matches!(symbol.found.kind, SymbolKind::EnumMember(_)) {
                 // The parent enum declaration is imported but not the enum member.
                 // Therefore, we need to execute `resolve_imported` to the parent enum declaration.
                 // see:
                 // https://github.com/veryl-lang/veryl/issues/1721#issuecomment-2986758880
-                //
-                // This is also applied for struct/union member.
                 let member_path = self.paths.pop().unwrap();
                 if namespace.matched(&symbol.found.namespace) {
                     // For case that the given namespace is matched with the enum declaration
@@ -734,7 +747,7 @@ impl GenericSymbolPath {
                 }
                 self.paths.push(member_path);
             } else if symbol.imported {
-                let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
+                let self_namespace = namespace_table::get(path.range.beg.id).unwrap();
                 let TokenSource::File {
                     path: self_file_path,
                     ..
@@ -743,7 +756,7 @@ impl GenericSymbolPath {
                     return;
                 };
 
-                if let Ok(symbol) = symbol_table::resolve((&self.generic_path(), &self_namespace))
+                if let Ok(symbol) = symbol_table::resolve((&path.generic_path(), &self_namespace))
                     && let Some(_) = symbol.found.get_parent_package()
                     && let Some(import) = symbol
                         .found
@@ -759,8 +772,8 @@ impl GenericSymbolPath {
                         package_path.apply_map(maps);
                     }
 
-                    if let Some(path) = package_path.unaliased_path() {
-                        self.append_package_path(&path, self_file_path, &self_namespace);
+                    if let Some(package_path) = package_path.unaliased_path() {
+                        self.append_package_path(&package_path, self_file_path, &self_namespace);
                     } else {
                         self.append_package_path(&package_path, self_file_path, &self_namespace);
                     }
@@ -806,6 +819,7 @@ impl GenericSymbolPath {
         let project_path = GenericSymbol {
             base: project_symbol.token,
             arguments: vec![],
+            is_member_reference: false,
         };
         self.paths.insert(0, project_path);
 
@@ -822,6 +836,7 @@ impl From<&Token> for GenericSymbolPath {
         let path = GenericSymbol {
             base: *value,
             arguments: vec![],
+            is_member_reference: false,
         };
         GenericSymbolPath {
             paths: vec![path],
@@ -839,6 +854,7 @@ impl From<&syntax_tree::FixedType> for GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: token.beg,
                 arguments: Vec::new(),
+                is_member_reference: false,
             }],
             kind: GenericSymbolPathKind::FixedType(kind),
             range: token,
@@ -879,6 +895,7 @@ impl From<&syntax_tree::Number> for GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: token,
                 arguments: Vec::new(),
+                is_member_reference: false,
             }],
             kind,
             range: token.into(),
@@ -896,6 +913,7 @@ impl From<&syntax_tree::BooleanLiteral> for GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: token,
                 arguments: Vec::new(),
+                is_member_reference: false,
             }],
             kind: GenericSymbolPathKind::Boolean(value),
             range: token.into(),
@@ -924,6 +942,7 @@ impl From<&syntax_tree::Identifier> for GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: value.identifier_token.token,
                 arguments: Vec::new(),
+                is_member_reference: false,
             }],
             kind: GenericSymbolPathKind::Identifier,
             range: value.into(),
@@ -939,6 +958,7 @@ impl From<&syntax_tree::HierarchicalIdentifier> for GenericSymbolPath {
             path.paths.push(GenericSymbol {
                 base: x.identifier.identifier_token.token,
                 arguments: vec![],
+                is_member_reference: true,
             });
         }
 
@@ -956,6 +976,7 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                 paths.push(GenericSymbol {
                     base,
                     arguments: Vec::new(),
+                    is_member_reference: false,
                 });
             }
             syntax_tree::ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
@@ -973,7 +994,11 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                     }
                 }
 
-                paths.push(GenericSymbol { base, arguments });
+                paths.push(GenericSymbol {
+                    base,
+                    arguments,
+                    is_member_reference: false,
+                });
             }
         }
 
@@ -992,7 +1017,11 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                 }
             }
 
-            paths.push(GenericSymbol { base, arguments });
+            paths.push(GenericSymbol {
+                base,
+                arguments,
+                is_member_reference: false,
+            });
         }
 
         GenericSymbolPath {
@@ -1015,6 +1044,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for GenericSymbolPath {
             path.paths.push(GenericSymbol {
                 base,
                 arguments: vec![],
+                is_member_reference: true,
             });
         }
 
@@ -1031,6 +1061,7 @@ impl From<&syntax_tree::GenericArgIdentifier> for GenericSymbolPath {
             path.paths.push(GenericSymbol {
                 base: x.identifier.identifier_token.token,
                 arguments: vec![],
+                is_member_reference: true,
             });
         }
 

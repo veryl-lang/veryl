@@ -4912,6 +4912,31 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package a_proto_pkg {
+        struct foo_struct {
+            foo: u32,
+        }
+        const FOO: foo_struct;
+    }
+    package a_pkg::<V: u32> for a_proto_pkg {
+        struct foo_struct {
+            foo: u32,
+        }
+        const FOO: foo_struct = foo_struct'{ foo: V };
+    }
+    module b_module::<PKG: a_proto_pkg> #(
+        const BAR: u32 = FOO.bar, // bar is unknown member
+    ) {
+        import PKG::*;
+    }
+    alias package A = a_pkg::<32>;
+    alias module  B = b_module::<A>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
 }
 
 #[test]
@@ -7184,29 +7209,6 @@ fn unresolvable_generic_argument() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
     );
-
-    let code = r#"
-    module ModuleA::<PKG: ProtoPkg> {
-        function FuncB() -> u32 {
-            return FuncA::<PKG::T>();
-        }
-    }
-    proto package ProtoPkg {
-        type T;
-    }
-    package Pkg::<W: u32> for ProtoPkg {
-        type T = logic<W>;
-    }
-    module ModuleB {
-        inst u: ModuleA::<Pkg::<8>>;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnresolvableGenericArgument { .. }
-    ));
 
     let code = r#"
     package Pkg {

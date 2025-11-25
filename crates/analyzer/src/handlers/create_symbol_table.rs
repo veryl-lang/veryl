@@ -42,30 +42,19 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 #[derive(Default)]
 struct GenericContext {
     parameters: Vec<Vec<SymbolId>>,
-    references: Vec<Vec<GenericSymbolPath>>,
 }
 
 impl GenericContext {
     pub fn push(&mut self) {
         self.parameters.push(Vec::new());
-        self.references.push(Vec::new());
     }
 
-    pub fn pop(&mut self) -> (Vec<SymbolId>, Vec<GenericSymbolPath>) {
-        (
-            self.parameters.pop().unwrap(),
-            self.references.pop().unwrap(),
-        )
+    pub fn pop(&mut self) -> Vec<SymbolId> {
+        self.parameters.pop().unwrap()
     }
 
     pub fn push_parameter(&mut self, id: SymbolId) {
         self.parameters.last_mut().unwrap().push(id);
-    }
-
-    pub fn push_reference(&mut self, path: GenericSymbolPath) {
-        if !self.references.is_empty() && path.may_be_generic_reference() {
-            self.references.last_mut().unwrap().push(path);
-        }
     }
 }
 
@@ -672,51 +661,45 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
-        match self.point {
-            HandlerPoint::Before => {
-                if !self.with_member_reference {
-                    reference_table::add((arg, self.in_import).into());
-                }
+        if let HandlerPoint::Before = self.point {
+            if !self.with_member_reference {
+                reference_table::add((arg, self.in_import).into());
+            }
 
-                // Add symbols under $sv namespace
-                if let ScopedIdentifierGroup::DollarIdentifier(x) =
-                    arg.scoped_identifier_group.as_ref()
-                    && x.dollar_identifier.dollar_identifier_token.to_string() == "$sv"
-                {
-                    let mut namespace = Namespace::new();
-                    for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
-                        if i != 0 {
-                            let symbol = Symbol::new(
-                                token,
-                                SymbolKind::SystemVerilog,
-                                &namespace,
-                                false,
-                                DocComment::default(),
-                            );
-                            let _ = symbol_table::insert(token, symbol);
-                        }
-                        namespace.push(token.text);
+            // Add symbols under $sv namespace
+            if let ScopedIdentifierGroup::DollarIdentifier(x) = arg.scoped_identifier_group.as_ref()
+                && x.dollar_identifier.dollar_identifier_token.to_string() == "$sv"
+            {
+                let mut namespace = Namespace::new();
+                for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {
+                    if i != 0 {
+                        let symbol = Symbol::new(
+                            token,
+                            SymbolKind::SystemVerilog,
+                            &namespace,
+                            false,
+                            DocComment::default(),
+                        );
+                        let _ = symbol_table::insert(token, symbol);
                     }
-                }
-
-                let ident = arg.identifier().token;
-                if ident.to_string() != "_" {
-                    let path: GenericSymbolPath = arg.into();
-                    let namespace = self.get_namespace(&ident);
-                    let cand = TypeDagCandidate::Path {
-                        path: Box::new(path),
-                        namespace,
-                        project_namespace: self.project_namespace.clone(),
-                        parent: None,
-                    };
-
-                    if let Some(x) = self.type_dag_candidates.last_mut() {
-                        x.push(cand);
-                    }
+                    namespace.push(token.text);
                 }
             }
-            HandlerPoint::After => {
-                self.generic_context.push_reference(arg.into());
+
+            let ident = arg.identifier().token;
+            if ident.to_string() != "_" {
+                let path: GenericSymbolPath = arg.into();
+                let namespace = self.get_namespace(&ident);
+                let cand = TypeDagCandidate::Path {
+                    path: Box::new(path),
+                    namespace,
+                    project_namespace: self.project_namespace.clone(),
+                    parent: None,
+                };
+
+                if let Some(x) = self.type_dag_candidates.last_mut() {
+                    x.push(cand);
+                }
             }
         }
         Ok(())
@@ -1272,12 +1255,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.struct_or_union = None;
                 self.namespace.pop();
 
-                let (generic_parameters, generic_references) =
-                    if arg.struct_union_declaration_opt.is_some() {
-                        self.generic_context.pop()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let generic_parameters = if arg.struct_union_declaration_opt.is_some() {
+                    self.generic_context.pop()
+                } else {
+                    vec![]
+                };
 
                 let members: Vec<_> = self.struct_union_members.drain(0..).flatten().collect();
                 let (context, kind) = match &*arg.struct_union {
@@ -1285,7 +1267,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         let property = StructProperty {
                             members,
                             generic_parameters,
-                            generic_references,
+                            generic_references: vec![],
                         };
                         (Context::Struct, SymbolKind::Struct(property))
                     }
@@ -1293,7 +1275,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         let property = UnionProperty {
                             members,
                             generic_parameters,
-                            generic_references,
+                            generic_references: vec![],
                         };
                         (Context::Union, SymbolKind::Union(property))
                     }
@@ -1728,12 +1710,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.pop();
                 self.affiliation.pop();
 
-                let (generic_parameters, generic_references) =
-                    if arg.function_declaration_opt.is_some() {
-                        self.generic_context.pop()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let generic_parameters = if arg.function_declaration_opt.is_some() {
+                    self.generic_context.pop()
+                } else {
+                    vec![]
+                };
                 let ports: Vec<_> = self.ports.pop().unwrap();
 
                 let ret = arg
@@ -1755,7 +1736,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let property = FunctionProperty {
                     range,
                     generic_parameters,
-                    generic_references,
+                    generic_references: vec![],
                     ports,
                     ret,
                 };
@@ -1831,12 +1812,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.affiliation.pop();
                 self.module_namspace_depth = 0;
 
-                let (generic_parameters, generic_references) =
-                    if arg.module_declaration_opt.is_some() {
-                        self.generic_context.pop()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let generic_parameters = if arg.module_declaration_opt.is_some() {
+                    self.generic_context.pop()
+                } else {
+                    vec![]
+                };
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
                 let ports: Vec<_> = self.ports.pop().unwrap();
 
@@ -1876,7 +1856,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     range: arg.into(),
                     proto,
                     generic_parameters,
-                    generic_references,
+                    generic_references: vec![],
                     parameters,
                     ports,
                     default_clock,
@@ -1979,12 +1959,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.pop();
                 self.affiliation.pop();
 
-                let (generic_parameters, generic_references) =
-                    if arg.interface_declaration_opt.is_some() {
-                        self.generic_context.pop()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let generic_parameters = if arg.interface_declaration_opt.is_some() {
+                    self.generic_context.pop()
+                } else {
+                    vec![]
+                };
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
 
                 let proto = if let Some(x) = arg.interface_declaration_opt0.as_ref() {
@@ -2003,7 +1982,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     range: arg.into(),
                     proto,
                     generic_parameters,
-                    generic_references,
+                    generic_references: vec![],
                     parameters,
                     members: self.declaration_items.drain(..).collect(),
                     definition,
@@ -2041,12 +2020,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.pop();
                 self.affiliation.pop();
 
-                let (generic_parameters, generic_references) =
-                    if arg.package_declaration_opt.is_some() {
-                        self.generic_context.pop()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let generic_parameters = if arg.package_declaration_opt.is_some() {
+                    self.generic_context.pop()
+                } else {
+                    vec![]
+                };
 
                 let range = TokenRange::new(&arg.package.package_token, &arg.r_brace.r_brace_token);
                 let proto = if let Some(x) = arg.package_declaration_opt0.as_ref() {
@@ -2065,7 +2043,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     range,
                     proto,
                     generic_parameters,
-                    generic_references,
+                    generic_references: vec![],
                     members: self.declaration_items.drain(..).collect(),
                 };
                 if let Some(id) = self.insert_symbol(
@@ -2292,12 +2270,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.pop();
                 self.affiliation.pop();
 
-                let (generic_parameters, generic_references) =
-                    if arg.proto_function_declaration_opt.is_some() {
-                        self.generic_context.pop()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let generic_parameters = if arg.proto_function_declaration_opt.is_some() {
+                    self.generic_context.pop()
+                } else {
+                    vec![]
+                };
                 let ports: Vec<_> = self.ports.pop().unwrap();
 
                 let ret = arg
@@ -2316,7 +2293,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let property = FunctionProperty {
                     range,
                     generic_parameters,
-                    generic_references,
+                    generic_references: vec![],
                     ports,
                     ret,
                 };
