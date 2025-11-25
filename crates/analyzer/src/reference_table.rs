@@ -311,9 +311,7 @@ impl ReferenceTable {
                     }
 
                     for arg in args.iter_mut() {
-                        if let Some(unaliased_arg) = arg.unaliased_path() {
-                            *arg = unaliased_arg;
-                        }
+                        arg.unalias();
                         arg.append_project_path(namespace, &target_namespace);
                     }
 
