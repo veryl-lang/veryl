@@ -4072,6 +4072,27 @@ fn invisible_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package a_proto_pkg {
+        const A_TYPE: type;
+    }
+    package a_pkg::<a_type: type> for a_proto_pkg {
+        const A_TYPE: type = a_type;
+    }
+    proto package b_proto_pkg {
+        alias package A_PKG: a_proto_pkg;
+    }
+    package b_pkg::<a_type: type> for b_proto_pkg {
+        alias package A_PKG = a_pkg::<a_type>;
+    }
+    module c_module::<B_PKG: b_proto_pkg> {
+        let _c: B_PKG::A_PKG::A_TYPE = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

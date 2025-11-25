@@ -2409,7 +2409,7 @@ impl VerylWalker for Emitter {
             self.veryl_token(&arg.identifier().replace(""));
         } else {
             match self.resolve_scoped_idnetifier(arg) {
-                (Ok(symbol), _) => {
+                (Ok(symbol), _path) => {
                     let context: SymbolContext = self.into();
                     let text = symbol_string(
                         arg.identifier(),
@@ -5922,7 +5922,12 @@ pub fn resolve_generic_path(
     generic_maps: Option<&Vec<GenericMap>>,
 ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
     let mut path = path.clone();
+
     path.resolve_imported(namespace, generic_maps);
+    if let Some(maps) = generic_maps {
+        path.apply_map(maps);
+    }
+    path.unalias();
 
     let path_symbols: Vec<_> = (0..path.len())
         .filter_map(|i| {
@@ -5938,15 +5943,9 @@ pub fn resolve_generic_path(
             let n_args = path.paths[*i].arguments.len();
 
             for param in params.iter().skip(n_args) {
-                path.paths[*i]
-                    .arguments
-                    .push(param.1.default_value.as_ref().unwrap().clone());
-            }
-
-            for arg in &mut path.paths[*i].arguments {
-                if let Some(unaliased_arg) = arg.unaliased_path() {
-                    *arg = unaliased_arg;
-                }
+                let mut arg = param.1.default_value.as_ref().unwrap().clone();
+                arg.unalias();
+                path.paths[*i].arguments.push(arg);
             }
         }
     }
