@@ -134,7 +134,9 @@ impl CmdBuild {
                     std::fs::create_dir_all(dst.parent().unwrap()).into_diagnostic()?;
                 }
 
-                if self.opt.check {
+                let exclude_check = context.path.prj == "$std";
+
+                if self.opt.check && !exclude_check {
                     let output = fs::read_to_string(&dst).unwrap_or(String::new());
                     if output != emitter.as_str() {
                         if !quiet {
