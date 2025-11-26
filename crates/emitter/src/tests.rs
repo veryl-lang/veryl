@@ -2371,3 +2371,61 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn package_alias_defined_in_package() {
+    let code = r#"
+proto package a_proto_pkg {
+    const A_TYPE: type;
+}
+package a_pkg::<a_type: type> for a_proto_pkg {
+    const A_TYPE: type = a_type;
+}
+proto package b_proto_pkg {
+    alias package A_PKG: a_proto_pkg;
+}
+package b_pkg::<a_type: type> for b_proto_pkg {
+    alias package A_PKG = a_pkg::<a_type>;
+}
+module c_module::<B_PKG: b_proto_pkg> {
+    import B_PKG::*;
+    let _d: B_PKG::A_PKG::A_TYPE = 0;
+    let _e: A_PKG::A_TYPE        = 0;
+}
+alias package B_PKG    = b_pkg::<bool>;
+alias module  C_MODULE = c_module::<B_PKG>;
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__bool;
+    localparam type A_TYPE = logic;
+endpackage
+
+
+package prj___b_pkg__bool;
+
+
+endpackage
+module prj___c_module____b_pkg__bool;
+    import prj___b_pkg__bool::*;
+
+    prj___a_pkg__bool::A_TYPE _d; always_comb _d = 0;
+    prj___a_pkg__bool::A_TYPE _e; always_comb _e = 0;
+endmodule
+
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

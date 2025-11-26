@@ -419,9 +419,10 @@ impl SymbolTable {
             _ => false,
         };
         let via_pacakge = match &last_found.kind {
-            SymbolKind::Package(_) | SymbolKind::ProtoPackage(_) | SymbolKind::AliasPackage(_) => {
-                true
-            }
+            SymbolKind::Package(_)
+            | SymbolKind::ProtoPackage(_)
+            | SymbolKind::AliasPackage(_)
+            | SymbolKind::ProtoAliasPackage(_) => true,
             SymbolKind::GenericInstance(_) => {
                 matches!(last_found_type, Some(SymbolKind::Package(_)))
             }
@@ -860,7 +861,6 @@ impl SymbolTable {
         let project_path = GenericSymbol {
             base: project_symbol.token,
             arguments: vec![],
-            is_member_reference: false,
         };
 
         let mut path = path.clone();
