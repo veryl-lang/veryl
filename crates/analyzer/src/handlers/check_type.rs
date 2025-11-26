@@ -49,8 +49,12 @@ impl Handler for CheckType {
     }
 }
 
-fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespace) -> bool {
-    match &symbol.kind {
+fn is_referable_generic_arg_symbol(
+    arg_symbol: &Symbol,
+    base_symbol: &Symbol,
+    namespace: &Namespace,
+) -> bool {
+    match &arg_symbol.kind {
         SymbolKind::Package(_)
         | SymbolKind::ProtoPackage(_)
         | SymbolKind::GenericParameter(_)
@@ -59,20 +63,22 @@ fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespac
         }
         SymbolKind::GenericInstance(x) => {
             return symbol_table::get(x.base)
-                .map(|x| is_referable_generic_arg_symbol(&x, defined_namesapce))
+                .map(|x| is_referable_generic_arg_symbol(&x, base_symbol, namespace))
                 .unwrap_or(false);
         }
         _ => {
-            if symbol.is_variable_type()
+            if arg_symbol.is_variable_type()
                 || matches!(
-                    symbol.kind,
+                    arg_symbol.kind,
                     SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) | SymbolKind::Instance(_)
                 )
             {
-                if symbol.namespace.matched(defined_namesapce) {
+                if arg_symbol.namespace.matched(&base_symbol.namespace) {
                     return true;
-                } else if let Some(parent) = symbol.get_parent() {
-                    return is_referable_generic_arg_symbol(&parent, defined_namesapce);
+                } else if !arg_symbol.namespace.matched(namespace)
+                    && let Some(parent) = arg_symbol.get_parent()
+                {
+                    return is_referable_generic_arg_symbol(&parent, base_symbol, namespace);
                 }
             }
         }
@@ -81,17 +87,21 @@ fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespac
     false
 }
 
-fn is_referable_generic_arg(full_path: &[SymbolId], defined_namesapce: &Namespace) -> bool {
-    full_path
+fn is_referable_generic_arg(
+    arg_full_path: &[SymbolId],
+    base_symbol: &Symbol,
+    namespace: &Namespace,
+) -> bool {
+    arg_full_path
         .iter()
         .map(|x| symbol_table::get(*x).unwrap())
-        .any(|x| is_referable_generic_arg_symbol(&x, defined_namesapce))
+        .any(|x| is_referable_generic_arg_symbol(&x, base_symbol, namespace))
 }
 
 fn check_generic_type_arg(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
-    base: &Symbol,
+    base_symbol: &Symbol,
 ) -> Option<AnalyzerError> {
     if matches!(arg.kind, GenericSymbolPathKind::FixedType(_)) {
         None
@@ -102,14 +112,14 @@ fn check_generic_type_arg(
         };
 
         if symbol.found.is_variable_type() {
-            if is_referable_generic_arg_symbol(&symbol.found, &base.namespace) {
+            if is_referable_generic_arg_symbol(&symbol.found, base_symbol, namespace) {
                 return None;
             }
 
             Some(AnalyzerError::unresolvable_generic_argument(
                 &arg.to_string(),
                 &arg.range,
-                &base.token.into(),
+                &base_symbol.token.into(),
             ))
         } else {
             Some(AnalyzerError::mismatch_type(
@@ -133,20 +143,20 @@ fn check_generic_inst_arg(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
     bound: &GenericBoundKind,
-    base: &Symbol,
+    base_symbol: &Symbol,
 ) -> Option<AnalyzerError> {
-    let required = bound.resolve_inst_bound(&base.namespace)?;
+    let required = bound.resolve_inst_bound(&base_symbol.namespace)?;
     let actual = if arg.is_resolvable() {
         'inst: {
             let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
             let SymbolKind::Instance(inst) = &arg_symbol.found.kind else {
                 break 'inst arg_symbol.found.kind.to_kind_name();
             };
-            if !is_referable_generic_arg_symbol(&arg_symbol.found, &base.namespace) {
+            if !is_referable_generic_arg_symbol(&arg_symbol.found, base_symbol, namespace) {
                 return Some(AnalyzerError::unresolvable_generic_argument(
                     &arg.to_string(),
                     &arg.range,
-                    &base.token.into(),
+                    &base_symbol.token.into(),
                 ));
             }
 
@@ -182,9 +192,9 @@ fn check_generic_proto_arg(
     arg: &GenericSymbolPath,
     namespace: &Namespace,
     bound: &GenericBoundKind,
-    base: &Symbol,
+    base_symbol: &Symbol,
 ) -> Option<AnalyzerError> {
-    let required = bound.resolve_proto_bound(&base.namespace)?;
+    let required = bound.resolve_proto_bound(&base_symbol.namespace)?;
     let arg_symbol = if arg.is_resolvable() {
         let symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok();
         if symbol.is_some() {
@@ -290,13 +300,13 @@ fn check_generic_proto_arg(
 
     if required.is_variable_type()
         && !arg_symbol
-            .map(|x| is_referable_generic_arg(&x.full_path, &base.namespace))
+            .map(|x| is_referable_generic_arg(&x.full_path, base_symbol, namespace))
             .unwrap_or(true)
     {
         return Some(AnalyzerError::unresolvable_generic_argument(
             &arg.to_string(),
             &arg.range,
-            &base.token.into(),
+            &base_symbol.token.into(),
         ));
     }
 

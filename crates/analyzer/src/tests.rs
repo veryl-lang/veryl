@@ -7321,6 +7321,22 @@ fn unresolvable_generic_argument() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA::<V: u32> {
+        const A: u32 = V;
+    }
+    package PkgB {
+        const B: u32 = 32;
+        const A: u32 = PkgA::<B>::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericArgument { .. }
+    ));
 }
 
 #[test]
