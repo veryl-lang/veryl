@@ -5956,7 +5956,7 @@ pub fn resolve_generic_path(
 
     for (i, symbol) in &path_symbols {
         for arg in &mut path.paths[*i].arguments {
-            arg.append_project_path(namespace, &symbol.namespace);
+            arg.append_namespace_path(namespace, &symbol.namespace);
         }
     }
 

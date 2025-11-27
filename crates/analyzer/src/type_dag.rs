@@ -1,7 +1,7 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericMap, ParameterKind, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{ParameterKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath};
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
@@ -184,56 +184,42 @@ impl TypeDag {
         parent: &Option<(SymbolId, Context)>,
     ) {
         namespace_table::set_default(&project_namespace.paths);
-        if let Some((parent_id, parent_context)) = parent {
-            let parent_symbol = symbol_table::get(*parent_id).unwrap();
-            for generic_map in parent_symbol.generic_maps() {
-                self.insert_path_with_generic_map(
-                    path,
-                    namespace,
-                    Some((&parent_symbol, parent_context)),
-                    Some(generic_map),
-                );
-            }
-        } else {
-            self.insert_path_with_generic_map(path, namespace, None, None);
-        }
-    }
 
-    fn insert_path_with_generic_map(
-        &mut self,
-        path: &GenericSymbolPath,
-        namespace: &Namespace,
-        parent: Option<(&Symbol, &Context)>,
-        generic_map: Option<GenericMap>,
-    ) {
         let mut path = path.clone();
-
-        let maps = generic_map.map(|map| vec![map]);
-        path.resolve_imported(namespace, maps.as_ref());
-        if let Some(maps) = maps.as_ref() {
-            path.apply_map(maps);
-        }
+        path.resolve_imported(namespace, None);
 
         for i in 0..path.len() {
-            let Some(base_symbol) = Self::resolve_symbol_path(&path.base_path(i), namespace) else {
+            let Some(base_symbol) =
+                Self::resolve_symbol_path(&path.slice(i).generic_path(), namespace)
+            else {
                 continue;
             };
 
-            if let Some((parent_symbol, parent_context)) = parent {
-                if !base_symbol.namespace.included(&parent_symbol.namespace)
-                    && let Some(parent_symbol) = parent_symbol.get_parent_component()
-                    && let Some(base_symbol) = base_symbol.get_parent_component()
-                {
-                    let parent_context = if parent_symbol.is_module(true) {
-                        Context::Module
-                    } else if parent_symbol.is_interface(true) {
-                        Context::Interface
+            if let Some((parent_symbol, parent_context)) =
+                parent.map(|(id, context)| (symbol_table::get(id).unwrap(), context))
+            {
+                if !base_symbol.namespace.included(&parent_symbol.namespace) {
+                    let (parent_symbol, parent_context) =
+                        if let Some(symbol) = parent_symbol.get_parent_component() {
+                            let context = if parent_symbol.is_module(true) {
+                                Context::Module
+                            } else if parent_symbol.is_interface(true) {
+                                Context::Interface
+                            } else {
+                                Context::Package
+                            };
+                            (symbol, context)
+                        } else {
+                            (parent_symbol, parent_context)
+                        };
+                    let base_symbol = if let Some(symbol) = base_symbol.get_parent_component() {
+                        symbol
                     } else {
-                        Context::Package
+                        base_symbol
                     };
                     self.insert_path_symbols(&parent_symbol, parent_context, &base_symbol);
                 } else {
-                    self.insert_path_symbols(parent_symbol, *parent_context, &base_symbol);
+                    self.insert_path_symbols(&parent_symbol, parent_context, &base_symbol);
                 }
             } else {
                 self.insert_symbol(&base_symbol);
