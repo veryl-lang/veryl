@@ -302,7 +302,6 @@ impl ReferenceTable {
                     }
 
                     let target_symbol = symbol.found;
-                    let target_namespace = target_symbol.inner_namespace();
 
                     let mut args: Vec<_> = path.paths[i].arguments.drain(0..).collect();
                     for param in params.iter().skip(n_args) {
@@ -312,20 +311,14 @@ impl ReferenceTable {
 
                     for arg in args.iter_mut() {
                         arg.unalias();
-                        arg.append_project_path(namespace, &target_namespace);
+                        arg.append_namespace_path(namespace, &target_symbol.namespace);
                     }
 
                     path.paths[i].arguments.append(&mut args);
                     if path.is_generic_reference() {
                         Self::add_generic_reference(&target_symbol, namespace, &path, i);
                     } else {
-                        Self::insert_generic_instance(
-                            &path,
-                            i,
-                            namespace,
-                            &target_symbol,
-                            &target_namespace,
-                        );
+                        Self::insert_generic_instance(&path, i, namespace, &target_symbol);
                     }
                 }
                 Err(err) => {
@@ -345,7 +338,6 @@ impl ReferenceTable {
         ith: usize,
         namespace: &Namespace,
         target: &Symbol,
-        target_namespace: &Namespace,
     ) {
         let instance_path = &path.paths[ith];
         let Some((token, symbol)) = instance_path.get_generic_instance(target) else {
@@ -361,6 +353,7 @@ impl ReferenceTable {
             map: target.generic_table(&instance_path.arguments),
         }];
 
+        let target_namespace = &target.inner_namespace();
         let mut referecnes = target.generic_references();
         for path in &mut referecnes {
             // check recursive reference
@@ -370,17 +363,11 @@ impl ReferenceTable {
 
             let mut path = path.clone();
             path.apply_map(&map);
-            path.append_project_path(namespace, target_namespace);
+            path.append_namespace_path(namespace, &target.namespace);
 
             if let Ok(target) = symbol_table::resolve((&path.generic_path(), target_namespace)) {
                 let ith = path.len() - 1;
-                Self::insert_generic_instance(
-                    &path,
-                    ith,
-                    target_namespace,
-                    &target.found,
-                    &target.found.inner_namespace(),
-                );
+                Self::insert_generic_instance(&path, ith, target_namespace, &target.found);
             }
         }
     }
@@ -417,13 +404,7 @@ impl ReferenceTable {
             let mut path = path.clone();
             let ith = path.len() - 1;
             path.apply_map(&[map]);
-            Self::insert_generic_instance(
-                &path,
-                ith,
-                &namespace,
-                symbol,
-                &symbol.inner_namespace(),
-            );
+            Self::insert_generic_instance(&path, ith, &namespace, symbol);
         }
 
         let kind = match target.kind {
