@@ -204,6 +204,8 @@ fn check_generic_proto_arg(
                 .trace_user_defined(Some(&x.found.namespace))
                 .map(|(x, y)| (Some(x), y))
                 .unwrap_or((None, None))
+        } else if let Some(alias_target) = resolve_alias(&x.found) {
+            (None, Some(alias_target))
         } else {
             (None, None)
         }
@@ -301,6 +303,17 @@ fn check_generic_proto_arg(
     }
 
     None
+}
+
+fn resolve_alias(symbol: &Symbol) -> Option<Symbol> {
+    let target_path = symbol.alias_target()?;
+    let target_symbol =
+        symbol_table::resolve((&target_path.generic_path(), &symbol.namespace)).ok()?;
+    if let Some(proto) = target_symbol.found.proto() {
+        Some(proto)
+    } else {
+        Some(target_symbol.found)
+    }
 }
 
 fn check_inst(
