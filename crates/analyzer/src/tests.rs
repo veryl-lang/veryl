@@ -4990,6 +4990,42 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+
+    let code = r#"
+    proto package a_proto_pkg {
+        const WIDTH: u32;
+        struct a_struct {
+            a: logic<WIDTH>,
+        }
+    }
+    package a_pkg::<W: u32> for a_proto_pkg {
+        const WIDTH: u32 = W;
+        struct a_struct {
+            a: logic<WIDTH>,
+        }
+    }
+    package b_pkg::<PKG: a_proto_pkg> {
+        struct b_struct {
+            b: PKG::a_struct,
+        }
+    }
+    interface c_interface::<PKG: a_proto_pkg> {
+        var c: PKG::a_struct;
+        modport mp {
+            c: input,
+        }
+    }
+    module c_module {
+        alias package A_PKG = a_pkg::<32>;
+        var _b: b_pkg::<A_PKG>::b_struct;
+        assign _b.b.a = 0;
+        inst _c: c_interface::<A_PKG>;
+        assign _c.c.a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

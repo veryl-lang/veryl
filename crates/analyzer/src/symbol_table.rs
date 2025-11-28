@@ -154,7 +154,7 @@ impl SymbolTable {
 
             let mut path = x.path.clone();
             path.resolve_imported(&context.namespace, None);
-
+            path.unalias();
             let symbol = self.resolve(
                 &path.generic_path(),
                 &path.generic_arguments(),
@@ -674,6 +674,7 @@ impl SymbolTable {
                             SymbolKind::Instance(x) => {
                                 let mut type_name = x.type_name.clone();
                                 type_name.resolve_imported(&context.namespace, None);
+                                type_name.unalias();
                                 context = self.trace_type_path(context, &type_name)?;
                             }
                             SymbolKind::GenericInstance(_) => {
