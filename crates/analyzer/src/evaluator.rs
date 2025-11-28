@@ -1783,8 +1783,9 @@ impl Evaluator {
         arg: &ArrayLiteralItemGroupDefaulColonExpression,
     ) -> Evaluated {
         match self.expression(arg.expression.as_ref()).value {
-            EvaluatedValue::Fixed(_) => Evaluated::create_unknown_static(),
-            EvaluatedValue::UnknownStatic => unreachable!(),
+            EvaluatedValue::Fixed(_) | EvaluatedValue::UnknownStatic => {
+                Evaluated::create_unknown_static()
+            }
             _ => Evaluated::create_unknown(),
         }
     }
