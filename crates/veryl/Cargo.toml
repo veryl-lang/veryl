@@ -22,31 +22,32 @@ pre-release-hook = ["../../support/scripts/tag_submodule.sh", "{{version}}"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anstyle         = "1.0"
-clap            = {workspace = true}
-clap_complete   = "4.5"
-console         = {workspace = true}
-fern            = "0.7.0"
-futures         = {workspace = true}
-handlebars      = {workspace = true}
-log             = {workspace = true}
-once_cell       = {workspace = true}
-mdbook          = {workspace = true}
-miette          = {workspace = true}
-pulldown-cmark  = {workspace = true}
-regex           = {workspace = true}
-serde           = {workspace = true}
-serde_json      = {workspace = true}
-similar         = {workspace = true}
-tempfile        = {workspace = true}
-thiserror       = {workspace = true}
-tokio           = {workspace = true}
-tokio-util      = {version = "0.7.17", features = ["codec"]}
-veryl-analyzer  = {version = "0.17.0", path = "../analyzer"}
-veryl-emitter   = {version = "0.17.0", path = "../emitter"}
-veryl-formatter = {version = "0.17.0", path = "../formatter"}
-veryl-metadata  = {version = "0.17.0", path = "../metadata"}
-veryl-migrator  = {version = "0.17.0", path = "../migrator"}
-veryl-parser    = {version = "0.17.0", path = "../parser"}
-veryl-path      = {version = "0.17.0", path = "../path"}
-veryl-sourcemap = {version = "0.17.0", path = "../sourcemap"}
+anstyle             = "1.0"
+clap                = {workspace = true}
+clap_complete       = "4.5"
+console             = {workspace = true}
+fern                = "0.7.0"
+futures             = {workspace = true}
+handlebars          = {workspace = true}
+log                 = {workspace = true}
+once_cell           = {workspace = true}
+mdbook-driver       = {workspace = true}
+mdbook-preprocessor = {workspace = true}
+miette              = {workspace = true}
+pulldown-cmark      = {workspace = true}
+regex               = {workspace = true}
+serde               = {workspace = true}
+serde_json          = {workspace = true}
+similar             = {workspace = true}
+tempfile            = {workspace = true}
+thiserror           = {workspace = true}
+tokio               = {workspace = true}
+tokio-util          = {version = "0.7.17", features = ["codec"]}
+veryl-analyzer      = {version = "0.17.0", path = "../analyzer"}
+veryl-emitter       = {version = "0.17.0", path = "../emitter"}
+veryl-formatter     = {version = "0.17.0", path = "../formatter"}
+veryl-metadata      = {version = "0.17.0", path = "../metadata"}
+veryl-migrator      = {version = "0.17.0", path = "../migrator"}
+veryl-parser        = {version = "0.17.0", path = "../parser"}
+veryl-path          = {version = "0.17.0", path = "../path"}
+veryl-sourcemap     = {version = "0.17.0", path = "../sourcemap"}
