@@ -1348,8 +1348,6 @@ impl Emitter {
                     _ => (vec![], vec![], symbol.found),
                 }
             } else {
-                let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-                println!("path {}", path.mangled_path());
                 unreachable!()
             };
         let connected_ports: Vec<InstPortItem> =
