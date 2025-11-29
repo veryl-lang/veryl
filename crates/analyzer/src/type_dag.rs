@@ -229,7 +229,7 @@ impl TypeDag {
 
     fn resolve_symbol_path(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
         let symbol = symbol_table::resolve((path, namespace)).ok()?;
-        if let Some(alias_path) = symbol.found.alias_target() {
+        if let Some(alias_path) = symbol.found.alias_target(false) {
             // alias referenced as generic arg for generic instance put on the same namespace
             // causes cyclic dependency error.
             // https://github.com/veryl-lang/veryl/blob/52b46337148340b43f8ab1c8f2ab67f58cd3c943/crates/analyzer/src/tests.rs#L3740-L3743

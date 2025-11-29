@@ -571,15 +571,14 @@ impl Symbol {
         None
     }
 
-    pub fn alias_target(&self) -> Option<GenericSymbolPath> {
+    pub fn alias_target(&self, include_proto: bool) -> Option<GenericSymbolPath> {
         match &self.kind {
-            SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => Some(x.target.clone()),
-            SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
-                Some(x.target.clone())
-            }
-            SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
-                Some(x.target.clone())
-            }
+            SymbolKind::AliasModule(x) => Some(x.target.clone()),
+            SymbolKind::ProtoAliasModule(x) if include_proto => Some(x.target.clone()),
+            SymbolKind::AliasInterface(x) => Some(x.target.clone()),
+            SymbolKind::ProtoAliasInterface(x) if include_proto => Some(x.target.clone()),
+            SymbolKind::AliasPackage(x) => Some(x.target.clone()),
+            SymbolKind::ProtoAliasPackage(x) if include_proto => Some(x.target.clone()),
             _ => None,
         }
     }

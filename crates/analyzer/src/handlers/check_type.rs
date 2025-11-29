@@ -306,7 +306,7 @@ fn check_generic_proto_arg(
 }
 
 fn resolve_alias(symbol: &Symbol) -> Option<Symbol> {
-    let target_path = symbol.alias_target()?;
+    let target_path = symbol.alias_target(true)?;
     let target_symbol =
         symbol_table::resolve((&target_path.generic_path(), &symbol.namespace)).ok()?;
     if let Some(proto) = target_symbol.found.proto() {
