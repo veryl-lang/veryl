@@ -280,7 +280,7 @@ endmodule
 }
 
 #[test]
-fn omit_project_prefix() {
+fn omit_prject_prefix() {
     let code = r#"module ModuleA {
     inst u: InterfaceB::<10>;
 }
@@ -1209,6 +1209,80 @@ endmodule
         emit(&metadata, code)
     };
 
+    assert_eq!(ret, expect);
+
+    let code = r#"
+proto module a_proto_module;
+
+module a_module for a_proto_module {
+}
+proto package b_proto_pkg {
+    alias module A_MODULE: a_proto_module;
+}
+package b_pkg::<MOD: a_proto_module> for b_proto_pkg {
+    alias module A_MODULE = MOD;
+}
+proto package c_proto_pkg {
+    alias module A_MODULE: a_proto_module;
+}
+package c_pkg::<MOD: a_proto_module> for c_proto_pkg {
+    alias module A_MODULE = MOD;
+}
+module d_module::<PKG: b_proto_pkg> {
+    import PKG::*;
+    inst u: A_MODULE;
+}
+module e_module::<PKG: c_proto_pkg> {
+    import PKG::*;
+    alias package B_PKG = b_pkg::<A_MODULE>;
+    inst u: d_module::<B_PKG>;
+}
+alias package C_PKG    = c_pkg::<a_module>;
+alias module  E_MODULE = e_module::<C_PKG>;
+"#;
+
+    let expect = r#"
+
+module prj_a_module;
+endmodule
+
+
+package prj___b_pkg__a_module;
+
+
+endpackage
+
+
+package prj___c_pkg__a_module;
+
+
+endpackage
+module prj___d_module____b_pkg__a_module;
+    import prj___b_pkg__a_module::*;
+
+    prj_a_module u ();
+endmodule
+module prj___e_module____c_pkg__a_module;
+    import prj___c_pkg__a_module::*;
+
+
+
+    prj___d_module____b_pkg__a_module u ();
+endmodule
+
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
 

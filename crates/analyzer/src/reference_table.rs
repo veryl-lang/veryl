@@ -361,13 +361,13 @@ impl ReferenceTable {
                 continue;
             }
 
-            let mut path = path.clone();
             path.apply_map(&map);
+            path.unalias();
             path.append_namespace_path(namespace, &target.namespace);
 
             if let Ok(target) = symbol_table::resolve((&path.generic_path(), target_namespace)) {
                 let ith = path.len() - 1;
-                Self::insert_generic_instance(&path, ith, target_namespace, &target.found);
+                Self::insert_generic_instance(path, ith, target_namespace, &target.found);
             }
         }
     }

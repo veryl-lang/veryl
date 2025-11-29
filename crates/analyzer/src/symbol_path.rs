@@ -575,7 +575,7 @@ impl GenericSymbolPath {
             let symbol = symbol_table::resolve((&self.slice(i).mangled_path(), &namespace));
 
             if let Ok(ref symbol) = symbol
-                && let Some(mut alias_target) = symbol.found.alias_target()
+                && let Some(mut alias_target) = symbol.found.alias_target(false)
             {
                 alias_target.resolve_imported(&namespace, Some(&generic_maps));
                 alias_target.apply_map(&generic_maps);

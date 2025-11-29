@@ -1348,6 +1348,8 @@ impl Emitter {
                     _ => (vec![], vec![], symbol.found),
                 }
             } else {
+                let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+                println!("path {}", path.mangled_path());
                 unreachable!()
             };
         let connected_ports: Vec<InstPortItem> =
@@ -5942,27 +5944,26 @@ pub fn resolve_generic_path(
             let params = symbol.generic_parameters();
             let n_args = path.paths[*i].arguments.len();
 
+            // Apply default value
             for param in params.iter().skip(n_args) {
                 let mut arg = param.1.default_value.as_ref().unwrap().clone();
                 arg.unalias();
                 path.paths[*i].arguments.push(arg);
             }
-        }
-    }
 
-    if let Some(maps) = generic_maps {
-        path.apply_map(maps);
-    }
-
-    for (i, symbol) in &path_symbols {
-        for arg in &mut path.paths[*i].arguments {
-            arg.append_namespace_path(namespace, &symbol.namespace);
+            for arg in path.paths[*i].arguments.iter_mut() {
+                if let Some(maps) = generic_maps {
+                    arg.apply_map(maps);
+                }
+                arg.unalias();
+                arg.append_namespace_path(namespace, &symbol.namespace);
+            }
         }
     }
 
     let result = symbol_table::resolve((&path.mangled_path(), namespace));
     if let Ok(symbol) = &result
-        && let Some(target) = symbol.found.alias_target()
+        && let Some(target) = symbol.found.alias_target(false)
     {
         if let Some(parent) = symbol.found.get_parent()
             && matches!(parent.kind, SymbolKind::GenericInstance(_))
