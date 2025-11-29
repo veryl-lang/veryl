@@ -1,6 +1,6 @@
 use crate::evaluator::{Evaluated, EvaluatedValue, Evaluator};
 use crate::namespace::{DefineContext, Namespace};
-use crate::symbol::{ConnectTargetIdentifier, SymbolId};
+use crate::symbol::{ConnectTargetIdentifier, Symbol, SymbolId, SymbolKind};
 use crate::symbol_table;
 use miette::Result;
 use std::convert::{From, TryFrom};
@@ -345,6 +345,48 @@ impl VarRefPath {
         self.0
             .iter()
             .any(|x| !matches!(x, VarRefPathItem::Identifier { .. }))
+    }
+
+    pub fn proto_path(&self) -> Self {
+        fn trace_proto(id: SymbolId) -> Option<Symbol> {
+            let symbol = symbol_table::get(id)?;
+            if matches!(
+                &symbol.kind,
+                SymbolKind::Variable(_)
+                    | SymbolKind::Parameter(_)
+                    | SymbolKind::TypeDef(_)
+                    | SymbolKind::Enum(_)
+                    | SymbolKind::EnumMember(_)
+                    | SymbolKind::Struct(_)
+                    | SymbolKind::StructMember(_)
+                    | SymbolKind::Union(_)
+                    | SymbolKind::UnionMember(_)
+                    | SymbolKind::Function(_)
+                    | SymbolKind::Modport(_)
+            ) {
+                let parent = symbol.get_parent()?;
+                let proto = trace_proto(parent.id)?;
+                symbol_table::resolve((&symbol.token, &proto.inner_namespace()))
+                    .map(|x| x.found)
+                    .ok()
+            } else {
+                symbol.proto()
+            }
+        }
+
+        let paths: Vec<_> = self
+            .full_path()
+            .iter()
+            .map(|x| {
+                let id = if let Some(proto) = trace_proto(*x) {
+                    proto.id
+                } else {
+                    *x
+                };
+                VarRefPathItem::Identifier { symbol_id: id }
+            })
+            .collect();
+        Self::new(paths)
     }
 }
 

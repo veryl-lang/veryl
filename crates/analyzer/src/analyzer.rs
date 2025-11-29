@@ -132,16 +132,23 @@ impl AnalyzerPass3 {
                 ));
             }
         }
-        let mut assignable_list: Vec<_> = assignable_list.iter().map(|x| (x, vec![])).collect();
+        let mut assignable_list: Vec<_> = assignable_list
+            .iter()
+            .map(|x| (x, x.proto_path(), vec![]))
+            .collect();
         for assign in &assign_list {
+            let assign_proto_path = assign.path.proto_path();
             for assignable in &mut assignable_list {
-                if assignable.0.included(&assign.path) {
-                    assignable.1.push((assign.position.clone(), assign.partial));
+                if assignable.0.included(&assign.path)
+                    || assignable.1.included(&assign.path)
+                    || assignable.0.included(&assign_proto_path)
+                {
+                    assignable.2.push((assign.position.clone(), assign.partial));
                 }
             }
         }
 
-        for (path, positions) in &assignable_list {
+        for (path, _, positions) in &assignable_list {
             if positions.is_empty() {
                 let full_path = path.full_path();
                 let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
