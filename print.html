@@ -284,6 +284,11 @@
     <th class="table_list_item"><a href="slicer.html">slicer</a></th>
     <td class="table_list_item"></td>
 </tr>
+<tr>
+    <th class="table_list_item"><a href="synchronizer_basic.html">synchronizer_basic</a></th>
+    <td class="table_list_item"> Basic synchronizer implementation using single-bit FF scheme
+</td>
+</tr>
 </tbody>
 </table>
 <h2 id="module-prototypes"><a class="header" href="#module-prototypes">Module Prototypes</a></h2>
@@ -451,6 +456,11 @@
 <tr>
     <th class="table_list_item"><a href="slicer.html">slicer</a></th>
     <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item"><a href="synchronizer_basic.html">synchronizer_basic</a></th>
+    <td class="table_list_item"> Basic synchronizer implementation using single-bit FF scheme
+</td>
 </tr>
 </tbody>
 </table>
@@ -2051,17 +2061,8 @@ a bit vector with a unary encoding.</p>
 </tr>
 </tbody>
 </table>
-<div style="break-before: page; page-break-before: always;"></div><h2 id="module-prototypes-1"><a class="header" href="#module-prototypes-1">Module Prototypes</a></h2>
-<hr />
-<table class="table_list">
-<tbody>
-<tr>
-    <th class="table_list_item"><a href="synchronizer.html">synchronizer</a></th>
-    <td class="table_list_item"></td>
-</tr>
-</tbody>
-</table>
-<div style="break-before: page; page-break-before: always;"></div><h2 id="synchronizer"><a class="header" href="#synchronizer">synchronizer</a></h2>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="synchronizer_basic"><a class="header" href="#synchronizer_basic">synchronizer_basic</a></h2>
+<p>Basic synchronizer implementation using single-bit FF scheme</p>
 <h3 id="parameters-19"><a class="header" href="#parameters-19">Parameters</a></h3>
 <hr />
 <table class="table_list">
@@ -2069,6 +2070,11 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">WIDTH</th>
     <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">INITIAL_VALUE</th>
+    <td class="table_list_item"><span class="hljs-type">bit<WIDTH></span></td>
     <td class="table_list_item"></td>
 </tr>
 <tr>
@@ -2091,6 +2097,84 @@ a bit vector with a unary encoding.</p>
 </tbody>
 </table>
 <h3 id="ports-19"><a class="header" href="#ports-19">Ports</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">i_clk</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">clock</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_rst</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">reset</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">i_d</th>
+    <td class="table_list_item"><span class="hljs-keyword">input</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<WIDTH></span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">o_d</th>
+    <td class="table_list_item"><span class="hljs-keyword">output</span></td>
+    <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
+    <td class="table_list_item"><span class="hljs-type">logic<WIDTH></span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="module-prototypes-1"><a class="header" href="#module-prototypes-1">Module Prototypes</a></h2>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item"><a href="synchronizer.html">synchronizer</a></th>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="synchronizer"><a class="header" href="#synchronizer">synchronizer</a></h2>
+<h3 id="parameters-20"><a class="header" href="#parameters-20">Parameters</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">WIDTH</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">INITIAL_VALUE</th>
+    <td class="table_list_item"><span class="hljs-type">bit<WIDTH></span></td>
+    <td class="table_list_item"></td>
+</tr>
+<tr>
+    <th class="table_list_item">STAGES</th>
+    <td class="table_list_item"><span class="hljs-type">u32</span></td>
+    <td class="table_list_item"></td>
+</tr>
+</tbody>
+</table>
+<h3 id="clock-domains-3"><a class="header" href="#clock-domains-3">Clock Domains</a></h3>
+<hr />
+<table class="table_list">
+<tbody>
+<tr>
+    <th class="table_list_item">'d</th>
+</tr>
+<tr>
+    <th class="table_list_item">'s</th>
+</tr>
+</tbody>
+</table>
+<h3 id="ports-20"><a class="header" href="#ports-20">Ports</a></h3>
 <hr />
 <table class="table_list">
 <tbody>
