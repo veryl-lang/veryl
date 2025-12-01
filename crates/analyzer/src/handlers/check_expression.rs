@@ -1,6 +1,6 @@
 use crate::analyzer::AnalyzerPass2Expression;
 use crate::analyzer_error::AnalyzerError;
-use crate::connect_operation_table::{self, ConnectOperand};
+use crate::connect_operation_table::ConnectOperand;
 use crate::definition_table::{self, Definition};
 use crate::evaluator::{Evaluated, EvaluatedError, EvaluatedType, Evaluator};
 use crate::instance_history::{self, InstanceHistoryError, InstanceSignature};
@@ -477,21 +477,25 @@ impl VerylGrammarTrait for CheckExpression {
                     );
                 }
                 IdentifierStatementGroup::Assignment(x) => {
-                    let token = arg.expression_identifier.identifier().token;
-                    let (is_rhs_expression, is_connect_operation) =
-                        if let Some(x) = connect_operation_table::get(&token) {
-                            (matches!(x.rhs, ConnectOperand::Expression(_)), true)
-                        } else {
-                            (true, false)
-                        };
+                    let (is_connect_operation, is_rhs_modport) = if matches!(
+                        &*x.assignment.assignment_group,
+                        AssignmentGroup::DiamondOperator(_)
+                    ) {
+                        let is_modport = ConnectOperand::try_from(&*x.assignment.expression)
+                            .map(|x| matches!(x, ConnectOperand::Modport(_)))
+                            .unwrap_or(false);
+                        (true, is_modport)
+                    } else {
+                        (false, false)
+                    };
 
                     if !is_connect_operation {
                         // Evaluate expressions in select of LHS
                         self.evaluate_expression(&arg.expression_identifier.as_ref().into(), false);
                     }
 
-                    if is_connect_operation && !is_rhs_expression {
-                        // RHS operand is modport so no checks will be skipped.
+                    if is_connect_operation && is_rhs_modport {
+                        // RHS operand is modport so no checks will be executed.
                         return Ok(());
                     }
 

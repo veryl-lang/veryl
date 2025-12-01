@@ -6533,6 +6533,33 @@ fn invalid_factor_kind() {
     //
     //    let errors = analyze(code);
     //    assert!(matches!(errors[0], AnalyzerError::InvalidFactor { .. }));
+
+    let code = r#"
+    interface foo_if {
+        var ready  : logic;
+        var valid  : logic;
+        modport master {
+            ready: input ,
+            valid: output,
+        }
+        modport slave {
+            ..converse(master)
+        }
+    }
+    module c_module {
+        inst u: b_module;
+    }
+    module b_module {
+        inst a_if: foo_if;
+        inst b_if: foo_if;
+        always_comb {
+            a_if.master <> b_if.slave;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
