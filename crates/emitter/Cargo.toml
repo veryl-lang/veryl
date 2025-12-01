@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-emitter"
-version               = "0.17.0"
+version               = "0.17.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -15,11 +15,11 @@ edition.workspace     = true
 [dependencies]
 serde           = {workspace = true}
 strnum_bitwidth = {workspace = true}
-veryl-aligner   = {version = "0.17.0", path = "../aligner"}
-veryl-analyzer  = {version = "0.17.0", path = "../analyzer"}
-veryl-metadata  = {version = "0.17.0", path = "../metadata"}
-veryl-parser    = {version = "0.17.0", path = "../parser"}
-veryl-sourcemap = {version = "0.17.0", path = "../sourcemap"}
+veryl-aligner   = {version = "0.17.1", path = "../aligner"}
+veryl-analyzer  = {version = "0.17.1", path = "../analyzer"}
+veryl-metadata  = {version = "0.17.1", path = "../metadata"}
+veryl-parser    = {version = "0.17.1", path = "../parser"}
+veryl-sourcemap = {version = "0.17.1", path = "../sourcemap"}
 
 [dev-dependencies]
 toml = {workspace = true}
