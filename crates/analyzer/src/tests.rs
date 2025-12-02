@@ -4376,11 +4376,17 @@ fn undefined_identifier() {
         }
     }
     module e_module (
-        aif: modport a_if::<b_pkg::<32>::b_struct>::slave,
-        cif: modport c_if::<b_pkg::<32>>::master         ,
+        aif: modport a_if::<b_pkg::<32>::b_struct>::slave   ,
+        bif: modport c_if::<b_pkg::<32>>::master            ,
+        cif: modport a_if::<b_pkg::<32>::b_struct>::slave[1],
+        dif: modport c_if::<b_pkg::<32>>::master[1]         ,
     ) {
         always_comb {
-            cif.connect_if(aif);
+            bif.connect_if(aif);
+        }
+
+        always_comb {
+            dif[0].connect_if(aif: cif[0]);
         }
     }
     "#;
