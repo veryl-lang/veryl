@@ -4375,6 +4375,14 @@ fn undefined_identifier() {
             cif.connect_if(aif);
         }
     }
+    module e_module (
+        aif: modport a_if::<b_pkg::<32>::b_struct>::slave,
+        cif: modport c_if::<b_pkg::<32>>::master         ,
+    ) {
+        always_comb {
+            cif.connect_if(aif);
+        }
+    }
     "#;
 
     let errors = analyze(code);

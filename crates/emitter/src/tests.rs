@@ -1701,6 +1701,207 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+interface a_if::<T: type> {
+    var ready  : logic;
+    var valid  : logic;
+    var payload: T    ;
+
+    modport slave {
+        ready  : output,
+        valid  : input ,
+        payload: input ,
+    }
+}
+
+proto package b_proto_pkg {
+    const WIDTH: u32;
+    struct b_struct {
+        b: logic<WIDTH>,
+    }
+}
+
+package b_pkg::<W: u32> for b_proto_pkg {
+    const WIDTH: u32 = W;
+    struct b_struct {
+        b: logic<WIDTH>,
+    }
+}
+
+interface c_if::<B_PKG: b_proto_pkg> {
+    var ready  : logic          ;
+    var valid  : logic          ;
+    var payload: B_PKG::b_struct;
+
+    function connect_if(
+        aif: modport a_if::<B_PKG::b_struct>::slave,
+    ) {
+        aif.ready = ready;
+        valid     = aif.valid;
+        payload.b = aif.payload.b;
+    }
+
+    modport master {
+        ready     : input ,
+        valid     : output,
+        payload   : output,
+        connect_if: import,
+    }
+}
+
+module d_module {
+    alias package PKG = b_pkg::<32>;
+
+    inst aif: a_if::<PKG::b_struct>   ;
+    inst bif: c_if::<PKG>             ;
+    inst cif: a_if::<PKG::b_struct>[1];
+    inst dif: c_if::<PKG>[1]          ;
+
+    always_comb {
+        aif.valid     = '0;
+        aif.payload.b = '0;
+    }
+
+    always_comb {
+        bif.ready = '0;
+        bif.connect_if(aif);
+    }
+
+    always_comb {
+        cif[0].valid     = '0;
+        cif[0].payload.b = '0;
+    }
+
+    always_comb {
+        dif[0].ready = '0;
+        dif[0].connect_if(aif: cif[0]);
+    }
+}
+
+module e_module (
+    aif: modport a_if::<b_pkg::<32>::b_struct>::slave   ,
+    bif: modport c_if::<b_pkg::<32>>::master            ,
+    cif: modport a_if::<b_pkg::<32>::b_struct>::slave[1],
+    dif: modport c_if::<b_pkg::<32>>::master[1]         ,
+) {
+    always_comb {
+        bif.connect_if(aif);
+    }
+
+    always_comb {
+        dif[0].connect_if(aif: cif[0]);
+    }
+}
+"#;
+
+    let expect = r#"interface prj___a_if____b_pkg__32_b_struct;
+    logic                     ready  ;
+    logic                     valid  ;
+    prj___b_pkg__32::b_struct payload;
+
+    modport slave (
+        output ready  ,
+        input  valid  ,
+        input  payload
+    );
+endinterface
+
+
+package prj___b_pkg__32;
+    localparam int unsigned WIDTH = 32;
+    typedef struct packed {
+        logic [WIDTH-1:0] b;
+    } b_struct;
+endpackage
+
+interface prj___c_if____b_pkg__32;
+    logic                         ready        ;
+    logic                         valid        ;
+    prj___b_pkg__32::b_struct     payload      ;
+
+    function automatic void connect_if(
+        output var logic                     __aif_ready  ,
+        input  var logic                     __aif_valid  ,
+        input  var prj___b_pkg__32::b_struct __aif_payload
+    ) ;
+        __aif_ready = ready;
+        valid       = __aif_valid;
+        payload.b   = __aif_payload.b;
+    endfunction
+
+    modport master (
+        input  ready     ,
+        output valid     ,
+        output payload   ,
+        import connect_if
+    );
+endinterface
+
+module prj_d_module;
+
+
+    prj___a_if____b_pkg__32_b_struct aif ();
+    prj___c_if____b_pkg__32          bif ();
+    prj___a_if____b_pkg__32_b_struct cif [0:1-1] ();
+    prj___c_if____b_pkg__32          dif [0:1-1] ();
+
+    always_comb begin
+        aif.valid     = '0;
+        aif.payload.b = '0;
+    end
+
+    always_comb begin
+        bif.ready      = '0;
+        bif.connect_if(aif.ready, aif.valid, aif.payload);
+    end
+
+    always_comb begin
+        cif[0].valid     = '0;
+        cif[0].payload.b = '0;
+    end
+
+    always_comb begin
+        dif[0].ready      = '0;
+        dif[0].connect_if(
+            .__aif_ready   (cif[0].ready  ),
+            .__aif_valid   (cif[0].valid  ),
+            .__aif_payload (cif[0].payload)
+        );
+    end
+endmodule
+
+module prj_e_module (
+    prj___a_if____b_pkg__32_b_struct.slave aif        ,
+    prj___c_if____b_pkg__32.master         bif        ,
+    prj___a_if____b_pkg__32_b_struct.slave cif [0:1-1],
+    prj___c_if____b_pkg__32.master         dif [0:1-1]
+);
+    always_comb begin
+        bif.connect_if(aif.ready, aif.valid, aif.payload);
+    end
+
+    always_comb begin
+        dif[0].connect_if(
+            .__aif_ready   (cif[0].ready  ),
+            .__aif_valid   (cif[0].valid  ),
+            .__aif_payload (cif[0].payload)
+        );
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]

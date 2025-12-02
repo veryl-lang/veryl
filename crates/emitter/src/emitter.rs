@@ -1777,27 +1777,33 @@ impl Emitter {
         identifier: &ExpressionIdentifier,
         function_call: &FunctionCall,
     ) {
-        let (defined_ports, generic_map, namespace) = if let (Ok(symbol), _) =
-            self.resolve_scoped_idnetifier(&identifier.scoped_identifier)
-        {
-            match symbol.found.kind {
-                SymbolKind::Function(ref x) => {
-                    (x.ports.clone(), Vec::new(), symbol.found.namespace)
-                }
-                SymbolKind::GenericInstance(ref x) => {
-                    let base = symbol_table::get(x.base).unwrap();
-                    match base.kind {
-                        SymbolKind::Function(ref x) => {
-                            (x.ports.clone(), symbol.found.generic_maps(), base.namespace)
-                        }
-                        _ => (Vec::new(), Vec::new(), base.namespace),
+        let (defined_ports, generic_map, namespace) =
+            if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
+                match symbol.found.kind {
+                    SymbolKind::Function(ref x) => {
+                        (x.ports.clone(), Vec::new(), symbol.found.namespace)
                     }
+                    SymbolKind::ModportFunctionMember(x) => {
+                        let symbol = symbol_table::get(x.function).unwrap();
+                        let SymbolKind::Function(x) = symbol.kind else {
+                            unreachable!();
+                        };
+                        (x.ports.clone(), Vec::new(), symbol.namespace)
+                    }
+                    SymbolKind::GenericInstance(ref x) => {
+                        let base = symbol_table::get(x.base).unwrap();
+                        match base.kind {
+                            SymbolKind::Function(ref x) => {
+                                (x.ports.clone(), symbol.found.generic_maps(), base.namespace)
+                            }
+                            _ => (Vec::new(), Vec::new(), base.namespace),
+                        }
+                    }
+                    _ => (Vec::new(), Vec::new(), symbol.found.namespace),
                 }
-                _ => (Vec::new(), Vec::new(), symbol.found.namespace),
-            }
-        } else {
-            unreachable!()
-        };
+            } else {
+                unreachable!()
+            };
 
         let in_named_argument = if let Some(ref x) = function_call.function_call_opt {
             let list: Vec<_> = x.argument_list.as_ref().into();
@@ -1824,7 +1830,6 @@ impl Emitter {
                 );
             self.modport_connections_tables
                 .push(modport_connections_table);
-
             self.argument_list(&x.argument_list);
             1 + x.argument_list.argument_list_list.len()
         } else {

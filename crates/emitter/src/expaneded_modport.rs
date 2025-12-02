@@ -11,8 +11,10 @@ use veryl_analyzer::symbol::{
 };
 use veryl_analyzer::symbol_table;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::stringifier::Stringifier;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
+use veryl_parser::veryl_walker::VerylWalker;
 
 pub struct ExpandModportConnection {
     pub port_target: VerylToken,
@@ -79,11 +81,15 @@ impl ExpandModportConnectionsTable {
         generic_map: &[GenericMap],
         namespace: &Namespace,
     ) -> Self {
-        let connected_ports: HashMap<StrId, Option<&VerylToken>> = inst_ports
+        let connected_ports: HashMap<StrId, Option<VerylToken>> = inst_ports
             .iter()
             .map(|x| {
                 let token = if let Some(ref x) = x.inst_port_item_opt {
-                    x.expression.unwrap_identifier().map(|x| x.identifier())
+                    x.expression.unwrap_identifier().map(|x| {
+                        let mut stringifier = Stringifier::new();
+                        stringifier.expression_identifier(x);
+                        x.identifier().replace(stringifier.as_str())
+                    })
                 } else {
                     None
                 };
@@ -115,7 +121,7 @@ impl ExpandModportConnectionsTable {
             .collect();
         list.insert(0, argument_list.argument_item.clone());
 
-        let connected_ports: HashMap<StrId, Option<&VerylToken>> = list
+        let connected_ports: HashMap<StrId, Option<VerylToken>> = list
             .iter()
             .enumerate()
             .map(|(i, arg)| {
@@ -125,7 +131,7 @@ impl ExpandModportConnectionsTable {
                         .argument_expression
                         .expression
                         .unwrap_identifier()
-                        .map(|x| x.identifier());
+                        .map(|x| x.identifier().clone());
                     (Some(lhs_token), rhs_token)
                 } else {
                     let lhs_token = arg
@@ -134,7 +140,11 @@ impl ExpandModportConnectionsTable {
                         .unwrap_identifier()
                         .map(|x| x.identifier().token.text);
                     let rhs_token = if let Some(ref rhs) = arg.argument_item_opt {
-                        rhs.expression.unwrap_identifier().map(|x| x.identifier())
+                        rhs.expression.unwrap_identifier().map(|x| {
+                            let mut stringifier = Stringifier::new();
+                            stringifier.expression_identifier(x);
+                            x.identifier().replace(stringifier.as_str())
+                        })
                     } else {
                         None
                     };
@@ -159,7 +169,7 @@ impl ExpandModportConnectionsTable {
     fn expand(
         &mut self,
         defined_ports: &[Port],
-        connected_ports: &HashMap<StrId, Option<&VerylToken>>,
+        connected_ports: &HashMap<StrId, Option<VerylToken>>,
         generic_map: &[GenericMap],
         namespace: &Namespace,
         in_function: bool,
@@ -170,28 +180,24 @@ impl ExpandModportConnectionsTable {
                 continue;
             }
 
-            let connected_interface = connected_ports
-                .get(&port.name())
-                .map(|x| x.unwrap_or(&port.token))
-                .unwrap();
             let property = port.property();
             let array_size = evaluate_array_size(&property.r#type.array, generic_map);
-            let array_index = expand_array_index(&array_size, &[]);
-            let connections: Vec<_> = if array_index.is_empty() {
-                vec![ExpandModportConnections::new(
-                    &port,
-                    &modport,
-                    connected_interface,
-                    &[],
-                )]
-            } else {
-                array_index
-                    .iter()
-                    .map(|index| {
-                        ExpandModportConnections::new(&port, &modport, connected_interface, index)
-                    })
-                    .collect()
-            };
+            let mut array_index = expand_array_index(&array_size, &[]);
+            if array_index.is_empty() {
+                array_index.push(vec![]);
+            }
+
+            let connected_port = connected_ports.get(&port.name()).unwrap();
+            let connections: Vec<_> = array_index
+                .iter()
+                .map(|index| {
+                    if let Some(connected_port) = connected_port {
+                        ExpandModportConnections::new(&port, &modport, connected_port, index)
+                    } else {
+                        ExpandModportConnections::new(&port, &modport, &port.token, index)
+                    }
+                })
+                .collect();
 
             let entry = ExpandModportConnectionsTableEntry {
                 id: port.name(),
