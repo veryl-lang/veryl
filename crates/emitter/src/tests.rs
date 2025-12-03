@@ -1757,6 +1757,8 @@ module d_module {
     inst bif: c_if::<PKG>             ;
     inst cif: a_if::<PKG::b_struct>[1];
     inst dif: c_if::<PKG>[1]          ;
+    inst eif: a_if::<PKG::b_struct>[1];
+    inst fif: c_if::<PKG>[1]          ;
 
     always_comb {
         aif.valid     = '0;
@@ -1777,6 +1779,16 @@ module d_module {
         dif[0].ready = '0;
         dif[0].connect_if(aif: cif[0]);
     }
+
+    always_comb {
+        eif[0].valid     = '0;
+        eif[0].payload.b = '0;
+    }
+
+    always_comb {
+        fif[0].ready = '0;
+        fif[0].connect_if(eif[0]);
+    }
 }
 
 module e_module (
@@ -1784,6 +1796,8 @@ module e_module (
     bif: modport c_if::<b_pkg::<32>>::master            ,
     cif: modport a_if::<b_pkg::<32>::b_struct>::slave[1],
     dif: modport c_if::<b_pkg::<32>>::master[1]         ,
+    eif: modport a_if::<b_pkg::<32>::b_struct>::slave[1],
+    fif: modport c_if::<b_pkg::<32>>::master[1]         ,
 ) {
     always_comb {
         bif.connect_if(aif);
@@ -1791,6 +1805,10 @@ module e_module (
 
     always_comb {
         dif[0].connect_if(aif: cif[0]);
+    }
+
+    always_comb {
+        fif[0].connect_if(eif[0]);
     }
 }
 "#;
@@ -1845,6 +1863,8 @@ module prj_d_module;
     prj___c_if____b_pkg__32          bif ();
     prj___a_if____b_pkg__32_b_struct cif [0:1-1] ();
     prj___c_if____b_pkg__32          dif [0:1-1] ();
+    prj___a_if____b_pkg__32_b_struct eif [0:1-1] ();
+    prj___c_if____b_pkg__32          fif [0:1-1] ();
 
     always_comb begin
         aif.valid     = '0;
@@ -1869,13 +1889,25 @@ module prj_d_module;
             .__aif_payload (cif[0].payload)
         );
     end
+
+    always_comb begin
+        eif[0].valid     = '0;
+        eif[0].payload.b = '0;
+    end
+
+    always_comb begin
+        fif[0].ready      = '0;
+        fif[0].connect_if(eif[0].ready, eif[0].valid, eif[0].payload);
+    end
 endmodule
 
 module prj_e_module (
     prj___a_if____b_pkg__32_b_struct.slave aif        ,
     prj___c_if____b_pkg__32.master         bif        ,
     prj___a_if____b_pkg__32_b_struct.slave cif [0:1-1],
-    prj___c_if____b_pkg__32.master         dif [0:1-1]
+    prj___c_if____b_pkg__32.master         dif [0:1-1],
+    prj___a_if____b_pkg__32_b_struct.slave eif [0:1-1],
+    prj___c_if____b_pkg__32.master         fif [0:1-1]
 );
     always_comb begin
         bif.connect_if(aif.ready, aif.valid, aif.payload);
@@ -1887,6 +1919,10 @@ module prj_e_module (
             .__aif_valid   (cif[0].valid  ),
             .__aif_payload (cif[0].payload)
         );
+    end
+
+    always_comb begin
+        fif[0].connect_if(eif[0].ready, eif[0].valid, eif[0].payload);
     end
 endmodule
 //# sourceMappingURL=test.sv.map
