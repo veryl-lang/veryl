@@ -39,7 +39,7 @@ console         = "0.16.1"
 futures         = "0.3.31"
 fxhash          = "0.2.1"
 handlebars      = "6.3"
-log             = "0.4.28"
+log             = "0.4.29"
 mdbook          = "0.4.51"
 miette          = {version = "7.6"}
 once_cell       = "1.21"
