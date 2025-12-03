@@ -271,7 +271,7 @@ impl CheckExpression {
                 continue;
             };
 
-            let range: TokenRange = (&param).into();
+            let range: TokenRange = param.into();
             let value = if let Some(x) = &param.inst_parameter_item_opt {
                 self.evaluate_connection(
                     Context::ParameterConnection,
@@ -310,10 +310,10 @@ impl CheckExpression {
         }
 
         for connect in connections {
-            let token: TokenRange = (&connect).into();
+            let token: TokenRange = connect.into();
             let dst = connect.identifier.identifier_token.token.text;
 
-            match (connect.inst_port_item_opt, ports.get(&dst)) {
+            match (&connect.inst_port_item_opt, ports.get(&dst)) {
                 (Some(src), Some(dst)) => {
                     self.evaluate_connection(
                         Context::PortConnection,
@@ -603,7 +603,7 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let range_items: Vec<RangeItem> = arg.into();
+            let range_items: Vec<_> = arg.into();
 
             for x in range_items {
                 let exp = self.evaluate_expression(&x.range.expression, false);
@@ -639,10 +639,10 @@ impl VerylGrammarTrait for CheckExpression {
         if !self.disable
             && let HandlerPoint::Before = self.point
         {
-            let expressions: Vec<Expression> = arg.into();
+            let expressions: Vec<_> = arg.into();
 
             for x in expressions {
-                self.evaluate_expression(&x, false);
+                self.evaluate_expression(x, false);
 
                 // TODO type check
             }

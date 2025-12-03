@@ -1646,7 +1646,7 @@ impl Evaluator {
         let func_name = identifier.identifier().to_string();
 
         let args: Vec<_> = if let Some(args) = &func_call.function_call_opt {
-            let args: Vec<ArgumentItem> = args.argument_list.as_ref().into();
+            let args: Vec<_> = args.argument_list.as_ref().into();
             args.iter()
                 .map(|arg| {
                     let mut arg = self.expression(&arg.argument_expression.expression);

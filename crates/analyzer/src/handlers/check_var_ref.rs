@@ -738,7 +738,7 @@ impl VerylGrammarTrait for CheckVarRef {
     fn assign_declaration(&mut self, arg: &AssignDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::After = self.point {
             let idents: Vec<_> = arg.assign_destination.as_ref().into();
-            for ident in &idents {
+            for ident in idents {
                 if let Ok(path) = VarRefPath::try_from(ident) {
                     let full_path = path.full_path();
                     if can_assign(full_path) {

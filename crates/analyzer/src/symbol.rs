@@ -1636,12 +1636,12 @@ impl TryFrom<&syntax_tree::Expression> for Type {
 
                     let r#type: UserDefinedType = x.scoped_identifier.as_ref().into();
                     let kind = TypeKind::UserDefined(r#type);
-                    let width: Vec<syntax_tree::Expression> =
-                        if let Some(ref x) = x.expression_identifier_opt {
-                            x.width.as_ref().into()
-                        } else {
-                            Vec::new()
-                        };
+                    let width: Vec<_> = if let Some(ref x) = x.expression_identifier_opt {
+                        let width: Vec<_> = x.width.as_ref().into();
+                        width.iter().map(|x| (*x).clone()).collect()
+                    } else {
+                        Vec::new()
+                    };
                     Ok(Type {
                         kind,
                         modifier: vec![],
@@ -1700,8 +1700,9 @@ impl From<&syntax_tree::FactorType> for Type {
                     syntax_tree::VariableType::Logic(_) => TypeKind::Logic,
                     syntax_tree::VariableType::Bit(_) => TypeKind::Bit,
                 };
-                let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.factor_type_opt {
-                    x.width.as_ref().into()
+                let width: Vec<_> = if let Some(ref x) = x.factor_type_opt {
+                    let width: Vec<_> = x.width.as_ref().into();
+                    width.iter().map(|x| (*x).clone()).collect()
                 } else {
                     Vec::new()
                 };
@@ -1758,8 +1759,9 @@ impl From<&syntax_tree::ScalarType> for Type {
             syntax_tree::ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
                 let r#type: UserDefinedType = x.user_defined_type.scoped_identifier.as_ref().into();
                 let kind = TypeKind::UserDefined(r#type);
-                let width: Vec<syntax_tree::Expression> = if let Some(ref x) = x.scalar_type_opt {
-                    x.width.as_ref().into()
+                let width: Vec<_> = if let Some(ref x) = x.scalar_type_opt {
+                    let width: Vec<_> = x.width.as_ref().into();
+                    width.iter().map(|x| (*x).clone()).collect()
                 } else {
                     Vec::new()
                 };
@@ -1791,9 +1793,10 @@ impl From<&syntax_tree::ArrayType> for Type {
     fn from(value: &syntax_tree::ArrayType) -> Self {
         let scalar_type: Type = value.scalar_type.as_ref().into();
         let mut array_type = scalar_type.array_type.unwrap();
-        let array: Vec<syntax_tree::Expression> = if let Some(ref x) = value.array_type_opt {
+        let array: Vec<_> = if let Some(ref x) = value.array_type_opt {
             array_type.array_type_opt.replace(x.clone());
-            x.array.as_ref().into()
+            let x: Vec<_> = x.array.as_ref().into();
+            x.iter().map(|x| (*x).clone()).collect()
         } else {
             Vec::new()
         };

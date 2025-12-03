@@ -75,7 +75,7 @@ impl ExpandModportConnectionsTable {
 
     pub fn create_from_inst_ports(
         defined_ports: &[Port],
-        inst_ports: &[InstPortItem],
+        inst_ports: &Vec<&InstPortItem>,
         generic_map: &[GenericMap],
         namespace: &Namespace,
     ) -> Self {
