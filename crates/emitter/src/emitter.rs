@@ -993,7 +993,7 @@ impl Emitter {
         let statement_block_list: Vec<_> = arg
             .statement_block_list
             .iter()
-            .map(|x| Into::<Vec<StatementBlockItem>>::into(x.statement_block_group.as_ref()))
+            .map(|x| Into::<Vec<_>>::into(x.statement_block_group.as_ref()))
             .collect();
 
         let mut base = 0;
@@ -1350,16 +1350,15 @@ impl Emitter {
             } else {
                 unreachable!()
             };
-        let connected_ports: Vec<InstPortItem> =
-            if let Some(ref x) = arg.component_instantiation_opt2 {
-                if let Some(ref x) = x.inst_port.inst_port_opt {
-                    x.inst_port_list.as_ref().into()
-                } else {
-                    vec![]
-                }
+        let connected_ports: Vec<_> = if let Some(ref x) = arg.component_instantiation_opt2 {
+            if let Some(ref x) = x.inst_port.inst_port_opt {
+                x.inst_port_list.as_ref().into()
             } else {
                 vec![]
-            };
+            }
+        } else {
+            vec![]
+        };
 
         let modport_connections_table = ExpandModportConnectionsTable::create_from_inst_ports(
             &defined_ports,
@@ -1468,7 +1467,7 @@ impl Emitter {
     fn emit_inst_unconnected_port(
         &mut self,
         defined_ports: &[Port],
-        connected_ports: &[InstPortItem],
+        connected_ports: &Vec<&InstPortItem>,
         generic_map: &[GenericMap],
     ) {
         if defined_ports.is_empty() || defined_ports.len() == connected_ports.len() {
@@ -3943,7 +3942,7 @@ impl VerylWalker for Emitter {
         let idents: Vec<_> = arg.assign_destination.as_ref().into();
         let mut emit_assign = false;
         for ident in idents {
-            if let Ok(symbol) = symbol_table::resolve(&ident) {
+            if let Ok(symbol) = symbol_table::resolve(ident) {
                 match &symbol.found.kind {
                     SymbolKind::Variable(x) => {
                         if x.r#type.has_modifier(&SymTypeModifierKind::Tri) {
@@ -5529,7 +5528,7 @@ impl VerylWalker for Emitter {
                     self.newline();
                 }
                 for x in &arg.veryl_list {
-                    let items: Vec<DescriptionItem> = x.description_group.as_ref().into();
+                    let items: Vec<_> = x.description_group.as_ref().into();
                     for item in items {
                         if let DescriptionItem::ImportDeclaration(x) = item {
                             self.file_scope_import

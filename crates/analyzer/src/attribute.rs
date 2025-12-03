@@ -108,10 +108,10 @@ fn get_arg_ident(
     use veryl_parser::veryl_grammar_trait as g;
 
     if let Some(x) = args {
-        let args: Vec<g::AttributeItem> = x.attribute_list.as_ref().into();
+        let args: Vec<_> = x.attribute_list.as_ref().into();
         if args.len() <= pos {
             None
-        } else if let g::AttributeItem::Identifier(ref x) = args[pos] {
+        } else if let g::AttributeItem::Identifier(x) = args[pos] {
             Some(x.identifier.identifier_token.token)
         } else {
             None
@@ -128,7 +128,7 @@ fn get_arg_string(
     use veryl_parser::veryl_grammar_trait as g;
 
     if let Some(x) = args {
-        let args: Vec<g::AttributeItem> = x.attribute_list.as_ref().into();
+        let args: Vec<_> = x.attribute_list.as_ref().into();
         if args.len() <= pos {
             None
         } else if let g::AttributeItem::StringLiteral(x) = &args[pos] {
@@ -147,7 +147,7 @@ fn get_args_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>
     let mut ret = Vec::new();
 
     if let Some(x) = args {
-        let args: Vec<g::AttributeItem> = x.attribute_list.as_ref().into();
+        let args: Vec<_> = x.attribute_list.as_ref().into();
         for arg in args {
             if let g::AttributeItem::Identifier(x) = arg {
                 ret.push(x.identifier.identifier_token.token);

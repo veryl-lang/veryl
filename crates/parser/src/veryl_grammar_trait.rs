@@ -6,31 +6,31 @@ use std::fmt;
 macro_rules! list_group_to_item {
     ($x:ident) => {
         paste! {
-            impl From<&[<$x List>]> for Vec<[<$x Item>]> {
-                fn from(x: &[<$x List>]) -> Self {
+            impl<'a> From<&'a [<$x List>]> for Vec<&'a [<$x Item>]> {
+                fn from(x: &'a [<$x List>]) -> Self {
                     let mut ret = Vec::new();
                     {
-                        let mut x: Vec<[<$x Item>]> = x.[<$x:snake _group>].as_ref().into();
+                        let mut x: Vec<&'a [<$x Item>]> = x.[<$x:snake _group>].as_ref().into();
                         ret.append(&mut x);
                     }
                     for x in &x.[<$x:snake _list_list>] {
-                        let mut x: Vec<[<$x Item>]> = x.[<$x:snake _group>].as_ref().into();
+                        let mut x: Vec<&'a [<$x Item>]> = x.[<$x:snake _group>].as_ref().into();
                         ret.append(&mut x);
                     }
                     ret
                 }
             }
 
-            impl From<&[<$x Group>]> for Vec<[<$x Item>]> {
-                fn from(x: &[<$x Group>]) -> Self {
+            impl<'a> From<&'a [<$x Group>]> for Vec<&'a [<$x Item>]> {
+                fn from(x: &'a [<$x Group>]) -> Self {
                     let mut ret = Vec::new();
                     match &*x.[<$x:snake _group_group>] {
                         [<$x GroupGroup>]::[<LBrace $x ListRBrace>](x) => {
-                            let mut x: Vec<[<$x Item>]> = x.[<$x:snake _list>].as_ref().into();
+                            let mut x: Vec<&'a [<$x Item>]> = x.[<$x:snake _list>].as_ref().into();
                             ret.append(&mut x);
                         }
                         [<$x GroupGroup>]::[<$x Item>](x) => {
-                            ret.push(x.[<$x:snake _item>].as_ref().clone());
+                            ret.push(x.[<$x:snake _item>].as_ref());
                         }
                     }
                     ret
@@ -43,14 +43,14 @@ macro_rules! list_group_to_item {
 macro_rules! list_to_item {
     ($x:ident) => {
         paste! {
-            impl From<&[<$x List>]> for Vec<[<$x Item>]> {
-                fn from(x: &[<$x List>]) -> Self {
+            impl<'a> From<&'a [<$x List>]> for Vec<&'a [<$x Item>]> {
+                fn from(x: &'a [<$x List>]) -> Self {
                     let mut ret = Vec::new();
                     {
-                        ret.push(x.[<$x:snake _item>].as_ref().clone());
+                        ret.push(x.[<$x:snake _item>].as_ref());
                     }
                     for x in &x.[<$x:snake _list_list>] {
-                        ret.push(x.[<$x:snake _item>].as_ref().clone());
+                        ret.push(x.[<$x:snake _item>].as_ref());
                     }
                     ret
                 }
@@ -62,18 +62,18 @@ macro_rules! list_to_item {
 macro_rules! group_to_item {
     ($x:ident) => {
         paste! {
-            impl From<&[<$x Group>]> for Vec<[<$x Item>]> {
-                fn from(x: &[<$x Group>]) -> Self {
+            impl<'a> From<&'a [<$x Group>]> for Vec<&'a [<$x Item>]> {
+                fn from(x: &'a [<$x Group>]) -> Self {
                     let mut ret = Vec::new();
                     match &*x.[<$x:snake _group_group>] {
                         [<$x GroupGroup>]::[<LBrace $x GroupGroupListRBrace>](x) => {
                             for x in &x.[<$x:snake _group_group_list>] {
-                                let mut x: Vec<[<$x Item>]> = x.[<$x:snake _group>].as_ref().into();
+                                let mut x: Vec<&'a [<$x Item>]> = x.[<$x:snake _group>].as_ref().into();
                                 ret.append(&mut x);
                             }
                         }
                         [<$x GroupGroup>]::[<$x Item>](x) => {
-                            ret.push(x.[<$x:snake _item>].as_ref().clone());
+                            ret.push(x.[<$x:snake _item>].as_ref());
                         }
                     }
                     ret
@@ -83,13 +83,13 @@ macro_rules! group_to_item {
     };
 }
 
-impl From<&ScopedIdentifier> for Vec<Option<WithGenericArgument>> {
-    fn from(value: &ScopedIdentifier) -> Self {
+impl<'a> From<&'a ScopedIdentifier> for Vec<Option<&'a WithGenericArgument>> {
+    fn from(value: &'a ScopedIdentifier) -> Self {
         let mut ret = Vec::new();
         match value.scoped_identifier_group.as_ref() {
             ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
                 if let Some(ref x) = x.scoped_identifier_opt {
-                    ret.push(Some(x.with_generic_argument.as_ref().clone()));
+                    ret.push(Some(x.with_generic_argument.as_ref()));
                 } else {
                     ret.push(None);
                 }
@@ -100,7 +100,7 @@ impl From<&ScopedIdentifier> for Vec<Option<WithGenericArgument>> {
         }
         for x in &value.scoped_identifier_list {
             if let Some(ref x) = x.scoped_identifier_opt0 {
-                ret.push(Some(x.with_generic_argument.as_ref().clone()));
+                ret.push(Some(x.with_generic_argument.as_ref()));
             } else {
                 ret.push(None);
             }
@@ -109,68 +109,68 @@ impl From<&ScopedIdentifier> for Vec<Option<WithGenericArgument>> {
     }
 }
 
-impl From<&CaseCondition> for Vec<RangeItem> {
-    fn from(value: &CaseCondition) -> Self {
+impl<'a> From<&'a CaseCondition> for Vec<&'a RangeItem> {
+    fn from(value: &'a CaseCondition) -> Self {
         let mut ret = Vec::new();
-        ret.push(value.range_item.as_ref().clone());
+        ret.push(value.range_item.as_ref());
 
         for x in &value.case_condition_list {
-            ret.push(x.range_item.as_ref().clone());
+            ret.push(x.range_item.as_ref());
         }
 
         ret
     }
 }
 
-impl From<&SwitchCondition> for Vec<Expression> {
-    fn from(value: &SwitchCondition) -> Self {
+impl<'a> From<&'a SwitchCondition> for Vec<&'a Expression> {
+    fn from(value: &'a SwitchCondition) -> Self {
         let mut ret = Vec::new();
-        ret.push(value.expression.as_ref().clone());
+        ret.push(value.expression.as_ref());
 
         for x in &value.switch_condition_list {
-            ret.push(x.expression.as_ref().clone());
+            ret.push(x.expression.as_ref());
         }
 
         ret
     }
 }
 
-impl From<&Width> for Vec<Expression> {
-    fn from(value: &Width) -> Self {
+impl<'a> From<&'a Width> for Vec<&'a Expression> {
+    fn from(value: &'a Width) -> Self {
         let mut ret = Vec::new();
-        ret.push(value.expression.as_ref().clone());
+        ret.push(value.expression.as_ref());
 
         for x in &value.width_list {
-            ret.push(x.expression.as_ref().clone());
+            ret.push(x.expression.as_ref());
         }
 
         ret
     }
 }
 
-impl From<&Array> for Vec<Expression> {
-    fn from(value: &Array) -> Self {
+impl<'a> From<&'a Array> for Vec<&'a Expression> {
+    fn from(value: &'a Array) -> Self {
         let mut ret = Vec::new();
-        ret.push(value.expression.as_ref().clone());
+        ret.push(value.expression.as_ref());
 
         for x in &value.array_list {
-            ret.push(x.expression.as_ref().clone());
+            ret.push(x.expression.as_ref());
         }
 
         ret
     }
 }
 
-impl From<&AssignDestination> for Vec<HierarchicalIdentifier> {
-    fn from(value: &AssignDestination) -> Self {
+impl<'a> From<&'a AssignDestination> for Vec<&'a HierarchicalIdentifier> {
+    fn from(value: &'a AssignDestination) -> Self {
         match value {
             AssignDestination::HierarchicalIdentifier(x) => {
-                vec![x.hierarchical_identifier.as_ref().clone()]
+                vec![x.hierarchical_identifier.as_ref()]
             }
             AssignDestination::LBraceAssignConcatenationListRBrace(x) => {
                 let list: Vec<_> = x.assign_concatenation_list.as_ref().into();
                 list.iter()
-                    .map(|x| x.hierarchical_identifier.as_ref().clone())
+                    .map(|x| x.hierarchical_identifier.as_ref())
                     .collect()
             }
         }

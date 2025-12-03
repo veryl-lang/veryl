@@ -327,7 +327,7 @@ fn check_inst(
     if let Some(ref x) = arg.component_instantiation_opt1
         && let Some(ref x) = x.inst_parameter.inst_parameter_opt
     {
-        let items: Vec<InstParameterItem> = x.inst_parameter_list.as_ref().into();
+        let items: Vec<_> = x.inst_parameter_list.as_ref().into();
         for item in items {
             connected_params.push(item.identifier.identifier_token.token.text);
         }
@@ -337,7 +337,7 @@ fn check_inst(
     if let Some(ref x) = arg.component_instantiation_opt2
         && let Some(ref x) = x.inst_port.inst_port_opt
     {
-        let items: Vec<InstPortItem> = x.inst_port_list.as_ref().into();
+        let items: Vec<_> = x.inst_port_list.as_ref().into();
         for item in items {
             connected_ports.push(item.identifier.identifier_token.token.text);
         }

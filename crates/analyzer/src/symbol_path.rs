@@ -942,10 +942,9 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
                 if let Some(ref x) = x.scoped_identifier_opt
                     && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
                 {
-                    let list: Vec<syntax_tree::WithGenericArgumentItem> =
-                        x.with_generic_argument_list.as_ref().into();
+                    let list: Vec<_> = x.with_generic_argument_list.as_ref().into();
                     for x in &list {
-                        let arg: GenericSymbolPath = x.into();
+                        let arg: GenericSymbolPath = (*x).into();
                         arguments.push(arg);
                     }
                 }
@@ -961,10 +960,9 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
             if let Some(ref x) = x.scoped_identifier_opt0
                 && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
             {
-                let list: Vec<syntax_tree::WithGenericArgumentItem> =
-                    x.with_generic_argument_list.as_ref().into();
+                let list: Vec<_> = x.with_generic_argument_list.as_ref().into();
                 for x in &list {
-                    let arg: GenericSymbolPath = x.into();
+                    let arg: GenericSymbolPath = (*x).into();
                     arguments.push(arg);
                 }
             }

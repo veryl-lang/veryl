@@ -1035,7 +1035,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
             HandlerPoint::After => {
                 let mut members = Vec::new();
-                let items: Vec<ModportItem> = if let Some(ref x) = arg.modport_declaration_opt {
+                let items: Vec<_> = if let Some(ref x) = arg.modport_declaration_opt {
                     x.modport_list.as_ref().into()
                 } else {
                     Vec::new()
@@ -1347,8 +1347,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
         if let HandlerPoint::After = self.point {
             let inst = &arg.component_instantiation;
 
-            let array: Vec<Expression> = if let Some(ref x) = inst.component_instantiation_opt0 {
-                x.array.as_ref().into()
+            let array: Vec<_> = if let Some(ref x) = inst.component_instantiation_opt0 {
+                let x: Vec<_> = x.array.as_ref().into();
+                x.iter().map(|x| (*x).clone()).collect()
             } else {
                 Vec::new()
             };
@@ -1653,8 +1654,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     } else {
                         TypeKind::AbstractInterface(None)
                     };
-                    let array: Vec<Expression> = if let Some(ref x) = x.port_type_abstract_opt1 {
-                        x.array.as_ref().into()
+                    let array: Vec<_> = if let Some(ref x) = x.port_type_abstract_opt1 {
+                        let x: Vec<_> = x.array.as_ref().into();
+                        x.iter().map(|x| (*x).clone()).collect()
                     } else {
                         Vec::new()
                     };
