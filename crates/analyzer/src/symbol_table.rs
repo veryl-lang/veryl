@@ -794,7 +794,7 @@ impl SymbolTable {
     }
 
     fn collect_generic_bounds(&self, symbol: &Symbol) -> Vec<Vec<(StrId, GenericBoundKind)>> {
-        fn collect_generic_paramss(
+        fn collect_generic_params(
             symbol_table: &SymbolTable,
             generic_params: &[SymbolId],
         ) -> Vec<(StrId, GenericBoundKind)> {
@@ -811,9 +811,9 @@ impl SymbolTable {
         }
 
         match &symbol.kind {
-            SymbolKind::Module(x) => vec![collect_generic_paramss(self, &x.generic_parameters)],
-            SymbolKind::Interface(x) => vec![collect_generic_paramss(self, &x.generic_parameters)],
-            SymbolKind::Package(x) => vec![collect_generic_paramss(self, &x.generic_parameters)],
+            SymbolKind::Module(x) => vec![collect_generic_params(self, &x.generic_parameters)],
+            SymbolKind::Interface(x) => vec![collect_generic_params(self, &x.generic_parameters)],
+            SymbolKind::Package(x) => vec![collect_generic_params(self, &x.generic_parameters)],
             SymbolKind::GenericInstance(x) => {
                 let symbol = self.get(x.base).unwrap();
                 self.collect_generic_bounds(&symbol)
@@ -824,7 +824,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 };
-                bounds.push(collect_generic_paramss(self, &x.generic_parameters));
+                bounds.push(collect_generic_params(self, &x.generic_parameters));
                 bounds
             }
             SymbolKind::Struct(x) => {
@@ -833,7 +833,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 };
-                bounds.push(collect_generic_paramss(self, &x.generic_parameters));
+                bounds.push(collect_generic_params(self, &x.generic_parameters));
                 bounds
             }
             SymbolKind::Union(x) => {
@@ -842,7 +842,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 };
-                bounds.push(collect_generic_paramss(self, &x.generic_parameters));
+                bounds.push(collect_generic_params(self, &x.generic_parameters));
                 bounds
             }
             SymbolKind::Block => {
