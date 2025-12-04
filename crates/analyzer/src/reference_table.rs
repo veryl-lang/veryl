@@ -553,14 +553,20 @@ impl ReferenceTable {
                 }
                 ReferenceCandidate::NamedArgument { arg, function } => {
                     if let Ok(symbol) = symbol_table::resolve(function) {
-                        let namespace = symbol.found.inner_namespace();
+                        let func_symbol =
+                            if let SymbolKind::ModportFunctionMember(x) = symbol.found.kind {
+                                symbol_table::get(x.function).unwrap()
+                            } else {
+                                symbol.found
+                            };
+                        let namespace = func_symbol.inner_namespace();
                         let path: SymbolPath = arg.into();
                         let path: SymbolPathNamespace = (&path, &namespace).into();
                         self.check_simple_identifier(
                             &path,
                             None,
                             &arg.into(),
-                            Some(&symbol.found.token),
+                            Some(&func_symbol.token),
                         );
                     }
                 }

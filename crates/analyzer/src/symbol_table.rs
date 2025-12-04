@@ -760,85 +760,99 @@ impl SymbolTable {
 
         let path = namespace.pop().map(|x| SymbolPath::new(&[x]))?;
         let context = ResolveContext::new(&namespace);
-        let params = self
+        let param_list = self
             .resolve(&path, &[], context)
             .map(|x| self.collect_generic_bounds(&x.found))
             .ok()?;
 
-        if params.is_empty() {
+        if param_list.is_empty() {
             return None;
         }
 
-        let mut map = GenericTable::default();
-        for (key, bound) in params {
-            if let GenericBoundKind::Proto(x) = bound {
-                let TypeKind::UserDefined(x) = x.kind else {
-                    continue;
-                };
-                if let Some(path) = self.append_project_prefix_to_generic_bound(&x.path, &namespace)
-                {
-                    map.insert(key, path);
-                } else {
-                    map.insert(key, x.path);
+        let mut maps = Vec::new();
+        for params in param_list {
+            let mut map = GenericTable::default();
+            for (key, bound) in params {
+                if let GenericBoundKind::Proto(x) = bound {
+                    let TypeKind::UserDefined(x) = x.kind else {
+                        continue;
+                    };
+                    if let Some(path) =
+                        self.append_project_prefix_to_generic_bound(&x.path, &namespace)
+                    {
+                        map.insert(key, path);
+                    } else {
+                        map.insert(key, x.path);
+                    }
                 }
             }
+
+            maps.push(GenericMap { id: None, map });
         }
 
-        let map = GenericMap { id: None, map };
-        Some(vec![map])
+        Some(maps)
     }
 
-    fn collect_generic_bounds(&self, symbol: &Symbol) -> Vec<(StrId, GenericBoundKind)> {
-        fn get_generic_bound(table: &SymbolTable, id: SymbolId) -> (StrId, GenericBoundKind) {
-            let symbol = table.get(id).unwrap();
-            let SymbolKind::GenericParameter(x) = symbol.kind else {
-                unreachable!();
-            };
-            (symbol.token.text, x.bound)
+    fn collect_generic_bounds(&self, symbol: &Symbol) -> Vec<Vec<(StrId, GenericBoundKind)>> {
+        fn collect_generic_params(
+            symbol_table: &SymbolTable,
+            generic_params: &[SymbolId],
+        ) -> Vec<(StrId, GenericBoundKind)> {
+            generic_params
+                .iter()
+                .map(|param| {
+                    let symbol = symbol_table.get(*param).unwrap();
+                    let SymbolKind::GenericParameter(x) = symbol.kind else {
+                        unreachable!();
+                    };
+                    (symbol.token.text, x.bound)
+                })
+                .collect()
         }
 
         match &symbol.kind {
-            SymbolKind::Function(x) => x
-                .generic_parameters
-                .iter()
-                .map(|x| get_generic_bound(self, *x))
-                .collect(),
-            SymbolKind::Module(x) => x
-                .generic_parameters
-                .iter()
-                .map(|x| get_generic_bound(self, *x))
-                .collect(),
-            SymbolKind::Interface(x) => x
-                .generic_parameters
-                .iter()
-                .map(|x| get_generic_bound(self, *x))
-                .collect(),
-            SymbolKind::Package(x) => x
-                .generic_parameters
-                .iter()
-                .map(|x| get_generic_bound(self, *x))
-                .collect(),
-            SymbolKind::Block => {
-                let Some(parent) = symbol.get_parent() else {
-                    return Vec::new();
-                };
-                self.collect_generic_bounds(&parent)
-            }
-            SymbolKind::Struct(x) => x
-                .generic_parameters
-                .iter()
-                .map(|x| get_generic_bound(self, *x))
-                .collect(),
-            SymbolKind::Union(x) => x
-                .generic_parameters
-                .iter()
-                .map(|x| get_generic_bound(self, *x))
-                .collect(),
+            SymbolKind::Module(x) => vec![collect_generic_params(self, &x.generic_parameters)],
+            SymbolKind::Interface(x) => vec![collect_generic_params(self, &x.generic_parameters)],
+            SymbolKind::Package(x) => vec![collect_generic_params(self, &x.generic_parameters)],
             SymbolKind::GenericInstance(x) => {
                 let symbol = self.get(x.base).unwrap();
                 self.collect_generic_bounds(&symbol)
             }
-            _ => Vec::new(),
+            SymbolKind::Function(x) => {
+                let mut bounds = if let Some(parent) = symbol.get_parent() {
+                    self.collect_generic_bounds(&parent)
+                } else {
+                    vec![]
+                };
+                bounds.push(collect_generic_params(self, &x.generic_parameters));
+                bounds
+            }
+            SymbolKind::Struct(x) => {
+                let mut bounds = if let Some(parent) = symbol.get_parent() {
+                    self.collect_generic_bounds(&parent)
+                } else {
+                    vec![]
+                };
+                bounds.push(collect_generic_params(self, &x.generic_parameters));
+                bounds
+            }
+            SymbolKind::Union(x) => {
+                let mut bounds = if let Some(parent) = symbol.get_parent() {
+                    self.collect_generic_bounds(&parent)
+                } else {
+                    vec![]
+                };
+                bounds.push(collect_generic_params(self, &x.generic_parameters));
+                bounds
+            }
+            SymbolKind::Block => {
+                if let Some(parent) = symbol.get_parent() {
+                    self.collect_generic_bounds(&parent)
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
         }
     }
 

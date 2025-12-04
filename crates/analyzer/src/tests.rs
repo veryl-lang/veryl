@@ -4317,6 +4317,82 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if::<T: type> {
+        var ready  : logic;
+        var valid  : logic;
+        var payload: T    ;
+        modport slave {
+            ready  : output,
+            valid  : input ,
+            payload: input ,
+        }
+    }
+    proto package b_proto_pkg {
+        const WIDTH: u32;
+        struct b_struct {
+            b: logic<WIDTH>,
+        }
+    }
+    package b_pkg::<W: u32> for b_proto_pkg {
+        const WIDTH: u32 = W;
+        struct b_struct {
+            b: logic<WIDTH>,
+        }
+    }
+    interface c_if::<B_PKG: b_proto_pkg> {
+        var ready  : logic          ;
+        var valid  : logic          ;
+        var payload: B_PKG::b_struct;
+
+        function connect_if(
+            aif: modport a_if::<B_PKG::b_struct>::slave,
+        ) {
+            aif.ready = ready;
+            valid     = aif.valid;
+            payload.b = aif.payload.b;
+        }
+
+        modport master {
+            ready     : input ,
+            valid     : output,
+            payload   : output,
+            connect_if: import,
+        }
+    }
+    module d_module {
+        alias package PKG = b_pkg::<32>;
+        inst aif: a_if::<PKG::b_struct>;
+        inst cif: c_if::<PKG>          ;
+        always_comb {
+            aif.valid     = '0;
+            aif.payload.b = '0;
+        }
+
+        always_comb {
+            cif.ready = '0;
+            cif.connect_if(aif);
+        }
+    }
+    module e_module (
+        aif: modport a_if::<b_pkg::<32>::b_struct>::slave   ,
+        bif: modport c_if::<b_pkg::<32>>::master            ,
+        cif: modport a_if::<b_pkg::<32>::b_struct>::slave[1],
+        dif: modport c_if::<b_pkg::<32>>::master[1]         ,
+    ) {
+        always_comb {
+            bif.connect_if(aif);
+        }
+
+        always_comb {
+            dif[0].connect_if(aif: cif[0]);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
