@@ -21,7 +21,7 @@ regex          = {workspace = true}
 semver         = {workspace = true}
 serde          = {workspace = true}
 serde_regex    = "1.1"
-spdx           = "0.13.1"
+spdx           = "0.13.2"
 thiserror      = {workspace = true}
 toml           = {workspace = true}
 url            = {workspace = true}
