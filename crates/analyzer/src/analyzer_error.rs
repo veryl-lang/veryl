@@ -1,6 +1,6 @@
-use crate::evaluator::EvaluatedError;
 use crate::multi_sources::{MultiSources, Source};
 use miette::{self, Diagnostic, Severity, SourceSpan};
+use std::fmt;
 use thiserror::Error;
 use veryl_parser::token_range::TokenRange;
 
@@ -83,12 +83,8 @@ pub enum AnalyzerError {
         identifier: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Assigned")]
-        assign_pos0: SourceSpan,
-        #[label("Assigned too")]
-        assign_pos1: SourceSpan,
+        #[label(collection, "Assigned")]
+        error_locations: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -171,6 +167,40 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_operand),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand")
+    )]
+    #[error("{kind} cannot be used as a operand of {op} operator")]
+    InvalidOperand {
+        kind: String,
+        op: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        // TODO
+        //#[label(collection, "instantiated at")]
+        //inst_context: Vec<SourceSpan>,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(invalid_logical_operand),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand")
+    )]
+    #[error("{kind} should be 1-bit value")]
+    InvalidLogicalOperand {
+        kind: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_factor),
         help("remove {kind} from expression"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_factor")
@@ -198,7 +228,7 @@ pub enum AnalyzerError {
     )]
     #[error("invalid select caused by {kind}")]
     InvalidSelect {
-        kind: String,
+        kind: InvalidSelectKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -376,10 +406,9 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(severity(Error), code(invalid_port_default_value), help(""), url(""))]
-    #[error("#{direction} port #{identifier} cannot have a port default value")]
+    #[error("{kind}")]
     InvalidPortDefaultValue {
-        identifier: String,
-        direction: String,
+        kind: InvalidPortDefaultValueKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -527,6 +556,24 @@ pub enum AnalyzerError {
         name: String,
         arity: usize,
         args: usize,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+    },
+
+    #[diagnostic(
+        severity(Warning),
+        code(mismatch_function_arg),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_function_arg"
+        )
+    )]
+    #[error("\"{src}\" type can't be used as an argument of function \"{name}\"")]
+    MismatchFunctionArg {
+        name: String,
+        src: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -702,10 +749,8 @@ pub enum AnalyzerError {
         name: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Not reset")]
-        reset: SourceSpan,
+        #[label(collection, "Not reset")]
+        error_locations: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -1225,10 +1270,8 @@ pub enum AnalyzerError {
         identifier: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Uncovered")]
-        uncovered: SourceSpan,
+        #[label(collection, "Covered")]
+        error_locations: Vec<SourceSpan>,
     },
 
     #[diagnostic(
@@ -1359,6 +1402,22 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(unsupported_by_ir),
+        help(""),
+        url(
+            "https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unsupported_by_ir"
+        )
+    )]
+    #[error("This description is not supported by IR")]
+    UnsupportedByIr {
+        //#[source_code]
+        //input: MultiSources,
+        //#[label("Error location")]
+        //error_location: SourceSpan,
+    },
 }
 
 fn source(token: &TokenRange) -> MultiSources {
@@ -1411,6 +1470,16 @@ impl AnalyzerError {
         }
     }
 
+    pub fn call_non_function(identifier: &str, kind: &str, token: &TokenRange) -> Self {
+        AnalyzerError::CallNonFunction {
+            identifier: identifier.to_string(),
+            kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            inst_context: vec![],
+        }
+    }
+
     pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
         AnalyzerError::CyclicTypeDependency {
             start: start.into(),
@@ -1431,15 +1500,12 @@ impl AnalyzerError {
     pub fn multiple_assignment(
         identifier: &str,
         token: &TokenRange,
-        assign_pos0: &TokenRange,
-        assign_pos1: &TokenRange,
+        assigned: &[TokenRange],
     ) -> Self {
         AnalyzerError::MultipleAssignment {
             identifier: identifier.to_string(),
             input: source(token),
-            error_location: token.into(),
-            assign_pos0: assign_pos0.into(),
-            assign_pos1: assign_pos1.into(),
+            error_locations: assigned.iter().map(|x| x.into()).collect(),
         }
     }
 
@@ -1487,6 +1553,28 @@ impl AnalyzerError {
         }
     }
 
+    pub fn invalid_operand(kind: &str, op: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidOperand {
+            kind: kind.to_string(),
+            op: op.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn invalid_logical_operand(op: bool, token: &TokenRange) -> Self {
+        let kind = if op {
+            "Operand of logical operator"
+        } else {
+            "Conditional expression"
+        };
+        AnalyzerError::InvalidLogicalOperand {
+            kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
     pub fn invalid_factor(
         identifier: Option<&str>,
         kind: &str,
@@ -1497,6 +1585,20 @@ impl AnalyzerError {
         AnalyzerError::InvalidFactor {
             identifier: identifier.map(|x| x.to_string()),
             kind: kind.to_string(),
+            input,
+            error_location: token.into(),
+            inst_context,
+        }
+    }
+
+    pub fn invalid_select(
+        kind: &InvalidSelectKind,
+        token: &TokenRange,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let (input, inst_context) = source_with_context(token, inst_context);
+        AnalyzerError::InvalidSelect {
+            kind: kind.clone(),
             input,
             error_location: token.into(),
             inst_context,
@@ -1646,13 +1748,11 @@ impl AnalyzerError {
     }
 
     pub fn invalid_port_default_value(
-        identifier: &str,
-        direction: &str,
+        kind: InvalidPortDefaultValueKind,
         token: &TokenRange,
     ) -> Self {
         AnalyzerError::InvalidPortDefaultValue {
-            identifier: identifier.into(),
-            direction: direction.into(),
+            kind,
             input: source(token),
             error_location: token.into(),
         }
@@ -1686,6 +1786,15 @@ impl AnalyzerError {
             name: name.to_string(),
             arity,
             args,
+            input: source(token),
+            error_location: token.into(),
+        }
+    }
+
+    pub fn mismatch_function_arg(name: &str, src: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MismatchFunctionArg {
+            name: name.to_string(),
+            src: src.to_string(),
             input: source(token),
             error_location: token.into(),
         }
@@ -1768,12 +1877,11 @@ impl AnalyzerError {
         }
     }
 
-    pub fn missing_reset_statement(name: &str, token: &TokenRange, reset: &TokenRange) -> Self {
+    pub fn missing_reset_statement(name: &str, token: &TokenRange, tokens: &[TokenRange]) -> Self {
         AnalyzerError::MissingResetStatement {
             name: name.to_string(),
             input: source(token),
-            error_location: token.into(),
-            reset: reset.into(),
+            error_locations: tokens.iter().map(|x| x.into()).collect(),
         }
     }
 
@@ -2078,12 +2186,11 @@ impl AnalyzerError {
         }
     }
 
-    pub fn uncovered_branch(identifier: &str, token: &TokenRange, uncovered: &TokenRange) -> Self {
+    pub fn uncovered_branch(identifier: &str, token: &TokenRange, covered: &[TokenRange]) -> Self {
         AnalyzerError::UncoveredBranch {
             identifier: identifier.to_string(),
             input: source(token),
-            error_location: token.into(),
-            uncovered: uncovered.into(),
+            error_locations: covered.iter().map(|x| x.into()).collect(),
         }
     }
 
@@ -2158,36 +2265,64 @@ impl AnalyzerError {
         }
     }
 
-    pub fn evaluated_error(error: &EvaluatedError, inst_context: &[TokenRange]) -> Self {
-        match error {
-            EvaluatedError::InvalidFactor { kind, token } => {
-                let (input, inst_context) = source_with_context(token, inst_context);
-                AnalyzerError::InvalidFactor {
-                    identifier: None,
-                    kind: kind.clone(),
-                    input,
-                    error_location: token.into(),
-                    inst_context,
+    // TODO
+    // Too many UnsupportedByIr cause performance degration
+    // After stabilizing IR, revert the commented code
+    pub fn unsupported_by_ir(_token: &TokenRange) -> Self {
+        AnalyzerError::UnsupportedByIr {
+            //input: source(token),
+            //error_location: token.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum InvalidSelectKind {
+    WrongOrder { beg: usize, end: usize },
+    OutOfRange { beg: usize, end: usize, size: usize },
+    OutOfDimension { dim: usize, size: usize },
+}
+
+impl fmt::Display for InvalidSelectKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidSelectKind::WrongOrder { beg, end } => {
+                format!("wrong index order [{beg}:{end}]").fmt(f)
+            }
+            InvalidSelectKind::OutOfRange { beg, end, size } => {
+                if beg == end {
+                    format!("out of range [{beg}] > {size}").fmt(f)
+                } else {
+                    format!("out of range [{beg}:{end}] > {size}").fmt(f)
                 }
             }
-            EvaluatedError::CallNonFunction { kind, token } => {
-                let (input, inst_context) = source_with_context(&token.into(), inst_context);
-                AnalyzerError::CallNonFunction {
-                    identifier: token.to_string(),
-                    kind: kind.clone(),
-                    input,
-                    error_location: token.into(),
-                    inst_context,
-                }
+            InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum InvalidPortDefaultValueKind {
+    NotGlobal,
+    InFunction,
+    NonAnonymousInOutput,
+    InvalidDirection(String),
+}
+
+impl fmt::Display for InvalidPortDefaultValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidPortDefaultValueKind::NotGlobal => {
+                "port default value should be accessable globally".fmt(f)
             }
-            EvaluatedError::InvalidSelect { kind, range } => {
-                let (input, inst_context) = source_with_context(range, inst_context);
-                AnalyzerError::InvalidSelect {
-                    kind: kind.to_string(),
-                    input,
-                    error_location: range.into(),
-                    inst_context,
-                }
+            InvalidPortDefaultValueKind::InFunction => {
+                "port default value in function is not supported".fmt(f)
+            }
+            InvalidPortDefaultValueKind::NonAnonymousInOutput => {
+                "Only '_' is supported for output default value".fmt(f)
+            }
+            InvalidPortDefaultValueKind::InvalidDirection(x) => {
+                format!("Port default value for {x} is not supported").fmt(f)
             }
         }
     }

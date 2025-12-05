@@ -1,4 +1,5 @@
 pub use crate::generated::veryl_grammar_trait::*;
+use crate::resource_table::StrId;
 use crate::veryl_token::{VerylToken, is_anonymous_token};
 use paste::paste;
 use std::fmt;
@@ -432,6 +433,17 @@ impl From<&FixedType> for Expression {
     }
 }
 
+impl<'a> From<&'a StatementBlock> for Vec<&'a StatementBlockItem> {
+    fn from(value: &'a StatementBlock) -> Self {
+        let mut ret = vec![];
+        for x in &value.statement_block_list {
+            let mut x: Vec<_> = x.statement_block_group.as_ref().into();
+            ret.append(&mut x);
+        }
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -445,6 +457,7 @@ list_to_item!(Attribute);
 list_to_item!(Argument);
 list_to_item!(Concatenation);
 list_to_item!(AssignConcatenation);
+list_to_item!(ArrayLiteral);
 group_to_item!(Module);
 group_to_item!(Interface);
 group_to_item!(Generate);
@@ -697,6 +710,12 @@ impl fmt::Display for Direction {
             Direction::Import(x) => &x.import.import_token,
         };
         token.fmt(f)
+    }
+}
+
+impl Identifier {
+    pub fn text(&self) -> StrId {
+        self.identifier_token.token.text
     }
 }
 

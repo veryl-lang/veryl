@@ -117,7 +117,7 @@ impl VerylGrammarTrait for CheckAnonymous {
                     if let Some(port) = self
                         .inst_ports
                         .iter()
-                        .find(|x| x.name() == arg.identifier.identifier_token.token.text)
+                        .find(|x| x.name() == arg.identifier.text())
                     {
                         if let SymbolKind::Port(port) = symbol_table::get(port.symbol).unwrap().kind
                         {

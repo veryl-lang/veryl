@@ -2,28 +2,21 @@ use crate::HashMap;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
-use crate::handlers::check_expression::CheckExpression;
+use crate::conv::{Context, Conv};
 use crate::handlers::*;
-use crate::instance_history;
+use crate::ir::Ir;
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::reference_table;
-use crate::symbol::{
-    Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
-};
+use crate::symbol::{Affiliation, Direction, DocComment, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use crate::type_dag;
-use crate::var_ref::{
-    AssignPosition, AssignPositionTree, AssignPositionType, ExpressionTargetType, VarRef,
-    VarRefAffiliation, VarRefPath, VarRefType,
-};
-use itertools::Itertools;
+use crate::var_ref::{ExpressionTargetType, VarRef, VarRefAffiliation, VarRefPath, VarRefType};
 use std::path::Path;
 use veryl_metadata::{Build, EnvVar, Lint, Metadata};
 use veryl_parser::resource_table::{self, StrId};
-use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
@@ -61,28 +54,6 @@ impl AnalyzerPass2 {
 impl VerylWalker for AnalyzerPass2 {
     fn get_handlers(&mut self) -> Option<Vec<(bool, &mut dyn Handler)>> {
         Some(self.handlers.get_handlers())
-    }
-}
-
-pub struct AnalyzerPass2Expression {
-    check_expression: CheckExpression,
-}
-
-impl AnalyzerPass2Expression {
-    pub fn new(inst_context: Vec<TokenRange>) -> Self {
-        AnalyzerPass2Expression {
-            check_expression: CheckExpression::new(inst_context),
-        }
-    }
-
-    pub fn get_errors(&mut self) -> Vec<AnalyzerError> {
-        self.check_expression.errors.drain(0..).collect()
-    }
-}
-
-impl VerylWalker for AnalyzerPass2Expression {
-    fn get_handlers(&mut self) -> Option<Vec<(bool, &mut dyn Handler)>> {
-        Some(vec![(true, &mut self.check_expression as &mut dyn Handler)])
     }
 }
 
@@ -162,26 +133,6 @@ impl AnalyzerPass3 {
                         &symbol.token.into(),
                     ));
                 }
-            }
-
-            let full_path = path.full_path();
-            let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
-
-            if positions.len() > 1 {
-                for comb in positions.iter().combinations(2) {
-                    ret.append(&mut check_multiple_assignment(&symbol, comb[0], comb[1]));
-                }
-            }
-
-            let non_state_variable = match &symbol.kind {
-                SymbolKind::Port(_) => true,
-                SymbolKind::Variable(x) => x.affiliation != VariableAffiliation::StatementBlock,
-                _ => {
-                    unreachable!()
-                }
-            };
-            if non_state_variable {
-                ret.append(&mut check_assign_position_tree(&symbol, positions));
             }
         }
 
@@ -384,21 +335,44 @@ impl Analyzer {
         ret
     }
 
+    fn create_ir(input: &Veryl, build_opt: &Build) -> (Ir, Vec<AnalyzerError>) {
+        let mut context = Context::default();
+        context.instance_history.depth_limit = build_opt.instance_depth_limit;
+        context.instance_history.total_limit = build_opt.instance_total_limit;
+        let ir: Ir = Conv::conv(&mut context, input);
+        ir.eval_assign(&mut context);
+        let errors = context.drain_errors();
+        (ir, errors)
+    }
+
     pub fn analyze_pass2<T: AsRef<Path>>(
         &self,
         project_name: &str,
         _path: T,
         input: &Veryl,
+        ir: Option<&mut Ir>,
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         namespace_table::set_default(&[project_name.into()]);
-        instance_history::clear();
-        instance_history::set_depth_limit(self.build_opt.instance_depth_limit);
-        instance_history::set_total_limit(self.build_opt.instance_total_limit);
         let mut pass2 = AnalyzerPass2::new(&self.build_opt, &self.lint_opt, &self.env_var);
         pass2.veryl(input);
         ret.append(&mut pass2.handlers.get_errors());
+
+        // some pass2 errors are generated in create_ir
+        // The actual implementation is under crate/analyzer/src/ir/conv
+        let mut ir_result = Self::create_ir(input, &self.build_opt);
+        if let Some(x) = ir {
+            x.append(&mut ir_result.0);
+            ret.append(&mut ir_result.1);
+        } else {
+            // If IR is not used for successor stages, UnsupportedByIr should be ignored
+            for error in ir_result.1 {
+                if !matches!(error, AnalyzerError::UnsupportedByIr { .. }) {
+                    ret.push(error);
+                }
+            }
+        }
 
         ret
     }
@@ -579,9 +553,9 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
                 }
             }
             SymbolKind::Variable(x)
-                if x.affiliation == VariableAffiliation::Module
-                    || x.affiliation == VariableAffiliation::Function
-                    || x.affiliation == VariableAffiliation::StatementBlock =>
+                if x.affiliation == Affiliation::Module
+                    || x.affiliation == Affiliation::Function
+                    || x.affiliation == Affiliation::StatementBlock =>
             {
                 if let TypeKind::UserDefined(ref x) = x.r#type.kind {
                     if let Some(id) = x.symbol {
@@ -596,99 +570,4 @@ fn traverse_assignable_symbol(id: SymbolId, path: &VarRefPath) -> Vec<VarRefPath
     }
 
     vec![]
-}
-
-fn check_multiple_assignment(
-    symbol: &Symbol,
-    x: &(AssignPosition, bool),
-    y: &(AssignPosition, bool),
-) -> Vec<AnalyzerError> {
-    let x_pos = &x.0;
-    let y_pos = &y.0;
-    let x_partial = &x.1;
-    let y_partial = &y.1;
-    let mut ret = Vec::new();
-    let len = x_pos.0.len().min(y_pos.0.len());
-
-    let x_maybe = x_pos.0.last().unwrap().is_maybe();
-    let y_maybe = y_pos.0.last().unwrap().is_maybe();
-    if x_maybe || y_maybe {
-        return vec![];
-    }
-
-    let x_define = x_pos.0.last().unwrap().define_context();
-    let y_define = y_pos.0.last().unwrap().define_context();
-
-    // If x and y is in exclusive define context, they are not conflict.
-    if x_define.exclusive(y_define) {
-        return vec![];
-    }
-
-    // Earyl return to avoid calling AnalyzerError constructor
-    for i in 0..len {
-        let x_type = &x_pos.0[i];
-        let y_type = &y_pos.0[i];
-        if x_type != y_type {
-            match x_type {
-                AssignPositionType::DeclarationBranch { .. }
-                | AssignPositionType::Declaration { .. } => (),
-                _ => return vec![],
-            }
-        }
-    }
-
-    for i in 0..len {
-        let x_type = &x_pos.0[i];
-        let y_type = &y_pos.0[i];
-        if x_type != y_type {
-            match x_type {
-                AssignPositionType::DeclarationBranch { .. }
-                | AssignPositionType::Declaration { .. } => {
-                    if !x_partial | !y_partial {
-                        ret.push(AnalyzerError::multiple_assignment(
-                            &symbol.token.to_string(),
-                            &symbol.token.into(),
-                            &x_pos.0.last().unwrap().token().into(),
-                            &y_pos.0.last().unwrap().token().into(),
-                        ));
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
-    ret
-}
-
-fn check_assign_position_tree(
-    symbol: &Symbol,
-    positions: &[(AssignPosition, bool)],
-) -> Vec<AnalyzerError> {
-    let mut ret = Vec::new();
-
-    let mut tree = AssignPositionTree::default();
-    for x in positions {
-        let pos = &x.0;
-
-        tree.add(pos.clone());
-    }
-
-    if let Some(token) = tree.check_always_comb_uncovered() {
-        ret.push(AnalyzerError::uncovered_branch(
-            &symbol.token.to_string(),
-            &symbol.token.into(),
-            &token.into(),
-        ));
-    }
-
-    if let Some(token) = tree.check_always_ff_missing_reset() {
-        ret.push(AnalyzerError::missing_reset_statement(
-            &symbol.token.to_string(),
-            &symbol.token.into(),
-            &token.into(),
-        ));
-    }
-
-    ret
 }

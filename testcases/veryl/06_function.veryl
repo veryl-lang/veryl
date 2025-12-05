@@ -40,9 +40,9 @@ module Module06 {
     function FuncE () -> u32 {
         const ParamE: u32 = 2 * ParamX;
 
-        let a: logic<ParamE> = 0;
-        let b: logic<ParamE> = 1;
-        var c: logic<ParamE>;
+        let a: bit<ParamE> = 0;
+        let b: bit<ParamE> = 1;
+        var c: bit<ParamE>;
 
         c = a + b;
         return c;
@@ -82,6 +82,9 @@ module Module06 {
     );
 
     inst ab_if: Interface06;
+
+    assign ab_if.a = 0;
+    assign ab_if.b = 0;
 
     assign g = FuncD(ab_if);
     assign h = FuncE();

@@ -153,11 +153,7 @@ impl VerylGrammarTrait for CheckMsbLsb {
         if let HandlerPoint::Before = self.point
             && self.is_in_expression_identifier()
         {
-            self.identifier_path
-                .last_mut()
-                .unwrap()
-                .0
-                .push(arg.identifier_token.token.text);
+            self.identifier_path.last_mut().unwrap().0.push(arg.text());
         }
         Ok(())
     }
