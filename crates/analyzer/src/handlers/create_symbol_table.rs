@@ -23,7 +23,7 @@ use crate::symbol::{
     TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty, VariableAffiliation,
     VariableProperty,
 };
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::Bind as SymBind;
 use crate::symbol_table::Import as SymImport;
@@ -97,8 +97,8 @@ pub struct CreateSymbolTable {
     exist_clock_without_domain: bool,
     in_proto: bool,
     in_import: bool,
-    file_scope_import_item: Vec<GenericSymbolPathNamesapce>,
-    file_scope_import_wildcard: Vec<GenericSymbolPathNamesapce>,
+    file_scope_import_item: Vec<GenericSymbolPathNamespace>,
+    file_scope_import_wildcard: Vec<GenericSymbolPathNamespace>,
     is_public: bool,
     identifier_factor_names: Vec<ExpressionIdentifier>,
     in_named_argument: Vec<bool>,
@@ -1406,7 +1406,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             };
 
             let doc_comment = self.create_doc_comment(&inst.identifier.identifier_token.token);
-            let target = GenericSymbolPathNamesapce(
+            let target = GenericSymbolPathNamespace(
                 arg.scoped_identifier.as_ref().into(),
                 self.namespace.clone(),
             );
@@ -1767,7 +1767,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let namespace = self.get_namespace(&arg.scoped_identifier.identifier().token);
                 let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
-                let path: GenericSymbolPathNamesapce = (&path, &namespace).into();
+                let path: GenericSymbolPathNamespace = (&path, &namespace).into();
                 let wildcard = arg.import_declaration_opt.is_some();
 
                 let import = SymImport {

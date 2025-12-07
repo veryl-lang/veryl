@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{ParameterKind, Symbol, SymbolId, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath};
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
@@ -25,7 +25,7 @@ pub enum TypeDagCandidate {
         context: Context,
         project_namespace: Namespace,
         parent: Option<(SymbolId, Context)>,
-        import: Vec<GenericSymbolPathNamesapce>,
+        import: Vec<GenericSymbolPathNamespace>,
     },
 }
 

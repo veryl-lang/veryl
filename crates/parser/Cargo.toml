@@ -18,7 +18,7 @@ anyhow        = {workspace = true}
 bimap         = "0.6.3"
 once_cell     = {workspace = true}
 parol_runtime = {workspace = true}
-paste         = "1.0"
+paste         = {workspace = true}
 regex         = {workspace = true}
 scnr2         = {workspace = true}
 thiserror     = {workspace = true}

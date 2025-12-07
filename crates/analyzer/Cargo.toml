@@ -20,6 +20,7 @@ itertools       = "0.14.0"
 log             = {workspace = true}
 num-bigint      = "0.4.6"
 num-traits      = "0.2.19"
+paste           = {workspace = true}
 smallvec        = {workspace = true}
 strnum_bitwidth = {workspace = true}
 thiserror       = {workspace = true}

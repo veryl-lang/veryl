@@ -5423,6 +5423,7 @@ dependencies = [
  "miette",
  "num-bigint",
  "num-traits",
+ "paste",
  "smallvec",
  "strnum_bitwidth",
  "thiserror 2.0.17",

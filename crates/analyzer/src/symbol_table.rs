@@ -6,7 +6,7 @@ use crate::symbol::{
     GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TypeKind,
 };
 use crate::symbol_path::{
-    GenericSymbol, GenericSymbolPath, GenericSymbolPathNamesapce, SymbolPath, SymbolPathNamespace,
+    GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
 };
 use crate::var_ref::{Assign, VarRef, VarRefAffiliation};
 use crate::{AnalyzerError, HashMap, namespace_table};
@@ -51,7 +51,7 @@ impl ResolveError {
 
 #[derive(Clone, Debug)]
 pub struct Import {
-    pub path: GenericSymbolPathNamesapce,
+    pub path: GenericSymbolPathNamespace,
     pub namespace: Namespace,
     pub wildcard: bool,
 }
@@ -59,7 +59,7 @@ pub struct Import {
 #[derive(Clone, Debug)]
 pub struct Bind {
     pub token: Token,
-    pub target: GenericSymbolPathNamesapce,
+    pub target: GenericSymbolPathNamespace,
     pub doc_comment: DocComment,
     pub property: InstanceProperty,
 }
