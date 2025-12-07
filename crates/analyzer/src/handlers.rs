@@ -10,7 +10,6 @@ pub mod check_function;
 pub mod check_identifier;
 pub mod check_modport;
 pub mod check_msb_lsb;
-pub mod check_number;
 pub mod check_port;
 pub mod check_proto;
 pub mod check_separator;
@@ -18,6 +17,7 @@ pub mod check_statement;
 pub mod check_type;
 pub mod check_unsafe;
 pub mod check_var_ref;
+pub mod create_literal_table;
 pub mod create_symbol_table;
 use check_anonymous::*;
 use check_attribute::*;
@@ -31,7 +31,6 @@ use check_function::*;
 use check_identifier::*;
 use check_modport::*;
 use check_msb_lsb::*;
-use check_number::*;
 use check_port::*;
 use check_proto::*;
 use check_separator::*;
@@ -39,6 +38,7 @@ use check_statement::*;
 use check_type::*;
 use check_unsafe::*;
 use check_var_ref::*;
+use create_literal_table::*;
 use create_symbol_table::*;
 
 use crate::analyzer_error::AnalyzerError;
@@ -50,9 +50,9 @@ pub struct Pass1Handlers {
     check_port: CheckPort,
     check_embed_include: CheckEmbedInclude,
     check_identifier: CheckIdentifier,
-    check_number: CheckNumber,
     check_statement: CheckStatement,
     check_unsafe: CheckUnsafe,
+    create_literal_table: CreateLiteralTable,
     create_symbol_table: CreateSymbolTable,
     enables: [bool; 8],
 }
@@ -64,9 +64,9 @@ impl Pass1Handlers {
             check_port: CheckPort::new(),
             check_embed_include: CheckEmbedInclude::new(),
             check_identifier: CheckIdentifier::new(lint_opt),
-            check_number: CheckNumber::new(),
             check_statement: CheckStatement::new(),
             check_unsafe: CheckUnsafe::new(),
+            create_literal_table: CreateLiteralTable::new(),
             create_symbol_table: CreateSymbolTable::new(build_opt),
             enables: env_var.analyzer_pass1_enables,
         }
@@ -79,9 +79,9 @@ impl Pass1Handlers {
             (en[1], &mut self.check_port as &mut dyn Handler),
             (en[2], &mut self.check_embed_include as &mut dyn Handler),
             (en[3], &mut self.check_identifier as &mut dyn Handler),
-            (en[4], &mut self.check_number as &mut dyn Handler),
-            (en[5], &mut self.check_statement as &mut dyn Handler),
-            (en[6], &mut self.check_unsafe as &mut dyn Handler),
+            (en[4], &mut self.check_statement as &mut dyn Handler),
+            (en[5], &mut self.check_unsafe as &mut dyn Handler),
+            (en[6], &mut self.create_literal_table as &mut dyn Handler),
             (en[7], &mut self.create_symbol_table as &mut dyn Handler),
         ]
     }
@@ -92,9 +92,9 @@ impl Pass1Handlers {
         ret.append(&mut self.check_port.errors);
         ret.append(&mut self.check_embed_include.errors);
         ret.append(&mut self.check_identifier.errors);
-        ret.append(&mut self.check_number.errors);
         ret.append(&mut self.check_statement.errors);
         ret.append(&mut self.check_unsafe.errors);
+        ret.append(&mut self.create_literal_table.errors);
         ret.append(&mut self.create_symbol_table.errors);
         ret
     }

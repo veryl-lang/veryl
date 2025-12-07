@@ -93,7 +93,7 @@ fn check_generic_type_arg(
     namespace: &Namespace,
     base: &Symbol,
 ) -> Option<AnalyzerError> {
-    if matches!(arg.kind, GenericSymbolPathKind::FixedType(_)) {
+    if arg.kind == GenericSymbolPathKind::TypeLiteral {
         None
     } else if arg.is_resolvable() {
         let Ok(symbol) = symbol_table::resolve((&arg.generic_path(), namespace)) else {
