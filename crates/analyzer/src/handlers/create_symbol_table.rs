@@ -90,7 +90,7 @@ pub struct CreateSymbolTable {
     default_clock_candidates: Vec<SymbolId>,
     default_reset: Option<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
-    variable_ids: HashMap<StrId, SymbolId>,
+    interface_variables: HashMap<StrId, SymbolId>,
     modport_member_ids: Vec<SymbolId>,
     modport_ids: Vec<SymbolId>,
     function_ids: HashMap<StrId, SymbolId>,
@@ -443,7 +443,7 @@ impl CreateSymbolTable {
                     }
                 }
                 SymbolKind::ModportVariableMember(x) => {
-                    if let Some(id) = self.variable_ids.get(&mp_member.token.text) {
+                    if let Some(id) = self.interface_variables.get(&mp_member.token.text) {
                         let mut property = x;
                         property.variable = *id;
                         let kind = SymbolKind::ModportVariableMember(property);
@@ -499,18 +499,9 @@ impl CreateSymbolTable {
                 .map(|x| symbol_table::get(*x).unwrap().token.text)
                 .collect();
             let mut default_members: Vec<_> = self
-                .variable_ids
+                .interface_variables
                 .iter()
-                .filter(|(x, y)| {
-                    !explicit_members.contains(x)
-                        && symbol_table::get(**y)
-                            .map(|x| {
-                                // member variables should belong to
-                                // the interface directly
-                                x.namespace.matched(interface_namesapce)
-                            })
-                            .unwrap()
-                })
+                .filter(|(x, _)| !explicit_members.contains(x))
                 .collect();
 
             // Sort by SymbolId to keep inserting order as the same as definition order
@@ -967,8 +958,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
             {
                 self.push_declaration_item(id);
                 self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
-                let text = arg.identifier.identifier_token.token.text;
-                self.variable_ids.insert(text, id);
+                if self
+                    .affiliation
+                    .last()
+                    .map(|x| matches!(x, VariableAffiliation::Interface))
+                    .unwrap_or(false)
+                {
+                    let text = arg.identifier.identifier_token.token.text;
+                    self.interface_variables.insert(text, id);
+                }
             }
         }
         Ok(())
@@ -1949,7 +1947,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
                 self.parameters.push(Vec::new());
                 self.affiliation.push(VariableAffiliation::Interface);
-                self.variable_ids.clear();
+                self.interface_variables.clear();
                 self.function_ids.clear();
                 self.modport_member_ids.clear();
                 self.modport_ids.clear();

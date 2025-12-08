@@ -5125,6 +5125,31 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: u32;
+        function f() -> u32 {
+            var a: u32;
+            a = 0;
+            return a;
+        }
+        modport master {
+            a: output,
+        }
+        modport slave {
+            ..converse(master)
+        }
+    }
+    module b_module (
+        aif: modport a_if::slave,
+    ) {
+        let _b: u32 = aif.a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
