@@ -1,0 +1,4 @@
+[build]
+# false positives in 1.92
+# see https://github.com/rust-lang/rust/issues/149889
+rustflags = ["-A", "unused_assignments"]
