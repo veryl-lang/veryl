@@ -635,9 +635,14 @@ impl GenericSymbolPath {
             }
         }
 
-        for path in &mut self.paths {
-            for arg in &mut path.arguments {
-                arg.append_namespace_path(namespace, target_namespace);
+        for i in 0..self.len() {
+            if !self.paths[i].arguments.is_empty()
+                && let Ok(path_symbol) =
+                    symbol_table::resolve((&self.slice(i).generic_path(), namespace))
+            {
+                for arg in &mut self.paths[i].arguments {
+                    arg.append_namespace_path(namespace, &path_symbol.found.namespace);
+                }
             }
         }
     }
