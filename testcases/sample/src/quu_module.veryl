@@ -1,0 +1,3 @@
+pub module quu_module::<V: u32> {
+  let _quu: u32 = V;
+}
