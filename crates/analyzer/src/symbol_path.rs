@@ -1,3 +1,4 @@
+use crate::ir::VarPath;
 use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
@@ -248,6 +249,13 @@ impl From<&GenericSymbolPathNamespace> for SymbolPathNamespace {
     }
 }
 
+impl From<&GenericSymbolPath> for SymbolPathNamespace {
+    fn from(value: &GenericSymbolPath) -> Self {
+        let namespace = namespace_table::get(value.paths[0].base.id).unwrap_or_default();
+        SymbolPathNamespace(value.generic_path(), namespace)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericSymbolPathNamespace(pub GenericSymbolPath, pub Namespace);
 
@@ -258,7 +266,7 @@ impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamespace {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GenericSymbolPathKind {
     Identifier,
     TypeLiteral,
@@ -276,14 +284,14 @@ impl fmt::Display for GenericSymbolPathKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericSymbolPath {
     pub paths: Vec<GenericSymbol>,
     pub kind: GenericSymbolPathKind,
     pub range: TokenRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericSymbol {
     pub base: Token,
     pub arguments: Vec<GenericSymbolPath>,
@@ -640,6 +648,18 @@ impl GenericSymbolPath {
                 arg.append_namespace_path(namespace, target_namespace);
             }
         }
+    }
+
+    pub fn to_var_path(&self) -> Option<VarPath> {
+        let mut ret = VarPath::default();
+        for path in &self.paths {
+            if path.arguments.is_empty() {
+                ret.push(path.base());
+            } else {
+                return None;
+            }
+        }
+        Some(ret)
     }
 }
 

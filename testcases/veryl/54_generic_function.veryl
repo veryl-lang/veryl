@@ -25,7 +25,8 @@ module Module54 {
         return IF.a;
     }
 
-    inst u: Interface54;
+    inst u  : Interface54;
+    assign u.a = 0;
 
     let _i: logic = FuncC::<u>();
 }

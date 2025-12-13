@@ -14,7 +14,7 @@ module veryl_testcase_Module13;
 
     // position and width
     always_comb c = X[1+:2];
-    always_comb d = X[1-:2];
+    always_comb d = X[4-:2];
 
     // index by step
     always_comb e = X[1*(2)+:(2)];

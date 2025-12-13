@@ -24,5 +24,6 @@ module veryl_testcase_Module66A (
     interface b,
     interface.port c
 );
+    always_comb a.en = 0;
 endmodule
 //# sourceMappingURL=../map/66_modport_connect.sv.map

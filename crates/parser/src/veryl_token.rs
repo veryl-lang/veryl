@@ -142,6 +142,12 @@ pub fn is_anonymous_token(token: &Token) -> bool {
     is_anonymous_text(token.text)
 }
 
+impl Default for Token {
+    fn default() -> Self {
+        Self::generate(StrId::default(), PathId::default())
+    }
+}
+
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = format!("{}", self.text);

@@ -8,7 +8,7 @@ module Module28A (
     let b: logic<WIDTH0 + 10, WIDTH1> = 1;
 
     let _x: logic = a[msb][msb:lsb + 1];
-    let _y: logic = b[msb - 3][msb + 5:lsb];
+    let _y: logic = b[msb - 3][msb - 5:lsb];
     let _z: logic = c[msb][msb];
 }
 
