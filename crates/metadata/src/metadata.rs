@@ -377,7 +377,7 @@ impl Metadata {
 name = "{name}"
 version = "0.1.0"
 [build]
-source = "src"
+sources = ["src"]
 target = {{type = "directory", path = "target"}}"###
         ))
     }
