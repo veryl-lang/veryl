@@ -53,10 +53,17 @@ module Module25B::<PKG: ProtoPackage25> (
     }
 }
 
-module Module25C {
+module Module25C::<V: u32> {
+    inst u5: veryl_sample4::quu_module::<V>;
+}
+
+alias package package_25 = Package25::<1>;
+
+module Module25D {
     inst qux_if: veryl_sample4::qux_if::<Package25::<1>::S>;
-    inst u5: Module25B::<Package25::<1>> (
+    inst u6: Module25B::<Package25::<1>> (
         if3: qux_if,
         if4: qux_if,
     );
+    inst u7: Module25C::<package_25::C>;
 }

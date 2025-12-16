@@ -58,11 +58,17 @@ module veryl_testcase___Module25B____Package25__1
     end
 endmodule
 
-module veryl_testcase_Module25C;
+module veryl_testcase___Module25C____Package25__1_C;
+    veryl_sample4___quu_module__veryl_testcase___Package25__1_C u5 ();
+endmodule
+
+
+module veryl_testcase_Module25D;
     veryl_sample4___qux_if__veryl_testcase___Package25__1_S qux_if ();
-    veryl_testcase___Module25B____Package25__1 u5 (
+    veryl_testcase___Module25B____Package25__1 u6 (
         .if3 (qux_if),
         .if4 (qux_if)
     );
+    veryl_testcase___Module25C____Package25__1_C u7 ();
 endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map

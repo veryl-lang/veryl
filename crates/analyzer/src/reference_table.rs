@@ -404,6 +404,7 @@ impl ReferenceTable {
             let mut path = path.clone();
             let ith = path.len() - 1;
             path.apply_map(&[map]);
+            path.append_namespace_path(&namespace, &symbol.namespace);
             Self::insert_generic_instance(&path, ith, &namespace, symbol);
         }
 
