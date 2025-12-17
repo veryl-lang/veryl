@@ -538,7 +538,9 @@ impl ReferenceTable {
                     }
                 }
                 ReferenceCandidate::StructConstructorItem { arg, r#type } => {
-                    if let Ok(symbol) = symbol_table::resolve(r#type) {
+                    if let Ok(symbol) = symbol_table::resolve(r#type)
+                        && !matches!(symbol.found.kind, SymbolKind::SystemVerilog)
+                    {
                         let identifier = arg.identifier.as_ref();
 
                         let namespace = Self::get_struct_namespace(&symbol.found);
