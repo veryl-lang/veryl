@@ -57,7 +57,7 @@ strnum_bitwidth = "0.1.2"
 tempfile        = "3.23"
 thiserror       = "2.0"
 tokio           = {version = "1.48.0", features = ["full"]}
-toml            = "0.9.7"
+toml            = "0.9.9"
 url             = {version = "2.5", features = ["serde"]}
 walkdir         = "2.5.0"
 
