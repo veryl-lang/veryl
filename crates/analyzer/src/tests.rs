@@ -5150,6 +5150,25 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module a_module {
+        var _a: $sv::foo_bar;
+        var _b: $sv::foo_bar;
+        always_comb {
+            _a = $sv::foo_bar'{
+                foo: 0,
+                bar: 1,
+            };
+
+            _b.foo = 0;
+            _b.bar = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
