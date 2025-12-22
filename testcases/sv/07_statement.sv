@@ -81,19 +81,31 @@ module veryl_testcase_Module07;
         end
     end
 
+    logic a00;
+    logic a01;
+    logic a02;
+    logic a03;
+    logic a04;
+    logic a05;
+    logic a06;
+    logic a07;
+    logic a08;
+    logic a09;
+    logic a10;
+    logic a11;
     always_ff @ (posedge clk) begin
-        a <= a + (1);
-        a <= a - (1);
-        a <= a * (1);
-        a <= a / (1);
-        a <= a % (1);
-        a <= a & (1);
-        a <= a | (1);
-        a <= a ^ (1);
-        a <= a << (1);
-        a <= a >> (1);
-        a <= a <<< (1);
-        a <= a >>> (1);
+        a00 <= a00 + (1);
+        a01 <= a01 - (1);
+        a02 <= a02 * (1);
+        a03 <= a03 / (1);
+        a04 <= a04 % (1);
+        a05 <= a05 & (1);
+        a06 <= a06 | (1);
+        a07 <= a07 ^ (1);
+        a08 <= a08 << (1);
+        a09 <= a09 >> (1);
+        a10 <= a10 <<< (1);
+        a11 <= a11 >>> (1);
     end
 endmodule
 //# sourceMappingURL=../map/07_statement.sv.map

@@ -39,6 +39,17 @@ module Module56 (
     inst u_d0: Interface56D::<Package56C::StructA>;
     inst u_d1: Interface56E::<Package56C>;
 
+    assign u_a0._a   = 0;
+    assign u_a1._a   = 0;
+    assign u_b0._b   = 0;
+    assign u_b1._b   = 0;
+    assign u_b2._b   = 0;
+    assign u_b3._b   = 0;
+    assign u_d0._b.a = 0;
+    assign u_d0._b.b = 0;
+    assign u_d1._b.a = 0;
+    assign u_d1._b.b = 0;
+
     let _a: logic = u_a0._a;
     let _b: logic = u_b0._b;
     let _c: logic = u_b3._b;

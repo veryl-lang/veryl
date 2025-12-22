@@ -3,6 +3,8 @@ module veryl_testcase_Module43 (
 );
     StructA a;
 
+    always_comb a = 0;
+
     logic _b; always_comb _b = a.memberA;
 
     InterfaceA c ();

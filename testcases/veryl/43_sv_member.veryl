@@ -3,6 +3,8 @@ module Module43 (
 ) {
     var a: $sv::StructA;
 
+    assign a = 0;
+
     let _b: logic = a.memberA;
 
     inst c: $sv::InterfaceA;

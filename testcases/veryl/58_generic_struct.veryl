@@ -19,11 +19,11 @@ module Module58 {
         C: U,
     }
 
-    var _a: StructA::<Package58::B>;
-    var _b: StructA::<Package58::C>;
-    var _c: StructA::<C>           ;
-    var _d: StructB::<Package58::C>;
-    var _f: StructB::<Package58::C>;
-    var _e: StructB::<>            ;
-    var _g: StructC::<C, C>        ;
+    let _a: StructA::<Package58::B> = 0;
+    let _b: StructA::<Package58::C> = 0;
+    let _c: StructA::<C>            = 0;
+    let _d: StructB::<Package58::C> = 0;
+    let _f: StructB::<Package58::C> = 0;
+    let _e: StructB::<>             = 0;
+    let _g: StructC::<C, C>         = 0;
 }

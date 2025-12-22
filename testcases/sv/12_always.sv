@@ -37,6 +37,12 @@ module veryl_testcase_Module12_2 (
     input var logic i_rst_sh,
     input var logic i_rst_sl
 );
+    logic          a0 ;
+    logic          a1 ;
+    logic          a2 ;
+    logic          a3 ;
+    logic          a4 ;
+    logic          a5 ;
     logic          a  ;
     logic          aa ;
     logic          aaa;
@@ -46,50 +52,50 @@ module veryl_testcase_Module12_2 (
     // always_ff declaration with default polarity
     always_ff @ (posedge i_clk, negedge i_rst_n) begin
         if (!i_rst_n) begin
-            a <= 1'b0;
+            a0 <= 1'b0;
         end else if (a) begin
-            a <= b[0];
+            a0 <= b[0];
         end else begin
-            a <= c[5:0];
+            a0 <= c[5:0];
         end
     end
 
     // always_ff declaration without reset
     always_ff @ (posedge i_clk) begin
         if (a) begin
-            a <= b;
+            a1 <= b;
         end else begin
-            a <= c[5:0];
+            a1 <= c[5:0];
         end
     end
 
     // always_ff declaration with specified polarity
     always_ff @ (posedge i_clk_p, posedge i_rst_ah) begin
         if (i_rst_ah) begin
-            a <= 1'b0;
+            a2 <= 1'b0;
         end else begin
-            a <= c[5:0];
+            a2 <= c[5:0];
         end
     end
     always_ff @ (negedge i_clk_n, negedge i_rst_al) begin
         if (!i_rst_al) begin
-            a <= 1'b0;
+            a3 <= 1'b0;
         end else begin
-            a <= c[5:0];
+            a3 <= c[5:0];
         end
     end
     always_ff @ (posedge i_clk_p) begin
         if (i_rst_sh) begin
-            a <= 1'b0;
+            a4 <= 1'b0;
         end else begin
-            a <= c[5:0];
+            a4 <= c[5:0];
         end
     end
     always_ff @ (negedge i_clk_n) begin
         if (!i_rst_sl) begin
-            a <= 1'b0;
+            a5 <= 1'b0;
         end else begin
-            a <= c[5:0];
+            a5 <= c[5:0];
         end
     end
 
@@ -114,7 +120,7 @@ module veryl_testcase_Module12_2 (
     end
 
     // if_reset by reset value initialized by function
-    localparam logic X = $sin(1);
+    localparam logic X = $clog2(1);
     logic f;
     always_ff @ (posedge i_clk, negedge i_rst_n) begin
         if (!i_rst_n) begin

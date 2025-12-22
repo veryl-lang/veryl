@@ -1,10 +1,10 @@
 module Module18 {
     var a: logic<20>;
     var b: logic    ;
-    let c: logic     = 1;
+    let c: logic<20> = 1;
 
-    assign a = {a[10:0], c,};
-    assign b = {a[10:0] repeat 10, c repeat 4};
+    assign a = {c[10:0], c,};
+    assign b = {c[10:0] repeat 10, c repeat 4};
 
     // multi-line concatenation
     let _d: logic = {
