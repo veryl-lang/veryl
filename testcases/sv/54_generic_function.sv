@@ -35,7 +35,8 @@ module veryl_testcase_Module54;
         return u.a;
     endfunction
 
-    veryl_testcase_Interface54 u ();
+    veryl_testcase_Interface54 u   ();
+    always_comb u.a = 0;
 
     logic _i; always_comb _i = __FuncC__u();
 endmodule

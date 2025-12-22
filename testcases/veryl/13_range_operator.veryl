@@ -14,7 +14,7 @@ module Module13 {
 
     // position and width
     assign c = X[1+:2];
-    assign d = X[1-:2];
+    assign d = X[4-:2];
 
     // index by step
     assign e = X[1 step 2];

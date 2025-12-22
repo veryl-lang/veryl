@@ -4,7 +4,7 @@ module veryl_testcase_Module03;
     logic _aa; always_comb _aa = -1;
 
     // unary logical
-    logic _b ; always_comb _b  = !1;
+    logic _b ; always_comb _b  = !1'b1;
     logic _bb; always_comb _bb = ~1;
 
     // unary reduce
@@ -46,7 +46,7 @@ module veryl_testcase_Module03;
     logic _ggggg; always_comb _ggggg = 1 | 1;
 
     // binary logical
-    logic _h ; always_comb _h  = 1 && 1;
-    logic _hh; always_comb _hh = 1 || 1;
+    logic _h ; always_comb _h  = 1'b1 && 1'b1;
+    logic _hh; always_comb _hh = 1'b1 || 1'b1;
 endmodule
 //# sourceMappingURL=../map/03_operator.sv.map

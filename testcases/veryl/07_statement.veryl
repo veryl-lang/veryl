@@ -81,18 +81,30 @@ module Module07 {
         }
     }
 
+    var a00: logic;
+    var a01: logic;
+    var a02: logic;
+    var a03: logic;
+    var a04: logic;
+    var a05: logic;
+    var a06: logic;
+    var a07: logic;
+    var a08: logic;
+    var a09: logic;
+    var a10: logic;
+    var a11: logic;
     always_ff (clk) {
-        a +=   1;
-        a -=   1;
-        a *=   1;
-        a /=   1;
-        a %=   1;
-        a &=   1;
-        a |=   1;
-        a ^=   1;
-        a <<=  1;
-        a >>=  1;
-        a <<<= 1;
-        a >>>= 1;
+        a00 +=   1;
+        a01 -=   1;
+        a02 *=   1;
+        a03 /=   1;
+        a04 %=   1;
+        a05 &=   1;
+        a06 |=   1;
+        a07 ^=   1;
+        a08 <<=  1;
+        a09 >>=  1;
+        a10 <<<= 1;
+        a11 >>>= 1;
     }
 }

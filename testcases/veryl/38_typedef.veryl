@@ -1,12 +1,13 @@
 module Module38 {
-    type word_t    = logic <16>         ;
-    type words_t   = logic <16, 16>     ;
-    type regfile_t = word_t         [16];
+    type word_t    = logic <16>        ;
+    type words_t   = logic <16, 16>    ;
+    type regfile_t = word_t         [2];
 
     type octbyte = bit<8> [8];
 
     var rf   : regfile_t;
     assign rf[0] = '0;
+    assign rf[1] = '0;
 }
 
 interface Interface38 {

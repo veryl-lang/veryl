@@ -28,12 +28,12 @@ module veryl_testcase_Module58;
         C C;
     } __StructC__C__C;
 
-    __StructA__Package58_B _a;
-    __StructA__Package58_C _b;
-    __StructA__C           _c;
-    __StructB__Package58_C _d;
-    __StructB__Package58_C _f;
-    __StructB__C           _e;
-    __StructC__C__C        _g;
+    __StructA__Package58_B _a; always_comb _a = 0;
+    __StructA__Package58_C _b; always_comb _b = 0;
+    __StructA__C           _c; always_comb _c = 0;
+    __StructB__Package58_C _d; always_comb _d = 0;
+    __StructB__Package58_C _f; always_comb _f = 0;
+    __StructB__C           _e; always_comb _e = 0;
+    __StructC__C__C        _g; always_comb _g = 0;
 endmodule
 //# sourceMappingURL=../map/58_generic_struct.sv.map

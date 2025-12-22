@@ -38,6 +38,17 @@ module veryl_testcase_Module56
     veryl_testcase___Interface56D__Package56C_StructA u_d0 ();
     veryl_testcase___Interface56E__Package56C         u_d1 ();
 
+    always_comb u_a0._a   = 0;
+    always_comb u_a1._a   = 0;
+    always_comb u_b0._b   = 0;
+    always_comb u_b1._b   = 0;
+    always_comb u_b2._b   = 0;
+    always_comb u_b3._b   = 0;
+    always_comb u_d0._b.a = 0;
+    always_comb u_d0._b.b = 0;
+    always_comb u_d1._b.a = 0;
+    always_comb u_d1._b.b = 0;
+
     logic _a; always_comb _a = u_a0._a;
     logic _b; always_comb _b = u_b0._b;
     logic _c; always_comb _c = u_b3._b;

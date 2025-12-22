@@ -23,4 +23,6 @@ module Module66A (
     a: modport Interface66::port,
     b: interface,
     c: interface::port,
-) {}
+) {
+    assign a.en = 0;
+}

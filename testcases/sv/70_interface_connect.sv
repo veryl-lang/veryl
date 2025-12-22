@@ -32,5 +32,7 @@ module veryl_testcase_Module70A (
     veryl_testcase___Interface70B__8.port b,
     interface c
 );
+    always_comb a.en    = 0;
+    always_comb b.value = 0;
 endmodule
 //# sourceMappingURL=../map/70_interface_connect.sv.map
