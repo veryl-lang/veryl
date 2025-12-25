@@ -6,8 +6,8 @@ use crate::server::{
 use async_channel::{Receiver, Sender, unbounded};
 use serde_json::Value;
 use tower_lsp_server::jsonrpc::Result;
-use tower_lsp_server::lsp_types::Uri as Url;
-use tower_lsp_server::lsp_types::*;
+use tower_lsp_server::ls_types::Uri as Url;
+use tower_lsp_server::ls_types::*;
 use tower_lsp_server::{Client, LanguageServer};
 
 const COMPLETION_TRIGGER: &[&str] = &["<", ">", "=", "!", "."];
@@ -280,7 +280,7 @@ impl LanguageServer for Backend {
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
-    ) -> Result<Option<OneOf<Vec<SymbolInformation>, Vec<WorkspaceSymbol>>>> {
+    ) -> Result<Option<WorkspaceSymbolResponse>> {
         let query = params.query;
 
         self.send(MsgToServer::Symbol { query }).await;
@@ -288,7 +288,8 @@ impl LanguageServer for Backend {
         // Dispose unexpected messages
         while let Some(x) = self.recv().await {
             if let MsgFromServer::Symbol(x) = x {
-                return Ok(Some(OneOf::Left(x)));
+                let ret = WorkspaceSymbolResponse::Flat(x);
+                return Ok(Some(ret));
             }
         }
         Ok(None)
