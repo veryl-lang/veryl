@@ -2261,7 +2261,7 @@ module ModuleA {
         Bar baz;
     } Baz;
 
-    localparam Baz QUX = '{baz: '{bar: '{foo: 0}}};
+    localparam Baz QUX = Baz'{baz: Bar'{bar: Foo'{foo: 0}}};
 
     function automatic logic __Func__QUX_baz;
         return QUX.baz.bar.foo;
@@ -2316,7 +2316,7 @@ module ModuleB {
         Bar baz;
     } Baz;
 
-    localparam Baz QUX = '{baz: '{bar: '{foo: 0}}};
+    localparam Baz QUX = Baz'{baz: Bar'{bar: Foo'{foo: 0}}};
 endpackage
 module prj_ModuleB;
     function automatic logic __Func__Pkg_QUX_baz;
@@ -2358,7 +2358,7 @@ alias package BarPkg = bar_pkg::<FooPkg::FOO.foo>;
         int unsigned foo;
     } foo_struct;
 
-    localparam foo_struct FOO = '{foo: 32};
+    localparam foo_struct FOO = foo_struct'{foo: 32};
 endpackage
 package prj___bar_pkg____foo_pkg__32_FOO_foo;
     localparam int unsigned BAR = prj___foo_pkg__32::FOO.foo;
@@ -2648,7 +2648,7 @@ package prj___a_pkg__32;
     typedef struct packed {
         int unsigned a;
     } a_struct;
-    localparam a_struct A = '{a: 32};
+    localparam a_struct A = a_struct'{a: 32};
 endpackage
 
 

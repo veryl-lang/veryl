@@ -2898,6 +2898,7 @@ impl VerylWalker for Emitter {
                     self.emit_function_call(&arg.expression_identifier, &x.function_call);
                 }
                 IdentifierFactorOptGroup::StructConstructor(x) => {
+                    self.expression_identifier(&arg.expression_identifier);
                     self.struct_constructor(&x.struct_constructor);
                 }
             }

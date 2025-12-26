@@ -15,4 +15,19 @@ module Module79 {
     };
 
     let _c: StructA = StructA'{a : 10, bb: 10};
+
+    union UnionA {
+        dd      : logic  <20>,
+        struct_a: StructA    ,
+    }
+
+    struct StructWithUnion {
+        uu: UnionA,
+    }
+
+    let _e: StructWithUnion = StructWithUnion'{
+        uu: StructA'{
+            a : 5, bb: 5
+        },
+    };
 }
