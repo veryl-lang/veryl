@@ -451,6 +451,13 @@ impl Lockfile {
                     } else {
                         let base = root_metadata.project_path();
                         let path = base.join(metadata.project_path()).join(path);
+                        if !path.exists() {
+                            let project = x.project.clone().unwrap_or(name.to_string());
+                            return Err(MetadataError::ProjectNotFound {
+                                url: UrlPath::Path(path),
+                                project,
+                            });
+                        }
                         diff_paths(path.canonicalize().unwrap(), base).unwrap()
                     };
                     LockSource::Path(path)
