@@ -144,12 +144,9 @@ impl Preprocessor for Veryl {
                                         );
                                         errors.append(&mut Analyzer::analyze_post_pass1());
                                         errors.append(
-                                            &mut analyzer.analyze_pass2(prj, "", &ret.veryl),
+                                            &mut analyzer.analyze_pass2(prj, "", &ret.veryl, None),
                                         );
-                                        let info = Analyzer::analyze_post_pass2();
-                                        errors.append(
-                                            &mut analyzer.analyze_pass3(prj, "", &ret.veryl, &info),
-                                        );
+                                        errors.append(&mut Analyzer::analyze_post_pass2());
 
                                         if !errors.is_empty() {
                                             eprintln!("veryl analyze failed : {path}:{line}:{col}");

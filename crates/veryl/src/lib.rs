@@ -243,10 +243,6 @@ pub struct OptDump {
     #[arg(long)]
     pub symbol_table: bool,
 
-    /// output assign list
-    #[arg(long)]
-    pub assign_list: bool,
-
     /// output namespace table
     #[arg(long)]
     pub namespace_table: bool,
@@ -266,4 +262,8 @@ pub struct OptDump {
     /// output unsafe table
     #[arg(long)]
     pub unsafe_table: bool,
+
+    /// output IR
+    #[arg(long)]
+    pub ir: bool,
 }

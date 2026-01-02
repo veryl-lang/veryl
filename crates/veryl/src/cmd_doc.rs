@@ -45,17 +45,10 @@ impl CmdDoc {
             let path = &context.path;
             context
                 .analyzer
-                .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+                .analyze_pass2(&path.prj, &path.src, &context.parser.veryl, None);
         }
 
-        let info = Analyzer::analyze_post_pass2();
-
-        for context in &contexts {
-            let path = &context.path;
-            context
-                .analyzer
-                .analyze_pass3(&path.prj, &path.src, &context.parser.veryl, &info);
-        }
+        Analyzer::analyze_post_pass2();
 
         let mut modules = BTreeMap::new();
         let mut proto_modules = BTreeMap::new();

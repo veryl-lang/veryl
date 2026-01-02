@@ -3,7 +3,7 @@ use crate::veryl_grammar_trait::*;
 use crate::veryl_token::{Token, VerylToken};
 use paste::paste;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenRange {
     pub beg: Token,
     pub end: Token,
@@ -75,6 +75,14 @@ impl From<&Token> for TokenRange {
     fn from(value: &Token) -> Self {
         let beg = *value;
         let end = *value;
+        TokenRange { beg, end }
+    }
+}
+
+impl From<&VerylToken> for TokenRange {
+    fn from(value: &VerylToken) -> Self {
+        let beg = value.token;
+        let end = value.token;
         TokenRange { beg, end }
     }
 }
@@ -878,6 +886,15 @@ impl From<&IfStatement> for TokenRange {
 }
 impl_token_ext!(IfStatement);
 
+impl From<&IfStatementList> for TokenRange {
+    fn from(value: &IfStatementList) -> Self {
+        let mut ret: TokenRange = value.r#else.as_ref().into();
+        ret.set_end(value.statement_block.as_ref().into());
+        ret
+    }
+}
+impl_token_ext!(IfStatementList);
+
 impl From<&IfResetStatement> for TokenRange {
     fn from(value: &IfResetStatement) -> Self {
         let mut ret: TokenRange = value.if_reset.as_ref().into();
@@ -892,6 +909,15 @@ impl From<&IfResetStatement> for TokenRange {
     }
 }
 impl_token_ext!(IfResetStatement);
+
+impl From<&IfResetStatementList> for TokenRange {
+    fn from(value: &IfResetStatementList) -> Self {
+        let mut ret: TokenRange = value.r#else.as_ref().into();
+        ret.set_end(value.statement_block.as_ref().into());
+        ret
+    }
+}
+impl_token_ext!(IfResetStatementList);
 
 impl_token_range!(ReturnStatement, r#return, semicolon);
 impl_token_range!(BreakStatement, r#break, semicolon);

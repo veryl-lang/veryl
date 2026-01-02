@@ -94,20 +94,12 @@ impl CmdCheck {
             let mut errors =
                 context
                     .analyzer
-                    .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+                    .analyze_pass2(&path.prj, &path.src, &context.parser.veryl, None);
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
-        let info = Analyzer::analyze_post_pass2();
-
-        for context in &contexts {
-            let path = &context.path;
-            let mut errors =
-                context
-                    .analyzer
-                    .analyze_pass3(&path.prj, &path.src, &context.parser.veryl, &info);
-            check_error = check_error.append(&mut errors).check_err()?;
-        }
+        let mut errors = Analyzer::analyze_post_pass2();
+        check_error = check_error.append(&mut errors).check_err()?;
 
         let _ = check_error.check_all()?;
         Ok(true)
