@@ -38,7 +38,7 @@ clap            = {version = "4.5.53", features = ["derive"]}
 console         = "0.16.2"
 futures         = "0.3.31"
 fxhash          = "0.2.1"
-handlebars      = "6.3"
+handlebars      = "6.4"
 log             = "0.4.29"
 mdbook          = "0.4.51"
 miette          = {version = "7.6"}
