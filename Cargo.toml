@@ -19,6 +19,7 @@ members = [
 ]
 exclude = [
     "support/sourcemap-resolver",
+    "support/zed",
 ]
 resolver = "2"
 
