@@ -1,0 +1,11 @@
+[package]
+name = "zed-veryl"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/veryl.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7.0"

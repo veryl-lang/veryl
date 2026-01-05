@@ -1,0 +1,16 @@
+id = "veryl-zed"
+name = "Veryl"
+version = "0.0.1"
+schema_version = 1
+authors = ["veryl-lang"]
+description = "Veryl extension for Zed"
+repository = "https://github.com/veryl-lang/veryl"
+
+[language_servers.veryl-ls]
+name = "Veryl Language Server"
+language = "Veryl"
+language_ids = { "Veryl" = "veryl" }
+
+[grammars.veryl]
+repository = "https://github.com/veryl-lang/tree-sitter-veryl"
+rev = "8fe7d4b5ff90abbdefe82f21e31105ab6888685f"
