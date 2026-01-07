@@ -380,7 +380,7 @@ impl Server {
                 if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
                     let location = to_location(&symbol.found.token);
                     self.snd
-                        .send_blocking(MsgFromServer::GotoDefinition(Some(location)))
+                        .send_blocking(MsgFromServer::GotoDefinition(location))
                         .unwrap();
                     return;
                 }
@@ -440,17 +440,18 @@ impl Server {
                     VerylSymbolKind::Test(_) => SymbolKind::MODULE,
                     VerylSymbolKind::Embed => SymbolKind::NAMESPACE,
                 };
-                let location = to_location(&symbol.token);
-                #[allow(deprecated)]
-                let symbol_info = SymbolInformation {
-                    name,
-                    kind,
-                    tags: None,
-                    deprecated: None,
-                    location,
-                    container_name: None,
-                };
-                ret.push(symbol_info);
+                if let Some(location) = to_location(&symbol.token) {
+                    #[allow(deprecated)]
+                    let symbol_info = SymbolInformation {
+                        name,
+                        kind,
+                        tags: None,
+                        deprecated: None,
+                        location,
+                        container_name: None,
+                    };
+                    ret.push(symbol_info);
+                }
             }
         }
         self.snd.send_blocking(MsgFromServer::Symbol(ret)).unwrap();
@@ -507,8 +508,9 @@ impl Server {
                 };
                 if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
                     for reference in &symbol.found.references {
-                        let location = to_location(reference);
-                        ret.push(location);
+                        if let Some(location) = to_location(reference) {
+                            ret.push(location);
+                        }
                     }
                 }
             }
@@ -863,16 +865,16 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
     )
 }
 
-fn to_location(token: &Token) -> Location {
+fn to_location(token: &Token) -> Option<Location> {
     let line = token.line - 1;
     let column = token.column - 1;
     let length = token.length;
-    let uri = Url::from_file_path(token.source.to_string()).unwrap();
+    let uri = Url::from_file_path(token.source.to_string())?;
     let range = Range::new(
         Position::new(line, column),
         Position::new(line, column + length),
     );
-    Location { uri, range }
+    Some(Location { uri, range })
 }
 
 fn completion_item_operator(
