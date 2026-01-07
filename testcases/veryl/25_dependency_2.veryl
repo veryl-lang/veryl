@@ -60,7 +60,8 @@ module Module25C::<V: u32> {
 alias package package_25 = Package25::<1>;
 
 module Module25D {
-    inst qux_if: veryl_sample4::qux_if::<Package25::<1>::S>;
+    inst qux_if    : veryl_sample4::qux_if::<Package25::<1>::S>;
+    assign qux_if.qux = 0;
     inst u6: Module25B::<Package25::<1>> (
         if3: qux_if,
         if4: qux_if,
