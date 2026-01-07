@@ -64,7 +64,8 @@ endmodule
 
 
 module veryl_testcase_Module25D;
-    veryl_sample4___qux_if__veryl_testcase___Package25__1_S qux_if ();
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S qux_if     ();
+    always_comb qux_if.qux = 0;
     veryl_testcase___Module25B____Package25__1 u6 (
         .if3 (qux_if),
         .if4 (qux_if)

@@ -59,7 +59,8 @@ module veryl_testcase_Module56
 endmodule
 
 module veryl_testcase___Module56A__1;
-    veryl_testcase___Interface56A__1 u ();
+    veryl_testcase___Interface56A__1 u    ();
+    always_comb u._a = 0;
     function automatic void f() ;
     endfunction
 endmodule

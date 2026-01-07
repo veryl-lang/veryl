@@ -60,7 +60,8 @@ module Module56 (
 }
 
 module Module56A::<T: u32> {
-    inst u: Interface56A::<T>;
+    inst u   : Interface56A::<T>;
+    assign u._a = 0;
     function f () {}
 }
 
