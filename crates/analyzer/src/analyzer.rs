@@ -1,6 +1,7 @@
 use crate::HashMap;
 use crate::analyzer::resource_table::PathId;
 use crate::analyzer_error::AnalyzerError;
+use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::handlers::check_expression::CheckExpression;
 use crate::handlers::*;
@@ -157,10 +158,16 @@ impl AnalyzerPass3 {
                         .iter()
                         .map(|x| symbol_table::get(*x).unwrap().token.to_string())
                         .collect();
-                    ret.push(AnalyzerError::unassign_variable(
-                        &path.join("."),
-                        &symbol.token.into(),
-                    ));
+
+                    if !attribute_table::contains(
+                        &symbol.token,
+                        Attribute::Allow(AllowItem::UnassignVariable),
+                    ) {
+                        ret.push(AnalyzerError::unassign_variable(
+                            &path.join("."),
+                            &symbol.token.into(),
+                        ));
+                    }
                 }
             }
 
@@ -235,10 +242,16 @@ impl AnalyzerPass3 {
                 if before_assign {
                     let full_path = var_ref.path.full_path();
                     let symbol = symbol_table::get(*full_path.first().unwrap()).unwrap();
-                    ret.push(AnalyzerError::unassign_variable(
-                        &var_ref.path.to_string(),
-                        &symbol.token.into(),
-                    ));
+
+                    if !attribute_table::contains(
+                        &symbol.token,
+                        Attribute::Allow(AllowItem::UnassignVariable),
+                    ) {
+                        ret.push(AnalyzerError::unassign_variable(
+                            &var_ref.path.to_string(),
+                            &symbol.token.into(),
+                        ));
+                    }
                 }
             }
         }

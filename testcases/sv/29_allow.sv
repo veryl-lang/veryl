@@ -17,6 +17,8 @@ module veryl_testcase_Module29 (
     end
 
     veryl_testcase_Module29A u0 ();
+
+    logic _d;
 endmodule
 
 module veryl_testcase_Module29A (
