@@ -23,6 +23,8 @@ num-traits      = "0.2.19"
 paste           = {workspace = true}
 smallvec        = {workspace = true}
 strnum_bitwidth = {workspace = true}
+strum           = "0.27.2"
+strum_macros    = "0.27.2"
 thiserror       = {workspace = true}
 veryl-metadata  = {version = "0.17.2", path = "../metadata"}
 veryl-parser    = {version = "0.17.2", path = "../parser"}
