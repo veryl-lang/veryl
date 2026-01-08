@@ -1791,10 +1791,10 @@ impl AnalyzerError {
         }
     }
 
-    pub fn mismatch_attribute_args(name: &str, expected: &str, token: &TokenRange) -> Self {
+    pub fn mismatch_attribute_args(name: &str, expected: String, token: &TokenRange) -> Self {
         AnalyzerError::MismatchAttributeArgs {
             name: name.to_string(),
-            expected: expected.to_string(),
+            expected,
             input: source(token),
             error_location: token.into(),
         }

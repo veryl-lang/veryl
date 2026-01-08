@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_token::Token;
 
@@ -98,7 +100,7 @@ impl fmt::Display for Attribute {
 #[derive(Clone, Debug)]
 pub enum AttributeError {
     UnknownAttribute,
-    MismatchArgs(&'static str),
+    MismatchArgs(String),
 }
 
 fn get_arg_ident(
@@ -242,13 +244,17 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         x if x == pat.elsif => {
                             Ok(Attribute::Elsif(arg.text, Vec::new(), Vec::new()))
                         }
-                        x if x == pat.r#else => Err(AttributeError::MismatchArgs("no argument")),
+                        x if x == pat.r#else => {
+                            Err(AttributeError::MismatchArgs("no argument".to_string()))
+                        }
                         _ => unreachable!(),
                     }
                 } else if x == pat.r#else {
                     Ok(Attribute::Else(Vec::new(), Vec::new()))
                 } else {
-                    Err(AttributeError::MismatchArgs("single identifier"))
+                    Err(AttributeError::MismatchArgs(
+                        "single identifier".to_string(),
+                    ))
                 }
             }
             x if x == pat.sv => {
@@ -257,15 +263,14 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 if let Some(arg) = arg {
                     Ok(Attribute::Sv(arg.text))
                 } else {
-                    Err(AttributeError::MismatchArgs("single string"))
+                    Err(AttributeError::MismatchArgs("single string".to_string()))
                 }
             }
             x if x == pat.allow => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
-                let err = AttributeError::MismatchArgs(
-                    "rule: (missing_port|missing_reset_statement|unused_variable)",
-                );
+                let err =
+                    AttributeError::MismatchArgs(format!("rule: ({})", AllowItem::available()));
 
                 if let Some(arg) = arg {
                     match arg.text {
@@ -288,7 +293,10 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             x if x == pat.enum_encoding => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
-                let err = AttributeError::MismatchArgs("encoding type: (sequential|onehot|gray)");
+                let err = AttributeError::MismatchArgs(format!(
+                    "encoding type: ({})",
+                    EnumEncodingItem::available()
+                ));
 
                 if let Some(arg) = arg {
                     match arg.text {
@@ -311,7 +319,9 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 if let Some(arg) = arg {
                     Ok(Attribute::EnumMemberPrefix(arg.text))
                 } else {
-                    Err(AttributeError::MismatchArgs("single identifier"))
+                    Err(AttributeError::MismatchArgs(
+                        "single identifier".to_string(),
+                    ))
                 }
             }
             x if x == pat.test => {
@@ -321,14 +331,18 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 if let Some(arg) = arg {
                     Ok(Attribute::Test(arg, top.map(|x| x.text)))
                 } else {
-                    Err(AttributeError::MismatchArgs("single identifier"))
+                    Err(AttributeError::MismatchArgs(
+                        "single identifier".to_string(),
+                    ))
                 }
             }
             x if x == pat.cond_type => {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
-                let err =
-                    AttributeError::MismatchArgs("condition type: (unique|unique0|priority|none)");
+                let err = AttributeError::MismatchArgs(format!(
+                    "condition type: ({})",
+                    CondTypeItem::available()
+                ));
 
                 if let Some(arg) = arg {
                     match arg.text {
@@ -346,7 +360,10 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 let args = get_args_ident(&value.attribute_opt);
                 let mut items = Vec::new();
 
-                let err = AttributeError::MismatchArgs("align type: (number|identifier)");
+                let err = AttributeError::MismatchArgs(format!(
+                    "align type: ({})",
+                    AlignItem::available()
+                ));
 
                 for arg in &args {
                     match arg.text {
@@ -366,7 +383,10 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 let args = get_args_ident(&value.attribute_opt);
                 let mut items = Vec::new();
 
-                let err = AttributeError::MismatchArgs("format type: (compact)");
+                let err = AttributeError::MismatchArgs(format!(
+                    "format type: ({})",
+                    FormatItem::available()
+                ));
 
                 for arg in &args {
                     match arg.text {
@@ -386,7 +406,10 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 let args = get_args_ident(&value.attribute_opt);
                 let mut items = Vec::new();
 
-                let err = AttributeError::MismatchArgs("expand type: (modport)");
+                let err = AttributeError::MismatchArgs(format!(
+                    "expand type: ({})",
+                    ExpandItem::available()
+                ));
 
                 for arg in &args {
                     match arg.text {
@@ -406,12 +429,25 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum AllowItem {
     MissingPort,
     MissingResetStatement,
     UnusedVariable,
     UnassignVariable,
+}
+
+impl AllowItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
 }
 
 impl fmt::Display for AllowItem {
@@ -426,12 +462,25 @@ impl fmt::Display for AllowItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, EnumIter)]
 pub enum EnumEncodingItem {
     #[default]
     Sequential,
     OneHot,
     Gray,
+}
+
+impl EnumEncodingItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
 }
 
 impl fmt::Display for EnumEncodingItem {
@@ -445,12 +494,25 @@ impl fmt::Display for EnumEncodingItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum CondTypeItem {
     Unique,
     Unique0,
     Priority,
     None,
+}
+
+impl CondTypeItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
 }
 
 impl fmt::Display for CondTypeItem {
@@ -465,10 +527,23 @@ impl fmt::Display for CondTypeItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum AlignItem {
     Number,
     Identifier,
+}
+
+impl AlignItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
 }
 
 impl fmt::Display for AlignItem {
@@ -481,10 +556,23 @@ impl fmt::Display for AlignItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum FormatItem {
     Compact,
     Skip,
+}
+
+impl FormatItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
 }
 
 impl fmt::Display for FormatItem {
@@ -497,9 +585,22 @@ impl fmt::Display for FormatItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum ExpandItem {
     Modport,
+}
+
+impl ExpandItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
 }
 
 impl fmt::Display for ExpandItem {
