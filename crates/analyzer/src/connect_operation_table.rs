@@ -2,7 +2,6 @@ use crate::HashMap;
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
-use crate::var_ref::{ExpressionTargetType, VarRefPath, VarRefPathItem};
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use veryl_parser::resource_table::TokenId;
@@ -14,7 +13,6 @@ use veryl_parser::veryl_token::Token;
 #[derive(Clone, Debug)]
 pub struct ConnectModportOperand {
     pub id: SymbolId,
-    pub base_path: VarRefPath,
     pub via_instance: bool,
 }
 
@@ -120,88 +118,6 @@ impl ConnectOperation {
             None
         }
     }
-
-    pub fn get_assign_paths(&self) -> Vec<VarRefPath> {
-        match (&self.lhs, &self.rhs) {
-            (ConnectOperand::Modport(lhs), ConnectOperand::Modport(rhs)) => {
-                let mut ret = Vec::new();
-                for (lhs_symbol, lhs_direction, rhs_symbol, rhs_direction) in
-                    self.get_connection_pairs()
-                {
-                    if matches!(lhs_direction, Direction::Output | Direction::Inout) {
-                        let mut path = lhs.base_path.clone();
-                        path.push(VarRefPathItem::Identifier {
-                            symbol_id: lhs_symbol.id,
-                        });
-                        ret.push(path);
-                    }
-                    if matches!(rhs_direction, Direction::Output | Direction::Inout) {
-                        let mut path = rhs.base_path.clone();
-                        path.push(VarRefPathItem::Identifier {
-                            symbol_id: rhs_symbol.id,
-                        });
-                        ret.push(path);
-                    }
-                }
-
-                ret
-            }
-            (ConnectOperand::Modport(lhs), ConnectOperand::Expression(_)) => {
-                let (ports, _) = self.get_ports_with_expression().unwrap();
-                ports
-                    .iter()
-                    .map(|(port, _)| {
-                        let mut path = lhs.base_path.clone();
-                        path.push(VarRefPathItem::Identifier { symbol_id: port.id });
-                        path
-                    })
-                    .collect()
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn get_expression_paths(&self) -> Vec<(VarRefPath, ExpressionTargetType)> {
-        let mut ret = Vec::new();
-
-        if let (ConnectOperand::Modport(lhs), ConnectOperand::Modport(rhs)) = (&self.lhs, &self.rhs)
-        {
-            for (lhs_symbol, lhs_direction, rhs_symbol, rhs_direction) in
-                self.get_connection_pairs()
-            {
-                if matches!(lhs_direction, Direction::Input | Direction::Inout) {
-                    let mut path = lhs.base_path.clone();
-                    path.push(VarRefPathItem::Identifier {
-                        symbol_id: lhs_symbol.id,
-                    });
-
-                    if lhs.via_instance {
-                        ret.push((path, ExpressionTargetType::Variable));
-                    } else if matches!(lhs_direction, Direction::Input) {
-                        ret.push((path, ExpressionTargetType::InputPort));
-                    } else {
-                        ret.push((path, ExpressionTargetType::InoutPort));
-                    }
-                }
-                if matches!(rhs_direction, Direction::Input | Direction::Inout) {
-                    let mut path = rhs.base_path.clone();
-                    path.push(VarRefPathItem::Identifier {
-                        symbol_id: rhs_symbol.id,
-                    });
-
-                    if rhs.via_instance {
-                        ret.push((path, ExpressionTargetType::Variable));
-                    } else if matches!(rhs_direction, Direction::Input) {
-                        ret.push((path, ExpressionTargetType::InputPort));
-                    } else {
-                        ret.push((path, ExpressionTargetType::InoutPort));
-                    }
-                }
-            }
-        }
-
-        ret
-    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -265,12 +181,13 @@ impl TryFrom<&HierarchicalIdentifier> for ConnectOperand {
     type Error = Option<AnalyzerError>;
 
     fn try_from(arg: &HierarchicalIdentifier) -> Result<Self, Self::Error> {
-        let Ok(mut base_path) = VarRefPath::try_from(arg) else {
+        let full_path: Vec<_> = if let Ok(symbol) = symbol_table::resolve(arg) {
+            symbol.full_path.into_iter().collect()
+        } else {
             return Err(None);
         };
-
-        let full_path = &base_path.full_path();
         let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
+
         let result = match &symbol.kind {
             SymbolKind::Modport(_) => {
                 // Specify modport via interface instance
@@ -331,14 +248,7 @@ impl TryFrom<&HierarchicalIdentifier> for ConnectOperand {
 
         match result {
             Ok((id, via_instance)) => {
-                if via_instance {
-                    base_path.pop();
-                }
-                let operand = ConnectModportOperand {
-                    id,
-                    base_path,
-                    via_instance,
-                };
+                let operand = ConnectModportOperand { id, via_instance };
                 Ok(ConnectOperand::Modport(operand))
             }
             Err(id) => {
@@ -353,11 +263,11 @@ impl TryFrom<&ExpressionIdentifier> for ConnectOperand {
     type Error = Option<AnalyzerError>;
 
     fn try_from(arg: &ExpressionIdentifier) -> Result<Self, Self::Error> {
-        let Ok(mut base_path) = VarRefPath::try_from(arg) else {
+        let full_path: Vec<_> = if let Ok(symbol) = symbol_table::resolve(arg) {
+            symbol.full_path.into_iter().collect()
+        } else {
             return Err(None);
         };
-
-        let full_path = &base_path.full_path();
         let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
 
         let result = match &symbol.kind {
@@ -420,14 +330,7 @@ impl TryFrom<&ExpressionIdentifier> for ConnectOperand {
 
         match result {
             Ok((id, via_instance)) => {
-                if via_instance {
-                    base_path.pop();
-                }
-                let operand = ConnectModportOperand {
-                    id,
-                    base_path,
-                    via_instance,
-                };
+                let operand = ConnectModportOperand { id, via_instance };
                 Ok(ConnectOperand::Modport(operand))
             }
             Err(id) => {
@@ -450,11 +353,12 @@ impl TryFrom<&Expression> for ConnectOperand {
             };
             return Ok(ConnectOperand::Expression(operand));
         };
-        let Ok(mut base_path) = VarRefPath::try_from(exp) else {
+
+        let full_path: Vec<_> = if let Ok(symbol) = symbol_table::resolve(exp) {
+            symbol.full_path.into_iter().collect()
+        } else {
             return Err(None);
         };
-
-        let full_path = &base_path.full_path();
         let symbol = symbol_table::get(*full_path.last().unwrap()).unwrap();
 
         let id = match &symbol.kind {
@@ -522,14 +426,7 @@ impl TryFrom<&Expression> for ConnectOperand {
         };
 
         if let Some((id, via_instance)) = id {
-            if via_instance {
-                base_path.pop();
-            }
-            let operand = ConnectModportOperand {
-                id,
-                base_path,
-                via_instance,
-            };
+            let operand = ConnectModportOperand { id, via_instance };
             Ok(ConnectOperand::Modport(operand))
         } else {
             let operand = ConnectExpressionOperand {

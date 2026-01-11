@@ -2,7 +2,8 @@ use crate::emitter::{SymbolContext, resolve_generic_path, symbol_string};
 use std::collections::HashMap;
 use veryl_analyzer::attribute::ExpandItem;
 use veryl_analyzer::attribute_table;
-use veryl_analyzer::evaluator::Evaluator;
+use veryl_analyzer::conv::{Context, Conv};
+use veryl_analyzer::ir;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::Type as SymType;
@@ -453,10 +454,16 @@ fn collect_modports(ports: &[Port], namespace: &Namespace) -> Vec<(Symbol, Port,
 }
 
 fn evaluate_array_size(array_size: &[Expression], generic_map: &[GenericMap]) -> Vec<isize> {
-    let mut evaluator = Evaluator::new(generic_map);
+    let mut context = Context::default();
+    context.push_generic_map(generic_map.to_vec());
     array_size
         .iter()
-        .filter_map(|x| evaluator.expression(x).get_value_isize())
+        .filter_map(|x| {
+            let mut expr: ir::Expression = Conv::conv(&mut context, x).ok()?;
+            let comptime = expr.eval_comptime(&mut context, None);
+            let value = comptime.get_value().ok()?;
+            Some(value.to_usize() as isize)
+        })
         .collect()
 }
 
