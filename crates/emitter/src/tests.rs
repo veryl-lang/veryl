@@ -2740,3 +2740,36 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn function_call_via_generic_interface() {
+    let code = r#"module ModuleA (
+    a_if: interface::slave,
+) {
+    let _b: logic = 0;
+    let _c: logic = 1;
+    let _d: logic = a_if.func_a(_b, _c);
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    interface.slave a_if
+);
+    logic _b; always_comb _b = 0;
+    logic _c; always_comb _c = 1;
+    logic _d; always_comb _d = a_if.func_a(_b, _c);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

@@ -1776,33 +1776,41 @@ impl Emitter {
         identifier: &ExpressionIdentifier,
         function_call: &FunctionCall,
     ) {
-        let (defined_ports, generic_map, namespace) =
-            if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
-                match symbol.found.kind {
-                    SymbolKind::Function(ref x) => {
-                        (x.ports.clone(), Vec::new(), symbol.found.namespace)
-                    }
-                    SymbolKind::ModportFunctionMember(x) => {
-                        let symbol = symbol_table::get(x.function).unwrap();
-                        let SymbolKind::Function(x) = symbol.kind else {
-                            unreachable!();
-                        };
-                        (x.ports.clone(), Vec::new(), symbol.namespace)
-                    }
-                    SymbolKind::GenericInstance(ref x) => {
-                        let base = symbol_table::get(x.base).unwrap();
-                        match base.kind {
-                            SymbolKind::Function(ref x) => {
-                                (x.ports.clone(), symbol.found.generic_maps(), base.namespace)
-                            }
-                            _ => (Vec::new(), Vec::new(), base.namespace),
-                        }
-                    }
-                    _ => (Vec::new(), Vec::new(), symbol.found.namespace),
+        let (defined_ports, generic_map, namespace) = {
+            let symbol =
+                if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
+                    symbol.found
+                } else if let (Ok(symbol), _) =
+                    self.resolve_scoped_idnetifier(&identifier.scoped_identifier)
+                    && let SymbolKind::Port(port) = &symbol.found.kind
+                    && port.direction == SymDirection::Interface
+                {
+                    symbol.found
+                } else {
+                    unreachable!()
+                };
+
+            match symbol.kind {
+                SymbolKind::Function(ref x) => (x.ports.clone(), Vec::new(), symbol.namespace),
+                SymbolKind::ModportFunctionMember(x) => {
+                    let symbol = symbol_table::get(x.function).unwrap();
+                    let SymbolKind::Function(x) = symbol.kind else {
+                        unreachable!();
+                    };
+                    (x.ports.clone(), Vec::new(), symbol.namespace)
                 }
-            } else {
-                unreachable!()
-            };
+                SymbolKind::GenericInstance(ref x) => {
+                    let base = symbol_table::get(x.base).unwrap();
+                    match base.kind {
+                        SymbolKind::Function(ref x) => {
+                            (x.ports.clone(), symbol.generic_maps(), base.namespace)
+                        }
+                        _ => (Vec::new(), Vec::new(), base.namespace),
+                    }
+                }
+                _ => (Vec::new(), Vec::new(), symbol.namespace),
+            }
+        };
 
         let in_named_argument = if let Some(ref x) = function_call.function_call_opt {
             let list: Vec<_> = x.argument_list.as_ref().into();
