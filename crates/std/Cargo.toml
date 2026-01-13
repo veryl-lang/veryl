@@ -12,7 +12,7 @@ edition.workspace     = true
 
 [dependencies]
 miette      = {workspace = true}
-rust-embed  = {version = "8.9", features = ["debug-embed", "compression", "include-exclude"]}
+rust-embed  = {version = "8.10", features = ["debug-embed", "compression", "include-exclude"]}
 thiserror   = {workspace = true}
 veryl-path  = {version = "0.17.2", path = "../path"}
 
