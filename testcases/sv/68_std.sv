@@ -106,6 +106,9 @@ module veryl_testcase_Module68C;
         axi4_lite_if.rready  = 0;
     end
 
+    always_comb axi4_lite_if.awid = 0;
+    always_comb axi4_lite_if.arid = 0;
+
     veryl_testcase___Module68B____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH u (
         .axi4_if      (axi4_if     ),
         .axi4_lite_if (axi4_lite_if)
