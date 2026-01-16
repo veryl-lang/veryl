@@ -38,6 +38,9 @@ module Module68C {
     connect axi4_if.master      <> 0;
     connect axi4_lite_if.master <> 0;
 
+    assign axi4_lite_if.awid = 0;
+    assign axi4_lite_if.arid = 0;
+
     inst u: Module68B::<axi_pkg, axi_lite_pkg> (
         axi4_if     : axi4_if     ,
         axi4_lite_if: axi4_lite_if,
