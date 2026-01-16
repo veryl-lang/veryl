@@ -33,7 +33,7 @@ impl CmdDoc {
                 .wrap_err("")?;
             let parser = Parser::parse(&input, &path.src)?;
             let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1(&path.prj, &path.src, &parser.veryl);
+            analyzer.analyze_pass1(&path.prj, &parser.veryl);
 
             let context = Context::new(path.clone(), input, parser, analyzer)?;
             contexts.push(context);
@@ -41,21 +41,18 @@ impl CmdDoc {
 
         Analyzer::analyze_post_pass1();
 
+        let mut analyzer_context = veryl_analyzer::Context::default();
         for context in &contexts {
             let path = &context.path;
-            context
-                .analyzer
-                .analyze_pass2(&path.prj, &path.src, &context.parser.veryl);
+            context.analyzer.analyze_pass2(
+                &path.prj,
+                &context.parser.veryl,
+                &mut analyzer_context,
+                None,
+            );
         }
 
-        let info = Analyzer::analyze_post_pass2();
-
-        for context in &contexts {
-            let path = &context.path;
-            context
-                .analyzer
-                .analyze_pass3(&path.prj, &path.src, &context.parser.veryl, &info);
-        }
+        Analyzer::analyze_post_pass2();
 
         let mut modules = BTreeMap::new();
         let mut proto_modules = BTreeMap::new();

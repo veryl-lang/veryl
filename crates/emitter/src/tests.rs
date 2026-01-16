@@ -1,6 +1,6 @@
 use crate::Emitter;
 use std::path::PathBuf;
-use veryl_analyzer::{Analyzer, attribute_table, symbol_table};
+use veryl_analyzer::{Analyzer, Context, attribute_table, symbol_table};
 use veryl_metadata::{ClockType, Metadata, ResetType};
 use veryl_parser::Parser;
 
@@ -11,10 +11,11 @@ fn emit(metadata: &Metadata, code: &str) -> String {
 
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
+    let mut context = Context::default();
 
-    analyzer.analyze_pass1(&"prj", &"", &parser.veryl);
+    analyzer.analyze_pass1(&"prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &"", &parser.veryl);
+    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None);
 
     let mut emitter = Emitter::new(
         metadata,
