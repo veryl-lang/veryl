@@ -15,9 +15,12 @@ pub struct Parser {
 impl Parser {
     pub fn parse<T: AsRef<Path>>(input: &str, file: &T) -> Result<Self, ParserError> {
         let path = resource_table::insert_path(file.as_ref());
-        let text = TextInfo {
-            path,
-            text: input.to_string(),
+        let text = {
+            let mut text = input.to_string();
+            if !text.ends_with("\n") {
+                text.push('\n');
+            }
+            TextInfo { path, text }
         };
         text_table::set_current_text(text);
 
