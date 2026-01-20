@@ -2358,6 +2358,7 @@ pub struct GenericParameterProperty {
 pub struct GenericInstanceProperty {
     pub base: SymbolId,
     pub arguments: Vec<GenericSymbolPath>,
+    pub affiliation_symbol: Option<SymbolId>,
 }
 
 #[derive(Debug, Clone)]

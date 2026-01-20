@@ -2021,13 +2021,12 @@ impl Emitter {
             .filter(|x| {
                 if let Some(id) = x.id {
                     let symbol = symbol_table::get(id).unwrap();
-                    let parent = symbol.get_parent().unwrap();
-                    if matches!(parent.kind, SymbolKind::GenericInstance(_)) {
-                        parent_id == parent.id
+                    if let SymbolKind::GenericInstance(x) = symbol.kind
+                        && let Some(affiliation_symbol) = x.affiliation_symbol
+                    {
+                        affiliation_symbol == parent_id
                     } else {
-                        // If the symbol is a generic instance and used in the definition scope
-                        // it belongs to the base object of the parent even if the parent is a generic object.
-                        true
+                        unreachable!()
                     }
                 } else {
                     true
