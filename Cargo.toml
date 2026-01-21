@@ -50,7 +50,7 @@ parol_runtime   = "4.1"
 paste           = "1.0"
 pulldown-cmark  = "0.13.0"
 regex           = "1.12.2"
-scnr2           = "0.3.3"
+scnr2           = "0.4.0"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
 serde_json      = "1.0"
