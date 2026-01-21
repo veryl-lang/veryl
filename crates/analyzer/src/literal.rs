@@ -1,5 +1,6 @@
 use crate::value::Value;
 use std::fmt;
+use veryl_parser::resource_table::StrId;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -7,6 +8,7 @@ pub enum Literal {
     Value(Value),
     Type(TypeLiteral),
     Boolean(bool),
+    String(StrId),
 }
 
 impl fmt::Display for Literal {
@@ -15,32 +17,12 @@ impl fmt::Display for Literal {
             Literal::Value(x) => format!("{x:x}").fmt(f),
             Literal::Type(x) => x.fmt(f),
             Literal::Boolean(x) => x.fmt(f),
+            Literal::String(x) => x.fmt(f),
         }
     }
 }
 
-impl Literal {
-    pub fn is_fixed_type(&self) -> bool {
-        if let Literal::Type(x) = self {
-            matches!(
-                x,
-                TypeLiteral::U8
-                    | TypeLiteral::U16
-                    | TypeLiteral::U32
-                    | TypeLiteral::U64
-                    | TypeLiteral::I8
-                    | TypeLiteral::I16
-                    | TypeLiteral::I32
-                    | TypeLiteral::I64
-                    | TypeLiteral::F32
-                    | TypeLiteral::F64
-                    | TypeLiteral::String
-            )
-        } else {
-            false
-        }
-    }
-}
+impl Literal {}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TypeLiteral {

@@ -9,7 +9,7 @@ use semver::{Version, VersionReq};
 use similar::{ChangeTag, TextDiff};
 use std::io;
 use std::process;
-use veryl_analyzer::Analyzer;
+use veryl_analyzer::{Analyzer, Context};
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 
@@ -84,6 +84,7 @@ impl Preprocessor for Veryl {
     fn run(&self, _ctx: &PreprocessorContext, mut book: Book) -> Result<Book, Error> {
         let re_hiding_code_line = Regex::new("(?m)^# .*\n").unwrap();
         let re_hiding_code_indicator = Regex::new("(?m)^# ").unwrap();
+        let mut context = Context::default();
         let mut in_code = false;
         let mut in_playground = false;
         let mut total_success = true;
@@ -139,17 +140,15 @@ impl Preprocessor for Veryl {
                                         analyzer.clear();
 
                                         let mut errors = vec![];
-                                        errors.append(
-                                            &mut analyzer.analyze_pass1(prj, "", &ret.veryl),
-                                        );
+                                        errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
                                         errors.append(&mut Analyzer::analyze_post_pass1());
-                                        errors.append(
-                                            &mut analyzer.analyze_pass2(prj, "", &ret.veryl),
-                                        );
-                                        let info = Analyzer::analyze_post_pass2();
-                                        errors.append(
-                                            &mut analyzer.analyze_pass3(prj, "", &ret.veryl, &info),
-                                        );
+                                        errors.append(&mut analyzer.analyze_pass2(
+                                            prj,
+                                            &ret.veryl,
+                                            &mut context,
+                                            None,
+                                        ));
+                                        errors.append(&mut Analyzer::analyze_post_pass2());
 
                                         if !errors.is_empty() {
                                             eprintln!("veryl analyze failed : {path}:{line}:{col}");

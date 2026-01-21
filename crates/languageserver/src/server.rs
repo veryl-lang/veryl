@@ -14,8 +14,8 @@ use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
 use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{
-    Analyzer, AnalyzerError, attribute_table, definition_table, namespace_table, symbol_table,
-    unsafe_table,
+    Analyzer, AnalyzerError, Context, attribute_table, definition_table, namespace_table,
+    symbol_table, unsafe_table,
 };
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
@@ -697,7 +697,7 @@ impl Server {
                     drop_tables(src);
                 }
                 let analyzer = Analyzer::new(metadata);
-                let _ = analyzer.analyze_pass1(&path.prj, &src, &x.veryl);
+                let _ = analyzer.analyze_pass1(&path.prj, &x.veryl);
 
                 block_on(self.client.log_message(
                     MessageType::INFO,
@@ -733,15 +733,22 @@ impl Server {
             if let Some(metadata) = self.get_metadata(url) {
                 let diag = match Parser::parse(text, &path) {
                     Ok(x) => {
-                        if let Some(path) = resource_table::get_path_id(path.to_path_buf()) {
-                            drop_tables(path);
+                        let path_id = resource_table::get_path_id(path.to_path_buf());
+                        if let Some(path_id) = path_id {
+                            drop_tables(path_id);
                         }
+
                         let analyzer = Analyzer::new(&metadata);
-                        let mut errors = analyzer.analyze_pass1(prj, &path, &x.veryl);
+                        let mut context = Context::default();
+                        let mut errors = analyzer.analyze_pass1(prj, &x.veryl);
                         errors.append(&mut Analyzer::analyze_post_pass1());
-                        errors.append(&mut analyzer.analyze_pass2(prj, &path, &x.veryl));
-                        let info = Analyzer::analyze_post_pass2();
-                        errors.append(&mut analyzer.analyze_pass3(prj, &path, &x.veryl, &info));
+                        errors.append(&mut analyzer.analyze_pass2(
+                            prj,
+                            &x.veryl,
+                            &mut context,
+                            None,
+                        ));
+                        errors.append(&mut Analyzer::analyze_post_pass2());
                         let ret: Vec<_> = errors
                             .drain(0..)
                             .filter(|x| {
@@ -757,9 +764,13 @@ impl Server {
                                             | AnalyzerError::UnusedVariable { .. }
                                             | AnalyzerError::AnonymousIdentifierUsage { .. }
                                             | AnalyzerError::InvalidResetNonElaborative { .. }
+                                            | AnalyzerError::MismatchType { .. }
+                                            | AnalyzerError::ReferringBeforeDefinition { .. }
                                     )
                                 }
                             })
+                            // Filter errors caused by background sources
+                            .filter(|x| x.token_source() == path_id)
                             .map(|x| {
                                 let x: miette::ErrReport = x.into();
                                 to_diag(x, &rope)
@@ -803,12 +814,16 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
 
     let range = if let Some(mut labels) = miette_diag.labels() {
         labels.next().map_or(Range::default(), |label| {
-            let line = rope.byte_to_line(label.offset());
-            let pos = label.offset() - rope.line_to_byte(line);
-            let line = line as u32;
-            let pos = pos as u32;
-            let len = label.len() as u32;
-            Range::new(Position::new(line, pos), Position::new(line, pos + len))
+            if rope.len_bytes() <= label.offset() {
+                Range::default()
+            } else {
+                let line = rope.byte_to_line(label.offset());
+                let pos = label.offset() - rope.line_to_byte(line);
+                let line = line as u32;
+                let pos = pos as u32;
+                let len = label.len() as u32;
+                Range::new(Position::new(line, pos), Position::new(line, pos + len))
+            }
         })
     } else {
         Range::default()

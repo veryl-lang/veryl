@@ -196,4 +196,14 @@ impl VerylGrammarTrait for CreateLiteralTable {
         }
         Ok(())
     }
+
+    fn string_literal(&mut self, arg: &StringLiteral) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let id = arg.string_literal_token.token.id;
+            let text = arg.string_literal_token.token.text;
+            let literal = Literal::String(text);
+            literal_table::insert(id, literal);
+        }
+        Ok(())
+    }
 }

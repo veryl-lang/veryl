@@ -6,13 +6,14 @@ use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem};
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::connect_operation_table;
-use veryl_analyzer::evaluator::{EvaluatedTypeResetKind, Evaluator};
+use veryl_analyzer::conv::{Context, Conv};
+use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
-    GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind, VariableAffiliation,
+    Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind,
 };
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
@@ -2442,6 +2443,7 @@ impl VerylWalker for Emitter {
                             Literal::Value(_) => path.base_path(0).0[0].to_string(),
                             Literal::Type(x) => x.to_sv_string(),
                             Literal::Boolean(x) => if x { "1'b1" } else { "1'b0" }.to_string(),
+                            Literal::String(x) => x.to_string(),
                         }
                     } else {
                         path.base_path(0).0[0].to_string()
@@ -2764,31 +2766,36 @@ impl VerylWalker for Emitter {
                 | CastingType::ResetAsyncLow(_)
                 | CastingType::ResetSyncHigh(_)
                 | CastingType::ResetSyncLow(_) => {
-                    let mut eval = Evaluator::new(&[]);
-                    let src = eval.expression13(&arg.expression13);
+                    let mut context = Context::default();
+                    let expr: IrResult<ir::Expression> =
+                        Conv::conv(&mut context, arg.expression13.as_ref());
+                    let src_kind = if let Ok(mut expr) = expr {
+                        let comptime = expr.eval_comptime(&mut context, None);
+                        Some(comptime.r#type.kind)
+                    } else {
+                        None
+                    };
+
                     let dst = x.casting_type.as_ref();
                     let reset_type = self.build_opt.reset_type;
 
-                    let src_kind = &src.get_reset_kind();
-
-                    let src_is_high =
-                        matches!(
-                            (src_kind, reset_type),
-                            (Some(EvaluatedTypeResetKind::Implicit), ResetType::AsyncHigh)
-                        ) | matches!(
-                            (src_kind, reset_type),
-                            (Some(EvaluatedTypeResetKind::Implicit), ResetType::SyncHigh)
-                        ) | matches!(src_kind, Some(EvaluatedTypeResetKind::AsyncHigh))
-                            | matches!(src_kind, Some(EvaluatedTypeResetKind::SyncHigh));
+                    let src_is_high = matches!(
+                        (&src_kind, reset_type),
+                        (Some(ir::TypeKind::Reset), ResetType::AsyncHigh)
+                    ) | matches!(
+                        (&src_kind, reset_type),
+                        (Some(ir::TypeKind::Reset), ResetType::SyncHigh)
+                    ) | matches!(&src_kind, Some(ir::TypeKind::ResetAsyncHigh))
+                        | matches!(src_kind, Some(ir::TypeKind::ResetSyncHigh));
 
                     let src_is_low = matches!(
-                        (src_kind, reset_type),
-                        (Some(EvaluatedTypeResetKind::Implicit), ResetType::AsyncLow)
+                        (&src_kind, reset_type),
+                        (Some(ir::TypeKind::Reset), ResetType::AsyncLow)
                     ) | matches!(
-                        (src_kind, reset_type),
-                        (Some(EvaluatedTypeResetKind::Implicit), ResetType::SyncLow)
-                    ) | matches!(src_kind, Some(EvaluatedTypeResetKind::AsyncLow))
-                        | matches!(src_kind, Some(EvaluatedTypeResetKind::SyncLow));
+                        (&src_kind, reset_type),
+                        (Some(ir::TypeKind::Reset), ResetType::SyncLow)
+                    ) | matches!(&src_kind, Some(ir::TypeKind::ResetAsyncLow))
+                        | matches!(&src_kind, Some(ir::TypeKind::ResetSyncLow));
 
                     let dst_is_high = matches!(
                         (dst, reset_type),
@@ -3369,7 +3376,7 @@ impl VerylWalker for Emitter {
                 match lhs_symbol.found.kind {
                     SymbolKind::Variable(x) => !matches!(
                         x.affiliation,
-                        VariableAffiliation::StatementBlock | VariableAffiliation::Function
+                        Affiliation::StatementBlock | Affiliation::Function
                     ),
                     _ => true,
                 }

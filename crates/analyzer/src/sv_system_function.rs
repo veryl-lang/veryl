@@ -4,6 +4,7 @@ use crate::symbol::{
     SystemFuncitonProperty, Type, TypeKind,
 };
 use crate::symbol_table::SymbolTable;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 
 pub struct SvSystemFunction {
@@ -40,6 +41,7 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
                 array: vec![],
                 array_type: None,
                 is_const: false,
+                token: TokenRange::default(),
             };
             let property = PortProperty {
                 token,

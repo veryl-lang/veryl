@@ -42,6 +42,10 @@ pub struct Build {
     pub instance_depth_limit: usize,
     #[serde(default = "default_instance_total_limit")]
     pub instance_total_limit: usize,
+    #[serde(default = "default_evaluate_size_limit")]
+    pub evaluate_size_limit: usize,
+    #[serde(default = "default_evaluate_array_limit")]
+    pub evaluate_array_limit: usize,
     #[serde(default)]
     pub flatten_array_interface: bool,
     #[serde(default)]
@@ -66,6 +70,14 @@ fn default_instance_depth_limit() -> usize {
 
 fn default_instance_total_limit() -> usize {
     1024 * 1024
+}
+
+fn default_evaluate_size_limit() -> usize {
+    1024 * 1024
+}
+
+fn default_evaluate_array_limit() -> usize {
+    128
 }
 
 fn default_incremental() -> bool {
