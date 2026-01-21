@@ -347,13 +347,23 @@ impl GenericSymbol {
         }
     }
 
-    pub fn get_generic_instance(&self, base: &Symbol) -> Option<(Token, Symbol)> {
+    pub fn get_generic_instance(
+        &self,
+        base: &Symbol,
+        affiliation_symbol: Option<&Symbol>,
+    ) -> Option<(Token, Symbol)> {
         if self.arguments.is_empty() {
             None
         } else {
+            let affiliation_id = if let Some(symbol) = affiliation_symbol {
+                Some(symbol.id)
+            } else {
+                base.get_parent().map(|parent| parent.id)
+            };
             let property = GenericInstanceProperty {
                 base: base.id,
                 arguments: self.arguments.clone(),
+                affiliation_symbol: affiliation_id,
             };
             let kind = SymbolKind::GenericInstance(property);
             let token = &self.base;

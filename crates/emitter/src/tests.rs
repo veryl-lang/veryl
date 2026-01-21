@@ -2445,15 +2445,27 @@ module ModuleA::<PKG: ProtoPkgA> {
     let _w: u32 = func::<A>();
 }
 module ModuleB {
-    inst u_a: ModuleA::<PkgA::<32>>;
+    inst u_a: ModuleA::<PkgA::<16>>;
+    inst u_b: ModuleA::<PkgA::<32>>;
 }
 "#;
 
     let expect = r#"
 
+package prj___PkgA__16;
+    typedef logic [16-1:0] A;
+endpackage
 package prj___PkgA__32;
     typedef logic [32-1:0] A;
 endpackage
+module prj___ModuleA____PkgA__16;
+    import prj___PkgA__16::*;
+
+    function automatic int unsigned __func____PkgA__16_A() ;
+        return $bits(prj___PkgA__16::A);
+    endfunction
+    int unsigned _w; always_comb _w = __func____PkgA__16_A();
+endmodule
 module prj___ModuleA____PkgA__32;
     import prj___PkgA__32::*;
 
@@ -2463,7 +2475,8 @@ module prj___ModuleA____PkgA__32;
     int unsigned _w; always_comb _w = __func____PkgA__32_A();
 endmodule
 module prj_ModuleB;
-    prj___ModuleA____PkgA__32 u_a ();
+    prj___ModuleA____PkgA__16 u_a ();
+    prj___ModuleA____PkgA__32 u_b ();
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;

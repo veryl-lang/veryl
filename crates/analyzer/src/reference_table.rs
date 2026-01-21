@@ -317,7 +317,7 @@ impl ReferenceTable {
                     if path.is_generic_reference() {
                         Self::add_generic_reference(&target_symbol, namespace, &path, i);
                     } else {
-                        Self::insert_generic_instance(&path, i, namespace, &target_symbol);
+                        Self::insert_generic_instance(&path, i, namespace, &target_symbol, None);
                     }
                 }
                 Err(err) => {
@@ -337,13 +337,15 @@ impl ReferenceTable {
         ith: usize,
         namespace: &Namespace,
         target: &Symbol,
+        affiliation_symbol: Option<&Symbol>,
     ) {
         let instance_path = &path.paths[ith];
-        let Some((token, symbol)) = instance_path.get_generic_instance(target) else {
+        let Some((token, symbol)) = instance_path.get_generic_instance(target, affiliation_symbol)
+        else {
             return;
         };
 
-        if let Some(ref id) = symbol_table::insert(&token, symbol) {
+        if let Some(ref id) = symbol_table::insert(&token, symbol.clone()) {
             symbol_table::add_generic_instance(target.id, *id);
         }
 
@@ -366,7 +368,13 @@ impl ReferenceTable {
 
             if let Ok(target) = symbol_table::resolve((&path.generic_path(), target_namespace)) {
                 let ith = path.len() - 1;
-                Self::insert_generic_instance(path, ith, target_namespace, &target.found);
+                Self::insert_generic_instance(
+                    path,
+                    ith,
+                    target_namespace,
+                    &target.found,
+                    Some(&symbol),
+                );
             }
         }
     }
@@ -400,11 +408,19 @@ impl ReferenceTable {
             // already been processed.
             // For this case, need to insert generic instance generated from
             // the given path explicitly.
+            let affiliation_symbol = map.id.map(|id| symbol_table::get(id).unwrap());
             let mut path = path.clone();
             let ith = path.len() - 1;
             path.apply_map(&[map]);
             path.append_namespace_path(&namespace, &symbol.namespace);
-            Self::insert_generic_instance(&path, ith, &namespace, symbol);
+
+            Self::insert_generic_instance(
+                &path,
+                ith,
+                &namespace,
+                symbol,
+                affiliation_symbol.as_ref(),
+            );
         }
 
         let kind = match target.kind {
