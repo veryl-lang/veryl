@@ -24,7 +24,9 @@ impl Backend {
         let (tx_from, rx_from) = unbounded();
         let (tx_to, rx_to) = unbounded();
         let mut server = Server::new(client.clone(), rx_to, tx_from);
-        std::thread::spawn(move || server.serve());
+
+        let builder = std::thread::Builder::new().stack_size(16 * 1024 * 1024);
+        let _ = builder.spawn(move || server.serve());
 
         Self {
             client,
