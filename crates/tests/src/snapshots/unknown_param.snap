@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_param (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_param)
+
+  × module "unknown_param2" doesn't have param "a", but it is overrided
+   ╭─[../../testcases/error/unknown_param.veryl:2:10]
+ 1 │ module unknown_param {
+ 2 │     inst u: unknown_param2 #( a: 1 );
+   ·          ┬
+   ·          ╰── Error location
+ 3 │ }
+   ╰────
+  help: remove "a" param

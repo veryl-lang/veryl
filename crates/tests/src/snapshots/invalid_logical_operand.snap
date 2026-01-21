@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_logical_operand (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_logical_operand)
+
+  ⚠ Operand of logical operator should be 1-bit value
+   ╭─[../../testcases/error/invalid_logical_operand.veryl:2:21]
+ 1 │ module invalid_logical_operand {
+ 2 │     let _a: logic = 1 && 1;
+   ·                     ┬
+   ·                     ╰── Error location
+ 3 │ }
+   ╰────
+  help:

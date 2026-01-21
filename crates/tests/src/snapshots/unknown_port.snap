@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_port (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_port)
+
+  × module "unknown_port2" doesn't have port "a", but it is connected
+   ╭─[../../testcases/error/unknown_port.veryl:2:10]
+ 1 │ module unknown_port {
+ 2 │     inst u: unknown_port2 (
+   ·          ┬
+   ·          ╰── Error location
+ 3 │         a: 1,
+   ╰────
+  help: remove "a" port

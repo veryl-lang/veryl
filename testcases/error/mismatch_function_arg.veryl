@@ -1,0 +1,3 @@
+module mismatch_function_arg {
+    let _a: u32 = $clog2(logic);
+}

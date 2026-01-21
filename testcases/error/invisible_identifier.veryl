@@ -1,0 +1,7 @@
+module invisible_identifier2 {
+    const A: u32 = 1;
+}
+
+module invisible_identifier {
+    let _a: u32 = invisible_identifier2::A;
+}

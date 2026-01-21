@@ -1,0 +1,2 @@
+#[allow(dummy_name)]
+module mismatch_attribute_args {}

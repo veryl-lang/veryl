@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_test (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_test)
+
+  × test is invalid because `cocotb` test requires top module name at the second argument of `#[test]` attribute
+   ╭─[../../testcases/error/invalid_test.veryl:1:8]
+ 1 │ #[test(invalid_test)]
+   ·        ──────┬─────
+   ·              ╰── Error location
+ 2 │ embed (cocotb) py{{{
+   ╰────
+  help:

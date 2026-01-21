@@ -689,6 +689,18 @@ dependencies = [
 
 [[package]]
 name = "console"
+version = "0.15.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "054ccb5b10f9f2cbf51eb355ca1d05c2d279ce1804688d0db74b4733a5aeafd8"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "once_cell",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "console"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03e45a4a8926227e4197636ba97a9fc9b00477e9f4bd711395687c5f0734bec4"
@@ -2244,7 +2256,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "console",
+ "console 0.16.2",
  "handlebars",
  "serde",
  "similar",
@@ -2677,6 +2689,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "insta"
+version = "1.46.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "248b42847813a1550dafd15296fd9748c651d0c32194559dbc05d804d54b21e8"
+dependencies = [
+ "console 0.15.11",
+ "once_cell",
+ "similar",
+ "tempfile",
 ]
 
 [[package]]
@@ -5430,7 +5454,7 @@ dependencies = [
  "anstyle",
  "clap",
  "clap_complete",
- "console",
+ "console 0.16.2",
  "fern",
  "futures",
  "handlebars",
@@ -5645,6 +5669,8 @@ name = "veryl-tests"
 version = "0.1.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "insta",
+ "miette",
  "pprof",
  "veryl",
  "veryl-analyzer",

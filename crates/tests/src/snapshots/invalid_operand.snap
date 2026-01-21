@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_operand (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_operand)
+
+  × type cannot be used as a operand of + operator
+   ╭─[../../testcases/error/invalid_operand.veryl:2:22]
+ 1 │ module invalid_operand {
+ 2 │     let _a: logic = +logic;
+   ·                      ──┬──
+   ·                        ╰── Error location
+ 3 │ }
+   ╰────
+  help:

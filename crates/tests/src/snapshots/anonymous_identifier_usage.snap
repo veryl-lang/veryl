@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+anonymous_identifier_usage (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#anonymous_identifier_usage)
+
+  × Anonymous identifier can't be placed at here
+   ╭─[../../testcases/error/anonymous_identifier_usage.veryl:2:9]
+ 1 │ module anonymous_identifier_usage {
+ 2 │     var _: logic;
+   ·         ┬
+   ·         ╰── Error location
+ 3 │ }
+   ╰────
+  help:

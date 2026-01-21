@@ -1,0 +1,11 @@
+module unevaluable_value_case_condition {
+    let a: logic = 1;
+    var b: logic;
+
+    always_comb {
+        case 1 {
+            a      : b = 1;
+            default: b = 0;
+        }
+    }
+}

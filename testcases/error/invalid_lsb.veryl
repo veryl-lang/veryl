@@ -1,0 +1,3 @@
+module invalid_lsb {
+    let _a: logic = lsb;
+}

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+too_large_number (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_large_number)
+
+  × number is over the maximum size of 1 bits
+   ╭─[../../testcases/error/too_large_number.veryl:2:20]
+ 1 │ module too_large_number {
+ 2 │     const a: u32 = 1'd10;
+   ·                    ──┬──
+   ·                      ╰── Error location
+ 3 │ }
+   ╰────
+  help: increase bit width

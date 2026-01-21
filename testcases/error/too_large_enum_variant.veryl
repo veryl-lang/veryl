@@ -1,0 +1,5 @@
+module too_large_enum_variant {
+    enum EnumA: logic<1> {
+        X = 10,
+    }
+}

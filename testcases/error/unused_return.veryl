@@ -1,0 +1,9 @@
+module unused_return {
+    function FuncA () -> logic {
+        return 0;
+    }
+
+    always_comb {
+        FuncA();
+    }
+}

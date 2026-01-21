@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_type_declaration (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_type_declaration)
+
+  × enum can't be declared in interface declaration
+   ╭─[../../testcases/error/invalid_type_declaration.veryl:2:5]
+ 1 │     interface invalid_type_declaration {
+ 2 │ ╭─▶     enum X {
+ 3 │ │           X,
+ 4 │ ├─▶     }
+   · ╰──── Error location
+ 5 │     }
+   ╰────
+  help:

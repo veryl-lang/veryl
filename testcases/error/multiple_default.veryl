@@ -1,0 +1,4 @@
+module multiple_default_clock {
+    let _a: 'a default clock = 0;
+    let _b: 'b default clock = 0;
+}

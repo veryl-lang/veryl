@@ -1,0 +1,4 @@
+module invalid_embed_identifier {}
+embed (cocotb) py{{{
+    \{ invalid_embed_identifier \}
+}}}

@@ -1,0 +1,3 @@
+module unenclosed_inner_if_expression {
+    let _a: logic = if 1'b1 ? if 1'b1 ? 1 : 0 : 0;
+}

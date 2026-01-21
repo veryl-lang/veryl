@@ -86,3 +86,7 @@ debug = true
 [profile.release-verylup]
 inherits = "release"
 lto = false
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3

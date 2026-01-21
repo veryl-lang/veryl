@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+cyclic_type_dependency (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#cyclic_type_dependency)
+
+  × Cyclic dependency between "StructA" and "StructA"
+   ╭─[../../testcases/error/cyclic_type_dependency.veryl:2:12]
+ 1 │ module cyclic_type_dependency {
+ 2 │     struct StructA {
+   ·            ───┬───
+   ·               ╰── Error location
+ 3 │         a: StructA,
+   ╰────
+  help:

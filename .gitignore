@@ -16,6 +16,7 @@ veryl_testcase.*
 /testcases/filelist/src/*.sv
 /testcases/filelist/*.f
 /testcases/filelist/Veryl.lock
+/testcases/error/dependencies/
 /crates/metadata/std/
 /crates/std/veryl/*.f
 /crates/std/veryl/target/

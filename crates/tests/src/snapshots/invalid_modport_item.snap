@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_modport_item (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_modport_item)
+
+  × "a" is not a function
+   ╭─[../../testcases/error/invalid_modport_item.veryl:4:9]
+ 3 │     modport m {
+ 4 │         a: import,
+   ·         ┬
+   ·         ╰── Error location
+ 5 │     }
+   ╰────
+  help:

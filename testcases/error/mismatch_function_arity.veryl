@@ -1,0 +1,9 @@
+module mismatch_function_arity {
+    function FuncA (
+        a: input u32,
+    ) -> u32 {
+        return a;
+    }
+
+    let _a: u32 = FuncA(1, 1);
+}

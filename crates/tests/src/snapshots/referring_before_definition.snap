@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+referring_before_definition (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#referring_before_definition)
+
+  × "b" is referred before it is defined.
+   ╭─[../../testcases/error/referring_before_definition.veryl:2:21]
+ 1 │ module referring_before_definition {
+ 2 │     let _a: logic = b;
+   ·                     ┬
+   ·                     ╰── Error location
+ 3 │     let b : logic = 1;
+   ╰────
+  help: move definition before reference point

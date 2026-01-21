@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+exceed_limit (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#exceed_limit)
+
+  × exceed hierarchy depth limit: 129
+   ╭─[../../testcases/error/exceed_limit_hierarch_depth.veryl:4:10]
+ 3 │ ) {
+ 4 │     inst u: exceed_limit_hierarchy_depth #( X: X + 1 );
+   ·          ┬
+   ·          ╰── Error location
+ 5 │ }
+   ╰────
+  help:

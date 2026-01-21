@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_if_reset (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_if_reset)
+
+  × if_reset statement is required for always_ff with reset signal
+   ╭─[../../testcases/error/missing_if_reset.veryl:5:5]
+ 4 │ 
+ 5 │     always_ff (clk, rst) {}
+   ·     ───────────┬───────────
+   ·                ╰── Error location
+ 6 │ }
+   ╰────
+  help: add if_reset statement

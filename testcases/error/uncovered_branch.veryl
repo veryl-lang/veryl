@@ -1,0 +1,10 @@
+module uncovered_branch {
+    let a: logic = 0;
+    var b: logic;
+
+    always_comb {
+        if a {
+            b = 1;
+        }
+    }
+}

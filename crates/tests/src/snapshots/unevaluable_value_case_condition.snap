@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unevaluatable_value (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unevaluatable_value)
+
+  × Value, which is not evaluable at elaboration, can't be used as case condition
+   ╭─[../../testcases/error/unevaluable_value_case_condition.veryl:7:13]
+ 6 │         case 1 {
+ 7 │             a      : b = 1;
+   ·             ┬
+   ·             ╰── Error location
+ 8 │             default: b = 0;
+   ╰────
+  help:

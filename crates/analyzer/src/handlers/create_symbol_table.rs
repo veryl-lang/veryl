@@ -1,4 +1,6 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{
+    AnalyzerError, InvalidModifierKind, InvalidTestKind, MultipleDefaultKind, UnevaluableValueKind,
+};
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
@@ -296,15 +298,15 @@ impl CreateSymbolTable {
             _ => unreachable!(),
         };
         let can_be_default_clock = r#type.can_be_default_clock();
-        let can_be_default_reest = r#type.can_be_default_reset();
+        let can_be_default_reset = r#type.can_be_default_reset();
         let in_module_top_hierarchy = *self.affiliation.last().unwrap() == Affiliation::Module
             && self.namespace.depth() == self.module_namspace_depth;
 
         if let Some(default_modifier) = r#type.find_modifier(&TypeModifierKind::Default) {
             let error_reason = if !in_module_top_hierarchy {
-                Some("here is not the module top layer")
-            } else if !(can_be_default_clock || can_be_default_reest) {
-                Some("the given type is not a single bit clock nor a single bit reset")
+                Some(InvalidModifierKind::NotTopModule)
+            } else if !(can_be_default_clock || can_be_default_reset) {
+                Some(InvalidModifierKind::NotClockReset)
             } else {
                 None
             };
@@ -320,16 +322,18 @@ impl CreateSymbolTable {
             if can_be_default_clock && self.default_clock.is_none() {
                 self.default_clock = Some(id);
             } else if can_be_default_clock {
-                self.errors.push(AnalyzerError::multiple_default_clock(
+                self.errors.push(AnalyzerError::multiple_default(
+                    MultipleDefaultKind::Clock,
                     &identifier.to_string(),
                     &identifier.into(),
                 ));
             }
 
-            if can_be_default_reest && self.default_reset.is_none() {
+            if can_be_default_reset && self.default_reset.is_none() {
                 self.default_reset = Some(id);
-            } else if can_be_default_reest {
-                self.errors.push(AnalyzerError::multiple_default_reset(
+            } else if can_be_default_reset {
+                self.errors.push(AnalyzerError::multiple_default(
+                    MultipleDefaultKind::Reset,
                     &identifier.to_string(),
                     &identifier.into(),
                 ));
@@ -337,7 +341,7 @@ impl CreateSymbolTable {
         } else if in_module_top_hierarchy {
             if can_be_default_clock {
                 self.default_clock_candidates.push(id);
-            } else if can_be_default_reest {
+            } else if can_be_default_reset {
                 self.defualt_reset_candidates.push(id);
             }
         }
@@ -378,7 +382,7 @@ impl CreateSymbolTable {
                             _ => true,
                         };
                         if !valid_variant {
-                            self.errors.push(AnalyzerError::invalid_enum_variant_value(
+                            self.errors.push(AnalyzerError::invalid_enum_variant(
                                 &arg.identifier.identifier_token.to_string(),
                                 &self.enum_encoding.to_string(),
                                 &arg.identifier.as_ref().into(),
@@ -399,8 +403,8 @@ impl CreateSymbolTable {
             } else if self.enum_encoding == EnumEncodingItem::Sequential {
                 EnumMemberValue::ExplicitValue(*x.expression.clone(), None)
             } else {
-                self.errors.push(AnalyzerError::unevaluatable_enum_variant(
-                    &arg.identifier.identifier_token.to_string(),
+                self.errors.push(AnalyzerError::unevaluable_value(
+                    UnevaluableValueKind::EnumVariant,
                     &arg.identifier.as_ref().into(),
                 ));
                 EnumMemberValue::UnevaluableValue
@@ -408,8 +412,8 @@ impl CreateSymbolTable {
         } else if let Some(value) = self.enum_variant_next_value() {
             EnumMemberValue::ImplicitValue(value)
         } else {
-            self.errors.push(AnalyzerError::unevaluatable_enum_variant(
-                &arg.identifier.identifier_token.to_string(),
+            self.errors.push(AnalyzerError::unevaluable_value(
+                UnevaluableValueKind::EnumVariant,
                 &arg.identifier.as_ref().into(),
             ));
             EnumMemberValue::UnevaluableValue
@@ -2510,8 +2514,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     };
 
                     if top.is_none() && way == "cocotb" {
-                        self.errors
-                            .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", &token.into()));
+                        self.errors.push(AnalyzerError::invalid_test(
+                            InvalidTestKind::NoTopModuleCocotb,
+                            &token.into(),
+                        ));
                     }
 
                     let property = TestProperty { r#type, path, top };
@@ -2560,8 +2566,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
 
                 if top.is_none() && way == "cocotb" {
-                    self.errors
-                        .push(AnalyzerError::invalid_test("`cocotb` test requires top module name at the second argument of `#[test]` attribute", &token.into()));
+                    self.errors.push(AnalyzerError::invalid_test(
+                        InvalidTestKind::NoTopModuleCocotb,
+                        &token.into(),
+                    ));
                 }
 
                 let property = TestProperty { r#type, path, top };

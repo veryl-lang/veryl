@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncArg, FuncPath, FuncProto,
@@ -396,7 +396,11 @@ impl Context {
 
     pub fn check_size(&mut self, x: usize, token: TokenRange) -> Option<usize> {
         if x > self.config.evaluate_size_limit {
-            self.insert_error(AnalyzerError::exceed_limit("evaluate size", x, &token));
+            self.insert_error(AnalyzerError::exceed_limit(
+                ExceedLimitKind::EvaluateSize,
+                x,
+                &token,
+            ));
             None
         } else {
             Some(x)

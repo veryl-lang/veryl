@@ -1,0 +1,4 @@
+module missing_clock_domain {
+    let _a: clock = 1;
+    let _b: clock = 1;
+}

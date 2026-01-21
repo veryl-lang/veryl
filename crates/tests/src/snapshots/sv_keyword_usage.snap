@@ -1,0 +1,13 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+sv_keyword_usage (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_keyword_usage)
+
+  × SystemVerilog keyword may not be used as identifier
+   ╭─[../../testcases/error/sv_keyword_usage.veryl:1:8]
+ 1 │ module always {}
+   ·        ───┬──
+   ·           ╰── Error location
+   ╰────
+  help: Change the identifier to a non-SystemVerilog keyword

@@ -1,0 +1,5 @@
+module invalid_port_default_value (
+    a: output logic = 0,
+) {
+    assign a = 0;
+}

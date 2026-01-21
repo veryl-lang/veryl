@@ -1,0 +1,3 @@
+module unassign_variable {
+    var _a: logic;
+}

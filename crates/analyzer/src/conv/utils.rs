@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, UnevaluableValueKind};
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_args;
@@ -522,7 +522,8 @@ pub fn eval_variable(
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
     let comptime = expr.eval_comptime(context, None);
     if context.in_if_reset && !comptime.is_const {
-        context.insert_error(AnalyzerError::invalid_reset_non_elaborative(
+        context.insert_error(AnalyzerError::unevaluable_value(
+            UnevaluableValueKind::ResetValue,
             &comptime.token,
         ));
     }
@@ -1323,7 +1324,8 @@ fn range_item(
 
     let comptime = exp.eval_comptime(context, None);
     if !comptime.is_const {
-        context.insert_error(AnalyzerError::invalid_case_condition_non_elaborative(
+        context.insert_error(AnalyzerError::unevaluable_value(
+            UnevaluableValueKind::CaseCondition,
             &range_item.into(),
         ));
     }
@@ -1333,7 +1335,8 @@ fn range_item(
 
         let comptime = exp0.eval_comptime(context, None);
         if !comptime.is_const {
-            context.insert_error(AnalyzerError::invalid_case_condition_non_elaborative(
+            context.insert_error(AnalyzerError::unevaluable_value(
+                UnevaluableValueKind::CaseCondition,
                 &range_item.into(),
             ));
         }
@@ -1406,7 +1409,9 @@ pub fn argument_list(context: &mut Context, value: &ArgumentList) -> IrResult<Ar
         context.insert_error(AnalyzerError::mixed_function_argument(&value.into()));
     }
 
-    let ret = if !named.is_empty() {
+    let ret = if !positional.is_empty() && !named.is_empty() {
+        Arguments::Mixed(positional, named)
+    } else if !named.is_empty() {
         Arguments::Named(named)
     } else if !positional.is_empty() {
         Arguments::Positional(positional)
@@ -1440,14 +1445,14 @@ pub fn get_component(
             match x {
                 InstanceHistoryError::ExceedDepthLimit(x) => {
                     context.insert_error(AnalyzerError::exceed_limit(
-                        "hierarchy depth limit",
+                        ExceedLimitKind::HierarchyDepth,
                         x,
                         &token,
                     ));
                 }
                 InstanceHistoryError::ExceedTotalLimit(x) => {
                     context.insert_error(AnalyzerError::exceed_limit(
-                        "total instance limit",
+                        ExceedLimitKind::TotalInstance,
                         x,
                         &token,
                     ));
@@ -1967,7 +1972,7 @@ pub fn function_call(
 
     let ret = context.block(|c| {
         let proto = get_function(c, &path, token)?;
-        let (inputs, outputs) = args.to_function_args(c, &proto)?;
+        let (inputs, outputs) = args.to_function_args(c, &proto, token)?;
         Ok(ir::FunctionCall {
             id: proto.id,
             index,

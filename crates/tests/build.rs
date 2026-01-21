@@ -4,16 +4,14 @@ use std::io::Write;
 use std::path::Path;
 use walkdir::WalkDir;
 
-fn main() {
-    println!("cargo:rerun-if-changed=../../testcases");
-
+fn gather_test(path: &str, tgt: &str) {
     let out_dir = env::var("OUT_DIR").unwrap();
-    let out_test = Path::new(&out_dir).join("test.rs");
+    let out_test = Path::new(&out_dir).join(tgt);
     let mut out_test = File::create(out_test).unwrap();
 
     let mut testcases = Vec::new();
 
-    for entry in WalkDir::new("../../testcases/veryl") {
+    for entry in WalkDir::new(format!("../../testcases/{}", path)) {
         let entry = entry.unwrap();
         if entry.file_type().is_file()
             && let Some(x) = entry.path().extension()
@@ -41,4 +39,11 @@ fn main() {
         let _ = writeln!(out_test, "    r\"{testcase}\",");
     }
     let _ = writeln!(out_test, "];");
+}
+
+fn main() {
+    println!("cargo:rerun-if-changed=../../testcases");
+
+    gather_test("veryl", "test.rs");
+    gather_test("error", "error_test.rs");
 }

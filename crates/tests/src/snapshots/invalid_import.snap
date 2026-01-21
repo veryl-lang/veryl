@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_import (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_import)
+
+  × This item can't be imported
+   ╭─[../../testcases/error/invalid_import.veryl:3:12]
+ 2 │     let a: logic = 0;
+ 3 │     import a::*;
+   ·            ┬
+   ·            ╰── Error location
+ 4 │ }
+   ╰────
+  help: fix import item

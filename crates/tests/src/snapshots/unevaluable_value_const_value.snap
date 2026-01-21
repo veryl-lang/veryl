@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unevaluatable_value (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unevaluatable_value)
+
+  × Value, which is not evaluable at elaboration, can't be used as const value
+   ╭─[../../testcases/error/unevaluable_value_const_value.veryl:3:22]
+ 2 │     let a: logic = 1;
+ 3 │     const b: logic = a;
+   ·                      ┬
+   ·                      ╰── Error location
+ 4 │ }
+   ╰────
+  help:

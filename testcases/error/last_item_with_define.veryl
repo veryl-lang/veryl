@@ -1,0 +1,7 @@
+module last_item_with_define {
+    enum A {
+        X,
+        #[ifdef(A)]
+        Y,
+    }
+}

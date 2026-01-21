@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unsigned_loop_variable_in_descending_order_for_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unsigned_loop_variable_in_descending_order_for_loop)
+
+  ⚠ use of unsigned loop variable in descending order for loop may cause infinite loop
+   ╭─[../../testcases/error/unsigned_loop_variable_in_descending_order_for_loop.veryl:3:13]
+ 2 │     always_comb {
+ 3 │         for _i: u32 in rev 0..32 {}
+   ·             ─┬
+   ·              ╰── Error location
+ 4 │     }
+   ╰────
+  help: use singed type as loop variable

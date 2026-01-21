@@ -1,0 +1,5 @@
+module invalid_assignment (
+    a: input logic,
+) {
+    assign a = 1;
+}

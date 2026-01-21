@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unenclosed_inner_if_expression (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unenclosed_inner_if_expression)
+
+  ⚠ inner if expression should be enclosed in parenthesis, but is not
+   ╭─[../../testcases/error/unenclosed_inner_if_expression.veryl:2:31]
+ 1 │ module unenclosed_inner_if_expression {
+ 2 │     let _a: logic = if 1'b1 ? if 1'b1 ? 1 : 0 : 0;
+   ·                               ───────┬───────
+   ·                                      ╰── Error location
+ 3 │ }
+   ╰────
+  help: enclose the inner if expression in parenthesis

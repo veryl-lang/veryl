@@ -1,0 +1,4 @@
+module invalid_cast {
+    let a : clock = 0;
+    let _b: reset = (a as reset);
+}

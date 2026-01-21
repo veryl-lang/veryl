@@ -1,0 +1,4 @@
+module invalid_select {
+    let _a: logic<2> = 1;
+    let _b: logic    = _a[2];
+}

@@ -1,0 +1,5 @@
+module unknown_param {
+    inst u: unknown_param2 #( a: 1 );
+}
+
+module unknown_param2 {}

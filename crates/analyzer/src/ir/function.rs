@@ -309,6 +309,7 @@ pub type FunctionArgs = (
 pub enum Arguments {
     Positional(PositionalArgs),
     Named(NamedArgs),
+    Mixed(PositionalArgs, NamedArgs),
     Null,
 }
 
@@ -321,6 +322,7 @@ impl Arguments {
         match self {
             Arguments::Positional(x) => x.len(),
             Arguments::Named(x) => x.len(),
+            Arguments::Mixed(x, y) => x.len() + y.len(),
             Arguments::Null => 0,
         }
     }
@@ -336,6 +338,7 @@ impl Arguments {
                 // TODO error
                 return vec![];
             }
+            Arguments::Mixed(_, _) => vec![],
             Arguments::Null => vec![],
         };
 
@@ -361,6 +364,7 @@ impl Arguments {
         self,
         context: &mut Context,
         func: &FuncProto,
+        token: TokenRange,
     ) -> IrResult<FunctionArgs> {
         let mut inputs = HashMap::default();
         let mut outputs = HashMap::default();
@@ -370,7 +374,7 @@ impl Arguments {
                 &func.name.to_string(),
                 func.arity,
                 self.len(),
-                &func.token,
+                &token,
             ));
             return Err(ir_error!(func.token));
         }
@@ -398,6 +402,7 @@ impl Arguments {
                     }
                 }
             }
+            Arguments::Mixed(_, _) => (),
             Arguments::Null => (),
         };
 

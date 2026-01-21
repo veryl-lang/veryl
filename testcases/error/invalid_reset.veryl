@@ -1,0 +1,8 @@
+module invalid_reset {
+    let clk: clock = 0;
+    let rst: logic = 0;
+
+    always_ff (clk, rst) {
+        if_reset {}
+    }
+}

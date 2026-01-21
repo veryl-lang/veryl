@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mismatch_function_arity (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_function_arity)
+
+  × function "FuncA" has 1 arguments, but 2 arguments are supplied
+   ╭─[../../testcases/error/mismatch_function_arity.veryl:8:19]
+ 7 │ 
+ 8 │     let _a: u32 = FuncA(1, 1);
+   ·                   ─────┬─────
+   ·                        ╰── Error location
+ 9 │ }
+   ╰────
+  help: fix function arguments

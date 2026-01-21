@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_attribute (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_attribute)
+
+  × "dummy_name" is not valid attribute
+   ╭─[../../testcases/error/unknown_attribute.veryl:1:3]
+ 1 │ #[dummy_name]
+   ·   ─────┬────
+   ·        ╰── Error location
+ 2 │ module unknown_attribute {}
+   ╰────
+  help:

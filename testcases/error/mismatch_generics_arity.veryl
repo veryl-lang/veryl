@@ -1,0 +1,7 @@
+package mismatch_generics_arity_pkg::<X: u32> {
+    const A: u32 = 1;
+}
+
+module mismatch_generics_arity {
+    let _a: logic = mismatch_generics_arity_pkg::<1, 1>::A;
+}

@@ -1,0 +1,13 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+reserved_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#reserved_identifier)
+
+  × "__reserved_identifier" is reverved for compiler usage
+   ╭─[../../testcases/error/reserved_identifier.veryl:1:8]
+ 1 │ module __reserved_identifier {}
+   ·        ──────────┬──────────
+   ·                  ╰── Error location
+   ╰────
+  help: prefix `__` can't be used

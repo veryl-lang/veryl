@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_reset_signal (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_reset_signal)
+
+  × reset signal is required for always_ff with if_reset statement
+   ╭─[../../testcases/error/missing_reset_signal.veryl:4:5]
+ 3 │     
+ 4 │ ╭─▶     always_ff {
+ 5 │ │           if_reset {}
+ 6 │ ├─▶     }
+   · ╰──── Error location
+ 7 │     }
+   ╰────
+  help: add reset port

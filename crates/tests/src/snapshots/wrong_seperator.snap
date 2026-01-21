@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+wrong_seperator (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#wrong_seperator)
+
+  × separator "::" can't be used at here
+   ╭─[../../testcases/error/wrong_seperator.veryl:7:24]
+ 6 │     let a : StructA = 1;
+ 7 │     let _b: logic   = a::a;
+   ·                        ─┬
+   ·                         ╰── Error location
+ 8 │ }
+   ╰────
+  help: replace valid separator "."

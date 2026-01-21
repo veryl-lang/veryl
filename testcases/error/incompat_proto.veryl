@@ -1,0 +1,4 @@
+proto interface incompat_proto_proto #(
+    param P: u32 = 0,
+) {}
+interface incompat_proto_interface for incompat_proto_proto {}

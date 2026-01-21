@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_default_argument (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_default_argument)
+
+  × missing default argument for parameter "A"
+   ╭─[../../testcases/error/missing_default_argument.veryl:2:11]
+ 1 │ module missing_default_argument #(
+ 2 │     param A: u32,
+   ·           ┬
+   ·           ╰── Error location
+ 3 │ ) {}
+   ╰────
+  help: give default argument

@@ -1,0 +1,7 @@
+module missing_reset_signal {
+    let a: clock = 1;
+
+    always_ff {
+        if_reset {}
+    }
+}

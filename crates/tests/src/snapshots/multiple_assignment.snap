@@ -1,0 +1,21 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+multiple_assignment (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#multiple_assignment)
+
+  × "a" is assigned in multiple procedural blocks or assignment statements
+    ╭─[../../testcases/error/multiple_assignment.veryl:5:9]
+  4 │     always_comb {
+  5 │         a = 1;
+    ·         ┬
+    ·         ╰── Assigned
+  6 │     }
+  7 │ 
+  8 │     always_comb {
+  9 │         a = 1;
+    ·         ┬
+    ·         ╰── Assigned
+ 10 │     }
+    ╰────
+  help:

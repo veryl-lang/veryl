@@ -1,0 +1,5 @@
+module invalid_clock {
+    let a: logic<10> = 0;
+
+    always_ff (a) {}
+}

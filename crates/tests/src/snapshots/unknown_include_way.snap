@@ -1,0 +1,13 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_include_way (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_include_way)
+
+  × "dummy" is not valid include way
+   ╭─[../../testcases/error/unknown_include_way.veryl:1:10]
+ 1 │ include (dummy, "Veryl.toml");
+   ·          ──┬──
+   ·            ╰── Error location
+   ╰────
+  help:

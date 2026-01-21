@@ -1,0 +1,3 @@
+module invalid_number_character {
+    let _a: logic = 'b123;
+}

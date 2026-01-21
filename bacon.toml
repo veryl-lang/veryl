@@ -8,7 +8,7 @@
 default_job = "check"
 on_change_strategy = "kill_then_restart"
 ignored_lines = ["warning: veryl-std.*", "warning: veryl-parser.*"]
-ignore = ["crates/parser/src/generated/*"]
+ignore = ["crates/parser/src/generated/*", "crates/tests/src/snapshots/*"]
 
 [jobs.build]
 command = ["cargo", "build", "--color", "always"]

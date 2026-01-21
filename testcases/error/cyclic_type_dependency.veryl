@@ -1,0 +1,5 @@
+module cyclic_type_dependency {
+    struct StructA {
+        a: StructA,
+    }
+}

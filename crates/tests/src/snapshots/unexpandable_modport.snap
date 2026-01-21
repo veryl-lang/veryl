@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unexpandable_modport (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unexpandable_modport)
+
+  × "a" can't be expanded
+    ╭─[../../testcases/error/unexpandable_modport.veryl:12:5]
+ 11 │ module unexpandable_modport (
+ 12 │     a: modport unexpandable_modport_if::m,
+    ·     ┬
+    ·     ╰── Error location
+ 13 │ ) {}
+    ╰────
+  help:

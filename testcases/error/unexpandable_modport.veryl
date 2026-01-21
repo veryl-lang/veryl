@@ -1,0 +1,13 @@
+interface unexpandable_modport_if #(
+    param W: u32 = 1,
+) {
+    var a: logic<W>;
+    modport m {
+        a: input,
+    }
+}
+
+#[expand(modport)]
+module unexpandable_modport (
+    a: modport unexpandable_modport_if::m,
+) {}

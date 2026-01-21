@@ -1,0 +1,11 @@
+module multiple_assignment {
+    var a: logic;
+
+    always_comb {
+        a = 1;
+    }
+
+    always_comb {
+        a = 1;
+    }
+}

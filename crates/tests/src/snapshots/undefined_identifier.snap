@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+undefined_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#undefined_identifier)
+
+  × "x" is undefined
+   ╭─[../../testcases/error/undefined_identifier.veryl:2:21]
+ 1 │ module undefined_identifier {
+ 2 │     let _a: logic = x;
+   ·                     ┬
+   ·                     ╰── Error location
+ 3 │ }
+   ╰────
+  help:

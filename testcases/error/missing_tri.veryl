@@ -1,0 +1,5 @@
+module missing_tri (
+    a: inout logic,
+) {
+    assign a = 0;
+}

@@ -1,0 +1,6 @@
+module mismatch_clock_domain {
+    let a: 'v logic = 0;
+    var b: 'w logic;
+
+    assign b = a;
+}

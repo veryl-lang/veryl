@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unassign_variable (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unassign_variable)
+
+  ⚠ "a" is unassigned
+   ╭─[../../testcases/error/unassign_variable_struct.veryl:7:9]
+ 6 │ 
+ 7 │     var a: StructA;
+   ·         ┬
+   ·         ╰── Error location
+ 8 │ 
+   ╰────
+  help:

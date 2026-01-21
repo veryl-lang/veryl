@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unassignable_output (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unassignable_output)
+
+  × unassignable type is connected to output port
+   ╭─[../../testcases/error/unassignable_output.veryl:3:12]
+ 2 │     inst u: unassignable_output2 (
+ 3 │         a: 1,
+   ·            ┬
+   ·            ╰── Error location
+ 4 │     );
+   ╰────
+  help:

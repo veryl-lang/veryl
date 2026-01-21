@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_clock_signal (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_clock_signal)
+
+  × clock signal is required for always_ff statement
+   ╭─[../../testcases/error/missing_clock_signal.veryl:2:5]
+ 1 │ module missing_clock_signal {
+ 2 │     always_ff {}
+   ·     ──────┬─────
+   ·           ╰── Error location
+ 3 │ }
+   ╰────
+  help: add clock port

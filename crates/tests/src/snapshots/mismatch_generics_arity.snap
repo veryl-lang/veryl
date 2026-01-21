@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mismatch_generics_arity (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_generics_arity)
+
+  × generics "mismatch_generics_arity_pkg" has 1 generic arguments, but 2 arguments are supplied
+   ╭─[../../testcases/error/mismatch_generics_arity.veryl:6:21]
+ 5 │ module mismatch_generics_arity {
+ 6 │     let _a: logic = mismatch_generics_arity_pkg::<1, 1>::A;
+   ·                     ───────────────────┬──────────────────
+   ·                                        ╰── Error location
+ 7 │ }
+   ╰────
+  help: fix generics arguments

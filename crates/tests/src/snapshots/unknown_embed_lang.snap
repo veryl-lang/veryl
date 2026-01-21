@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_embed_lang (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_embed_lang)
+
+  × "dummy" is not valid embed language
+   ╭─[../../testcases/error/unknown_embed_lang.veryl:1:16]
+ 1 │ embed (inline) dummy{{{
+   ·                ──┬──
+   ·                  ╰── Error location
+ 2 │ }}}
+   ╰────
+  help:

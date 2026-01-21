@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_member (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_member)
+
+  × "a" doesn't have member "a"
+   ╭─[../../testcases/error/unknown_member.veryl:8:12]
+ 7 │     assign a.x = 1;
+ 8 │     assign a.a = 1;
+   ·            ─┬─
+   ·             ╰── Error location
+ 9 │ }
+   ╰────
+  help:

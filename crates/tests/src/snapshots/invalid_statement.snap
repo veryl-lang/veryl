@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_statement (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_statement)
+
+  × return statement can't be placed at here
+   ╭─[../../testcases/error/invalid_statement.veryl:3:9]
+ 2 │     always_comb {
+ 3 │         return 1;
+   ·         ───┬──
+   ·            ╰── Error location
+ 4 │     }
+   ╰────
+  help: remove return statement

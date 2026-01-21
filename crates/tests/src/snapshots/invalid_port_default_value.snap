@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_port_default_value (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_port_default_value)
+
+  × Only '_' is supported for output default value
+   ╭─[../../testcases/error/invalid_port_default_value.veryl:2:23]
+ 1 │ module invalid_port_default_value (
+ 2 │     a: output logic = 0,
+   ·                       ┬
+   ·                       ╰── Error location
+ 3 │ ) {
+   ╰────
+  help:

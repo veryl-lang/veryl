@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, InvalidConnectOperandKind};
 use crate::connect_operation_table::{self, ConnectOperand, ConnectOperation};
 use crate::symbol::{Direction, Symbol};
 use crate::symbol_table::{self, Connect};
@@ -54,14 +54,14 @@ fn is_valid_operation(
         if includes_inout_ports(&operation.lhs) {
             return Err(AnalyzerError::invalid_connect_operand(
                 &lhs_token.to_string(),
-                "modport including inout ports can't be used at here",
+                InvalidConnectOperandKind::IncludeInout,
                 &lhs_token.into(),
             ));
         }
         if includes_inout_ports(&operation.rhs) {
             return Err(AnalyzerError::invalid_connect_operand(
                 &rhs_token.to_string(),
-                "modport including inout ports can't be used at here",
+                InvalidConnectOperandKind::IncludeInout,
                 &rhs_token.into(),
             ));
         }
@@ -72,7 +72,7 @@ fn is_valid_operation(
             if includes_unemittable_cast(&port, None) {
                 return Err(AnalyzerError::invalid_connect_operand(
                     &lhs_token.to_string(),
-                    "modport including variables of which type is defined in the interface can't be used for a connect operand",
+                    InvalidConnectOperandKind::UnemittableCast,
                     &lhs_token.into(),
                 ));
             }
@@ -88,7 +88,7 @@ fn is_valid_operation(
             if includes_unemittable_cast(target, Some(driver)) {
                 return Err(AnalyzerError::invalid_connect_operand(
                     &target_token.to_string(),
-                    "modport including variables of which type is defined in the interface can't be used for a connect operand",
+                    InvalidConnectOperandKind::UnemittableCast,
                     &target_token.into(),
                 ));
             }

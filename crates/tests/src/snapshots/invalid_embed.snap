@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_embed (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_embed)
+
+  × embed (way: inline/lang: py) can't be used at here
+   ╭─[../../testcases/error/invalid_embed.veryl:2:12]
+ 1 │ module invalid_embed {
+ 2 │     embed (inline) py{{{
+   ·            ───┬──
+   ·               ╰── Error location
+ 3 │     }}}
+   ╰────
+  help:

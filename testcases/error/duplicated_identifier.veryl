@@ -1,0 +1,4 @@
+module duplicated_identifier {
+    let _a: logic = 1;
+    let _a: logic = 1;
+}
