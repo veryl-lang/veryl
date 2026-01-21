@@ -9,7 +9,7 @@ use semver::{Version, VersionReq};
 use similar::{ChangeTag, TextDiff};
 use std::io;
 use std::process;
-use veryl_analyzer::{Analyzer, Context};
+use veryl_analyzer::{Analyzer, AnalyzerError, Context};
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
 
@@ -149,6 +149,13 @@ impl Preprocessor for Veryl {
                                             None,
                                         ));
                                         errors.append(&mut Analyzer::analyze_post_pass2());
+
+                                        let errors: Vec<_> = errors
+                                            .into_iter()
+                                            .filter(|x| {
+                                                !matches!(x, AnalyzerError::UnassignVariable { .. })
+                                            })
+                                            .collect();
 
                                         if !errors.is_empty() {
                                             eprintln!("veryl analyze failed : {path}:{line}:{col}");
