@@ -11,7 +11,7 @@ use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
 use num_bigint::BigUint;
-use std::{fmt, iter};
+use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -56,7 +56,7 @@ impl PartSelectPath {
             pos: 0,
             r#type: self.base.clone(),
         }];
-        let part_select = iter::chain(&base_select, self.part_select.iter());
+        let part_select = itertools::chain(&base_select, self.part_select.iter());
         let len = self.part_select.len() + 1;
 
         for (i, x) in part_select.enumerate() {
