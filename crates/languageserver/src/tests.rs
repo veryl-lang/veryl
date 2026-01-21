@@ -8,9 +8,9 @@ use std::env;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tower_lsp_server::jsonrpc::{Id, Request, Response};
-use tower_lsp_server::lsp_types::Uri as Url;
-use tower_lsp_server::lsp_types::*;
-use tower_lsp_server::{Client, LanguageServer, LspService, Server, UriExt};
+use tower_lsp_server::ls_types::Uri as Url;
+use tower_lsp_server::ls_types::*;
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 struct TestServer {
     req_stream: DuplexStream,
