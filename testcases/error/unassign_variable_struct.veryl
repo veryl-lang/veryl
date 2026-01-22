@@ -1,0 +1,10 @@
+module unassign_variable_struct {
+    struct StructA {
+        x: logic,
+        y: logic,
+    }
+
+    var a: StructA;
+
+    assign a.x = 0;
+}

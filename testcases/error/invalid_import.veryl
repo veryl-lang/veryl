@@ -1,0 +1,4 @@
+module invalid_import {
+    let a: logic = 0;
+    import a::*;
+}

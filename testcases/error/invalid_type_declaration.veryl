@@ -1,0 +1,5 @@
+interface invalid_type_declaration {
+    enum X {
+        X,
+    }
+}

@@ -1,0 +1,9 @@
+module unknown_member {
+    struct StructA {
+        x: logic,
+    }
+
+    var a  : StructA;
+    assign a.x = 1;
+    assign a.a = 1;
+}

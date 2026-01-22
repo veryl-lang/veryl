@@ -1,5 +1,5 @@
 use crate::HashMap;
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, InvalidConnectOperandKind};
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
 use std::cell::RefCell;
@@ -163,7 +163,10 @@ fn mismatch_type(symbol: &Symbol, expected: &str) -> Option<AnalyzerError> {
     Some(error)
 }
 
-fn invalid_connect_operand(symbol: &Symbol, reason: &str) -> Option<AnalyzerError> {
+fn invalid_connect_operand(
+    symbol: &Symbol,
+    reason: InvalidConnectOperandKind,
+) -> Option<AnalyzerError> {
     let error = AnalyzerError::invalid_connect_operand(
         &symbol.token.to_string(),
         reason,
@@ -213,8 +216,10 @@ impl TryFrom<&HierarchicalIdentifier> for ConnectOperand {
                 };
 
                 if !is_single_element(array, &select) {
-                    let error =
-                        invalid_connect_operand(&instance, "it is an array interface instance");
+                    let error = invalid_connect_operand(
+                        &instance,
+                        InvalidConnectOperandKind::InstanceArray,
+                    );
                     return Err(error);
                 }
 
@@ -237,7 +242,8 @@ impl TryFrom<&HierarchicalIdentifier> for ConnectOperand {
                 }
 
                 if !is_single_element(array, &arg.last_select()) {
-                    let error = invalid_connect_operand(&symbol, "it is an array modport");
+                    let error =
+                        invalid_connect_operand(&symbol, InvalidConnectOperandKind::ModportArray);
                     return Err(error);
                 }
 
@@ -295,8 +301,10 @@ impl TryFrom<&ExpressionIdentifier> for ConnectOperand {
                 };
 
                 if !is_single_element(array, &select) {
-                    let error =
-                        invalid_connect_operand(&instance, "it is an array interface instance");
+                    let error = invalid_connect_operand(
+                        &instance,
+                        InvalidConnectOperandKind::InstanceArray,
+                    );
                     return Err(error);
                 }
 
@@ -319,7 +327,8 @@ impl TryFrom<&ExpressionIdentifier> for ConnectOperand {
                 }
 
                 if !is_single_element(array, &arg.last_select()) {
-                    let error = invalid_connect_operand(&symbol, "it is an array modport");
+                    let error =
+                        invalid_connect_operand(&symbol, InvalidConnectOperandKind::ModportArray);
                     return Err(error);
                 }
 
@@ -386,8 +395,10 @@ impl TryFrom<&Expression> for ConnectOperand {
                 };
 
                 if !is_single_element(array, &select) {
-                    let error =
-                        invalid_connect_operand(&instance, "it is an array interface instance");
+                    let error = invalid_connect_operand(
+                        &instance,
+                        InvalidConnectOperandKind::InstanceArray,
+                    );
                     return Err(error);
                 }
 
@@ -412,7 +423,8 @@ impl TryFrom<&Expression> for ConnectOperand {
                 }
 
                 if !is_single_element(array, &exp.last_select()) {
-                    let error = invalid_connect_operand(&symbol, "it is an array modport");
+                    let error =
+                        invalid_connect_operand(&symbol, InvalidConnectOperandKind::ModportArray);
                     return Err(error);
                 }
 

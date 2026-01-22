@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_unsafe (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_unsafe)
+
+  × "dummy" is not valid unsafe identifier
+   ╭─[../../testcases/error/unknown_unsafe.veryl:2:13]
+ 1 │ module unknown_unsafe {
+ 2 │     unsafe (dummy) {}
+   ·             ──┬──
+   ·               ╰── Error location
+ 3 │ }
+   ╰────
+  help:

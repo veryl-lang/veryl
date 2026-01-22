@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_msb (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_msb)
+
+  × resolving msb is failed
+   ╭─[../../testcases/error/unknown_msb.veryl:2:28]
+ 1 │ module unknown_msb {
+ 2 │     let _a: logic = $sv::A[msb];
+   ·                            ─┬─
+   ·                             ╰── Error location
+ 3 │ }
+   ╰────
+  help:

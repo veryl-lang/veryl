@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+fixed_type_with_signed_modifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#fixed_type_with_signed_modifier)
+
+  × 'signed' modifier can't be used with fixed type
+   ╭─[../../testcases/error/fixed_type_with_signed_modifier.veryl:2:13]
+ 1 │ module fixed_type_with_signed_modifier {
+ 2 │     let _a: signed u32 = 0;
+   ·             ───┬──
+   ·                ╰── Error location
+ 3 │ }
+   ╰────
+  help: remove 'signed` modifier

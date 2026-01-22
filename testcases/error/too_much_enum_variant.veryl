@@ -1,0 +1,7 @@
+module too_much_enum_variant {
+    enum EnumA: logic<1> {
+        X,
+        Y,
+        Z,
+    }
+}

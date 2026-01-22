@@ -1,0 +1,5 @@
+module invalid_clock_domain {
+    inst u: 'a invalid_clock_domain2;
+}
+
+module invalid_clock_domain2 {}

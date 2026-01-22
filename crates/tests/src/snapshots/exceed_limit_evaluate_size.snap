@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+exceed_limit (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#exceed_limit)
+
+  × exceed evaluate size limit: 1000000000
+   ╭─[../../testcases/error/exceed_limit_evaluate_size.veryl:2:31]
+ 1 │ module exceed_limit_evaluate_size {
+ 2 │     let _a: logic = {1 repeat 1000000000};
+   ·                               ─────┬────
+   ·                                    ╰── Error location
+ 3 │ }
+   ╰────
+  help:

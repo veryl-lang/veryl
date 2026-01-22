@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_lsb (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_lsb)
+
+  × lsb can't be placed at here
+   ╭─[../../testcases/error/invalid_lsb.veryl:2:21]
+ 1 │ module invalid_lsb {
+ 2 │     let _a: logic = lsb;
+   ·                     ─┬─
+   ·                      ╰── Error location
+ 3 │ }
+   ╰────
+  help: remove lsb

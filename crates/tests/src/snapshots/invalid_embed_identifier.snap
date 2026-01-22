@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_embed_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_embed_identifier)
+
+  × embed identifier can be used in (way: inline/lang: sv) code block only
+   ╭─[../../testcases/error/invalid_embed_identifier.veryl:3:5]
+ 2 │ embed (cocotb) py{{{
+ 3 │     \{ invalid_embed_identifier \}
+   ·     ───────────────┬──────────────
+   ·                    ╰── Error location
+ 4 │ }}}
+   ╰────
+  help:

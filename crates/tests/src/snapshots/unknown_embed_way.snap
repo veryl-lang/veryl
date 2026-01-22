@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_embed_way (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_embed_way)
+
+  × "dummy" is not valid embed way
+   ╭─[../../testcases/error/unknown_embed_way.veryl:1:8]
+ 1 │ embed (dummy) sv{{{
+   ·        ──┬──
+   ·          ╰── Error location
+ 2 │ }}}
+   ╰────
+  help:

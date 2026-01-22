@@ -232,6 +232,67 @@ mod emitter {
 }
 
 #[cfg(test)]
+mod error {
+    use insta::Settings;
+    use miette::{GraphicalReportHandler, GraphicalTheme, Report};
+    use std::fs;
+    use veryl_analyzer::{Analyzer, Context};
+    use veryl_metadata::Metadata;
+    use veryl_parser::Parser;
+
+    const PLATFORM_DEPENDENT_TESTS: [&str; 1] = ["include_failure"];
+
+    fn test(name: &str) {
+        let name = name.to_string();
+
+        if PLATFORM_DEPENDENT_TESTS.contains(&name.as_str()) && !cfg!(target_os = "linux") {
+            return;
+        }
+
+        // cargo test uses 2MB stack by default
+        // some tests like recursive check need more stack size
+        let builder = std::thread::Builder::new().stack_size(16 * 1024 * 1024);
+        let handler = builder
+            .spawn(move || {
+                let metadata_path = Metadata::search_from_current().unwrap();
+                let metadata = Metadata::load(&metadata_path).unwrap();
+
+                let file = format!("../../testcases/error/{}.veryl", name);
+                let input = fs::read_to_string(&file).unwrap();
+
+                let ret = Parser::parse(&input, &file).unwrap();
+                let prj = &metadata.project.name;
+
+                let mut context = Context::default();
+                let analyzer = Analyzer::new(&metadata);
+                let mut errors = vec![];
+
+                errors.append(&mut analyzer.analyze_pass1(&prj, &ret.veryl));
+                errors.append(&mut Analyzer::analyze_post_pass1());
+                errors.append(&mut analyzer.analyze_pass2(&prj, &ret.veryl, &mut context, None));
+                errors.append(&mut Analyzer::analyze_post_pass2());
+
+                let err = Report::from(errors.remove(0));
+                let mut out = String::new();
+                GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
+                    .with_links(false)
+                    .render_report(&mut out, err.as_ref())
+                    .unwrap();
+
+                let mut settings = Settings::clone_current();
+                settings.set_prepend_module_to_snapshot(false);
+                settings.bind(|| {
+                    insta::assert_snapshot!(name, out);
+                });
+            })
+            .unwrap();
+        handler.join().unwrap()
+    }
+
+    include!(concat!(env!("OUT_DIR"), "/error_test.rs"));
+}
+
+#[cfg(test)]
 mod path {
     use std::path::PathBuf;
     use veryl_metadata::{Metadata, SourceMapTarget, Target};

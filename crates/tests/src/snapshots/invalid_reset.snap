@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_reset (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_reset)
+
+  × "rst" can't be used as a reset because it is not 'reset' type nor a single bit signal
+   ╭─[../../testcases/error/invalid_reset.veryl:3:9]
+ 2 │     let clk: clock = 0;
+ 3 │     let rst: logic = 0;
+   ·         ─┬─
+   ·          ╰── Error location
+ 4 │ 
+   ╰────
+  help:

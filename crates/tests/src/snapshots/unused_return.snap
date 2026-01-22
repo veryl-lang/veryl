@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unused_return (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unused_return)
+
+  ⚠ return value of "FuncA" is unused
+   ╭─[../../testcases/error/unused_return.veryl:7:9]
+ 6 │     always_comb {
+ 7 │         FuncA();
+   ·         ────┬───
+   ·             ╰── Error location
+ 8 │     }
+   ╰────
+  help: add variable assignment for function return

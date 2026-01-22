@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_direction (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_direction)
+
+  × import direction can't be placed at here
+   ╭─[../../testcases/error/invalid_direction.veryl:2:8]
+ 1 │ module invalid_direction (
+ 2 │     a: import logic,
+   ·        ───┬──
+   ·           ╰── Error location
+ 3 │ ) {}
+   ╰────
+  help: remove import direction

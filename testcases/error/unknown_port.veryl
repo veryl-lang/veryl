@@ -1,0 +1,7 @@
+module unknown_port {
+    inst u: unknown_port2 (
+        a: 1,
+    );
+}
+
+module unknown_port2 {}

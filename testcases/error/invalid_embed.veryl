@@ -1,0 +1,4 @@
+module invalid_embed {
+    embed (inline) py{{{
+    }}}
+}

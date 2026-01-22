@@ -1,0 +1,3 @@
+module missing_clock_signal {
+    always_ff {}
+}

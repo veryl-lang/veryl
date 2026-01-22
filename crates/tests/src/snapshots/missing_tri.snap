@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_tri (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_tri)
+
+  × tri type modifier is required at inout port
+   ╭─[../../testcases/error/missing_tri.veryl:2:14]
+ 1 │ module missing_tri (
+ 2 │     a: inout logic,
+   ·              ──┬──
+   ·                ╰── Error location
+ 3 │ ) {
+   ╰────
+  help: add tri type modifier

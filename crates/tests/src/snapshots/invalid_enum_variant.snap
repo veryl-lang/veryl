@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_enum_variant (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_enum_variant)
+
+  × The value of enum variant "A" is not encoded value by one_hot
+   ╭─[../../testcases/error/invalid_enum_variant.veryl:4:9]
+ 3 │     enum EnumA {
+ 4 │         A = 0,
+   ·         ┬
+   ·         ╰── Error location
+ 5 │     }
+   ╰────
+  help:

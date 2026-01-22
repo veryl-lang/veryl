@@ -1,0 +1,3 @@
+module infinite_recursion {
+    inst u: infinite_recursion;
+}

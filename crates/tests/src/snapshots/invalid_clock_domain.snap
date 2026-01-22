@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_clock_domain)
+
+  × Cannot specify clock domain annotation to module instance
+   ╭─[../../testcases/error/invalid_clock_domain.veryl:2:13]
+ 1 │ module invalid_clock_domain {
+ 2 │     inst u: 'a invalid_clock_domain2;
+   ·             ─┬
+   ·              ╰── Error location
+ 3 │ }
+   ╰────
+  help: Remove the clock domain annotation

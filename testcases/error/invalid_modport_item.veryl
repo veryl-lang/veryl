@@ -1,0 +1,6 @@
+interface invalid_modport_item {
+    var a: logic;
+    modport m {
+        a: import,
+    }
+}

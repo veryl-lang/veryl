@@ -1,0 +1,6 @@
+module unresolvable_generic_argument {
+    const X: u32 = 1;
+    inst u: unresolvable_generic_argument2::<X>;
+}
+
+module unresolvable_generic_argument2::<X: u32> {}

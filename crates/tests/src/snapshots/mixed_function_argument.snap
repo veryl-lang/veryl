@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mixed_function_argument (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mixed_function_argument)
+
+  × positional arguments and named arguments are mixed. Both of them can't be used at the same time
+    ╭─[../../testcases/error/mixed_function_argument.veryl:10:9]
+  9 │         let _a: logic = FuncA(
+ 10 │ ╭─▶         0,
+ 11 │ ├─▶         a: 1
+    · ╰──── Error location
+ 12 │         );
+    ╰────
+  help: fix function arguments

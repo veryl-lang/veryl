@@ -1,0 +1,4 @@
+module ambiguous_elsif {
+    #[elsif(A)]
+    let _a: logic = 0;
+}

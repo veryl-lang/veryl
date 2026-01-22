@@ -1,0 +1,4 @@
+module unevaluable_value_const_value {
+    let a: logic = 1;
+    const b: logic = a;
+}

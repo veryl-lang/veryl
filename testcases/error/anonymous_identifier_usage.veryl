@@ -1,0 +1,3 @@
+module anonymous_identifier_usage {
+    var _: logic;
+}

@@ -1,0 +1,4 @@
+module mismatch_type {
+    const a: u32 = 1;
+    inst u: a;
+}

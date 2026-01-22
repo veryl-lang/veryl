@@ -1,0 +1,7 @@
+module missing_port {
+    inst u: missing_port2;
+}
+
+module missing_port2 (
+    a: input logic,
+) {}

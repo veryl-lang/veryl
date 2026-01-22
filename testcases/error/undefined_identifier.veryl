@@ -1,0 +1,3 @@
+module undefined_identifier {
+    let _a: logic = x;
+}

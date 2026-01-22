@@ -1,0 +1,13 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+include_failure (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#include_failure)
+
+  × "../../testcases/error/A" can't be read because "No such file or directory (os error 2)"
+   ╭─[../../testcases/error/include_failure.veryl:1:18]
+ 1 │ include (inline, "A");
+   ·                  ─┬─
+   ·                   ╰── Error location
+   ╰────
+  help:

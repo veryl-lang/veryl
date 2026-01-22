@@ -1,0 +1,13 @@
+module mixed_function_argument {
+    function FuncA (
+        a: input logic,
+        b: input logic,
+    ) -> logic {
+        return 0;
+    }
+
+    let _a: logic = FuncA(
+        0,
+        a: 1
+    );
+}

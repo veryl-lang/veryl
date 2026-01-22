@@ -1,0 +1,6 @@
+module missing_if_reset {
+    let clk: clock = 1;
+    let rst: reset = 1;
+
+    always_ff (clk, rst) {}
+}

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_modifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_modifier)
+
+  × default modifier can't be used because the given type is not a single bit clock nor a single bit reset
+   ╭─[../../testcases/error/invalid_modifier.veryl:2:14]
+ 1 │ module invalid_modifier (
+ 2 │     a: input default logic,
+   ·              ───┬───
+   ·                 ╰── Error location
+ 3 │ ) {}
+   ╰────
+  help: remove the modifier

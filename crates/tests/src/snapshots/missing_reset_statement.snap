@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_reset_statement (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_reset_statement)
+
+  ⚠ "a" is not reset in if_reset statement
+   ╭─[../../testcases/error/missing_reset_statement.veryl:8:13]
+ 7 │         if_reset {} else {
+ 8 │             a = 0;
+   ·             ┬
+   ·             ╰── Not reset
+ 9 │         }
+   ╰────
+  help: add reset statement

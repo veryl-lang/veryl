@@ -1,0 +1,5 @@
+module exceed_limit_hierarchy_depth #(
+    param X: u32 = 1,
+) {
+    inst u: exceed_limit_hierarchy_depth #( X: X + 1 );
+}

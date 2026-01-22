@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+infinite_recursion (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#infinite_recursion)
+
+  × infinite instance recursion is detected
+   ╭─[../../testcases/error/infinite_recursion.veryl:2:10]
+ 1 │ module infinite_recursion {
+ 2 │     inst u: infinite_recursion;
+   ·          ┬
+   ·          ╰── Error location
+ 3 │ }
+   ╰────
+  help:

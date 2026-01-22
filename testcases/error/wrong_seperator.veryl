@@ -1,0 +1,8 @@
+module wrong_seperator {
+    struct StructA {
+        a: logic,
+    }
+
+    let a : StructA = 1;
+    let _b: logic   = a::a;
+}

@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::bind::check_bind_target;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -667,7 +667,8 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
 
             let (comptime, expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
             if !comptime.is_const {
-                context.insert_error(AnalyzerError::invalid_const_non_elaborative(
+                context.insert_error(AnalyzerError::unevaluable_value(
+                    UnevaluableValueKind::ConstValue,
                     &expr.token_range(),
                 ));
             }

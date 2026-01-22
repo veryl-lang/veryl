@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+sv_with_implicit_reset (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#sv_with_implicit_reset)
+
+  × Reset type with implicit synchronisity and polarity can't be connected to SystemVerilog module
+   ╭─[../../testcases/error/sv_with_implicit_reset.veryl:4:10]
+ 3 │ 
+ 4 │     inst u: $sv::Module (
+   ·          ┬
+   ·          ╰── Error location
+ 5 │         rst  ,
+   ╰────
+  help: Use types with explicit synchronisity and polarity like `reset_async_low`

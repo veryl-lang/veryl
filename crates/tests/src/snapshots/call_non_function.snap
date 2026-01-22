@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+call_non_function (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#call_non_function)
+
+  × Calling non-function symbol "_a" which has kind "variable"
+   ╭─[../../testcases/error/call_non_function.veryl:4:9]
+ 3 │     initial {
+ 4 │         _a();
+   ·         ──┬──
+   ·           ╰── Error location
+ 5 │     }
+   ╰────
+  help: remove call to non-function symbol

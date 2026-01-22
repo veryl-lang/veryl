@@ -1,0 +1,6 @@
+module call_non_function {
+    let _a: logic = 0;
+    initial {
+        _a();
+    }
+}

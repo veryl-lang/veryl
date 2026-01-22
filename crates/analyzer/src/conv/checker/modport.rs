@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, InvalidModportItemKind};
 use crate::attribute::ExpandItem;
 use crate::attribute_table;
 use crate::conv::{Affiliation, Context};
@@ -80,7 +80,8 @@ pub fn check_modport(context: &mut Context, arg: &ModportItem) {
             Direction::Modport(_) => {}
             Direction::Import(_) => {
                 if !is_function_defined_in_interface(&symbol.found) {
-                    context.insert_error(AnalyzerError::invalid_modport_function_item(
+                    context.insert_error(AnalyzerError::invalid_modport_item(
+                        InvalidModportItemKind::Function,
                         &arg.identifier.identifier_token.token.to_string(),
                         &arg.identifier.as_ref().into(),
                     ));
@@ -88,7 +89,8 @@ pub fn check_modport(context: &mut Context, arg: &ModportItem) {
             }
             _ => {
                 if !matches!(symbol.found.kind, SymbolKind::Variable(_)) {
-                    context.insert_error(AnalyzerError::invalid_modport_variable_item(
+                    context.insert_error(AnalyzerError::invalid_modport_item(
+                        InvalidModportItemKind::Variable,
                         &arg.identifier.identifier_token.token.to_string(),
                         &arg.identifier.as_ref().into(),
                     ));

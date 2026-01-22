@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_connect_operand (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_connect_operand)
+
+  × "u0" can't be used as a connect operand because it is an array interface instance
+    ╭─[../../testcases/error/invalid_connect_operand.veryl:10:10]
+  9 │ module invalid_connect_operand {
+ 10 │     inst u0: invalid_connect_operand_if [2];
+    ·          ─┬
+    ·           ╰── Error location
+ 11 │     inst u1: invalid_connect_operand_if;
+    ╰────
+  help:

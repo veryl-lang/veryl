@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_cast (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_cast)
+
+  × Casting from clock<1> to reset<1> is incompatible
+   ╭─[../../testcases/error/invalid_cast.veryl:3:27]
+ 2 │     let a : clock = 0;
+ 3 │     let _b: reset = (a as reset);
+   ·                           ──┬──
+   ·                             ╰── Error location
+ 4 │ }
+   ╰────
+  help:

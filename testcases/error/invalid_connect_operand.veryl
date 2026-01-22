@@ -1,0 +1,18 @@
+interface invalid_connect_operand_if {
+    var a: logic;
+
+    modport x {
+        a: input,
+    }
+}
+
+module invalid_connect_operand {
+    inst u0: invalid_connect_operand_if [2];
+    inst u1: invalid_connect_operand_if;
+
+    assign u0[0].a = 0;
+    assign u0[1].a = 0;
+    assign u1.a    = 0;
+
+    connect u0.x <> u1.x;
+}

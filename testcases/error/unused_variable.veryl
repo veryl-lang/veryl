@@ -1,0 +1,3 @@
+module unused_variable {
+    let a: logic = 1;
+}

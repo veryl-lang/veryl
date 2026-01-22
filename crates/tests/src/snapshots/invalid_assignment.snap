@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_assignment (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_assignment)
+
+  × "a" can't be assigned because it is input
+   ╭─[../../testcases/error/invalid_assignment.veryl:4:12]
+ 3 │ ) {
+ 4 │     assign a = 1;
+   ·            ┬
+   ·            ╰── Error location
+ 5 │ }
+   ╰────
+  help: remove the assignment

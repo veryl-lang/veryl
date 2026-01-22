@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+incompat_proto (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#incompat_proto)
+
+  × "incompat_proto_interface" is incompatible with "incompat_proto_proto" because parameter "P" is missing
+   ╭─[../../testcases/error/incompat_proto.veryl:4:11]
+ 3 │ ) {}
+ 4 │ interface incompat_proto_interface for incompat_proto_proto {}
+   ·           ────────────┬───────────
+   ·                       ╰── Error location
+   ╰────
+  help:

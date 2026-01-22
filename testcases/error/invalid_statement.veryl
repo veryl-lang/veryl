@@ -1,0 +1,5 @@
+module invalid_statement {
+    always_comb {
+        return 1;
+    }
+}

@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mismatch_attribute_args (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_attribute_args)
+
+  × Arguments of "allow" is expected to "rule: (missing_port|missing_reset_statement|unused_variable|unassign_variable)"
+   ╭─[../../testcases/error/mismatch_attribute_args.veryl:1:3]
+ 1 │ #[allow(dummy_name)]
+   ·   ──┬──
+   ·     ╰── Error location
+ 2 │ module mismatch_attribute_args {}
+   ╰────
+  help:

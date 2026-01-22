@@ -1,0 +1,3 @@
+module fixed_type_with_signed_modifier {
+    let _a: signed u32 = 0;
+}

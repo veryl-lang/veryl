@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+last_item_with_define (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#last_item_with_define)
+
+  × ifdef/ifndef/elsif/else attribute can't be used with the last item in comma-separated list
+   ╭─[../../testcases/error/last_item_with_define.veryl:4:9]
+ 3 │         X,
+ 4 │         #[ifdef(A)]
+   ·         ─────┬─────
+   ·              ╰── Error location
+ 5 │         Y,
+   ╰────
+  help:

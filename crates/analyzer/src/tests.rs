@@ -211,10 +211,7 @@ fn clock_check() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::MultipleDefaultClock { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::MultipleDefault { .. }));
 }
 
 #[test]
@@ -1336,7 +1333,7 @@ fn invalid_modport_item() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::InvalidModportVariableItem { .. }
+        AnalyzerError::InvalidModportItem { .. }
     ));
 
     let code = r#"
@@ -1355,7 +1352,7 @@ fn invalid_modport_item() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::InvalidModportFunctionItem { .. }
+        AnalyzerError::InvalidModportItem { .. }
     ));
 
     let code = r#"
@@ -1375,7 +1372,7 @@ fn invalid_modport_item() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::InvalidModportFunctionItem { .. }
+        AnalyzerError::InvalidModportItem { .. }
     ));
 
     let code = r#"
@@ -4628,7 +4625,7 @@ fn too_much_enum_variant() {
 }
 
 #[test]
-fn unevaluatable_enum_variant() {
+fn unevaluable_value_enum_variant() {
     let code = r#"
     module ModuleA {
         enum EnumA: logic<2> {
@@ -4651,10 +4648,7 @@ fn unevaluatable_enum_variant() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnevaluatableEnumVariant { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleC {
@@ -4666,10 +4660,7 @@ fn unevaluatable_enum_variant() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnevaluatableEnumVariant { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleD {
@@ -4681,10 +4672,7 @@ fn unevaluatable_enum_variant() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnevaluatableEnumVariant { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     package Pkg {
@@ -7344,7 +7332,7 @@ fn reserved_identifier() {
 }
 
 #[test]
-fn reset_value_non_elaborative() {
+fn unevaluable_value_reset_value() {
     let code = r#"
     module ModuleA (
         i_clk: input clock,
@@ -7363,10 +7351,7 @@ fn reset_value_non_elaborative() {
     }"#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidResetNonElaborative { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleA::<A: u32> (
@@ -7422,7 +7407,7 @@ fn reset_value_non_elaborative() {
 }
 
 #[test]
-fn const_value_non_elaborative() {
+fn unevaluable_value_const_value() {
     let code = r#"
     module ModuleA (
         a: input logic,
@@ -7431,10 +7416,7 @@ fn const_value_non_elaborative() {
     }"#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidConstNonElaborative { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleA {
@@ -7971,7 +7953,7 @@ fn enum_non_const_exception() {
 }
 
 #[test]
-fn invalid_case_condition_expression() {
+fn unevaluable_value_case_condition() {
     let code = r#"
     module ModuleA (
         i_sel: input  logic<3>,
@@ -8022,10 +8004,7 @@ fn invalid_case_condition_expression() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidCaseConditionNonElaborative { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleC (
@@ -8045,10 +8024,7 @@ fn invalid_case_condition_expression() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidCaseConditionNonElaborative { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleD (
@@ -8066,10 +8042,7 @@ fn invalid_case_condition_expression() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidCaseConditionNonElaborative { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 
     let code = r#"
     module ModuleE (
@@ -8087,10 +8060,7 @@ fn invalid_case_condition_expression() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::InvalidCaseConditionNonElaborative { .. }
-    ));
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
 }
 
 #[test]

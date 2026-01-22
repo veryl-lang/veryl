@@ -1,0 +1,3 @@
+module invalid_modifier (
+    a: input default logic,
+) {}

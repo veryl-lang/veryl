@@ -1,0 +1,11 @@
+module unassignable_output {
+    inst u: unassignable_output2 (
+        a: 1,
+    );
+}
+
+module unassignable_output2 (
+    a: output logic,
+) {
+    assign a = 0;
+}

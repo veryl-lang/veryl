@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_number_character (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_number_character)
+
+  × binary number can't contain 2
+   ╭─[../../testcases/error/invalid_number_character.veryl:2:21]
+ 1 │ module invalid_number_character {
+ 2 │     let _a: logic = 'b123;
+   ·                     ──┬──
+   ·                       ╰── Error location
+ 3 │ }
+   ╰────
+  help:

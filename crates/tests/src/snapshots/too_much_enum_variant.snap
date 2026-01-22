@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+too_much_enum_variant (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#too_much_enum_variant)
+
+  × enum "EnumA" has 3 variants, they are can't be represented by 1 bits
+   ╭─[../../testcases/error/too_much_enum_variant.veryl:2:10]
+ 1 │ module too_much_enum_variant {
+ 2 │     enum EnumA: logic<1> {
+   ·          ──┬──
+   ·            ╰── Error location
+ 3 │         X,
+   ╰────
+  help:

@@ -1,0 +1,3 @@
+module missing_default_argument #(
+    param A: u32,
+) {}

@@ -1,0 +1,4 @@
+module referring_before_definition {
+    let _a: logic = b;
+    let b : logic = 1;
+}

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_clock (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_clock)
+
+  × "a" can't be used as a clock because it is not 'clock' type nor a single bit signal
+   ╭─[../../testcases/error/invalid_clock.veryl:2:9]
+ 1 │ module invalid_clock {
+ 2 │     let a: logic<10> = 0;
+   ·         ┬
+   ·         ╰── Error location
+ 3 │ 
+   ╰────
+  help:

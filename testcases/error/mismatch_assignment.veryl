@@ -1,0 +1,4 @@
+module mismatch_assignment {
+    let a : logic = 1;
+    let _b: bit   = a;
+}

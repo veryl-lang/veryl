@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+ambiguous_elsif (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#ambiguous_elsif)
+
+  × elsif/else attribute is ambiguous because elsif should be placed just after ifdef/ifndef
+   ╭─[../../testcases/error/ambiguous_elsif.veryl:2:5]
+ 1 │ module ambiguous_elsif {
+ 2 │     #[elsif(A)]
+   ·     ─────┬─────
+   ·          ╰── Error location
+ 3 │     let _a: logic = 0;
+   ╰────
+  help:

@@ -1,0 +1,5 @@
+module unsigned_loop_variable_in_descending_order_for_loop {
+    always_comb {
+        for _i: u32 in rev 0..32 {}
+    }
+}
