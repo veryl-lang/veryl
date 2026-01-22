@@ -10,3 +10,6 @@
 [submodule "support/rouge"]
 	path = support/rouge
 	url = https://github.com/veryl-lang/rouge
+[submodule "support/tree-sitter"]
+	path = support/tree-sitter
+	url = https://github.com/veryl-lang/tree-sitter-veryl.git
