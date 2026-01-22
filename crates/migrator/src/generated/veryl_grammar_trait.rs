@@ -6944,7 +6944,7 @@ pub struct CommentsOpt {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CommentsTerm {
-    pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*\/?([^/]|[^*]/)*\*\/))\s*)+ */
+    pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*\/?([^/]|[^*]/)*\*\/))\s*)+ */
 }
 
 ///
@@ -10613,7 +10613,7 @@ pub struct Operator05 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Operator05Term {
-    pub operator05_term: crate::veryl_token::Token, /* \^~|\^|~\^ */
+    pub operator05_term: crate::veryl_token::Token, /* \^|~\^ */
 }
 
 ///
@@ -10669,7 +10669,7 @@ pub struct Operator07 {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Operator07Term {
-    pub operator07_term: crate::veryl_token::Token, /* ===|==\?|!==|!=\?|==|!= */
+    pub operator07_term: crate::veryl_token::Token, /* ==\?|!=\?|==|!= */
 }
 
 ///
@@ -14467,7 +14467,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 0:
     ///
-    /// `CommentsTerm: <INITIAL, EmbedHeader, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" : Token;`
+    /// `CommentsTerm: <INITIAL, EmbedHeader, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn comments_term(&mut self, comments_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14832,7 +14832,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 18:
     ///
-    /// `Operator07Term: "===|==\?|!==|!=\?|==|!=" : Token;`
+    /// `Operator07Term: "==\?|!=\?|==|!=" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn operator07_term(&mut self, operator07_term: &ParseTreeType<'t>) -> Result<()> {
@@ -14908,7 +14908,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 22:
     ///
-    /// `Operator05Term: "\^~|\^|~\^" : Token;`
+    /// `Operator05Term: "\^|~\^" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn operator05_term(&mut self, operator05_term: &ParseTreeType<'t>) -> Result<()> {

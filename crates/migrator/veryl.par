@@ -49,7 +49,7 @@
 
 // Longest match should be first
 
-CommentsTerm          : <INITIAL, Generic, EmbedHeader,                            Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+"                  : Token;
+CommentsTerm          : <INITIAL, Generic, EmbedHeader,                            Attr>"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+"                   : Token;
 StringLiteralTerm     : <INITIAL         ,                                         Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
 ExponentTerm          : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
@@ -67,11 +67,11 @@ Operator11Term        : <INITIAL                                                
 Operator10Term        : <INITIAL                                                       >"\+|-"                                                                                : Token;
 Operator09Term        : <INITIAL                                                       >"<<<|>>>|<<|>>"                                                                       : Token;
 Operator08Term        : <INITIAL                                                       >"<=|>=|<:|>:"                                                                         : Token;
-Operator07Term        : <INITIAL                                                       >"===|==\?|!==|!=\?|==|!="                                                             : Token;
+Operator07Term        : <INITIAL                                                       >"==\?|!=\?|==|!="                                                                     : Token;
 Operator03Term        : <INITIAL                                                       >"&&"                                                                                  : Token;
 Operator02Term        : <INITIAL                                                       >"\|\|"                                                                                : Token;
 Operator06Term        : <INITIAL                                                       >"&"                                                                                   : Token;
-Operator05Term        : <INITIAL                                                       >"\^~|\^|~\^"                                                                          : Token;
+Operator05Term        : <INITIAL                                                       >"\^|~\^"                                                                              : Token;
 Operator04Term        : <INITIAL                                                       >"\|"                                                                                  : Token;
 UnaryOperatorTerm     : <INITIAL                                                       >"~&|~\||!|~"                                                                          : Token;
 ColonColonLAngleTerm  : <INITIAL, Generic                                              >'::<'                                                                                 : Token;

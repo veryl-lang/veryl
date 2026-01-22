@@ -162,7 +162,7 @@ scanner! {
         mode INITIAL {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*" => 7; // "ExponentTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*" => 8; // "FixedPointTerm"
@@ -180,11 +180,11 @@ scanner! {
             token r"\+|-" => 20; // "Operator10Term"
             token r"<<<|>>>|<<|>>" => 21; // "Operator09Term"
             token r"<=|>=|<:|>:" => 22; // "Operator08Term"
-            token r"===|==\?|!==|!=\?|==|!=" => 23; // "Operator07Term"
+            token r"==\?|!=\?|==|!=" => 23; // "Operator07Term"
             token r"&&" => 24; // "Operator03Term"
             token r"\|\|" => 25; // "Operator02Term"
             token r"&" => 26; // "Operator06Term"
-            token r"\^~|\^|~\^" => 27; // "Operator05Term"
+            token r"\^|~\^" => 27; // "Operator05Term"
             token r"\|" => 28; // "Operator04Term"
             token r"~&|~\||!|~" => 29; // "UnaryOperatorTerm"
             token r"::<" => 30; // "ColonColonLAngleTerm"
@@ -299,7 +299,7 @@ scanner! {
         mode EmbedHeader {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"\{\{\{" => 45; // "TripleLBraceTerm"
             token r"\(" => 48; // "LParenTerm"
             token r"\)" => 54; // "RParenTerm"
@@ -330,7 +330,7 @@ scanner! {
         mode Generic {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*" => 7; // "ExponentTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*" => 8; // "FixedPointTerm"
             token r"(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*" => 9; // "BasedTerm"
@@ -429,7 +429,7 @@ scanner! {
         mode Attr {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
-            token r"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
+            token r"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
             token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"," => 33; // "CommaTerm"
             token r"\{" => 46; // "LBraceTerm"
@@ -33328,7 +33328,7 @@ pub const LOOKAHEAD_AUTOMATA: &[LookaheadDFA; 789] = &[
 ];
 
 pub const PRODUCTIONS: &[Production; 1146] = &[
-    // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+";
+    // 0 - CommentsTerm: "(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+";
     Production {
         lhs: 122,
         production: &[ParseType::T(5)],
@@ -33418,7 +33418,7 @@ pub const PRODUCTIONS: &[Production; 1146] = &[
         lhs: 498,
         production: &[ParseType::T(22)],
     },
-    // 18 - Operator07Term: "===|==\?|!==|!=\?|==|!=";
+    // 18 - Operator07Term: "==\?|!=\?|==|!=";
     Production {
         lhs: 495,
         production: &[ParseType::T(23)],
@@ -33438,7 +33438,7 @@ pub const PRODUCTIONS: &[Production; 1146] = &[
         lhs: 492,
         production: &[ParseType::T(26)],
     },
-    // 22 - Operator05Term: "\^~|\^|~\^";
+    // 22 - Operator05Term: "\^|~\^";
     Production {
         lhs: 489,
         production: &[ParseType::T(27)],

@@ -6,11 +6,12 @@ use crate::conv::utils::{
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
-    self, Comptime, IrResult, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
+    self, Comptime, IrResult, Shape, TypeKind, VarIndex, VarKind, VarPath, VarPathSelect,
+    VarSelect, Variable,
 };
 use crate::ir_error;
 use crate::namespace::DefineContext;
-use crate::symbol::SymbolKind;
+use crate::symbol::{Affiliation, SymbolKind};
 use crate::symbol_table;
 use crate::value::Value;
 use num_bigint::BigUint;
@@ -46,6 +47,9 @@ impl Conv<&StatementBlockItem> for ir::StatementBlock {
                 Ok(ir::StatementBlock::default())
             }
             StatementBlockItem::Statement(x) => Conv::conv(context, x.statement.as_ref()),
+            StatementBlockItem::ConcatenationAssignment(x) => {
+                Conv::conv(context, x.concatenation_assignment.as_ref())
+            }
         }
     }
 }
@@ -89,6 +93,65 @@ impl Conv<&LetStatement> for ir::StatementBlock {
         } else {
             Err(ir_error!(token))
         }
+    }
+}
+
+impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
+    fn conv(context: &mut Context, value: &ConcatenationAssignment) -> IrResult<Self> {
+        let token: TokenRange = value.into();
+
+        let items: Vec<_> = value.assign_concatenation_list.as_ref().into();
+
+        let mut dst = vec![];
+        for item in items {
+            let ident = item.hierarchical_identifier.as_ref();
+            let x: VarPathSelect = Conv::conv(context, ident)?;
+            if let Some(x) = x.to_assign_destination(context, false) {
+                dst.push(x);
+            } else {
+                if let Ok(symbol) = symbol_table::resolve(item.hierarchical_identifier.as_ref())
+                    && let SymbolKind::Variable(x) = symbol.found.kind
+                    && x.affiliation == Affiliation::Module
+                {
+                    let ident_token = ident.identifier.identifier_token.token;
+                    context.insert_error(AnalyzerError::referring_before_definition(
+                        &ident_token.text.to_string(),
+                        &ident_token.into(),
+                    ));
+                }
+                return Err(ir_error!(token));
+            }
+        }
+
+        let mut width = Some(0);
+        for x in &dst {
+            if let Some(x) = x.total_width(context)
+                && let Some(width) = &mut width
+            {
+                *width += x;
+            } else {
+                width = None;
+            }
+        }
+        if let Some(x) = width {
+            width = context.check_size(x, token);
+        }
+
+        let r#type = ir::Type {
+            kind: TypeKind::Logic,
+            width: Shape::new(vec![width]),
+            ..Default::default()
+        };
+
+        let (_, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
+        let statement = ir::Statement::Assign(ir::AssignStatement {
+            dst,
+            width,
+            expr,
+            token,
+        });
+
+        Ok(ir::StatementBlock(vec![statement]))
     }
 }
 

@@ -1261,6 +1261,18 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'ConcatenationAssignment'
+    fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        self.l_brace(&arg.l_brace);
+        self.assign_concatenation_list(&arg.assign_concatenation_list);
+        self.r_brace(&arg.r_brace);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
         self.space(1);
@@ -1300,7 +1312,9 @@ impl VerylWalker for Formatter {
             self.newline();
         }
         match arg.statement_block_group_group.as_ref() {
-            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                self.block(&x.block);
+                self.space(1);
                 self.token_will_push(&x.l_brace.l_brace_token);
                 for (i, x) in x.statement_block_group_group_list.iter().enumerate() {
                     self.newline_list(i);

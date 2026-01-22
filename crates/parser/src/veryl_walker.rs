@@ -455,6 +455,13 @@ pub trait VerylWalker {
     }
 
     /// Semantic action for non-terminal 'Bool'
+    fn block(&mut self, arg: &Block) {
+        before!(self, block, arg);
+        self.veryl_token(&arg.block_token);
+        after!(self, block, arg);
+    }
+
+    /// Semantic action for non-terminal 'Bool'
     fn bool(&mut self, arg: &Bool) {
         before!(self, bool, arg);
         self.veryl_token(&arg.bool_token);
@@ -1802,7 +1809,8 @@ pub trait VerylWalker {
             self.attribute(&x.attribute);
         }
         match arg.statement_block_group_group.as_ref() {
-            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                self.block(&x.block);
                 self.l_brace(&x.l_brace);
                 for x in &x.statement_block_group_group_list {
                     self.statement_block_group(&x.statement_block_group);
@@ -1824,6 +1832,9 @@ pub trait VerylWalker {
             StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
             StatementBlockItem::Statement(x) => self.statement(&x.statement),
             StatementBlockItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            StatementBlockItem::ConcatenationAssignment(x) => {
+                self.concatenation_assignment(&x.concatenation_assignment)
+            }
         }
         after!(self, statement_block_item, arg);
     }
@@ -1874,6 +1885,18 @@ pub trait VerylWalker {
         }
         self.semicolon(&arg.semicolon);
         after!(self, identifier_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationAssignment'
+    fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        before!(self, concatenation_assignment, arg);
+        self.l_brace(&arg.l_brace);
+        self.assign_concatenation_list(&arg.assign_concatenation_list);
+        self.r_brace(&arg.r_brace);
+        self.equ(&arg.equ);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+        after!(self, concatenation_assignment, arg);
     }
 
     /// Semantic action for non-terminal 'Assignment'

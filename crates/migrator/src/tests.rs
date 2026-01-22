@@ -15,45 +15,21 @@ fn migrate(code: &str, exp: &str) {
 }
 
 #[test]
-fn migrate_eq() {
+fn migrate_statement_block() {
     let code = r#"
     module A {
-        let a: logic = (1 === 1);
+        always_comb {
+            {
+            }
+        }
     }"#;
 
     let exp = r#"
     module A {
-        let a: logic = (1 ==  1);
-    }"#;
-
-    migrate(code, exp);
-}
-
-#[test]
-fn migrate_ne() {
-    let code = r#"
-    module A {
-        let a: logic = (1 !== 1);
-    }"#;
-
-    let exp = r#"
-    module A {
-        let a: logic = (1 !=  1);
-    }"#;
-
-    migrate(code, exp);
-}
-
-#[test]
-fn migrate_xnor() {
-    let code = r#"
-    module A {
-        let a: logic = (1 ^~ 1);
-    }"#;
-
-    let exp = r#"
-    module A {
-        let a: logic = (1 ~^ 1);
+        always_comb {
+            block {
+            }
+        }
     }"#;
 
     migrate(code, exp);

@@ -497,6 +497,7 @@ token_with_comments!(As);
 token_with_comments!(Assign);
 token_with_comments!(Bind);
 token_with_comments!(Bit);
+token_with_comments!(Block);
 token_with_comments!(Bool);
 token_with_comments!(Break);
 token_with_comments!(Case);

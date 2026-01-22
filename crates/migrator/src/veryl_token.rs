@@ -37,6 +37,16 @@ impl PartialEq<PathId> for TokenSource {
     }
 }
 
+impl PartialEq<Option<PathId>> for TokenSource {
+    fn eq(&self, other: &Option<PathId>) -> bool {
+        match self {
+            TokenSource::File { path, .. } => Some(path) == other.as_ref(),
+            TokenSource::Generated(x) => Some(x) == other.as_ref(),
+            _ => false,
+        }
+    }
+}
+
 impl PartialOrd<PathId> for TokenSource {
     fn partial_cmp(&self, other: &PathId) -> Option<std::cmp::Ordering> {
         match self {
@@ -140,6 +150,12 @@ pub fn is_anonymous_text(text: StrId) -> bool {
 
 pub fn is_anonymous_token(token: &Token) -> bool {
     is_anonymous_text(token.text)
+}
+
+impl Default for Token {
+    fn default() -> Self {
+        Self::generate(StrId::default(), PathId::default())
+    }
 }
 
 impl fmt::Display for Token {
