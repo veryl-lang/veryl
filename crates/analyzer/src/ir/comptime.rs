@@ -430,7 +430,11 @@ impl Type {
 
     pub fn compatible(&self, src: &Comptime) -> bool {
         // TODO type compatible check
-        if self.is_unknown() | src.r#type.is_unknown() {
+        if self.is_unknown()
+            | self.is_systemverilog()
+            | src.r#type.is_unknown()
+            | src.r#type.is_systemverilog()
+        {
             true
         } else if let Some(mut dst_sig) = self.kind.signature() {
             dst_sig.parameters.clear();
