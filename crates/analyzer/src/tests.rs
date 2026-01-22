@@ -6953,6 +6953,22 @@ fn unassignable_output() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        o_out: output logic,
+    ) {
+        assign o_out = 0;
+    }
+    
+    module Top {
+        inst foo_if: $sv::foo_if;
+        inst u_a: ModuleA (o_out: foo_if.value);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -606,12 +606,11 @@ impl Expression {
                 ret.r#type.width = Shape::new(vec![width]);
 
                 match op {
-                    Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor =>
-                    {
+                    Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
                         #[allow(clippy::if_same_then_else)]
-                        if x.r#type.is_unknown() {
+                        if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                             ret.r#type.kind = y.r#type.kind;
-                        } else if y.r#type.is_unknown() {
+                        } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
                             ret.r#type.kind = x.r#type.kind;
                         } else if x.r#type.is_clock() || x.r#type.is_reset() {
                             ret.r#type.kind = x.r#type.kind;
@@ -639,9 +638,9 @@ impl Expression {
                     | Op::NeWildcard
                     | Op::LogicAnd
                     | Op::LogicOr => {
-                        if x.r#type.is_unknown() {
+                        if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                             ret.r#type.kind = y.r#type.kind;
-                        } else if y.r#type.is_unknown() {
+                        } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
                             ret.r#type.kind = x.r#type.kind;
                         } else if x.r#type.is_2state() && y.r#type.is_2state() {
                             ret.r#type.kind = TypeKind::Bit;
@@ -719,9 +718,9 @@ impl Expression {
 
                 ret.r#type.width = Shape::new(vec![width]);
 
-                if y.r#type.is_unknown() {
+                if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
                     ret.r#type.kind = z.r#type.kind;
-                } else if z.r#type.is_unknown() {
+                } else if z.r#type.is_unknown() | z.r#type.is_systemverilog() {
                     ret.r#type.kind = y.r#type.kind;
                 } else if y.r#type.is_2state() && z.r#type.is_2state() {
                     ret.r#type.kind = TypeKind::Bit;
@@ -1067,10 +1066,12 @@ impl Factor {
     }
 
     pub fn is_assignable(&self) -> bool {
-        !matches!(
-            self,
-            Factor::Value(_, _) | Factor::SystemFunctionCall(_, _) | Factor::FunctionCall(_, _)
-        )
+        match self {
+            // SystemVerilog member is interpreted as Factor::Value, but it may be assignable.
+            Factor::Value(x, _) => x.r#type.is_systemverilog(),
+            Factor::FunctionCall(_, _) | Factor::SystemFunctionCall(_, _) => false,
+            _ => true,
+        }
     }
 
     pub fn eval_value(

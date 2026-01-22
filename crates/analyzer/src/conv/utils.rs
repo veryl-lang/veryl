@@ -1222,7 +1222,11 @@ pub fn eval_external_symbol(
             return eval_struct_member(context, &path, VarPath::default(), token);
         }
         SymbolKind::SystemVerilog => {
-            let mut x = Comptime::create_unknown(ClockDomain::None, token);
+            let r#type = ir::Type {
+                kind: ir::TypeKind::SystemVerilog,
+                ..Default::default()
+            };
+            let mut x = Comptime::from_type(r#type, ClockDomain::None, token);
 
             // $sv member is const / global
             x.is_const = true;
