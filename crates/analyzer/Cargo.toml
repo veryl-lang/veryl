@@ -28,14 +28,15 @@ strnum_bitwidth = {workspace = true}
 strum           = "0.27.2"
 strum_macros    = "0.27.2"
 thiserror       = {workspace = true}
+vcd             = {workspace = true}
 veryl-metadata  = {version = "0.17.2", path = "../metadata"}
 veryl-parser    = {version = "0.17.2", path = "../parser"}
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-miette          = {workspace = true, features = ["fancy-no-syscall"]}
+miette = {workspace = true, features = ["fancy-no-syscall"]}
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-miette          = {workspace = true, features = ["fancy"]}
+miette = {workspace = true, features = ["fancy"]}
 
 [dev-dependencies]
 toml = {workspace = true}

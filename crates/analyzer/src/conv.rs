@@ -7,7 +7,7 @@ pub mod ir;
 pub mod statement;
 pub mod utils;
 pub mod var;
-pub use context::Context;
+pub use context::{Context, EvalContext};
 
 use crate::ir::IrResult;
 use crate::symbol::Affiliation;

@@ -1,4 +1,3 @@
-use crate::analyzer_error::AnalyzerError;
 use crate::conv::utils::{
     TypePosition, case_condition, eval_expr, eval_external_symbol, eval_function_call, eval_size,
     eval_struct_constructor, eval_type, eval_width_select, range_list, switch_condition,
@@ -11,7 +10,7 @@ use crate::symbol::SymbolKind;
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{BigUint, ir_error, msb_table};
+use crate::{AnalyzerError, BigUint, ir_error, msb_table};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -746,7 +745,13 @@ impl Conv<&IdentifierFactor> for ir::Expression {
                     if comptime.r#type.is_type() {
                         ir::Factor::Value(comptime, token)
                     } else {
-                        ir::Factor::Variable(var_id, index, width_select, comptime, token)
+                        ir::Factor::Variable {
+                            id: var_id,
+                            index,
+                            select: width_select,
+                            comptime,
+                            token,
+                        }
                     }
                 }
             } else {

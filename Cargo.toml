@@ -37,6 +37,7 @@ edition     = "2024"
 anyhow          = "1.0"
 clap            = {version = "4.5.56", features = ["derive"]}
 console         = "0.16.2"
+criterion       = {package = "codspeed-criterion-compat", version = "4.0"}
 futures         = "0.3.31"
 fxhash          = "0.2.1"
 handlebars      = "6.4"
@@ -48,6 +49,7 @@ num-traits      = "0.2.19"
 once_cell       = "1.21"
 parol_runtime   = "4.1"
 paste           = "1.0"
+pprof           = {version = "0.15.0", features = ["flamegraph"]}
 pulldown-cmark  = "0.13.0"
 regex           = "1.12.2"
 scnr2           = "0.3.3"
@@ -62,6 +64,7 @@ thiserror       = "2.0"
 tokio           = {version = "1.48.0", features = ["full"]}
 toml            = "0.9.11"
 url             = {version = "2.5", features = ["serde"]}
+vcd             = "0.7.0"
 walkdir         = "2.5.0"
 
 [workspace.metadata.release]

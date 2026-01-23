@@ -542,3 +542,28 @@ impl Context {
         self.errors.drain(..).collect()
     }
 }
+
+pub trait EvalContext {
+    fn variables(&mut self) -> &mut HashMap<VarId, Variable>;
+    fn functions(&mut self) -> &mut HashMap<VarId, Function>;
+    fn check_size(&mut self, x: usize, token: TokenRange) -> Option<usize>;
+    fn insert_error(&mut self, error: AnalyzerError);
+}
+
+impl EvalContext for Context {
+    fn variables(&mut self) -> &mut HashMap<VarId, Variable> {
+        &mut self.variables
+    }
+
+    fn functions(&mut self) -> &mut HashMap<VarId, Function> {
+        &mut self.functions
+    }
+
+    fn check_size(&mut self, x: usize, token: TokenRange) -> Option<usize> {
+        self.check_size(x, token)
+    }
+
+    fn insert_error(&mut self, error: AnalyzerError) {
+        self.insert_error(error);
+    }
+}

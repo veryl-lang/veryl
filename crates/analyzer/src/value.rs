@@ -115,14 +115,32 @@ impl Value {
     }
 
     pub fn assign(&mut self, mut x: Value, beg: usize, end: usize) {
-        x.payload <<= end;
-        x.mask_xz <<= end;
+        if end == 0 && (beg + 1 >= self.width) {
+            *self = x;
+        } else {
+            x.payload <<= end;
+            x.mask_xz <<= end;
 
-        let mask = gen_mask_range(beg, end);
-        let inv_mask = inv(&mask, self.width);
+            let mask = gen_mask_range(beg, end);
+            let inv_mask = inv(&mask, self.width);
 
-        self.payload = (&self.payload & &inv_mask) | (x.payload & &mask);
-        self.mask_xz = (&self.mask_xz & &inv_mask) | (x.mask_xz & &mask);
+            self.payload = (&self.payload & &inv_mask) | (x.payload & &mask);
+            self.mask_xz = (&self.mask_xz & &inv_mask) | (x.mask_xz & &mask);
+        }
+    }
+
+    pub fn to_vcd_value(&self, i: u64) -> vcd::Value {
+        if self.mask_xz.bit(i) {
+            if self.payload.bit(i) {
+                vcd::Value::Z
+            } else {
+                vcd::Value::X
+            }
+        } else if self.payload.bit(i) {
+            vcd::Value::V1
+        } else {
+            vcd::Value::V0
+        }
     }
 }
 
@@ -267,6 +285,42 @@ impl From<&syntax_tree::Exponent> for Value {
             mask_xz,
             width: 64,
             signed: false,
+        }
+    }
+}
+
+impl From<&Value> for vcd::Value {
+    fn from(value: &Value) -> Self {
+        value.to_vcd_value(0)
+    }
+}
+
+impl IntoIterator for &Value {
+    type Item = vcd::Value;
+    type IntoIter = VcdValueIter;
+    fn into_iter(self) -> Self::IntoIter {
+        VcdValueIter {
+            pos: 0,
+            value: self.clone(),
+        }
+    }
+}
+
+pub struct VcdValueIter {
+    pos: u64,
+    value: Value,
+}
+
+impl Iterator for VcdValueIter {
+    type Item = vcd::Value;
+    fn next(&mut self) -> Option<Self::Item> {
+        let width = self.value.width as u64;
+        if self.pos < width {
+            let value = self.value.to_vcd_value(width - self.pos - 1);
+            self.pos += 1;
+            Some(value)
+        } else {
+            None
         }
     }
 }

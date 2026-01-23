@@ -1,6 +1,7 @@
 mod assign_table;
 mod comptime;
 mod declaration;
+mod event;
 mod expression;
 mod function;
 mod interface;
@@ -21,6 +22,7 @@ pub use declaration::{
     CombDeclaration, Declaration, DeclarationBlock, FfClock, FfDeclaration, FfReset,
     FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput, InstOutput,
 };
+pub use event::Event;
 pub use expression::{ArrayLiteralItem, Expression, Factor, Op};
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
@@ -29,7 +31,8 @@ pub use module::Module;
 pub use shape::{Shape, ShapeRef};
 pub use signature::Signature;
 pub use statement::{
-    AssignDestination, AssignStatement, IfResetStatement, IfStatement, Statement, StatementBlock,
+    AssignDestination, AssignDestinationDefault, AssignStatement, IfResetStatement, IfStatement,
+    Statement, StatementBlock,
 };
 pub use system_function::SystemFunctionCall;
 pub use variable::{

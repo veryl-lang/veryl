@@ -1,13 +1,35 @@
-use crate::HashMap;
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
-use crate::conv::Context;
+use crate::conv::{Context, EvalContext};
 use crate::ir::assign_table::AssignTable;
-use crate::ir::{Declaration, Function, Type, VarId, VarIndex, VarPath, Variable};
+use crate::ir::{Declaration, Event, Function, Type, VarId, VarIndex, VarPath, Variable};
 use crate::symbol::ClockDomain;
+use crate::{AnalyzerError, HashMap};
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
+
+pub struct ModuleContext<'a> {
+    pub variables: &'a mut HashMap<VarId, Variable>,
+    pub functions: &'a mut HashMap<VarId, Function>,
+}
+
+impl<'a> EvalContext for ModuleContext<'a> {
+    fn variables(&mut self) -> &mut HashMap<VarId, Variable> {
+        self.variables
+    }
+
+    fn functions(&mut self) -> &mut HashMap<VarId, Function> {
+        self.functions
+    }
+
+    fn check_size(&mut self, _x: usize, _token: TokenRange) -> Option<usize> {
+        None
+    }
+
+    fn insert_error(&mut self, _error: AnalyzerError) {}
+}
 
 #[derive(Clone)]
 pub struct Module {
@@ -77,6 +99,29 @@ impl Module {
                 }
             }
         }
+    }
+
+    pub fn eval_step(&mut self, event: &Event) {
+        let mut context = ModuleContext {
+            variables: &mut self.variables,
+            functions: &mut self.functions,
+        };
+        for x in &mut self.declarations {
+            x.eval_step(&mut context, event);
+        }
+    }
+
+    pub fn dump_variables(&self) -> String {
+        let mut ret = String::new();
+
+        let mut variables: Vec<_> = self.variables.iter().collect();
+        variables.sort_by(|a, b| a.0.cmp(b.0));
+
+        for (_, x) in variables {
+            ret.push_str(&format!("{}\n", x));
+        }
+
+        ret
     }
 }
 

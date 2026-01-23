@@ -1,5 +1,5 @@
-use crate::conv::Context;
 use crate::conv::utils::get_component;
+use crate::conv::{Context, EvalContext};
 use crate::ir::{
     Component, Expression, IrResult, Op, Shape, ShapeRef, Signature, VarIndex, VarPath, VarSelect,
     VarSelectOp,
@@ -238,7 +238,13 @@ impl Comptime {
         }
     }
 
-    pub fn invalid_operand(&mut self, context: &mut Context, op: Op, x: &Type, range: &TokenRange) {
+    pub fn invalid_operand<T: EvalContext>(
+        &mut self,
+        context: &mut T,
+        op: Op,
+        x: &Type,
+        range: &TokenRange,
+    ) {
         context.insert_error(AnalyzerError::invalid_operand(
             &x.to_string(),
             &op.to_string(),
@@ -252,7 +258,7 @@ impl Comptime {
         self.is_const = false;
     }
 
-    pub fn invalid_logical_operand(&mut self, context: &mut Context, range: &TokenRange) {
+    pub fn invalid_logical_operand<T: EvalContext>(&mut self, context: &mut T, range: &TokenRange) {
         context.insert_error(AnalyzerError::invalid_logical_operand(true, range));
         self.value = ValueVariant::Unknown;
         self.r#type = Type {
@@ -262,9 +268,9 @@ impl Comptime {
         self.is_const = false;
     }
 
-    pub fn invalid_cast(
+    pub fn invalid_cast<T: EvalContext>(
         &mut self,
-        context: &mut Context,
+        context: &mut T,
         dst: &Type,
         src: &Type,
         range: &TokenRange,
@@ -994,6 +1000,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(vec![Some(width)]),
             signed: false,
+            ..Default::default()
         }
     }
 
@@ -1003,6 +1010,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(width.to_vec()),
             signed: false,
+            ..Default::default()
         }
     }
 
@@ -1022,6 +1030,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(vec![Some(width)]),
             signed: false,
+            ..Default::default()
         }
     }
 
@@ -1041,6 +1050,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(vec![Some(width)]),
             signed: false,
+            ..Default::default()
         }
     }
 
