@@ -1,4 +1,3 @@
-use crate::analyzer_error::AnalyzerError;
 use crate::conv::utils::{
     TypePosition, argument_list, case_condition, eval_assign_statement, eval_expr, eval_for_range,
     eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
@@ -6,15 +5,13 @@ use crate::conv::utils::{
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
-    self, Comptime, IrResult, Shape, TypeKind, VarIndex, VarKind, VarPath, VarPathSelect,
-    VarSelect, Variable,
+    self, Comptime, IrResult, Shape, TypeKind, VarKind, VarPath, VarPathSelect, Variable,
 };
-use crate::ir_error;
 use crate::namespace::DefineContext;
 use crate::symbol::{Affiliation, SymbolKind};
 use crate::symbol_table;
 use crate::value::Value;
-use num_bigint::BigUint;
+use crate::{AnalyzerError, BigUint, ir_error};
 use veryl_parser::resource_table;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -77,14 +74,13 @@ impl Conv<&LetStatement> for ir::StatementBlock {
 
             let (id, comptime) = context.find_path(&path).ok_or_else(|| ir_error!(token))?;
 
-            let dst = ir::AssignDestination {
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 id,
                 path,
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime,
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             let mut expr = eval_expr(context, Some(r#type.clone()), &value.expression, false)?;
 
@@ -195,7 +191,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         if let Some(dst) = dst.to_assign_destination(context, false) {
                             let mut expr = eval_expr(
                                 context,
-                                Some(dst.comptime.r#type.clone()),
+                                Some(dst.comptime().r#type.clone()),
                                 &x.assignment.expression,
                                 false,
                             )?;
@@ -213,18 +209,28 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         let dst: VarPathSelect = Conv::conv(context, expr)?;
                         let src: VarPathSelect = Conv::conv(context, expr)?;
 
-                        if let Some(dst) = dst.to_assign_destination(context, false)
+                        if let Some(mut dst) = dst.to_assign_destination(context, false)
                             && let Some(src) = src.to_expression(context)
                         {
                             let (_, expr) = eval_expr(
                                 context,
-                                Some(dst.comptime.r#type.clone()),
+                                Some(dst.comptime().r#type.clone()),
                                 &x.assignment.expression,
                                 false,
                             )?;
 
                             let width = dst.total_width(context);
-                            let expr = ir::Expression::Binary(Box::new(src), op, Box::new(expr));
+                            let mut expr = if op == ir::Op::Sub {
+                                let expr = ir::Expression::Unary(ir::Op::Sub, Box::new(expr));
+                                ir::Expression::Binary(Box::new(src), ir::Op::Add, Box::new(expr))
+                            } else {
+                                ir::Expression::Binary(Box::new(src), op, Box::new(expr))
+                            };
+
+                            // for optimization
+                            expr.eval_comptime(context, width);
+                            dst.eval_comptime(context);
+
                             let statement = ir::AssignStatement {
                                 dst: vec![dst],
                                 width,
@@ -551,7 +557,7 @@ impl Conv<&ReturnStatement> for ir::Statement {
             let width = dst.total_width(context);
             let (_, expr) = eval_expr(
                 context,
-                Some(dst.comptime.r#type.clone()),
+                Some(dst.comptime().r#type.clone()),
                 &value.expression,
                 false,
             )?;
@@ -629,7 +635,7 @@ impl Conv<&ForStatement> for ir::StatementBlock {
                     path,
                     kind,
                     comptime.r#type.clone(),
-                    vec![comptime.get_value().unwrap()],
+                    vec![comptime.get_value().unwrap().clone()],
                     c.get_affiliation(),
                     &token,
                 );

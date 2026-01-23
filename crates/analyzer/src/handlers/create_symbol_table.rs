@@ -365,7 +365,7 @@ impl CreateSymbolTable {
             let explicit_value = if let Ok(mut expr) = expr {
                 let comptime = expr.eval_comptime(&mut context, None);
                 if let Ok(value) = comptime.get_value() {
-                    if value.is_x() | value.is_z() {
+                    if value.is_xz() {
                         None
                     } else {
                         let value = value.to_usize();
