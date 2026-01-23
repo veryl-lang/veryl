@@ -7,7 +7,6 @@ use crate::conv::{Context, Conv};
 use crate::ir::{
     self, Comptime, IrResult, Op, Shape, Type, TypeKind, ValueVariant, VarPath, VarPathSelect,
 };
-use crate::literal::Literal;
 use crate::symbol::SymbolKind;
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
@@ -752,43 +751,7 @@ impl Conv<&IdentifierFactor> for ir::Expression {
             } else {
                 let path = generic_path;
                 if let Some(x) = path.to_literal() {
-                    let (value, r#type) = match x {
-                        Literal::Value(x) => {
-                            let r#type = x.to_ir_type();
-                            (ValueVariant::Numeric(x), r#type)
-                        }
-                        Literal::Type(x) => {
-                            let r#type = ir::Type {
-                                kind: ir::TypeKind::Type,
-                                width: Shape::new(vec![Some(1)]),
-                                ..Default::default()
-                            };
-                            (ValueVariant::Type((&x).into()), r#type)
-                        }
-                        Literal::Boolean(x) => {
-                            let value = Value::new(x.into(), 1, false);
-                            let r#type = value.to_ir_type();
-                            (ValueVariant::Numeric(value), r#type)
-                        }
-                        Literal::String(x) => {
-                            let value = Value::new(x.0.into(), 32, false);
-                            let r#type = ir::Type {
-                                kind: ir::TypeKind::String,
-                                width: Shape::new(vec![Some(1)]),
-                                ..Default::default()
-                            };
-                            (ValueVariant::Numeric(value), r#type)
-                        }
-                    };
-                    let x = Comptime {
-                        value,
-                        r#type,
-                        is_const: true,
-                        is_global: true,
-                        token,
-                        ..Default::default()
-                    };
-
+                    let x = x.eval_comptime(token);
                     ir::Factor::Value(x, token)
                 } else if let Ok(symbol) = symbol_table::resolve(&path) {
                     // To resolve external symbol reference,

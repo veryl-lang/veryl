@@ -2033,9 +2033,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.default_block = Some(name);
                 self.namespace.push(name);
 
-                if self.for_identifier.is_some() {
-                    let identifier = self.for_identifier.unwrap();
-                    self.insert_symbol(&identifier, SymbolKind::Genvar, false);
+                if let Some(x) = self.for_identifier {
+                    self.insert_symbol(&x, SymbolKind::Genvar, false);
                     self.for_identifier = None;
                 }
             }

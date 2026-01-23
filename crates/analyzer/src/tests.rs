@@ -6844,6 +6844,52 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package foo_proto_pkg {
+        const FOO: bool;
+    }
+    
+    module bar_module::<PKG: foo_proto_pkg> {
+        import PKG::*;
+        var bar: u32;
+        if FOO :g {
+            assign bar = 0;
+        } else {
+            assign bar = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<X: u32> {
+        var a: logic;
+        if X == 0 :g {
+            assign a = 0;
+        } else {
+            assign a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<X: u32 = 0> {
+        var a: logic;
+        if X == 0 :g {
+        } else {
+            assign a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
 
 #[test]
