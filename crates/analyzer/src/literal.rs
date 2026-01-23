@@ -1,6 +1,8 @@
+use crate::ir::{Comptime, Shape, Type, TypeKind, ValueVariant};
 use crate::value::Value;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -9,6 +11,47 @@ pub enum Literal {
     Type(TypeLiteral),
     Boolean(bool),
     String(StrId),
+}
+
+impl Literal {
+    pub fn eval_comptime(&self, token: TokenRange) -> Comptime {
+        let (value, r#type) = match self {
+            Literal::Value(x) => {
+                let r#type = x.to_ir_type();
+                (ValueVariant::Numeric(x.clone()), r#type)
+            }
+            Literal::Type(x) => {
+                let r#type = Type {
+                    kind: TypeKind::Type,
+                    width: Shape::new(vec![Some(1)]),
+                    ..Default::default()
+                };
+                (ValueVariant::Type(x.into()), r#type)
+            }
+            Literal::Boolean(x) => {
+                let value = Value::new((*x).into(), 1, false);
+                let r#type = value.to_ir_type();
+                (ValueVariant::Numeric(value), r#type)
+            }
+            Literal::String(x) => {
+                let value = Value::new(x.0.into(), 32, false);
+                let r#type = Type {
+                    kind: TypeKind::String,
+                    width: Shape::new(vec![Some(1)]),
+                    ..Default::default()
+                };
+                (ValueVariant::Numeric(value), r#type)
+            }
+        };
+        Comptime {
+            value,
+            r#type,
+            is_const: true,
+            is_global: true,
+            token,
+            ..Default::default()
+        }
+    }
 }
 
 impl fmt::Display for Literal {

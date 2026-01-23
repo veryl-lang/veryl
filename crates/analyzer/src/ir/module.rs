@@ -17,10 +17,15 @@ pub struct Module {
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub declarations: Vec<Declaration>,
+    pub suppress_unassigned: bool,
 }
 
 impl Module {
     pub fn eval_assign(&self, context: &mut Context) {
+        if self.suppress_unassigned {
+            return;
+        }
+
         context.variables = self.variables.clone();
         context.functions = self.functions.clone();
 

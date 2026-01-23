@@ -11,6 +11,7 @@ use crate::ir::{
 };
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, SymbolKind,
+    TypeKind,
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveResult};
@@ -1135,6 +1136,15 @@ pub fn eval_external_symbol(
             }
         }
         SymbolKind::GenericParameter(x) => {
+            let default_value = if let Some(x) = &x.default_value
+                && let Some(x) = x.to_literal()
+            {
+                let x = x.eval_comptime(token);
+                Some(x)
+            } else {
+                None
+            };
+
             if let Some(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace) {
                 let r#type = match proto {
                     ProtoBound::FactorType(x) => Some(x),
@@ -1147,6 +1157,10 @@ pub fn eval_external_symbol(
                     let r#type = r#type.to_ir_type(context, TypePosition::Generic)?;
                     let mut x = Comptime::create_unknown(ClockDomain::None, token);
 
+                    if let Some(val) = default_value {
+                        x.value = val.value;
+                    }
+
                     // GenericParameter is const and global
                     x.is_const = true;
                     x.is_global = true;
@@ -1156,6 +1170,10 @@ pub fn eval_external_symbol(
                 }
             } else if matches!(x.bound, GenericBoundKind::Type) {
                 let mut x = Comptime::create_unknown(ClockDomain::None, token);
+
+                if let Some(val) = default_value {
+                    x.value = val.value;
+                }
 
                 // GenericParameter is const and global
                 x.is_const = true;
@@ -2006,6 +2024,48 @@ pub fn check_compatibility(
             token,
             &[],
         ));
+    }
+}
+
+pub fn check_module_with_unevaluable_generic_parameters(ident: &Identifier) -> bool {
+    if let Ok(symbol) = symbol_table::resolve(ident)
+        && let SymbolKind::Module(x) = symbol.found.kind
+    {
+        let mut ret = false;
+
+        for x in &x.generic_parameters {
+            let param = symbol_table::get(*x).unwrap();
+            if let SymbolKind::GenericParameter(x) = param.kind {
+                let has_default = x.default_value.is_some();
+                ret |= match &x.bound {
+                    GenericBoundKind::Type => false,
+                    GenericBoundKind::Inst(_) => false,
+                    GenericBoundKind::Proto(x) => {
+                        // Fixed type or proto package with non-default may be unevaluable
+                        if x.kind.is_fixed() && !has_default {
+                            true
+                        } else if let TypeKind::UserDefined(x) = &x.kind
+                            && let Ok(symbol) = symbol_table::resolve(&x.path)
+                            && matches!(
+                                symbol.found.kind,
+                                SymbolKind::ProtoPackage(_) | SymbolKind::ProtoAliasPackage(_)
+                            )
+                            && !has_default
+                        {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                };
+            } else {
+                unreachable!();
+            }
+        }
+
+        ret
+    } else {
+        false
     }
 }
 

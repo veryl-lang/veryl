@@ -2,6 +2,7 @@ use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_bound;
 use crate::conv::checker::proto::check_proto;
+use crate::conv::utils::check_module_with_unevaluable_generic_parameters;
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{self, IrResult, VarPath};
 use crate::symbol::SymbolKind;
@@ -31,7 +32,14 @@ impl Conv<&Veryl> for ir::Ir {
                                     Conv::conv(context, x.module_declaration.as_ref());
                                 context.insert_ir_error(&ret);
 
-                                if let Ok(component) = ret {
+                                if let Ok(mut component) = ret {
+                                    // suppress unassigned check for modules with unevaluable generic parameters
+                                    if check_module_with_unevaluable_generic_parameters(
+                                        &x.module_declaration.identifier,
+                                    ) {
+                                        component.suppress_unassigned = true;
+                                    }
+
                                     components.push(ir::Component::Module(component));
                                 }
                             }
@@ -215,6 +223,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             variables,
             functions,
             declarations,
+            suppress_unassigned: false,
         })
     }
 }
@@ -404,6 +413,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             variables,
             functions: HashMap::default(),
             declarations: vec![],
+            suppress_unassigned: false,
         })
     }
 }
