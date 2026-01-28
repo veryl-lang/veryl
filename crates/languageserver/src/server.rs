@@ -346,7 +346,7 @@ impl Server {
                     } else {
                         vec![]
                     };
-                    items.append(&mut completion_keyword(line, column));
+                    items.append(&mut completion_keyword());
                     Some(CompletionResponse::Array(items))
                 }
                 _ => None,
@@ -1200,26 +1200,17 @@ fn drop_tables(path: PathId) {
     definition_table::drop(path);
 }
 
-fn completion_keyword(line: usize, column: usize) -> Vec<CompletionItem> {
-    let line = (line - 1) as u32;
-    let character = (column - 2) as u32;
-    let start = Position { line, character };
-    let end = Position { line, character };
-
+fn completion_keyword() -> Vec<CompletionItem> {
     let mut items = Vec::new();
     for keyword in KEYWORDS {
-        let new_text = keyword.to_string();
-
-        let text_edit = CompletionTextEdit::Edit(TextEdit {
-            range: Range { start, end },
-            new_text,
-        });
+        let label = keyword.to_string();
+        let insert_text = Some(label.clone());
 
         let item = CompletionItem {
             label: keyword.to_string(),
             kind: Some(CompletionItemKind::KEYWORD),
             detail: None,
-            text_edit: Some(text_edit),
+            insert_text,
             ..Default::default()
         };
         items.push(item);
