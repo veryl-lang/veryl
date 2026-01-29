@@ -84,7 +84,6 @@ exports.Mode = Mode;
                         }
                     });
                 })();
-            
 "###;
 
 pub struct Ace;
