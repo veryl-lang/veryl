@@ -58,7 +58,7 @@ module Module57 {
 
     inst u: Package57F::<Module57F>::InstModule;
 
-    let _e: Package57G::<i32>::TYPE  = 0;
-    let _f: Package57G::<u32>::TYPE  = 0;
-    let _g: Package57G::<bool>::TYPE = false;
+    let _e: Package57G::<i32>::TYPE   = 0;
+    let _f: Package57G::<u32>::TYPE   = 0;
+    let _g: Package57G::<lbool>::TYPE = false;
 }

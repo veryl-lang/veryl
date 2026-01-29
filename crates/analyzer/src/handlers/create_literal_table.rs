@@ -46,7 +46,8 @@ macro_rules! impl_type_literal {
 
 impl VerylGrammarTrait for CreateLiteralTable {
     impl_type_literal!(Bit);
-    impl_type_literal!(Bool);
+    impl_type_literal!(BBool);
+    impl_type_literal!(LBool);
     impl_type_literal!(Clock);
     impl_type_literal!(ClockPosedge);
     impl_type_literal!(ClockNegedge);

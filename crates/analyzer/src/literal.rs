@@ -70,7 +70,8 @@ impl Literal {}
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TypeLiteral {
     Bit,
-    Bool,
+    BBool,
+    LBool,
     Clock,
     ClockPosedge,
     ClockNegedge,
@@ -97,7 +98,8 @@ impl TypeLiteral {
     pub fn to_sv_string(&self) -> String {
         let text = match self {
             TypeLiteral::Bit => "bit",
-            TypeLiteral::Bool => "logic",
+            TypeLiteral::BBool => "bit",
+            TypeLiteral::LBool => "logic",
             TypeLiteral::Clock => "logic",
             TypeLiteral::ClockPosedge => "logic",
             TypeLiteral::ClockNegedge => "logic",
@@ -127,7 +129,8 @@ impl fmt::Display for TypeLiteral {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TypeLiteral::Bit => "bit".fmt(f),
-            TypeLiteral::Bool => "bool".fmt(f),
+            TypeLiteral::BBool => "bbool".fmt(f),
+            TypeLiteral::LBool => "lbool".fmt(f),
             TypeLiteral::Clock => "clock".fmt(f),
             TypeLiteral::ClockPosedge => "clock_posedge".fmt(f),
             TypeLiteral::ClockNegedge => "clock_negedge".fmt(f),
@@ -173,7 +176,8 @@ macro_rules! impl_to_type_literal {
 }
 
 impl_to_literal!(Bit);
-impl_to_literal!(Bool);
+impl_to_literal!(BBool);
+impl_to_literal!(LBool);
 impl_to_literal!(Clock);
 impl_to_literal!(ClockPosedge);
 impl_to_literal!(ClockNegedge);
@@ -195,7 +199,8 @@ impl_to_literal!(U32);
 impl_to_literal!(U64);
 
 impl_to_type_literal!(Bit);
-impl_to_type_literal!(Bool);
+impl_to_type_literal!(BBool);
+impl_to_type_literal!(LBool);
 impl_to_type_literal!(Clock);
 impl_to_type_literal!(ClockPosedge);
 impl_to_type_literal!(ClockNegedge);

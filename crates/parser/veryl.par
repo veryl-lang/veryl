@@ -113,7 +113,8 @@ AsTerm                : <INITIAL, Generic                                       
 BindTerm              : <INITIAL, Generic                                             >'bind'                                                                                : Token; // Keyword: Statement
 BitTerm               : <INITIAL, Generic                                             >'bit'                                                                                 : Token; // Keyword: Type
 BlockTerm             : <INITIAL, Generic                                             >'block'                                                                               : Token; // Keyword: Statement
-BoolTerm              : <INITIAL, Generic                                             >'bool'                                                                                : Token; // Keyword: Type
+BBoolTerm             : <INITIAL, Generic                                             >'bbool'                                                                               : Token; // Keyword: Type
+LBoolTerm             : <INITIAL, Generic                                             >'lbool'                                                                               : Token; // Keyword: Type
 CaseTerm              : <INITIAL, Generic                                             >'case'                                                                                : Token; // Keyword: Conditional
 ClockTerm             : <INITIAL, Generic                                             >'clock'                                                                               : Token; // Keyword: Type
 ClockPosedgeTerm      : <INITIAL, Generic                                             >'clock_posedge'                                                                       : Token; // Keyword: Type
@@ -260,7 +261,8 @@ AssignToken        : AssignTerm        : Token Comments;
 BindToken          : BindTerm          : Token Comments;
 BitToken           : BitTerm           : Token Comments;
 BlockToken         : BlockTerm         : Token Comments;
-BoolToken          : BoolTerm          : Token Comments;
+BBoolToken         : BBoolTerm         : Token Comments;
+LBoolToken         : LBoolTerm         : Token Comments;
 CaseToken          : CaseTerm          : Token Comments;
 ClockToken         : ClockTerm         : Token Comments;
 ClockPosedgeToken  : ClockPosedgeTerm  : Token Comments;
@@ -413,7 +415,8 @@ Assign        : AssignToken        : VerylToken;
 Bind          : BindToken          : VerylToken;
 Bit           : BitToken           : VerylToken;
 Block         : BlockToken         : VerylToken;
-Bool          : BoolToken          : VerylToken;
+BBool         : BBoolToken         : VerylToken;
+LBool         : LBoolToken         : VerylToken;
 Break         : BreakToken         : VerylToken;
 Case          : CaseToken          : VerylToken;
 Clock         : ClockToken         : VerylToken;
@@ -620,7 +623,7 @@ RangeOperator: DotDot
 // ScalarType / ArrayType / CastingType
 // ----------------------------------------------------------------------------
 
-FixedType: U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | Bool | Strin;
+FixedType: U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | BBool | LBool | Strin;
 
 VariableType: Clock
             | ClockPosedge
@@ -653,7 +656,8 @@ CastingType: U8
            | I64
            | F32
            | F64
-           | Bool
+           | BBool
+           | LBool
            | Clock
            | ClockPosedge
            | ClockNegedge

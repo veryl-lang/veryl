@@ -285,7 +285,8 @@ impl Conv<&FactorType> for ir::Factor {
                     FixedType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true),
                     FixedType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
                     FixedType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
-                    FixedType::Bool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
+                    FixedType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
+                    FixedType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
                     FixedType::Strin(_) => (TypeKind::Unknown, Shape::new(vec![Some(1)]), false),
                 };
                 Type {
@@ -330,7 +331,8 @@ impl Conv<&CastingType> for ir::Factor {
                 CastingType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true),
                 CastingType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
                 CastingType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
-                CastingType::Bool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
+                CastingType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
+                CastingType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
                 CastingType::Clock(_) => (TypeKind::Clock, Shape::new(vec![Some(1)]), false),
                 CastingType::ClockPosedge(_) => {
                     (TypeKind::ClockPosedge, Shape::new(vec![Some(1)]), false)

@@ -7,6 +7,7 @@ module veryl_testcase_Module64;
     longint signed   _x3; always_comb _x3 = signed'(longint'(a));
     shortreal        _x4; always_comb _x4 = shortreal'(a);
     real             _x5; always_comb _x5 = real'(a);
-    logic            _x6; always_comb _x6 = ((a) != 1'b0);
+    bit              _x6; always_comb _x6 = ((a) != 1'b0);
+    logic            _x7; always_comb _x7 = ((a) != 1'b0);
 endmodule
 //# sourceMappingURL=../map/64_cast_to_builtin.sv.map

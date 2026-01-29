@@ -1564,26 +1564,26 @@ fn generics_resolve() {
         const WIDTH: u32;
         type Type = logic<WIDTH>;
     }
-    
+
     pub package Pkg::<X: u32> for ProtoPkg {
         const WIDTH: u32 = X;
         type Type = logic<WIDTH>;
     }
-    
+
     module ModuleA::<PKG: ProtoPkg> (
         i_clk   : input clock,
         i_rst   : input reset,
     ) {
         import PKG::*;
-    
+
         struct StructA {
             a: logic,
             b: Type ,
         }
-    
+
         var a: logic  ;
         var b: StructA;
-    
+
         always_ff {
             if_reset {
                 b = '0;
@@ -1593,7 +1593,7 @@ fn generics_resolve() {
             }
         }
     }
-    
+
     module ModuleB {
         inst u: ModuleA::<Pkg::<32>> (
             i_clk: '0,
@@ -1648,19 +1648,20 @@ fn generics_resolve2() {
     proto package ProtoPkg {
         const TYPE: type;
     }
-    
-    package PackageA::<X: type = bool,> for ProtoPkg {
+
+    package PackageA::<X: type = lbool,> for ProtoPkg {
         const TYPE: type = X;
     }
-    
+
     module ModuleA::<PKG: ProtoPkg> () {
         import PKG::*;
         let a : TYPE  = 1;
         let _b: logic = a;
     }
-    
+
     module ModuleB {
-        inst u: ModuleA::<PackageA::<>>;
+        inst u0: ModuleA::<PackageA::<>>;
+        inst u1: ModuleA::<PackageA::<bbool>>;
     }
     "#;
 
@@ -1677,10 +1678,24 @@ fn generics_resolve2() {
 }
 module ModuleB {
 
-  inst u (
+  inst u0 (
   ) {
     module ModuleA {
       let var0(a): logic = 'hx;
+      let var1(_b): logic = 'hx;
+
+      comb {
+        var0 = 00000001;
+      }
+      comb {
+        var1 = var0;
+      }
+    }
+  }
+  inst u1 (
+  ) {
+    module ModuleA {
+      let var0(a): bit = 'hx;
       let var1(_b): logic = 'hx;
 
       comb {

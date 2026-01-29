@@ -87,6 +87,11 @@ impl VerylWalker for Migrator {
         self.token(arg);
     }
 
+    /// Semantic action for non-terminal 'Bool'
+    fn bool(&mut self, arg: &Bool) {
+        self.veryl_token(&arg.bool_token.replace("lbool"));
+    }
+
     /// Semantic action for non-terminal 'StatementBlockGroup'
     fn statement_block_group(&mut self, arg: &StatementBlockGroup) {
         for x in &arg.statement_block_group_list {

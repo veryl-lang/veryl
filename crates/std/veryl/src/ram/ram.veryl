@@ -3,8 +3,8 @@ pub module ram #(
     param ADDRESS_WIDTH: u32       = if WORD_SIZE >= 2 ? $clog2(WORD_SIZE) : 1,
     param DATA_WIDTH   : u32       = 8                                        ,
     param DATA_TYPE    : type      = logic<DATA_WIDTH>                        ,
-    param BUFFER_OUT   : bool      = false                                    ,
-    param USE_RESET    : bool      = false                                    ,
+    param BUFFER_OUT   : bbool     = false                                    ,
+    param USE_RESET    : bbool     = false                                    ,
     param INITIAL_VALUE: DATA_TYPE = 0 as DATA_TYPE                           ,
 ) (
     i_clk : input  clock                   ,

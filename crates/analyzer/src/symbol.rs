@@ -1208,7 +1208,8 @@ impl Type {
             | TypeKind::ResetSyncHigh
             | TypeKind::ResetSyncLow
             | TypeKind::Bit
-            | TypeKind::Bool
+            | TypeKind::BBool
+            | TypeKind::LBool
             | TypeKind::Logic => {
                 let mut ret = Shape::default();
 
@@ -1273,6 +1274,7 @@ impl Type {
             TypeKind::ResetSyncHigh => ir::TypeKind::ResetSyncHigh,
             TypeKind::ResetSyncLow => ir::TypeKind::ResetSyncLow,
             TypeKind::Bit
+            | TypeKind::BBool
             | TypeKind::U8
             | TypeKind::U16
             | TypeKind::U32
@@ -1283,7 +1285,7 @@ impl Type {
             | TypeKind::I64
             | TypeKind::F32
             | TypeKind::F64 => ir::TypeKind::Bit,
-            TypeKind::Bool | TypeKind::Logic => ir::TypeKind::Logic,
+            TypeKind::LBool | TypeKind::Logic => ir::TypeKind::Logic,
             TypeKind::Type => ir::TypeKind::Type,
             TypeKind::String => ir::TypeKind::String,
             TypeKind::UserDefined(x) => {
@@ -1331,7 +1333,8 @@ pub enum TypeKind {
     F32,
     F64,
     Type,
-    Bool,
+    BBool,
+    LBool,
     String,
     UserDefined(UserDefinedType),
     AbstractInterface(Option<StrId>),
@@ -1361,6 +1364,7 @@ impl TypeKind {
         matches!(
             self,
             TypeKind::Bit
+                | TypeKind::BBool
                 | TypeKind::U8
                 | TypeKind::U16
                 | TypeKind::U32
@@ -1391,7 +1395,8 @@ impl TypeKind {
                 | TypeKind::I64
                 | TypeKind::F32
                 | TypeKind::F64
-                | TypeKind::Bool
+                | TypeKind::BBool
+                | TypeKind::LBool
                 | TypeKind::String
         )
     }
@@ -1497,7 +1502,8 @@ impl fmt::Display for Type {
             TypeKind::F32 => text.push_str("f32"),
             TypeKind::F64 => text.push_str("f64"),
             TypeKind::Type => text.push_str("type"),
-            TypeKind::Bool => text.push_str("bool"),
+            TypeKind::BBool => text.push_str("bbool"),
+            TypeKind::LBool => text.push_str("lbool"),
             TypeKind::String => text.push_str("string"),
             TypeKind::UserDefined(x) => {
                 text.push_str(&x.path.to_string());
@@ -1678,7 +1684,8 @@ impl From<&syntax_tree::FixedType> for Type {
             syntax_tree::FixedType::I64(_) => TypeKind::I64,
             syntax_tree::FixedType::F32(_) => TypeKind::F32,
             syntax_tree::FixedType::F64(_) => TypeKind::F64,
-            syntax_tree::FixedType::Bool(_) => TypeKind::Bool,
+            syntax_tree::FixedType::BBool(_) => TypeKind::BBool,
+            syntax_tree::FixedType::LBool(_) => TypeKind::LBool,
             syntax_tree::FixedType::Strin(_) => TypeKind::String,
         };
         Type {
@@ -1737,7 +1744,8 @@ impl From<&syntax_tree::FactorType> for Type {
                     syntax_tree::FixedType::I64(_) => TypeKind::I64,
                     syntax_tree::FixedType::F32(_) => TypeKind::F32,
                     syntax_tree::FixedType::F64(_) => TypeKind::F64,
-                    syntax_tree::FixedType::Bool(_) => TypeKind::Bool,
+                    syntax_tree::FixedType::BBool(_) => TypeKind::BBool,
+                    syntax_tree::FixedType::LBool(_) => TypeKind::LBool,
                     syntax_tree::FixedType::Strin(_) => TypeKind::String,
                 };
                 Type {

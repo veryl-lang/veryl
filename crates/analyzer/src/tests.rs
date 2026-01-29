@@ -1025,19 +1025,19 @@ fn multiple_assignment() {
             b: output,
         }
     }
-    
+
     module ModuleA {
         inst u: InterfaceA [2];
-    
+
         inst x0: ModuleB (
             p: u[0],
         );
-    
+
         inst x1: ModuleB (
             p: u[1],
         );
     }
-    
+
     module ModuleB (
         p: modport InterfaceA::mst,
     ) {
@@ -3650,7 +3650,7 @@ fn mismatch_type() {
     assert!(errors.is_empty());
 
     let code = r#"
-    package FooPkg::<A: bool = true, B: bool = false> {
+    package FooPkg::<A: bbool = true, B: bbool = false> {
     }
     module BarModule {
         import FooPkg::<false, true>::*;
@@ -3727,30 +3727,30 @@ fn mismatch_type() {
     proto package Proto {
         const X: u32;
     }
-    
+
     package Package for Proto {
         const X: u32 = 1;
     }
-    
+
     interface InterfaceA::<PKG: Proto> {
         var a: logic;
         modport master {
             a: output,
         }
     }
-    
+
     module ModuleC {
         inst u: ModuleA::<Package>;
     }
-    
+
     module ModuleA::<PKG: Proto> {
         inst a: InterfaceA::<PKG>;
-    
+
         inst u: ModuleB::<PKG> (
             p: a,
         );
     }
-    
+
     module ModuleB::<PKG: Proto> (
         p: modport InterfaceA::<PKG>::master,
     ) {
@@ -4470,7 +4470,7 @@ fn missing_reset_statement() {
         i_rst: input reset,
     ) {
         var a: $sv::StructA;
-    
+
         always_ff {
             if_reset {
                 a.a = 0;
@@ -5226,11 +5226,11 @@ fn referring_before_definition() {
     let code = r#"
     module ModuleA {
         let _a: logic = c.x;
-    
+
         struct StructA {
             x: logic,
         }
-    
+
         var c: StructA;
         assign c = 0;
     }
@@ -5244,24 +5244,24 @@ fn referring_before_definition() {
 
     let code = r#"
     proto package ProtoPkg {
-        const INFO     : bool;
-        const INFO_TYPE: type;
+        const INFO     : bbool;
+        const INFO_TYPE: type ;
     }
-    
-    package PackageA::<info: bool = false, info_type: type = bool,> for ProtoPkg {
-        const INFO     : bool = info;
-        const INFO_TYPE: type = info_type;
+
+    package PackageA::<info: bbool = false, info_type: type = bbool,> for ProtoPkg {
+        const INFO     : bbool = info;
+        const INFO_TYPE: type  = info_type;
     }
-    
+
     module ModuleA::<PKG: ProtoPkg> {
         import PKG::*;
-    
+
         let info: INFO_TYPE = 0;
         let _a  : logic     = info;
-    
+
         const X: logic = INFO;
     }
-    
+
     module ModuleB {
         inst u: ModuleA::<PackageA::<>>;
     }
@@ -6735,15 +6735,15 @@ fn unassign_variable() {
     ) {
         assign o = '0;
     }
-    
+
     module ModuleB {
         struct StructA {
             x: logic,
             y: logic,
         }
-    
+
         var a: StructA;
-    
+
         inst u0: ModuleA #(
             A: StructA,
         ) (
@@ -6800,7 +6800,7 @@ fn unassign_variable() {
             y: logic,
         }
     }
-    
+
     interface InterfaceA {
         var a: logic            ;
         var b: PackageA::StructA;
@@ -6809,15 +6809,15 @@ fn unassign_variable() {
             b: output,
         }
     }
-    
+
     module ModuleA {
         inst a: InterfaceA;
-    
+
         inst u: ModuleB (
             p: a,
         );
     }
-    
+
     module ModuleB (
         p: modport InterfaceA::mst,
     ) {
@@ -6847,9 +6847,9 @@ fn unassign_variable() {
 
     let code = r#"
     proto package foo_proto_pkg {
-        const FOO: bool;
+        const FOO: bbool;
     }
-    
+
     module bar_module::<PKG: foo_proto_pkg> {
         import PKG::*;
         var bar: u32;
@@ -7006,7 +7006,7 @@ fn unassignable_output() {
     ) {
         assign o_out = 0;
     }
-    
+
     module Top {
         inst foo_if: $sv::foo_if;
         inst u_a: ModuleA (o_out: foo_if.value);
@@ -7368,7 +7368,7 @@ fn anonymous_identifier() {
         assign b = 0 as T;
     }
     module ModuleC {
-        import PkgA::<bool>::*;
+        import PkgA::<bbool>::*;
         inst u: ModuleB::<TYPE> (
             b: _,
         );
@@ -7601,7 +7601,7 @@ fn invalid_logical_operand() {
     let code = r#"
     module ModuleA::<A: u32> {
         var a: logic<A>;
-    
+
         always_comb {
             if a[0] {}
         }
@@ -7618,7 +7618,7 @@ fn invalid_logical_operand() {
         }
         var a: StructA;
         assign a = 0;
-    
+
         always_comb {
             if a[0] {}
             if a.x {}
@@ -7632,7 +7632,7 @@ fn invalid_logical_operand() {
     module ModuleA {
         var a: logic   ;
         var b: logic<2>;
-    
+
         always_comb {
             a = 0;
             b = 0;

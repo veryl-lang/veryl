@@ -55,7 +55,7 @@ endpackage
 package veryl_testcase___Package57G__u32;
     typedef int unsigned TYPE;
 endpackage
-package veryl_testcase___Package57G__bool;
+package veryl_testcase___Package57G__lbool;
     typedef logic TYPE;
 endpackage
 
@@ -80,8 +80,8 @@ module veryl_testcase_Module57;
 
     veryl_testcase_Module57F u ();
 
-    veryl_testcase___Package57G__i32::TYPE  _e; always_comb _e = 0;
-    veryl_testcase___Package57G__u32::TYPE  _f; always_comb _f = 0;
-    veryl_testcase___Package57G__bool::TYPE _g; always_comb _g = 1'b0;
+    veryl_testcase___Package57G__i32::TYPE   _e; always_comb _e = 0;
+    veryl_testcase___Package57G__u32::TYPE   _f; always_comb _f = 0;
+    veryl_testcase___Package57G__lbool::TYPE _g; always_comb _g = 1'b0;
 endmodule
 //# sourceMappingURL=../map/57_generic_package.sv.map
