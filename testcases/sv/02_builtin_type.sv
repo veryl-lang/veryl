@@ -16,8 +16,10 @@ module veryl_testcase_Module02;
     real      _cc; always_comb _cc = 1;
 
     // boolean
-    logic _d ; always_comb _d  = 1'b1;
-    logic _dd; always_comb _dd = 1'b0;
+    bit   _d   ; always_comb _d    = 1'b1;
+    bit   _dd  ; always_comb _dd   = 1'b0;
+    logic _ddd ; always_comb _ddd  = 1'b1;
+    logic _dddd; always_comb _dddd = 1'b0;
 
     // 4 state (01xz) type
     logic                  _e  ; always_comb _e   = 1;

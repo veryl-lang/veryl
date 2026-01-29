@@ -612,7 +612,8 @@ impl From<&TypeLiteral> for Type {
     fn from(value: &TypeLiteral) -> Self {
         let kind = match value {
             TypeLiteral::Bit => TypeKind::Bit,
-            TypeLiteral::Bool => TypeKind::Logic,
+            TypeLiteral::BBool => TypeKind::Bit,
+            TypeLiteral::LBool => TypeKind::Logic,
             TypeLiteral::Clock => TypeKind::Clock,
             TypeLiteral::ClockPosedge => TypeKind::ClockPosedge,
             TypeLiteral::ClockNegedge => TypeKind::ClockNegedge,
@@ -647,7 +648,8 @@ impl From<&TypeLiteral> for Type {
 
         let width = match value {
             TypeLiteral::Bit
-            | TypeLiteral::Bool
+            | TypeLiteral::BBool
+            | TypeLiteral::LBool
             | TypeLiteral::Clock
             | TypeLiteral::ClockPosedge
             | TypeLiteral::ClockNegedge

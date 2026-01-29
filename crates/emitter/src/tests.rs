@@ -1507,7 +1507,7 @@ package PkgA::<W: u32> {
     }
 
     function FuncB (
-        enable: input   bool                   ,
+        enable: input   lbool                  ,
         a     : modport InterfaceA::<W>::master,
     ) {
         if enable {
@@ -1549,7 +1549,7 @@ module ModuleA {
 
     connect e_if.slave  <> 0;
 
-    function get_enable(v: input u32) -> bool {
+    function get_enable(v: input u32) -> lbool {
         return v != 0;
     }
 
@@ -2495,8 +2495,8 @@ endmodule
 
 #[test]
 fn boolean_literal_as_generic_arg() {
-    let code = r#"module ModuleA::<A: bool> {
-    let _a: bool = A;
+    let code = r#"module ModuleA::<A: lbool> {
+    let _a: lbool = A;
 }
 module ModuleB {
     inst u0: ModuleA::<true> ;
@@ -2717,26 +2717,26 @@ module c_module::<B_PKG: b_proto_pkg> {
     let _d: B_PKG::A_PKG::A_TYPE = 0;
     let _e: A_PKG::A_TYPE        = 0;
 }
-alias package B_PKG    = b_pkg::<bool>;
+alias package B_PKG    = b_pkg::<lbool>;
 alias module  C_MODULE = c_module::<B_PKG>;
 "#;
 
     let expect = r#"
 
-package prj___a_pkg__bool;
+package prj___a_pkg__lbool;
     localparam type A_TYPE = logic;
 endpackage
 
 
-package prj___b_pkg__bool;
+package prj___b_pkg__lbool;
 
 
 endpackage
-module prj___c_module____b_pkg__bool;
-    import prj___b_pkg__bool::*;
+module prj___c_module____b_pkg__lbool;
+    import prj___b_pkg__lbool::*;
 
-    prj___a_pkg__bool::A_TYPE _d; always_comb _d = 0;
-    prj___a_pkg__bool::A_TYPE _e; always_comb _e = 0;
+    prj___a_pkg__lbool::A_TYPE _d; always_comb _d = 0;
+    prj___a_pkg__lbool::A_TYPE _e; always_comb _e = 0;
 endmodule
 
 

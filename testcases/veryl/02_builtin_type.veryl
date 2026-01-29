@@ -16,8 +16,10 @@ module Module02 {
     let _cc: f64 = 1;
 
     // boolean
-    let _d : bool = true;
-    let _dd: bool = false;
+    let _d   : bbool = true;
+    let _dd  : bbool = false;
+    let _ddd : lbool = true;
+    let _dddd: lbool = false;
 
     // 4 state (01xz) type
     let _e  : logic         = 1;

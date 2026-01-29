@@ -2198,10 +2198,16 @@ impl VerylWalker for Emitter {
         }
     }
 
-    /// Semantic action for non-terminal 'Bool'
-    fn bool(&mut self, arg: &Bool) {
+    /// Semantic action for non-terminal 'BBool'
+    fn b_bool(&mut self, arg: &BBool) {
         let literal: TypeLiteral = arg.into();
-        self.veryl_token(&arg.bool_token.replace(&literal.to_sv_string()));
+        self.veryl_token(&arg.b_bool_token.replace(&literal.to_sv_string()));
+    }
+
+    /// Semantic action for non-terminal 'LBool'
+    fn l_bool(&mut self, arg: &LBool) {
+        let literal: TypeLiteral = arg.into();
+        self.veryl_token(&arg.l_bool_token.replace(&literal.to_sv_string()));
     }
 
     /// Semantic action for non-terminal 'Clock'
@@ -2751,7 +2757,7 @@ impl VerylWalker for Emitter {
                     self.f64(&x.f64);
                     self.str("'(");
                 }
-                CastingType::Bool(_) => self.str("(("),
+                CastingType::BBool(_) | CastingType::LBool(_) => self.str("(("),
                 CastingType::UserDefinedType(x) => {
                     self.user_defined_type(&x.user_defined_type);
                     self.str("'(");
@@ -2844,7 +2850,7 @@ impl VerylWalker for Emitter {
                 | CastingType::UserDefinedType(_)
                 | CastingType::Based(_)
                 | CastingType::BaseLess(_) => self.str(")"),
-                CastingType::Bool(_) => self.str(") != 1'b0)"),
+                CastingType::BBool(_) | CastingType::LBool(_) => self.str(") != 1'b0)"),
                 _ => (),
             }
         }

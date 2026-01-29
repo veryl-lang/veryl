@@ -109,6 +109,8 @@
 ; Built-in types
 [
   "logic"
+  "bbool"
+  "lbool"
   "bit"
   "u32"
   "u64"

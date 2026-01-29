@@ -338,7 +338,8 @@ impl_token_range_singular!(As);
 impl_token_range_singular!(Assign);
 impl_token_range_singular!(Bind);
 impl_token_range_singular!(Bit);
-impl_token_range_singular!(Bool);
+impl_token_range_singular!(BBool);
+impl_token_range_singular!(LBool);
 impl_token_range_singular!(Break);
 impl_token_range_singular!(Case);
 impl_token_range_singular!(Clock);
@@ -736,7 +737,7 @@ impl_token_range_enum!(RangeOperator, dot_dot, dot_dot_equ);
 // ----------------------------------------------------------------------------
 
 impl_token_range_enum!(
-    FixedType, u8, u16, u32, u64, i32, i8, i16, i64, f32, f64, bool, strin
+    FixedType, u8, u16, u32, u64, i32, i8, i16, i64, f32, f64, b_bool, l_bool, strin
 );
 impl_token_range_enum!(
     VariableType,
@@ -815,7 +816,8 @@ impl_token_range_enum!(
     i64,
     f32,
     f64,
-    bool,
+    b_bool,
+    l_bool,
     clock,
     clock_posedge,
     clock_negedge,

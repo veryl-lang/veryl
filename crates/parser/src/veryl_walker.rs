@@ -454,18 +454,25 @@ pub trait VerylWalker {
         after!(self, bit, arg);
     }
 
-    /// Semantic action for non-terminal 'Bool'
+    /// Semantic action for non-terminal 'Block'
     fn block(&mut self, arg: &Block) {
         before!(self, block, arg);
         self.veryl_token(&arg.block_token);
         after!(self, block, arg);
     }
 
-    /// Semantic action for non-terminal 'Bool'
-    fn bool(&mut self, arg: &Bool) {
-        before!(self, bool, arg);
-        self.veryl_token(&arg.bool_token);
-        after!(self, bool, arg);
+    /// Semantic action for non-terminal 'BBool'
+    fn b_bool(&mut self, arg: &BBool) {
+        before!(self, b_bool, arg);
+        self.veryl_token(&arg.b_bool_token);
+        after!(self, b_bool, arg);
+    }
+
+    /// Semantic action for non-terminal 'LBool'
+    fn l_bool(&mut self, arg: &LBool) {
+        before!(self, l_bool, arg);
+        self.veryl_token(&arg.l_bool_token);
+        after!(self, l_bool, arg);
     }
 
     /// Semantic action for non-terminal 'Case'
@@ -1666,7 +1673,8 @@ pub trait VerylWalker {
             FixedType::I64(x) => self.i64(&x.i64),
             FixedType::F32(x) => self.f32(&x.f32),
             FixedType::F64(x) => self.f64(&x.f64),
-            FixedType::Bool(x) => self.bool(&x.bool),
+            FixedType::BBool(x) => self.b_bool(&x.b_bool),
+            FixedType::LBool(x) => self.l_bool(&x.l_bool),
             FixedType::Strin(x) => self.strin(&x.strin),
         };
         after!(self, fixed_type, arg);
@@ -1767,7 +1775,8 @@ pub trait VerylWalker {
             CastingType::I64(x) => self.i64(&x.i64),
             CastingType::F32(x) => self.f32(&x.f32),
             CastingType::F64(x) => self.f64(&x.f64),
-            CastingType::Bool(x) => self.bool(&x.bool),
+            CastingType::BBool(x) => self.b_bool(&x.b_bool),
+            CastingType::LBool(x) => self.l_bool(&x.l_bool),
             CastingType::Clock(x) => self.clock(&x.clock),
             CastingType::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
             CastingType::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),

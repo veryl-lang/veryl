@@ -5,15 +5,15 @@ import async_fifo_pkg::calc_default_depth;
 /// Asynchronous FIFO based on gray-code pointer.
 /// Generic parameter `S` is a module name of synchrinozer.
 pub module async_fifo::<S: synchronizer> #(
-    param WIDTH             : u32  = 8                         , /// Data width
-    param TYPE              : type = logic<WIDTH>              , /// Data type
-    param STAGES            : u32  = 2                         , /// Stages of synchronizer
-    param DEPTH             : u32  = calc_default_depth(STAGES), /// Depth of FIFO
-    param THRESHOLD         : u32  = DEPTH                     , /// Threshold for almost full signal
-    param USE_OUT_DATA_RESET: bool = false                     , /// Whether output data is reset
-    param INITIAL_OUT_DATA  : TYPE = 0 as TYPE                 , /// Reset value of output data
-    param MERGE_RESET       : bool = false                     , /// Whether both reset are merged
-    param RESET_SYNC_STAGES : u32  = 2                         , /// Stages of reset synchronizer
+    param WIDTH             : u32   = 8                         , /// Data width
+    param TYPE              : type  = logic<WIDTH>              , /// Data type
+    param STAGES            : u32   = 2                         , /// Stages of synchronizer
+    param DEPTH             : u32   = calc_default_depth(STAGES), /// Depth of FIFO
+    param THRESHOLD         : u32   = DEPTH                     , /// Threshold for almost full signal
+    param USE_OUT_DATA_RESET: bbool = false                     , /// Whether output data is reset
+    param INITIAL_OUT_DATA  : TYPE  = 0 as TYPE                 , /// Reset value of output data
+    param MERGE_RESET       : bbool = false                     , /// Whether both reset are merged
+    param RESET_SYNC_STAGES : u32   = 2                         , /// Stages of reset synchronizer
 ) (
     is_clk        : input  's clock, /// src clock
     is_rst        : input  's reset, /// src reset

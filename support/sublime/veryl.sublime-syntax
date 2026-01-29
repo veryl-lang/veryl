@@ -14,7 +14,7 @@ contexts:
       scope: keyword.other.veryl
     - match: \b(case|default|else|if_reset|if|inside|outside|switch|for|in|repeat|rev|step)\b
       scope: keyword.control.veryl
-    - match: \b(bit|bool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|u8|u16|u32|u64)\b
+    - match: \b(bit|bbool|lbool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|u8|u16|u32|u64)\b
       scope: storage.type.veryl
     - match: \b(converse|inout|input|output|same)\b
       scope: storage.modifier.veryl

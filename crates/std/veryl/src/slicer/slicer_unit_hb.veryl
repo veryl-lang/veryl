@@ -1,7 +1,7 @@
 module slicer_unit_hb #(
-    param WIDTH       : u32  = 1    ,
-    param DISABLE_MBFF: bool = false,
-    param USE_RESET   : bool = false,
+    param WIDTH       : u32   = 1    ,
+    param DISABLE_MBFF: bbool = false,
+    param USE_RESET   : bbool = false,
 ) (
     i_clk  : input  clock       ,
     i_rst  : input  reset       ,

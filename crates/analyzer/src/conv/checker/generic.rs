@@ -373,7 +373,10 @@ fn match_fixed_type(arg_type: &SymType, param_type: &SymType) -> bool {
         return false;
     }
 
-    if matches!(param_type.kind, TypeKind::Bool | TypeKind::String) {
+    if matches!(
+        param_type.kind,
+        TypeKind::BBool | TypeKind::LBool | TypeKind::String
+    ) {
         arg_type.kind == param_type.kind
     } else {
         arg_type.kind.is_fixed()
