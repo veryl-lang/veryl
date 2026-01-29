@@ -87,31 +87,21 @@ impl VerylWalker for Migrator {
         self.token(arg);
     }
 
-    /// Semantic action for non-terminal 'Operator07'
-    fn operator07(&mut self, arg: &Operator07) {
-        let token = arg.operator07_token.token.text.to_string();
-        match token.as_str() {
-            "===" => {
-                self.token(&arg.operator07_token.replace("=="));
-            }
-            "!==" => {
-                self.token(&arg.operator07_token.replace("!="));
-            }
-            _ => {
-                self.token(&arg.operator07_token);
-            }
+    /// Semantic action for non-terminal 'StatementBlockGroup'
+    fn statement_block_group(&mut self, arg: &StatementBlockGroup) {
+        for x in &arg.statement_block_group_list {
+            self.attribute(&x.attribute);
         }
-    }
-
-    /// Semantic action for non-terminal 'Operator05'
-    fn operator05(&mut self, arg: &Operator05) {
-        let token = arg.operator05_token.token.text.to_string();
-        match token.as_str() {
-            "^~" => {
-                self.token(&arg.operator05_token.replace("~^"));
+        match arg.statement_block_group_group.as_ref() {
+            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
+                self.token(&x.l_brace.l_brace_token.replace("block {"));
+                for x in &x.statement_block_group_group_list {
+                    self.statement_block_group(&x.statement_block_group);
+                }
+                self.r_brace(&x.r_brace);
             }
-            _ => {
-                self.token(&arg.operator05_token);
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                self.statement_block_item(&x.statement_block_item);
             }
         }
     }

@@ -112,6 +112,7 @@ AssignTerm            : <INITIAL, Generic                                       
 AsTerm                : <INITIAL, Generic                                             >'as'                                                                                  : Token; // Keyword: Statement
 BindTerm              : <INITIAL, Generic                                             >'bind'                                                                                : Token; // Keyword: Statement
 BitTerm               : <INITIAL, Generic                                             >'bit'                                                                                 : Token; // Keyword: Type
+BlockTerm             : <INITIAL, Generic                                             >'block'                                                                               : Token; // Keyword: Statement
 BoolTerm              : <INITIAL, Generic                                             >'bool'                                                                                : Token; // Keyword: Type
 CaseTerm              : <INITIAL, Generic                                             >'case'                                                                                : Token; // Keyword: Conditional
 ClockTerm             : <INITIAL, Generic                                             >'clock'                                                                               : Token; // Keyword: Type
@@ -258,6 +259,7 @@ AsToken            : AsTerm            : Token Comments;
 AssignToken        : AssignTerm        : Token Comments;
 BindToken          : BindTerm          : Token Comments;
 BitToken           : BitTerm           : Token Comments;
+BlockToken         : BlockTerm         : Token Comments;
 BoolToken          : BoolTerm          : Token Comments;
 CaseToken          : CaseTerm          : Token Comments;
 ClockToken         : ClockTerm         : Token Comments;
@@ -410,6 +412,7 @@ As            : AsToken            : VerylToken;
 Assign        : AssignToken        : VerylToken;
 Bind          : BindToken          : VerylToken;
 Bit           : BitToken           : VerylToken;
+Block         : BlockToken         : VerylToken;
 Bool          : BoolToken          : VerylToken;
 Break         : BreakToken         : VerylToken;
 Case          : CaseToken          : VerylToken;
@@ -676,9 +679,9 @@ ClockDomain: Quote Identifier;
 
 StatementBlock: LBrace { StatementBlockGroup } RBrace;
 
-StatementBlockGroup: { Attribute } ( LBrace { StatementBlockGroup } RBrace | StatementBlockItem );
+StatementBlockGroup: { Attribute } ( Block LBrace { StatementBlockGroup } RBrace | StatementBlockItem );
 
-StatementBlockItem: VarDeclaration | LetStatement | ConstDeclaration | Statement;
+StatementBlockItem: VarDeclaration | LetStatement | ConstDeclaration | Statement | ConcatenationAssignment;
 
 Statement: IdentifierStatement
          | IfStatement
@@ -693,6 +696,8 @@ Statement: IdentifierStatement
 LetStatement: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Semicolon;
 
 IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolon;
+
+ConcatenationAssignment: LBrace AssignConcatenationList RBrace Equ Expression Semicolon;
 
 Assignment: ( Equ | AssignmentOperator | DiamondOperator ) Expression;
 

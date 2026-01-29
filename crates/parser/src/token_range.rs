@@ -840,13 +840,35 @@ impl_token_range!(ClockDomain, quote, identifier);
 // ----------------------------------------------------------------------------
 
 impl_token_range!(StatementBlock, l_brace, r_brace);
-impl_token_range_group!(StatementBlockGroup, StatementBlockItem);
+
+impl From<&StatementBlockGroup> for TokenRange {
+    fn from(value: &StatementBlockGroup) -> Self {
+        let mut ret: TokenRange = match value.statement_block_group_group.as_ref() {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                let beg = x.block.block_token.token;
+                let end = x.r_brace.r_brace_token.token;
+                TokenRange { beg, end }
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                x.statement_block_item.as_ref().into()
+            }
+        };
+        if let Some(x) = value.statement_block_group_list.first() {
+            let beg: TokenRange = x.attribute.as_ref().into();
+            ret.beg = beg.beg;
+        }
+        ret
+    }
+}
+impl_token_ext!(StatementBlockGroup);
+
 impl_token_range_enum!(
     StatementBlockItem,
     var_declaration,
     let_statement,
     statement,
-    const_declaration
+    const_declaration,
+    concatenation_assignment
 );
 impl_token_range_enum!(
     Statement,
@@ -860,6 +882,7 @@ impl_token_range_enum!(
     switch_statement
 );
 impl_token_range!(LetStatement, r#let, semicolon);
+impl_token_range!(ConcatenationAssignment, l_brace, semicolon);
 impl_token_range!(IdentifierStatement, expression_identifier, semicolon);
 
 impl From<&Assignment> for TokenRange {

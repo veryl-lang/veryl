@@ -29,6 +29,12 @@ module veryl_testcase_Module18;
         }),
         .b (0)
     );
+
+    logic f;
+    logic g;
+    always_comb begin
+        {f, g} = 1;
+    end
 endmodule
 
 module veryl_testcase_Module18A (

@@ -1024,7 +1024,9 @@ impl Emitter {
 
                 if matches!(
                     x,
-                    StatementBlockItem::LetStatement(_) | StatementBlockItem::Statement(_)
+                    StatementBlockItem::LetStatement(_)
+                        | StatementBlockItem::Statement(_)
+                        | StatementBlockItem::ConcatenationAssignment(_)
                 ) {
                     if i != 0 || ifdef_attributes.is_empty() {
                         self.newline_list(base + n_newlines);
@@ -1034,6 +1036,9 @@ impl Emitter {
                     match &x {
                         StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
                         StatementBlockItem::Statement(x) => self.statement(&x.statement),
+                        StatementBlockItem::ConcatenationAssignment(x) => {
+                            self.concatenation_assignment(&x.concatenation_assignment)
+                        }
                         _ => unreachable!(),
                     }
                 }
@@ -1053,7 +1058,10 @@ impl Emitter {
         base: usize,
         n_newlines: usize,
     ) -> (usize, usize) {
-        if matches!(arg, StatementBlockItem::Statement(_)) {
+        if matches!(
+            arg,
+            StatementBlockItem::Statement(_) | StatementBlockItem::ConcatenationAssignment(_)
+        ) {
             return (base, n_newlines);
         }
 
@@ -3364,6 +3372,18 @@ impl VerylWalker for Emitter {
             }
             self.semicolon(&arg.semicolon);
         }
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationAssignment'
+    fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        self.l_brace(&arg.l_brace);
+        self.assign_concatenation_list(&arg.assign_concatenation_list);
+        self.r_brace(&arg.r_brace);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'Assignment'

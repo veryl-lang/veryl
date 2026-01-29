@@ -6,6 +6,7 @@ pub const KEYWORDS: &[&str] = &[
     "as",
     "bind",
     "bit",
+    "block",
     "bool",
     "case",
     "clock",

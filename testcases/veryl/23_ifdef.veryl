@@ -51,7 +51,7 @@ module Module23 #(
     var _d: logic;
     always_comb {
         #[ifdef(DEFINE_D)]
-        {
+        block {
             _d = 0;
         }
     }

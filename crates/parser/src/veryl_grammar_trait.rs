@@ -444,6 +444,25 @@ impl<'a> From<&'a StatementBlock> for Vec<&'a StatementBlockItem> {
     }
 }
 
+impl<'a> From<&'a StatementBlockGroup> for Vec<&'a StatementBlockItem> {
+    fn from(x: &'a StatementBlockGroup) -> Self {
+        let mut ret = Vec::new();
+        match &*x.statement_block_group_group {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                for x in &x.statement_block_group_group_list {
+                    let mut x: Vec<&'a StatementBlockItem> =
+                        x.statement_block_group.as_ref().into();
+                    ret.append(&mut x);
+                }
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                ret.push(x.statement_block_item.as_ref());
+            }
+        }
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -464,7 +483,6 @@ group_to_item!(Interface);
 group_to_item!(Generate);
 group_to_item!(Package);
 group_to_item!(Description);
-group_to_item!(StatementBlock);
 
 impl Expression {
     pub fn unwrap_factor(&self) -> Option<&Factor> {

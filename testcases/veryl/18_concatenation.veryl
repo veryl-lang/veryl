@@ -29,6 +29,12 @@ module Module18 {
         },
         b: 0,
     );
+
+    var f: logic;
+    var g: logic;
+    always_comb {
+        {f, g} = 1;
+    }
 }
 
 module Module18A (

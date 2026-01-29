@@ -219,14 +219,16 @@ fn parse_error_help() {
     let code = r#"
     module ModuleA {
         always_comb {
-            {a, b} = 1;
+            case a {
+                1: {e, f} = g;
+            }
         }
     }
     "#;
 
     assert_eq!(
         &help_message(code),
-        "bit concatenation at the left-hand side in block is not allowed, please use 'assign' declaration"
+        "single case statement with bit concatenation at the left-hand side is not allowed,\nplease surround it by '{}' (e.g. 'x: { {a, b} = 1; }')"
     );
 
     let code = r#"

@@ -35,7 +35,7 @@
 
 %%
 
-/*    0 */ CommentsTerm: <INITIAL, EmbedHeader, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n)?)|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" : Token;
+/*    0 */ CommentsTerm: <INITIAL, EmbedHeader, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" : Token;
 /*    1 */ StringLiteralTerm: <INITIAL, Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;
 /*    2 */ ExponentTerm: <INITIAL, Generic>/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/ : Token;
 /*    3 */ FixedPointTerm: <INITIAL, Generic>/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/ : Token;
@@ -53,11 +53,11 @@
 /*   15 */ Operator10Term: "\+|-" : Token;
 /*   16 */ Operator09Term: "<<<|>>>|<<|>>" : Token;
 /*   17 */ Operator08Term: "<=|>=|<:|>:" : Token;
-/*   18 */ Operator07Term: "===|==\?|!==|!=\?|==|!=" : Token;
+/*   18 */ Operator07Term: "==\?|!=\?|==|!=" : Token;
 /*   19 */ Operator03Term: "&&" : Token;
 /*   20 */ Operator02Term: "\|\|" : Token;
 /*   21 */ Operator06Term: "&" : Token;
-/*   22 */ Operator05Term: "\^~|\^|~\^" : Token;
+/*   22 */ Operator05Term: "\^|~\^" : Token;
 /*   23 */ Operator04Term: "\|" : Token;
 /*   24 */ UnaryOperatorTerm: "~&|~\||!|~" : Token;
 /*   25 */ ColonColonLAngleTerm: <INITIAL, Generic>'::<' : Token;
