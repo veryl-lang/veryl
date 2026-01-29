@@ -19,26 +19,26 @@ pub fn end(token: Token) {
     ATTRIBUTE_TABLE.with(|f| f.borrow_mut().end(token))
 }
 
-pub fn get(token: &Token) -> Vec<Attribute> {
+pub fn get(token: &TokenRange) -> Vec<Attribute> {
     ATTRIBUTE_TABLE.with(|f| f.borrow().get(token))
 }
 
-pub fn is_align(token: &Token, item: AlignItem) -> bool {
+pub fn is_align(token: &TokenRange, item: AlignItem) -> bool {
     let attrs = ATTRIBUTE_TABLE.with(|f| f.borrow().get(token));
     attrs.iter().any(|x| x.is_align(item))
 }
 
-pub fn is_format(token: &Token, item: FormatItem) -> bool {
+pub fn is_format(token: &TokenRange, item: FormatItem) -> bool {
     let attrs = ATTRIBUTE_TABLE.with(|f| f.borrow().get(token));
     attrs.iter().any(|x| x.is_format(item))
 }
 
-pub fn is_expand(token: &Token, item: ExpandItem) -> bool {
+pub fn is_expand(token: &TokenRange, item: ExpandItem) -> bool {
     let attrs = ATTRIBUTE_TABLE.with(|f| f.borrow().get(token));
     attrs.iter().any(|x| x.is_expand(item))
 }
 
-pub fn contains(token: &Token, value: Attribute) -> bool {
+pub fn contains(token: &TokenRange, value: Attribute) -> bool {
     ATTRIBUTE_TABLE.with(|f| f.borrow().contains(token, &value))
 }
 

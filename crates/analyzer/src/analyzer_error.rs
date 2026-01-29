@@ -1437,8 +1437,8 @@ pub enum AnalyzerError {
 }
 
 fn source(token: &TokenRange) -> MultiSources {
-    let path = token.beg.source.to_string();
-    let text = token.beg.source.get_text();
+    let path = token.beg().source.to_string();
+    let text = token.beg().source.get_text();
     MultiSources {
         sources: vec![Source { path, text }],
     }
@@ -1448,8 +1448,8 @@ fn source_with_context(
     token: &TokenRange,
     context: &[TokenRange],
 ) -> (MultiSources, Vec<SourceSpan>) {
-    let path = token.beg.source.to_string();
-    let text = token.beg.source.get_text();
+    let path = token.beg().source.to_string();
+    let text = token.beg().source.get_text();
 
     let mut base = text.len();
     let mut ranges = Vec::new();
@@ -1458,8 +1458,8 @@ fn source_with_context(
     sources.push(Source { path, text });
 
     for x in context.iter().rev() {
-        let path = x.beg.source.to_string();
-        let text = x.beg.source.get_text();
+        let path = x.beg().source.to_string();
+        let text = x.beg().source.get_text();
 
         let mut range = *x;
         range.offset(base as u32);

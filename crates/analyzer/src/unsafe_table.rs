@@ -19,11 +19,11 @@ pub fn end(token: Token) {
     UNSAFE_TABLE.with(|f| f.borrow_mut().end(token))
 }
 
-pub fn get(token: &Token) -> Vec<Unsafe> {
+pub fn get(token: &TokenRange) -> Vec<Unsafe> {
     UNSAFE_TABLE.with(|f| f.borrow().get(token))
 }
 
-pub fn contains(token: &Token, value: Unsafe) -> bool {
+pub fn contains(token: &TokenRange, value: Unsafe) -> bool {
     UNSAFE_TABLE.with(|f| f.borrow().contains(token, &value))
 }
 

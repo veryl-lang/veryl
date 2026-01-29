@@ -68,11 +68,11 @@ impl CheckAttribute {
     fn set_attrs(&mut self, attrs: Vec<Option<(Attr, TokenRange)>>, range: TokenRange) {
         for attr in attrs {
             if let Some((attr, _)) = attr {
-                attribute_table::begin(range.beg, Some(attr));
+                attribute_table::begin(range.beg(), Some(attr));
             } else {
-                attribute_table::begin(range.beg, None);
+                attribute_table::begin(range.beg(), None);
             }
-            attribute_table::end(range.end);
+            attribute_table::end(range.end());
         }
     }
 

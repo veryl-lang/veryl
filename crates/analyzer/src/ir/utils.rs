@@ -3,7 +3,7 @@ use crate::attribute_table;
 use veryl_parser::token_range::TokenRange;
 
 pub fn has_cond_type(token: &TokenRange) -> bool {
-    let mut attrs = attribute_table::get(&token.beg);
+    let mut attrs = attribute_table::get(token);
     attrs.reverse();
     for attr in attrs {
         match attr {
@@ -16,8 +16,5 @@ pub fn has_cond_type(token: &TokenRange) -> bool {
 }
 
 pub fn allow_missing_reset_statement(token: &TokenRange) -> bool {
-    attribute_table::contains(
-        &token.beg,
-        Attribute::Allow(AllowItem::MissingResetStatement),
-    )
+    attribute_table::contains(token, Attribute::Allow(AllowItem::MissingResetStatement))
 }

@@ -1,7 +1,7 @@
-use crate::doc_comment_table;
 use crate::resource_table::{self, PathId, StrId, TokenId};
 use crate::text_table::{self, TextId};
 use crate::veryl_grammar_trait::*;
+use crate::{doc_comment_table, token_table};
 use once_cell::sync::Lazy;
 use paste::paste;
 use regex::Regex;
@@ -101,7 +101,7 @@ impl Token {
     ) -> Self {
         let id = resource_table::new_token_id();
         let text = resource_table::insert_str(text);
-        Token {
+        let token = Token {
             id,
             text,
             line,
@@ -109,12 +109,14 @@ impl Token {
             length,
             pos,
             source,
-        }
+        };
+        token_table::insert(id, token);
+        token
     }
 
     pub fn generate(text: StrId, path: PathId) -> Self {
         let id = resource_table::new_token_id();
-        Token {
+        let token = Token {
             id,
             text,
             line: 0,
@@ -122,7 +124,9 @@ impl Token {
             length: 0,
             pos: 0,
             source: TokenSource::Generated(path),
-        }
+        };
+        token_table::insert(id, token);
+        token
     }
 
     pub fn end_line(&self) -> u32 {
@@ -175,7 +179,7 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
             path: resource_table::insert_path(&x.location.file_name),
             text: text_table::get_current_text(),
         };
-        Ok(Token {
+        let token = Token {
             id,
             text,
             line: x.location.start_line,
@@ -183,7 +187,9 @@ impl<'t> TryFrom<&parol_runtime::lexer::Token<'t>> for Token {
             length: x.location.len() as u32,
             pos,
             source,
-        })
+        };
+        token_table::insert(id, token);
+        Ok(token)
     }
 }
 
@@ -320,6 +326,7 @@ fn split_comment_token(token: Token) -> Vec<Token> {
             pos: pos as u32 + length,
             source: token.source,
         };
+        token_table::insert(id, token);
         ret.push(token);
     }
     ret
@@ -346,6 +353,7 @@ impl TryFrom<&StartToken> for VerylToken {
             pos: 0,
             source,
         };
+        token_table::insert(id, token);
         Ok(VerylToken { token, comments })
     }
 }

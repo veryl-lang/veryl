@@ -214,7 +214,7 @@ impl ReferenceTable {
             return;
         }
 
-        let base_token = token_range.end;
+        let base_token = token_range.end();
         let package_token = symbol.token;
         if let (
             TokenSource::File {
@@ -469,7 +469,7 @@ impl ReferenceTable {
         match symbol_table::resolve(path) {
             Ok(symbol) => {
                 for id in symbol.full_path {
-                    symbol_table::add_reference(id, &token.beg);
+                    symbol_table::add_reference(id, &token.beg());
                 }
             }
             Err(err) => {

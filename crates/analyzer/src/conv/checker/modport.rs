@@ -11,7 +11,10 @@ use veryl_parser::veryl_grammar_trait::*;
 
 fn is_target_modport(context: &mut Context, identifier: &Identifier) -> bool {
     context.is_affiliated(Affiliation::Function)
-        || attribute_table::is_expand(&identifier.identifier_token.token, ExpandItem::Modport)
+        || attribute_table::is_expand(
+            &identifier.identifier_token.token.into(),
+            ExpandItem::Modport,
+        )
 }
 
 fn is_unexpandable_modport(context: &mut Context, symbol: &Symbol) -> bool {

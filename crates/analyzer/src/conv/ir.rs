@@ -197,7 +197,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
                 &mut context,
                 &clock.0.comptime,
                 &reset.0.comptime,
-                &value.module.module_token.token,
+                &value.module.module_token.token.into(),
             );
         }
 
