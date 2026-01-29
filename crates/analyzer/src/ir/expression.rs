@@ -113,8 +113,8 @@ impl Expression {
                         for i in 0..ret.width {
                             let i = i as u64;
                             ret.payload.set_bit(i, !ret.payload.bit(i));
-                            if ret.mask_x.bit(i) | ret.mask_z.bit(i) {
-                                ret.mask_x.set_bit(i, true);
+                            if ret.mask_xz.bit(i) {
+                                ret.payload.set_bit(i, false);
                             }
                         }
                         ret
@@ -148,40 +148,40 @@ impl Expression {
                 let y = y.eval_value(context, context_width)?;
                 let ret = match op {
                     Op::Pow => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x.pow(y.to_u32()?)),
                         |x, y| x & y,
                     ),
                     Op::Div => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| x.checked_div(&y),
+                        |x, y| x.checked_div(y),
                         |x, y| x & y,
                     ),
                     Op::Rem => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| if y == 0u32.into() { None } else { Some(x % y) },
+                        |x, y| if y == &0u32.into() { None } else { Some(x % y) },
                         |x, y| x & y,
                     ),
                     Op::Mul => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x * y),
                         |x, y| x & y,
                     ),
                     Op::Add => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x + y),
@@ -190,8 +190,8 @@ impl Expression {
                     // "a - b" is converted to "a + (-b)" to avoid overflow
                     Op::Sub => unreachable!(),
                     Op::ArithShiftL => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x << y.to_u32()?),
@@ -200,8 +200,8 @@ impl Expression {
                     Op::ArithShiftR => {
                         let width = x.width;
                         binary_op(
-                            x,
-                            y,
+                            &x,
+                            &y,
                             context_width,
                             |x, _, z| x.max(z.unwrap_or(0)),
                             |x, y| {
@@ -220,56 +220,56 @@ impl Expression {
                         )
                     }
                     Op::LogicShiftL => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x << y.to_u32()?),
                         |x, y| x & y,
                     ),
                     Op::LogicShiftR => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x >> y.to_u32()?),
                         |x, y| x & y,
                     ),
                     Op::LessEq => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
                         |x, y| Some((x <= y).into()),
                         |_, _| false,
                     ),
                     Op::GreaterEq => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
                         |x, y| Some((x >= y).into()),
                         |_, _| false,
                     ),
                     Op::Less => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
                         |x, y| Some((x < y).into()),
                         |_, _| false,
                     ),
                     Op::Greater => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
                         |x, y| Some((x > y).into()),
                         |_, _| false,
                     ),
                     Op::Eq => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
                         |x, y| Some((x == y).into()),
@@ -282,21 +282,20 @@ impl Expression {
                             let i = i as u64;
                             let x_bit = x.payload.bit(i);
                             let y_bit = y.payload.bit(i);
-                            if !y.mask_x.bit(i) && !y.mask_z.bit(i) {
+                            if !y.mask_xz.bit(i) {
                                 ret = ret && (x_bit == y_bit);
                             }
                         }
                         Value {
                             payload: ret.into(),
-                            mask_x: 0u32.into(),
-                            mask_z: 0u32.into(),
+                            mask_xz: 0u32.into(),
                             width: 1,
                             signed: false,
                         }
                     }
                     Op::Ne => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
                         |x, y| Some((x != y).into()),
@@ -309,53 +308,52 @@ impl Expression {
                             let i = i as u64;
                             let x_bit = x.payload.bit(i);
                             let y_bit = y.payload.bit(i);
-                            if !y.mask_x.bit(i) && !y.mask_z.bit(i) {
+                            if !y.mask_xz.bit(i) {
                                 ret = ret || (x_bit != y_bit);
                             }
                         }
                         Value {
                             payload: ret.into(),
-                            mask_x: 0u32.into(),
-                            mask_z: 0u32.into(),
+                            mask_xz: 0u32.into(),
                             width: 1,
                             signed: false,
                         }
                     }
                     Op::LogicAnd => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some(((x != 0u32.into()) & (y != 0u32.into())).into()),
+                        |x, y| Some(((x != &0u32.into()) & (y != &0u32.into())).into()),
                         |x, y| x & y,
                     ),
                     Op::LogicOr => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some(((x != 0u32.into()) | (y != 0u32.into())).into()),
+                        |x, y| Some(((x != &0u32.into()) | (y != &0u32.into())).into()),
                         |x, y| x & y,
                     ),
                     Op::BitAnd => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x & y),
                         |x, y| x & y,
                     ),
                     Op::BitOr => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x | y),
                         |x, y| x & y,
                     ),
                     Op::BitXor => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x ^ y),
@@ -363,8 +361,8 @@ impl Expression {
                     ),
                     Op::BitXnor => {
                         let mut ret = binary_op(
-                            x,
-                            y,
+                            &x,
+                            &y,
                             context_width,
                             |x, y, z| x.max(y).max(z.unwrap_or(0)),
                             |x, y| Some(x ^ y),
@@ -373,8 +371,8 @@ impl Expression {
                         for i in 0..ret.width {
                             let i = i as u64;
                             ret.payload.set_bit(i, !ret.payload.bit(i));
-                            if ret.mask_x.bit(i) | ret.mask_z.bit(i) {
-                                ret.mask_x.set_bit(i, true);
+                            if ret.mask_xz.bit(i) {
+                                ret.payload.set_bit(i, false);
                             }
                         }
                         ret
@@ -396,8 +394,7 @@ impl Expression {
             }
             Expression::Concatenation(x) => {
                 let mut payload = BigUint::from(0u32);
-                let mut mask_x = BigUint::from(0u32);
-                let mut mask_z = BigUint::from(0u32);
+                let mut mask_xz = BigUint::from(0u32);
                 let mut width = 0;
                 for (exp, rep) in x.iter() {
                     let exp = exp.eval_value(context, context_width)?;
@@ -413,12 +410,10 @@ impl Expression {
 
                     for _ in 0..rep {
                         payload <<= exp.width;
-                        mask_x <<= exp.width;
-                        mask_z <<= exp.width;
+                        mask_xz <<= exp.width;
 
-                        payload |= exp.payload.clone();
-                        mask_x |= exp.mask_x.clone();
-                        mask_z |= exp.mask_z.clone();
+                        payload |= &exp.payload;
+                        mask_xz |= &exp.mask_xz;
 
                         width += exp.width;
                     }
@@ -426,8 +421,7 @@ impl Expression {
 
                 Some(Value {
                     payload,
-                    mask_x,
-                    mask_z,
+                    mask_xz,
                     width,
                     signed: false,
                 })
@@ -439,7 +433,7 @@ impl Expression {
                     let width = sub_type.total_width()?;
                     let mut value = expr.eval_value(context, Some(width))?;
                     value.trunc(width);
-                    ret = ret.concat(value);
+                    ret = ret.concat(&value);
                 }
                 Some(ret)
             }
@@ -826,10 +820,10 @@ impl Expression {
         // const optimization
         if ret.is_const
             && let Ok(value) = ret.get_value()
-            && !value.is_x()
-            && !value.is_z()
+            && !value.is_xz()
         {
-            *self = Expression::create_value(value.payload, value.width, self.token_range());
+            *self =
+                Expression::create_value(value.payload.clone(), value.width, self.token_range());
         }
 
         ret
@@ -946,12 +940,7 @@ impl Expression {
 }
 
 fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value {
-    let mask_x = if value.is_x() | value.is_z() {
-        1u32
-    } else {
-        0u32
-    }
-    .into();
+    let mask_xz = if value.is_xz() { 1u32 } else { 0u32 }.into();
 
     let mut tmp = value.payload;
     let mut payload = tmp.clone() & BigUint::from(1u32);
@@ -962,8 +951,7 @@ fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value
 
     Value {
         payload,
-        mask_x,
-        mask_z: 0u32.into(),
+        mask_xz,
         width: 1,
         signed: false,
     }
@@ -971,37 +959,39 @@ fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value
 
 fn binary_op<
     T: Fn(usize, usize, Option<usize>) -> usize,
-    U: Fn(BigUint, BigUint) -> Option<BigUint>,
+    U: Fn(&BigUint, &BigUint) -> Option<BigUint>,
     V: Fn(bool, bool) -> bool,
 >(
-    x: Value,
-    y: Value,
+    x: &Value,
+    y: &Value,
     context_width: Option<usize>,
     calc_width: T,
     calc_value: U,
     calc_signed: V,
 ) -> Value {
     let width = calc_width(x.width, y.width, context_width);
-    let mask = gen_mask(width);
 
-    let mut mask_x = if x.is_x() | y.is_x() | x.is_z() | y.is_z() {
-        mask.clone()
+    let mut mask_xz = if x.is_xz() | y.is_xz() {
+        gen_mask(width)
     } else {
         BigUint::from(0u32)
     };
 
-    let payload = if let Some(payload) = calc_value(x.payload, y.payload) {
-        payload & mask
+    let payload = if let Some(payload) = calc_value(&x.payload, &y.payload) {
+        if payload.bits() as usize > width {
+            payload & gen_mask(width)
+        } else {
+            payload
+        }
     } else {
-        mask_x = mask.clone();
+        mask_xz = gen_mask(width);
         BigUint::from(0u32)
     };
     let signed = calc_signed(x.signed, y.signed);
 
     Value {
         payload,
-        mask_x,
-        mask_z: 0u32.into(),
+        mask_xz,
         width,
         signed,
     }
@@ -1009,21 +999,20 @@ fn binary_op<
 
 fn binary_op_signed<
     T: Fn(usize, usize, Option<usize>) -> usize,
-    U: Fn(BigInt, BigInt) -> Option<BigInt>,
+    U: Fn(&BigInt, &BigInt) -> Option<BigInt>,
     V: Fn(bool, bool) -> bool,
 >(
-    x: Value,
-    y: Value,
+    x: &Value,
+    y: &Value,
     context_width: Option<usize>,
     calc_width: T,
     calc_value: U,
     calc_signed: V,
 ) -> Value {
     let width = calc_width(x.width, y.width, context_width);
-    let mask = gen_mask(width);
 
-    let mut mask_x = if x.is_x() | y.is_x() | x.is_z() | y.is_z() {
-        mask.clone()
+    let mut mask_xz = if x.is_xz() | y.is_xz() {
+        gen_mask(width)
     } else {
         BigUint::from(0u32)
     };
@@ -1031,18 +1020,17 @@ fn binary_op_signed<
     let x_payload = x.to_bigint();
     let y_payload = y.to_bigint();
 
-    let payload = if let Some(payload) = calc_value(x_payload, y_payload) {
-        to_biguint(payload, width) & mask
+    let payload = if let Some(payload) = calc_value(&x_payload, &y_payload) {
+        to_biguint(payload, width)
     } else {
-        mask_x = mask.clone();
+        mask_xz = gen_mask(width);
         BigUint::from(0u32)
     };
     let signed = calc_signed(x.signed, y.signed);
 
     Value {
         payload,
-        mask_x,
-        mask_z: 0u32.into(),
+        mask_xz,
         width,
         signed,
     }
@@ -1082,7 +1070,7 @@ impl Factor {
         match self {
             Factor::Variable(id, index, select, comptime, _) => {
                 let index = index.eval_value(context)?;
-                let value = context.variables.get(id)?.get_value(&index)?;
+                let value = context.variables.get(id)?.get_value(&index)?.clone();
 
                 if !select.is_empty() {
                     let (beg, end) = select.eval_value(context, &comptime.r#type, false)?;
@@ -1091,7 +1079,7 @@ impl Factor {
                     Some(value)
                 }
             }
-            Factor::Value(x, _) => x.get_value().ok(),
+            Factor::Value(x, _) => x.get_value().ok().cloned(),
             Factor::SystemFunctionCall(x, _) => x.eval_value(context),
             Factor::FunctionCall(x, _) => x.eval_value(context),
             Factor::Anonymous(_) => None,

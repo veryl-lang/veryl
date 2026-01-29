@@ -181,7 +181,7 @@ impl FunctionCall {
 
         if let Some(x) = &func.ret {
             let variable = context.variables.get(x)?;
-            variable.get_value(&[])
+            variable.get_value(&[]).cloned()
         } else {
             None
         }

@@ -497,7 +497,7 @@ impl VarSelect {
                         let size = *size;
                         let beg = beg.eval_value(context, None)?;
 
-                        if beg.is_x() | beg.is_z() {
+                        if beg.is_xz() {
                             // skip out_of_range check
                             continue;
                         }
@@ -734,9 +734,9 @@ impl Variable {
         }
     }
 
-    pub fn get_value(&self, index: &[usize]) -> Option<Value> {
+    pub fn get_value(&self, index: &[usize]) -> Option<&Value> {
         let index = self.r#type.array.calc_index(index)?;
-        self.value.get(index).cloned()
+        self.value.get(index)
     }
 
     pub fn set_value(

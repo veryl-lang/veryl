@@ -875,7 +875,7 @@ fn assignment_operator() {
 
   comb {
     var0 = (var0 + 00000000);
-    var0 = (var0 - 00000000);
+    var0 = (var0 + (- 00000000));
     var0 = (var0 * 00000000);
     var0 = (var0 / 00000000);
     var0 = (var0 % 00000000);

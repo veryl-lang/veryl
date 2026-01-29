@@ -232,9 +232,9 @@ impl Comptime {
         }
     }
 
-    pub fn get_value(&self) -> IrResult<Value> {
+    pub fn get_value(&self) -> IrResult<&Value> {
         if let ValueVariant::Numeric(x) = &self.value {
-            Ok(x.clone())
+            Ok(x)
         } else {
             Err(ir_error!(self.token))
         }

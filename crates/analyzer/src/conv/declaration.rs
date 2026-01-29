@@ -275,7 +275,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
                     path,
                     kind,
                     comptime.r#type.clone(),
-                    vec![comptime.get_value().unwrap()],
+                    vec![comptime.get_value().unwrap().clone()],
                     c.get_affiliation(),
                     &token,
                 );
@@ -496,7 +496,7 @@ impl Conv<&PortDeclarationItem> for () {
                 if x.is_anonymous_expression() {
                     None
                 } else {
-                    let value = comptime.get_value()?;
+                    let value = comptime.get_value()?.clone();
                     Some((value, comptime))
                 }
             } else {
@@ -515,7 +515,7 @@ impl Conv<&PortDeclarationItem> for () {
                     path,
                     kind,
                     r#type,
-                    vec![value],
+                    vec![value.clone()],
                     context.get_affiliation(),
                     &variable_token,
                 );
