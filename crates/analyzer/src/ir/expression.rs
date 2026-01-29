@@ -1,6 +1,6 @@
-use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_repeat;
+use crate::conv::{Context, EvalContext};
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
     Comptime, FunctionCall, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant, VarId,
@@ -8,8 +8,9 @@ use crate::ir::{
 };
 use crate::symbol::ClockDomain;
 use crate::value::{Value, gen_mask, gen_mask_range, to_biguint};
-use num_bigint::{BigInt, BigUint};
+use crate::{BigInt, BigUint};
 use num_traits::ToPrimitive;
+use std::borrow::Cow;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -85,42 +86,46 @@ impl Expression {
         }
     }
 
-    pub fn eval_value(&self, context: &mut Context, context_width: Option<usize>) -> Option<Value> {
+    pub fn eval_value<'a, T: EvalContext>(
+        &'a self,
+        context: &mut T,
+        context_width: Option<usize>,
+    ) -> Option<Cow<'a, Value>> {
         match self {
             Expression::Term(x) => x.eval_value(context, context_width),
             Expression::Unary(op, x) => {
-                let mut ret = x.eval_value(context, context_width)?;
+                let mut ret = x.eval_value(context, context_width)?.into_owned();
                 let ret = match op {
                     Op::BitAnd => reduction(ret, |x, y| x & y),
                     Op::BitOr => reduction(ret, |x, y| x | y),
                     Op::BitXor => reduction(ret, |x, y| x ^ y),
                     Op::BitXnor => {
                         let mut ret = reduction(ret, |x, y| x ^ y);
-                        ret.payload = (ret.payload == 0u32.into()).into();
+                        ret.payload = ((ret.payload == 0u32.into()) as u32).into();
                         ret
                     }
                     Op::BitNand => {
                         let mut ret = reduction(ret, |x, y| x & y);
-                        ret.payload = (ret.payload == 0u32.into()).into();
+                        ret.payload = ((ret.payload == 0u32.into()) as u32).into();
                         ret
                     }
                     Op::BitNor => {
                         let mut ret = reduction(ret, |x, y| x | y);
-                        ret.payload = (ret.payload == 0u32.into()).into();
+                        ret.payload = ((ret.payload == 0u32.into()) as u32).into();
                         ret
                     }
                     Op::BitNot => {
                         for i in 0..ret.width {
                             let i = i as u64;
                             ret.payload.set_bit(i, !ret.payload.bit(i));
-                            if ret.mask_x.bit(i) | ret.mask_z.bit(i) {
-                                ret.mask_x.set_bit(i, true);
+                            if ret.mask_xz.bit(i) {
+                                ret.payload.set_bit(i, false);
                             }
                         }
                         ret
                     }
                     Op::LogicNot => {
-                        ret.payload = (ret.payload == 0u32.into()).into();
+                        ret.payload = ((ret.payload == 0u32.into()) as u32).into();
                         ret.width = 1;
                         ret.signed = false;
                         ret
@@ -136,52 +141,63 @@ impl Expression {
                     }
                     _ => unreachable!(),
                 };
-                Some(ret)
+                Some(Cow::Owned(ret))
             }
             Expression::Binary(x, op, y) => {
+                //crate::stopwatch::start("x_value");
                 let x = x.eval_value(context, context_width)?;
+                //crate::stopwatch::stop("x_value");
 
                 if op == &Op::As {
                     return Some(x);
                 }
 
+                //crate::stopwatch::start("y_value");
                 let y = y.eval_value(context, context_width)?;
+                //crate::stopwatch::stop("y_value");
+                //crate::stopwatch::start("op");
                 let ret = match op {
                     Op::Pow => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x.pow(y.to_u32()?)),
                         |x, y| x & y,
                     ),
                     Op::Div => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| x.checked_div(&y),
+                        |x, y| x.checked_div(y),
                         |x, y| x & y,
                     ),
                     Op::Rem => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| if y == 0u32.into() { None } else { Some(x % y) },
+                        |x, y| {
+                            if y == &(0u32.into()) {
+                                None
+                            } else {
+                                Some(x % y)
+                            }
+                        },
                         |x, y| x & y,
                     ),
                     Op::Mul => binary_op_signed(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x * y),
                         |x, y| x & y,
                     ),
                     Op::Add => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x + y),
@@ -190,8 +206,8 @@ impl Expression {
                     // "a - b" is converted to "a + (-b)" to avoid overflow
                     Op::Sub => unreachable!(),
                     Op::ArithShiftL => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x << y.to_u32()?),
@@ -200,8 +216,8 @@ impl Expression {
                     Op::ArithShiftR => {
                         let width = x.width;
                         binary_op(
-                            x,
-                            y,
+                            &x,
+                            &y,
                             context_width,
                             |x, _, z| x.max(z.unwrap_or(0)),
                             |x, y| {
@@ -220,59 +236,59 @@ impl Expression {
                         )
                     }
                     Op::LogicShiftL => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x << y.to_u32()?),
                         |x, y| x & y,
                     ),
                     Op::LogicShiftR => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, _, z| x.max(z.unwrap_or(0)),
                         |x, y| Some(x >> y.to_u32()?),
                         |x, y| x & y,
                     ),
                     Op::LessEq => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some((x <= y).into()),
+                        |x, y| Some(((x <= y) as u32).into()),
                         |_, _| false,
                     ),
                     Op::GreaterEq => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some((x >= y).into()),
+                        |x, y| Some(((x >= y) as u32).into()),
                         |_, _| false,
                     ),
                     Op::Less => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some((x < y).into()),
+                        |x, y| Some(((x < y) as u32).into()),
                         |_, _| false,
                     ),
                     Op::Greater => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some((x > y).into()),
+                        |x, y| Some(((x > y) as u32).into()),
                         |_, _| false,
                     ),
                     Op::Eq => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some((x == y).into()),
+                        |x, y| Some(((x == y) as u32).into()),
                         |_, _| false,
                     ),
                     Op::EqWildcard => {
@@ -282,24 +298,23 @@ impl Expression {
                             let i = i as u64;
                             let x_bit = x.payload.bit(i);
                             let y_bit = y.payload.bit(i);
-                            if !y.mask_x.bit(i) && !y.mask_z.bit(i) {
+                            if !y.mask_xz.bit(i) {
                                 ret = ret && (x_bit == y_bit);
                             }
                         }
                         Value {
-                            payload: ret.into(),
-                            mask_x: 0u32.into(),
-                            mask_z: 0u32.into(),
+                            payload: (ret as u32).into(),
+                            mask_xz: 0u32.into(),
                             width: 1,
                             signed: false,
                         }
                     }
                     Op::Ne => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some((x != y).into()),
+                        |x, y| Some(((x != y) as u32).into()),
                         |_, _| false,
                     ),
                     Op::NeWildcard => {
@@ -309,53 +324,56 @@ impl Expression {
                             let i = i as u64;
                             let x_bit = x.payload.bit(i);
                             let y_bit = y.payload.bit(i);
-                            if !y.mask_x.bit(i) && !y.mask_z.bit(i) {
+                            if !y.mask_xz.bit(i) {
                                 ret = ret || (x_bit != y_bit);
                             }
                         }
                         Value {
-                            payload: ret.into(),
-                            mask_x: 0u32.into(),
-                            mask_z: 0u32.into(),
+                            payload: (ret as u32).into(),
+                            mask_xz: 0u32.into(),
                             width: 1,
                             signed: false,
                         }
                     }
                     Op::LogicAnd => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some(((x != 0u32.into()) & (y != 0u32.into())).into()),
+                        |x, y| {
+                            Some((((x != &(0u32.into())) & (y != &(0u32.into()))) as u32).into())
+                        },
                         |x, y| x & y,
                     ),
                     Op::LogicOr => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |_, _, _| 1,
-                        |x, y| Some(((x != 0u32.into()) | (y != 0u32.into())).into()),
+                        |x, y| {
+                            Some((((x != &(0u32.into())) | (y != &(0u32.into()))) as u32).into())
+                        },
                         |x, y| x & y,
                     ),
                     Op::BitAnd => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x & y),
                         |x, y| x & y,
                     ),
                     Op::BitOr => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x | y),
                         |x, y| x & y,
                     ),
                     Op::BitXor => binary_op(
-                        x,
-                        y,
+                        &x,
+                        &y,
                         context_width,
                         |x, y, z| x.max(y).max(z.unwrap_or(0)),
                         |x, y| Some(x ^ y),
@@ -363,8 +381,8 @@ impl Expression {
                     ),
                     Op::BitXnor => {
                         let mut ret = binary_op(
-                            x,
-                            y,
+                            &x,
+                            &y,
                             context_width,
                             |x, y, z| x.max(y).max(z.unwrap_or(0)),
                             |x, y| Some(x ^ y),
@@ -373,15 +391,16 @@ impl Expression {
                         for i in 0..ret.width {
                             let i = i as u64;
                             ret.payload.set_bit(i, !ret.payload.bit(i));
-                            if ret.mask_x.bit(i) | ret.mask_z.bit(i) {
-                                ret.mask_x.set_bit(i, true);
+                            if ret.mask_xz.bit(i) {
+                                ret.payload.set_bit(i, false);
                             }
                         }
                         ret
                     }
                     _ => unreachable!(),
                 };
-                Some(ret)
+                //crate::stopwatch::stop("op");
+                Some(Cow::Owned(ret))
             }
             Expression::Ternary(x, y, z) => {
                 let x = x.eval_value(context, None)?;
@@ -390,14 +409,14 @@ impl Expression {
 
                 let width = y.width.max(z.width);
 
-                let mut ret = if x.payload == 0u32.into() { z } else { y };
+                let ret = if x.payload == 0u32.into() { z } else { y };
+                let mut ret = ret.into_owned();
                 ret.width = width;
-                Some(ret)
+                Some(Cow::Owned(ret))
             }
             Expression::Concatenation(x) => {
                 let mut payload = BigUint::from(0u32);
-                let mut mask_x = BigUint::from(0u32);
-                let mut mask_z = BigUint::from(0u32);
+                let mut mask_xz = BigUint::from(0u32);
                 let mut width = 0;
                 for (exp, rep) in x.iter() {
                     let exp = exp.eval_value(context, context_width)?;
@@ -413,50 +432,49 @@ impl Expression {
 
                     for _ in 0..rep {
                         payload <<= exp.width;
-                        mask_x <<= exp.width;
-                        mask_z <<= exp.width;
+                        mask_xz <<= exp.width;
 
-                        payload |= exp.payload.clone();
-                        mask_x |= exp.mask_x.clone();
-                        mask_z |= exp.mask_z.clone();
+                        payload |= &exp.payload;
+                        mask_xz |= &exp.mask_xz;
 
                         width += exp.width;
                     }
                 }
 
-                Some(Value {
+                let ret = Value {
                     payload,
-                    mask_x,
-                    mask_z,
+                    mask_xz,
                     width,
                     signed: false,
-                })
+                };
+
+                Some(Cow::Owned(ret))
             }
             Expression::StructConstructor(r#type, exprs) => {
                 let mut ret = Value::new(0u32.into(), 0, false);
                 for (name, expr) in exprs {
                     let sub_type = r#type.get_member_type(*name)?;
                     let width = sub_type.total_width()?;
-                    let mut value = expr.eval_value(context, Some(width))?;
+                    let mut value = expr.eval_value(context, Some(width))?.into_owned();
                     value.trunc(width);
-                    ret = ret.concat(value);
+                    ret = ret.concat(&value);
                 }
-                Some(ret)
+                Some(Cow::Owned(ret))
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
             Expression::ArrayLiteral(_) => None,
         }
     }
 
-    pub fn eval_comptime(
+    pub fn eval_comptime<T: EvalContext>(
         &mut self,
-        context: &mut Context,
+        context: &mut T,
         context_width: Option<usize>,
     ) -> Comptime {
         let token = self.token_range();
         let value = self.eval_value(context, context_width);
         let value = if let Some(x) = value {
-            ValueVariant::Numeric(x)
+            ValueVariant::Numeric(x.into_owned())
         } else {
             ValueVariant::Unknown
         };
@@ -826,10 +844,10 @@ impl Expression {
         // const optimization
         if ret.is_const
             && let Ok(value) = ret.get_value()
-            && !value.is_x()
-            && !value.is_z()
+            && !value.is_xz()
         {
-            *self = Expression::create_value(value.payload, value.width, self.token_range());
+            *self =
+                Expression::create_value(value.payload.clone(), value.width, self.token_range());
         }
 
         ret
@@ -946,12 +964,7 @@ impl Expression {
 }
 
 fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value {
-    let mask_x = if value.is_x() | value.is_z() {
-        1u32
-    } else {
-        0u32
-    }
-    .into();
+    let mask_xz = if value.is_xz() { 1u32 } else { 0u32 }.into();
 
     let mut tmp = value.payload;
     let mut payload = tmp.clone() & BigUint::from(1u32);
@@ -962,8 +975,7 @@ fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value
 
     Value {
         payload,
-        mask_x,
-        mask_z: 0u32.into(),
+        mask_xz,
         width: 1,
         signed: false,
     }
@@ -971,37 +983,39 @@ fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value
 
 fn binary_op<
     T: Fn(usize, usize, Option<usize>) -> usize,
-    U: Fn(BigUint, BigUint) -> Option<BigUint>,
+    U: Fn(&BigUint, &BigUint) -> Option<BigUint>,
     V: Fn(bool, bool) -> bool,
 >(
-    x: Value,
-    y: Value,
+    x: &Value,
+    y: &Value,
     context_width: Option<usize>,
     calc_width: T,
     calc_value: U,
     calc_signed: V,
 ) -> Value {
     let width = calc_width(x.width, y.width, context_width);
-    let mask = gen_mask(width);
 
-    let mut mask_x = if x.is_x() | y.is_x() | x.is_z() | y.is_z() {
-        mask.clone()
+    let mut mask_xz = if x.is_xz() | y.is_xz() {
+        gen_mask(width)
     } else {
         BigUint::from(0u32)
     };
 
-    let payload = if let Some(payload) = calc_value(x.payload, y.payload) {
-        payload & mask
+    let payload = if let Some(payload) = calc_value(&x.payload, &y.payload) {
+        if payload.bits() as usize > width {
+            payload & gen_mask(width)
+        } else {
+            payload
+        }
     } else {
-        mask_x = mask.clone();
+        mask_xz = gen_mask(width);
         BigUint::from(0u32)
     };
     let signed = calc_signed(x.signed, y.signed);
 
     Value {
         payload,
-        mask_x,
-        mask_z: 0u32.into(),
+        mask_xz,
         width,
         signed,
     }
@@ -1009,21 +1023,20 @@ fn binary_op<
 
 fn binary_op_signed<
     T: Fn(usize, usize, Option<usize>) -> usize,
-    U: Fn(BigInt, BigInt) -> Option<BigInt>,
+    U: Fn(&BigInt, &BigInt) -> Option<BigInt>,
     V: Fn(bool, bool) -> bool,
 >(
-    x: Value,
-    y: Value,
+    x: &Value,
+    y: &Value,
     context_width: Option<usize>,
     calc_width: T,
     calc_value: U,
     calc_signed: V,
 ) -> Value {
     let width = calc_width(x.width, y.width, context_width);
-    let mask = gen_mask(width);
 
-    let mut mask_x = if x.is_x() | y.is_x() | x.is_z() | y.is_z() {
-        mask.clone()
+    let mut mask_xz = if x.is_xz() | y.is_xz() {
+        gen_mask(width)
     } else {
         BigUint::from(0u32)
     };
@@ -1031,18 +1044,17 @@ fn binary_op_signed<
     let x_payload = x.to_bigint();
     let y_payload = y.to_bigint();
 
-    let payload = if let Some(payload) = calc_value(x_payload, y_payload) {
-        to_biguint(payload, width) & mask
+    let payload = if let Some(payload) = calc_value(&x_payload, &y_payload) {
+        to_biguint(payload, width)
     } else {
-        mask_x = mask.clone();
+        mask_xz = gen_mask(width);
         BigUint::from(0u32)
     };
     let signed = calc_signed(x.signed, y.signed);
 
     Value {
         payload,
-        mask_x,
-        mask_z: 0u32.into(),
+        mask_xz,
         width,
         signed,
     }
@@ -1050,7 +1062,19 @@ fn binary_op_signed<
 
 #[derive(Clone, Debug)]
 pub enum Factor {
-    Variable(VarId, VarIndex, VarSelect, Comptime, TokenRange),
+    Variable {
+        id: VarId,
+        index: VarIndex,
+        select: VarSelect,
+        comptime: Comptime,
+        token: TokenRange,
+    },
+    VariableOpt {
+        id: VarId,
+        raw_index: usize,
+        comptime: Comptime,
+        token: TokenRange,
+    },
     Value(Comptime, TokenRange),
     SystemFunctionCall(SystemFunctionCall, TokenRange),
     FunctionCall(FunctionCall, TokenRange),
@@ -1074,24 +1098,45 @@ impl Factor {
         }
     }
 
-    pub fn eval_value(
-        &self,
-        context: &mut Context,
+    pub fn eval_value<'a, T: EvalContext>(
+        &'a self,
+        context: &mut T,
         _context_width: Option<usize>,
-    ) -> Option<Value> {
+    ) -> Option<Cow<'a, Value>> {
         match self {
-            Factor::Variable(id, index, select, comptime, _) => {
-                let index = index.eval_value(context)?;
-                let value = context.variables.get(id)?.get_value(&index)?;
-
-                if !select.is_empty() {
-                    let (beg, end) = select.eval_value(context, &comptime.r#type, false)?;
-                    Some(value.select(beg, end))
+            Factor::Variable {
+                id,
+                index,
+                select,
+                comptime,
+                ..
+            } => {
+                let select = if !select.is_empty() {
+                    let select = select.eval_value(context, &comptime.r#type, false)?;
+                    Some(select)
                 } else {
-                    Some(value)
+                    None
+                };
+
+                let index = index.eval_value(context)?;
+                let variable = context.variables().get(id)?;
+                let value = variable.get_value(&index)?;
+
+                if let Some((beg, end)) = select {
+                    Some(Cow::Owned(value.select(beg, end)))
+                } else {
+                    Some(Cow::Owned(value.clone()))
                 }
             }
-            Factor::Value(x, _) => x.get_value().ok(),
+            Factor::VariableOpt { id, raw_index, .. } => {
+                let value = context
+                    .variables()
+                    .get(id)?
+                    .get_value_from_raw_index(Some(*raw_index))?;
+
+                Some(Cow::Owned(value.clone()))
+            }
+            Factor::Value(x, _) => x.get_value().ok().map(Cow::Borrowed),
             Factor::SystemFunctionCall(x, _) => x.eval_value(context),
             Factor::FunctionCall(x, _) => x.eval_value(context),
             Factor::Anonymous(_) => None,
@@ -1100,14 +1145,23 @@ impl Factor {
         }
     }
 
-    pub fn eval_comptime(
+    pub fn eval_comptime<T: EvalContext>(
         &mut self,
-        context: &mut Context,
+        context: &mut T,
         context_width: Option<usize>,
     ) -> Comptime {
-        let value = self.eval_value(context, context_width);
+        let value = self
+            .eval_value(context, context_width)
+            .map(|x| x.into_owned());
         match self {
-            Factor::Variable(_, index, select, comptime, _) => {
+            Factor::Variable {
+                id,
+                index,
+                select,
+                comptime,
+                token,
+                ..
+            } => {
                 let mut ret = comptime.clone();
 
                 let value = if let Some(x) = value {
@@ -1128,8 +1182,27 @@ impl Factor {
                 }
 
                 ret.value = value;
+
+                let is_const_index = index.is_const(context);
+
+                if is_const_index && select.is_empty() {
+                    let index = index.eval_value(context);
+                    if let Some(index) = index.as_ref().as_ref()
+                        && let Some(variable) = context.variables().get(id)
+                        && let Some(raw_index) = variable.get_raw_index(index)
+                    {
+                        *self = Factor::VariableOpt {
+                            id: *id,
+                            raw_index,
+                            comptime: ret.clone(),
+                            token: *token,
+                        };
+                    }
+                }
+
                 ret
             }
+            Factor::VariableOpt { comptime, .. } => comptime.clone(),
             Factor::Value(x, _) => x.clone(),
             Factor::SystemFunctionCall(x, _) => x.eval_comptime(context),
             Factor::FunctionCall(x, _) => x.eval_comptime(context),
@@ -1188,13 +1261,21 @@ impl Factor {
         assign_context: AssignContext,
     ) {
         match self {
-            Factor::Variable(id, index, select, _, _) => {
-                if let Some(index) = index.eval_value(context)
+            Factor::Variable {
+                id, index, select, ..
+            } => {
+                if let Some(index) = index.eval_value(context).as_ref()
                     && let Some(variable) = context.variables.get(id).cloned()
                     && let Some((beg, end)) = select.eval_value(context, &variable.r#type, false)
                 {
                     let mask = gen_mask_range(beg, end);
-                    assign_table.insert_reference(&variable, index, mask);
+                    assign_table.insert_reference(&variable, index.clone(), mask);
+                }
+            }
+            Factor::VariableOpt { id, raw_index, .. } => {
+                if let Some(variable) = context.variables.get(id).cloned() {
+                    let mask = gen_mask(variable.r#type.total_width().unwrap_or(0));
+                    assign_table.insert_reference_raw(&variable, *raw_index, mask);
                 }
             }
             Factor::FunctionCall(x, _) => {
@@ -1209,7 +1290,7 @@ impl Factor {
 
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
-            Factor::Variable(_, i, _, _, _) => {
+            Factor::Variable { index: i, .. } => {
                 *i = index.clone();
             }
             Factor::FunctionCall(x, _) => {
@@ -1221,7 +1302,8 @@ impl Factor {
 
     pub fn token_range(&self) -> TokenRange {
         match self {
-            Factor::Variable(_, _, _, _, x) => *x,
+            Factor::Variable { token, .. } => *token,
+            Factor::VariableOpt { token, .. } => *token,
             Factor::Value(_, x) => *x,
             Factor::SystemFunctionCall(_, x) => *x,
             Factor::FunctionCall(_, x) => *x,
@@ -1235,8 +1317,13 @@ impl Factor {
 impl fmt::Display for Factor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ret = match self {
-            Factor::Variable(id, index, select, _, _) => {
+            Factor::Variable {
+                id, index, select, ..
+            } => {
                 format!("{id}{index}{select}")
+            }
+            Factor::VariableOpt { id, raw_index, .. } => {
+                format!("opt {id}[{raw_index}]")
             }
             Factor::Value(x, _) => {
                 if let Ok(x) = x.get_value() {
@@ -1279,7 +1366,7 @@ impl ArrayLiteralItem {
         }
     }
 
-    pub fn is_const(&mut self, context: &mut Context) -> bool {
+    pub fn is_const<T: EvalContext>(&mut self, context: &mut T) -> bool {
         match self {
             ArrayLiteralItem::Value(x, y) => {
                 let mut ret = x.eval_comptime(context, None).is_const;
@@ -1292,7 +1379,7 @@ impl ArrayLiteralItem {
         }
     }
 
-    pub fn is_global(&mut self, context: &mut Context) -> bool {
+    pub fn is_global<T: EvalContext>(&mut self, context: &mut T) -> bool {
         match self {
             ArrayLiteralItem::Value(x, y) => {
                 let mut ret = x.eval_comptime(context, None).is_global;
@@ -1471,7 +1558,9 @@ mod tests {
         let mut context = Context::default();
         let x = parse_expression(s);
         let x: Expression = Conv::conv(&mut context, &x).unwrap();
-        x.eval_value(&mut context, context_width).unwrap()
+        x.eval_value(&mut context, context_width)
+            .unwrap()
+            .into_owned()
     }
 
     #[test]
@@ -1691,13 +1780,14 @@ mod tests {
     }
 
     fn bit(width: usize) -> Box<Expression> {
+        let r#type = Type {
+            kind: TypeKind::Bit,
+            width: Shape::new(vec![Some(width)]),
+            ..Default::default()
+        };
         let ret = Comptime {
             value: ValueVariant::Unknown,
-            r#type: Type {
-                kind: TypeKind::Bit,
-                width: Shape::new(vec![Some(width)]),
-                ..Default::default()
-            },
+            r#type,
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(
@@ -1707,13 +1797,14 @@ mod tests {
     }
 
     fn logic(width: usize) -> Box<Expression> {
+        let r#type = Type {
+            kind: TypeKind::Logic,
+            width: Shape::new(vec![Some(width)]),
+            ..Default::default()
+        };
         let ret = Comptime {
             value: ValueVariant::Unknown,
-            r#type: Type {
-                kind: TypeKind::Logic,
-                width: Shape::new(vec![Some(width)]),
-                ..Default::default()
-            },
+            r#type,
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(
@@ -1723,13 +1814,14 @@ mod tests {
     }
 
     fn value(value: usize) -> Box<Expression> {
+        let r#type = Type {
+            kind: TypeKind::Logic,
+            width: Shape::new(vec![Some(32)]),
+            ..Default::default()
+        };
         let ret = Comptime {
             value: ValueVariant::Numeric(Value::new(BigUint::from(value), 32, false)),
-            r#type: Type {
-                kind: TypeKind::Logic,
-                width: Shape::new(vec![Some(32)]),
-                ..Default::default()
-            },
+            r#type,
             is_const: true,
             is_global: true,
             ..Default::default()

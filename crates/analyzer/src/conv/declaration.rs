@@ -17,16 +17,15 @@ use crate::conv::utils::{
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
-    self, Comptime, FuncArg, FuncPath, IrResult, Shape, Signature, TypeKind, ValueVariant, VarId,
-    VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
+    self, Comptime, FuncArg, FuncPath, IrResult, Shape, Signature, TypeKind, ValueVariant, VarKind,
+    VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{HashMap, ir_error};
-use num_bigint::BigUint;
+use crate::{BigUint, HashMap, ir_error};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -275,7 +274,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
                     path,
                     kind,
                     comptime.r#type.clone(),
-                    vec![comptime.get_value().unwrap()],
+                    vec![comptime.get_value().unwrap().clone()],
                     c.get_affiliation(),
                     &token,
                 );
@@ -378,14 +377,12 @@ impl Conv<&WithParameterItem> for () {
             // Get overridden parameter if it exists
             let mut expr = context.get_override(&path).cloned().unwrap_or(expr);
 
-            let dst = ir::AssignDestination {
-                id: VarId::default(),
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 path: path.clone(),
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime: Comptime::from_type(r#type, ClockDomain::None, TokenRange::default()),
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             eval_const_assign(context, kind, &dst, &mut expr)?;
 
@@ -496,7 +493,7 @@ impl Conv<&PortDeclarationItem> for () {
                 if x.is_anonymous_expression() {
                     None
                 } else {
-                    let value = comptime.get_value()?;
+                    let value = comptime.get_value()?.clone();
                     Some((value, comptime))
                 }
             } else {
@@ -515,7 +512,7 @@ impl Conv<&PortDeclarationItem> for () {
                     path,
                     kind,
                     r#type,
-                    vec![value],
+                    vec![value.clone()],
                     context.get_affiliation(),
                     &variable_token,
                 );
@@ -620,14 +617,13 @@ impl Conv<&LetDeclaration> for ir::Declaration {
 
             let (id, comptime) = context.find_path(&path).ok_or_else(|| ir_error!(token))?;
 
-            let dst = ir::AssignDestination {
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 id,
                 path,
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime,
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             let mut expr = eval_expr(context, Some(r#type.clone()), &value.expression, false)?;
 
@@ -673,14 +669,12 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
                 ));
             }
 
-            let dst = ir::AssignDestination {
-                id: VarId::default(),
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 path: path.clone(),
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime: Comptime::from_type(r#type, ClockDomain::None, TokenRange::default()),
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             eval_const_assign(context, kind, &dst, &mut (comptime, expr))?;
 
@@ -708,7 +702,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                 if let Some(dst) = dst.to_assign_destination(context, false) {
                     let mut expr = eval_expr(
                         context,
-                        Some(dst.comptime.r#type.clone()),
+                        Some(dst.comptime().r#type.clone()),
                         &value.expression,
                         false,
                     )?;
@@ -1203,7 +1197,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             var_path_to_assign_destination(context, expanded_paths, true);
 
                         for dst_path in &dst_paths {
-                            if let Some((_, comptime)) = context.find_path(&dst_path.path) {
+                            if let Some((_, comptime)) = context.find_path(dst_path.path()) {
                                 // All port of SV instance should have the same clock domain
                                 if let Some(prev) = &prev_port {
                                     check_clock_domain(context, &comptime, prev, &token.beg);

@@ -29,7 +29,7 @@ impl Literal {
                 (ValueVariant::Type(x.into()), r#type)
             }
             Literal::Boolean(x) => {
-                let value = Value::new((*x).into(), 1, false);
+                let value = Value::new((*x as u32).into(), 1, false);
                 let r#type = value.to_ir_type();
                 (ValueVariant::Numeric(value), r#type)
             }
