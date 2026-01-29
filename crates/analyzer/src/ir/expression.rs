@@ -551,7 +551,7 @@ impl Expression {
                     return ret;
                 }
 
-                check_clock_domain(context, &x, &y, &token.beg);
+                check_clock_domain(context, &x, &y, &token);
 
                 let x_width = x.r#type.total_width();
                 let y_width = y.r#type.total_width();
@@ -709,8 +709,8 @@ impl Expression {
                     return ret;
                 }
 
-                check_clock_domain(context, &x, &y, &self.token_range().beg);
-                check_clock_domain(context, &x, &z, &self.token_range().beg);
+                check_clock_domain(context, &x, &y, &self.token_range());
+                check_clock_domain(context, &x, &z, &self.token_range());
 
                 let y_width = y.r#type.total_width();
                 let z_width = z.r#type.total_width();
@@ -751,7 +751,7 @@ impl Expression {
                         return ret;
                     }
 
-                    check_clock_domain(context, &ret, &expr, &token.beg);
+                    check_clock_domain(context, &ret, &expr, &token);
                     ret.clock_domain = expr.clock_domain;
 
                     if expr.r#type.is_4state() {
@@ -1465,7 +1465,8 @@ mod tests {
     use super::*;
     use crate::conv::utils::parse_expression;
     use crate::conv::{Context, Conv};
-    use veryl_parser::veryl_token::{Token, TokenSource};
+    use veryl_parser::resource_table::TokenId;
+    use veryl_parser::veryl_token::TokenSource;
 
     fn calc_expression(s: &str, context_width: Option<usize>) -> Value {
         let mut context = Context::default();
@@ -1685,9 +1686,10 @@ mod tests {
     }
 
     fn token_range() -> TokenRange {
-        let beg = Token::new("", 0, 0, 0, 0, TokenSource::External);
+        let beg = TokenId::default();
         let end = beg;
-        TokenRange { beg, end }
+        let source = TokenSource::External;
+        TokenRange { beg, end, source }
     }
 
     fn bit(width: usize) -> Box<Expression> {

@@ -207,7 +207,8 @@ impl ExpandModportConnectionsTable {
         in_function: bool,
     ) {
         for (modport, port, index) in collect_modports(defined_ports, namespace) {
-            if !(in_function || attribute_table::is_expand(&port.token.token, ExpandItem::Modport))
+            if !(in_function
+                || attribute_table::is_expand(&port.token.token.into(), ExpandItem::Modport))
             {
                 continue;
             }
@@ -358,7 +359,8 @@ impl ExpandedModportPortTable {
         context: &SymbolContext,
     ) {
         for (modport, port, _) in collect_modports(defined_ports, namespace) {
-            if !(in_function || attribute_table::is_expand(&port.token.token, ExpandItem::Modport))
+            if !(in_function
+                || attribute_table::is_expand(&port.token.token.into(), ExpandItem::Modport))
             {
                 continue;
             }

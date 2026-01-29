@@ -65,7 +65,7 @@ impl Module {
             if variable.is_assignable() && !check_skip {
                 for index in &variable.unassigned() {
                     if !attribute_table::contains(
-                        &variable.token.beg,
+                        &variable.token,
                         Attribute::Allow(AllowItem::UnassignVariable),
                     ) {
                         let index = VarIndex::from_index(*index, &variable.r#type.array);

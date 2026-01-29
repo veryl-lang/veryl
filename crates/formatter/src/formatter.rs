@@ -5,6 +5,7 @@ use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::token_range::TokenExt;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -338,14 +339,14 @@ impl Formatter {
         }
     }
 
-    fn measure_finish(&mut self, token: &Token) {
+    fn measure_finish(&mut self, token: &TokenRange) {
         if self.mode == Mode::Align {
-            self.measure.finish(token.id);
+            self.measure.finish(token.beg);
         }
     }
 
-    fn measure_get(&mut self, token: &Token) -> Option<u32> {
-        self.measure.get(token.id)
+    fn measure_get(&mut self, token: &TokenRange) -> Option<u32> {
+        self.measure.get(token.beg)
     }
 
     fn single_line_start(&mut self) {
@@ -482,7 +483,7 @@ impl VerylWalker for Formatter {
     fn identifier(&mut self, arg: &Identifier) {
         let align = !self.align_any()
             && !self.in_attribute
-            && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
+            && attribute_table::is_align(&arg.range(), AlignItem::Identifier);
         if align {
             self.align_start(align_kind::IDENTIFIER);
         }
@@ -494,7 +495,7 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, arg: &Number) {
-        let align = !self.align_any() && attribute_table::is_align(&arg.first(), AlignItem::Number);
+        let align = !self.align_any() && attribute_table::is_align(&arg.range(), AlignItem::Number);
         if align {
             self.align_start(align_kind::NUMBER);
         }
@@ -521,9 +522,9 @@ impl VerylWalker for Formatter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
+            let compact = attribute_table::is_format(&arg.range(), FormatItem::Compact);
             let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.first()).unwrap();
+                let width = self.measure_get(&arg.range()).unwrap();
                 (width < self.format_opt.max_width as u32) || compact
             } else {
                 // calc line width as single_line in Align mode
@@ -556,7 +557,7 @@ impl VerylWalker for Formatter {
             self.expression01(&arg.expression01);
             self.newline_tail_pop();
 
-            self.measure_finish(&arg.first());
+            self.measure_finish(&arg.range());
             if single_line {
                 self.single_line_finish();
             }
@@ -2966,7 +2967,7 @@ impl VerylWalker for Formatter {
 }
 
 fn is_single_line_inst_declaration(arg: &ComponentInstantiation) -> bool {
-    if attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact) {
+    if attribute_table::is_format(&arg.identifier.range(), FormatItem::Compact) {
         return true;
     }
 
@@ -2984,5 +2985,5 @@ fn skip_formatting(arg: &DescriptionItem) -> bool {
     let Some(identifier) = arg.identifier_token() else {
         return false;
     };
-    attribute_table::is_format(&identifier.token, FormatItem::Skip)
+    attribute_table::is_format(&identifier.token.into(), FormatItem::Skip)
 }

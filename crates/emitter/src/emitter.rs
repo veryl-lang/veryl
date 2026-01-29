@@ -22,6 +22,7 @@ use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType,
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenExt;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource, VerylToken, is_anonymous_token};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -481,14 +482,14 @@ impl Emitter {
         }
     }
 
-    fn measure_finish(&mut self, token: &Token) {
+    fn measure_finish(&mut self, token: &TokenRange) {
         if self.mode == Mode::Align {
-            self.measure.finish(token.id);
+            self.measure.finish(token.beg);
         }
     }
 
-    fn measure_get(&mut self, token: &Token) -> Option<u32> {
-        self.measure.get(token.id)
+    fn measure_get(&mut self, token: &TokenRange) -> Option<u32> {
+        self.measure.get(token.beg)
     }
 
     fn single_line_start(&mut self) {
@@ -563,7 +564,7 @@ impl Emitter {
     fn emit_identifier(&mut self, arg: &Identifier, symbol: Option<&Symbol>) {
         let align = !self.align_any()
             && !self.in_attribute
-            && attribute_table::is_align(&arg.first(), AlignItem::Identifier);
+            && attribute_table::is_align(&arg.range(), AlignItem::Identifier);
         if align {
             self.align_start(align_kind::IDENTIFIER);
         }
@@ -1085,7 +1086,7 @@ impl Emitter {
 
     fn cond_type_prefix(&self, token: &Token) -> (Option<String>, bool) {
         fn prefix(token: &Token) -> Option<String> {
-            let mut attrs = attribute_table::get(token);
+            let mut attrs = attribute_table::get(&token.into());
             attrs.reverse();
             for attr in attrs {
                 match attr {
@@ -1327,8 +1328,10 @@ impl Emitter {
         arg: &ComponentInstantiation,
         semicolon: &Semicolon,
     ) {
-        let allow_missing_port =
-            attribute_table::contains(&header_token.token, Attr::Allow(AllowItem::MissingPort));
+        let allow_missing_port = attribute_table::contains(
+            &header_token.token.into(),
+            Attr::Allow(AllowItem::MissingPort),
+        );
 
         let (defined_ports, generic_map, symbol) =
             if let (Ok(symbol), _) = self.resolve_scoped_idnetifier(&arg.scoped_identifier) {
@@ -1370,7 +1373,7 @@ impl Emitter {
             .push(modport_connections_table);
         self.inst_module_namespace = Some(symbol.inner_namespace());
 
-        let compact = attribute_table::is_format(&arg.identifier.first(), FormatItem::Compact);
+        let compact = attribute_table::is_format(&arg.identifier.range(), FormatItem::Compact);
         let single_line =
             arg.component_instantiation_opt2.is_none() && defined_ports.is_empty() || compact;
         if single_line {
@@ -2347,7 +2350,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Number'
     fn number(&mut self, arg: &Number) {
-        let align = !self.align_any() && attribute_table::is_align(&arg.first(), AlignItem::Number);
+        let align = !self.align_any() && attribute_table::is_align(&arg.range(), AlignItem::Number);
         if align {
             self.align_start(align_kind::NUMBER);
         }
@@ -2541,9 +2544,9 @@ impl VerylWalker for Emitter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
+            let compact = attribute_table::is_format(&arg.range(), FormatItem::Compact);
             let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.first()).unwrap();
+                let width = self.measure_get(&arg.range()).unwrap();
                 (width < self.format_opt.max_width as u32) || compact
             } else {
                 // calc line width as single_line in Align mode
@@ -2578,7 +2581,7 @@ impl VerylWalker for Emitter {
             self.newline_pop();
             self.str("))");
 
-            self.measure_finish(&arg.first());
+            self.measure_finish(&arg.range());
             if single_line {
                 self.single_line_finish();
             }

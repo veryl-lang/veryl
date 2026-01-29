@@ -65,7 +65,7 @@ impl Incrementable for PathId {
 
 impl fmt::Display for StrId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let text = get_str_value(*self).unwrap();
+        let text = get_str_value(*self).unwrap_or_default();
         text.fmt(f)
     }
 }

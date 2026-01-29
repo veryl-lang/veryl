@@ -407,10 +407,15 @@ impl GenericSymbolPath {
 
     pub fn slice(&self, i: usize) -> GenericSymbolPath {
         let paths: Vec<_> = self.paths.clone().drain(0..=i).collect();
+        let beg = paths.first().map(|x| x.base).unwrap();
+        let end = paths.last().map(|x| x.base).unwrap();
+
         let range = TokenRange {
-            beg: paths.first().map(|x| x.base).unwrap(),
-            end: paths.last().map(|x| x.base).unwrap(),
+            beg: beg.id,
+            end: end.id,
+            source: end.source,
         };
+
         GenericSymbolPath {
             paths,
             kind: self.kind,
@@ -434,7 +439,7 @@ impl GenericSymbolPath {
     }
 
     pub fn file_path(&self) -> Option<PathId> {
-        if let TokenSource::File { path, .. } = self.range.beg.source {
+        if let TokenSource::File { path, .. } = self.range.beg().source {
             Some(path)
         } else {
             None
@@ -606,7 +611,7 @@ impl GenericSymbolPath {
         if let Ok(head_symbol) = symbol_table::resolve((&head, namespace))
             && head_symbol.imported
         {
-            let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
+            let self_namespace = namespace_table::get(self.range.beg).unwrap();
             let Some(self_file_path) = self.file_path() else {
                 return;
             };
@@ -746,7 +751,7 @@ impl From<&syntax_tree::FixedType> for GenericSymbolPath {
         let token: TokenRange = value.into();
         GenericSymbolPath {
             paths: vec![GenericSymbol {
-                base: token.beg,
+                base: token.beg(),
                 arguments: Vec::new(),
             }],
             kind: GenericSymbolPathKind::TypeLiteral,

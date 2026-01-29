@@ -8,6 +8,7 @@ pub mod stringifier;
 pub mod text_table;
 pub mod token_collector;
 pub mod token_range;
+pub mod token_table;
 pub mod veryl_grammar;
 pub mod veryl_grammar_trait;
 pub mod veryl_parser;

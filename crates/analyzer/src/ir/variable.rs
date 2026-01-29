@@ -408,6 +408,7 @@ impl VarSelect {
             TokenRange {
                 beg: beg.beg,
                 end: end.end,
+                source: end.source,
             }
         } else {
             TokenRange::default()

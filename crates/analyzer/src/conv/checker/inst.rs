@@ -8,8 +8,8 @@ use crate::symbol_path::SymbolPathNamespace;
 use crate::symbol_table;
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 
 enum InstTypeSource {
@@ -75,7 +75,7 @@ fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
 pub fn check_inst(
     context: &mut Context,
     in_module: bool,
-    header_token: &Token,
+    header_token: &TokenRange,
     arg: &ComponentInstantiation,
 ) {
     if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref())

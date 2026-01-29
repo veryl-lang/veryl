@@ -180,7 +180,7 @@ impl CreateSymbolTable {
     }
 
     fn get_namespace(&self, token: &Token) -> Namespace {
-        let attrs = attribute_table::get(token);
+        let attrs = attribute_table::get(&token.into());
         let mut ret = self.namespace.clone();
         ret.define_context = attrs.as_slice().into();
         ret
@@ -190,7 +190,7 @@ impl CreateSymbolTable {
         let doc_comment = self.create_doc_comment(token);
         let mut symbol = Symbol::new(token, kind, &self.get_namespace(token), public, doc_comment);
 
-        if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
+        if attribute_table::contains(&token.into(), Attr::Allow(AllowItem::UnusedVariable)) {
             symbol.allow_unused = true;
         }
 
@@ -1241,7 +1241,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.enum_member_width = 1;
                 self.enum_member_value = None;
 
-                let attrs = attribute_table::get(&arg.r#enum.enum_token.token);
+                let attrs = attribute_table::get(&arg.r#enum.enum_token.token.into());
                 for attr in attrs {
                     if let Attr::EnumMemberPrefix(x) = attr {
                         // overridden prefix by attribute
@@ -2489,7 +2489,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let way = arg.identifier.identifier_token.to_string();
                 let mut test_attr = None;
 
-                let attrs = attribute_table::get(&arg.embed.embed_token.token);
+                let attrs = attribute_table::get(&arg.embed.embed_token.token.into());
                 for attr in attrs {
                     if let Attr::Test(x, y) = attr {
                         test_attr = Some((x, y));
@@ -2543,7 +2543,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let way = arg.identifier.identifier_token.to_string();
             let mut test_attr = None;
 
-            let attrs = attribute_table::get(&arg.include.include_token.token);
+            let attrs = attribute_table::get(&arg.include.include_token.token.into());
             for attr in attrs {
                 if let Attr::Test(x, y) = attr {
                     test_attr = Some((x, y));

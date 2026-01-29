@@ -1,43 +1,75 @@
-use crate::resource_table::{PathId, TokenId};
+use crate::resource_table::{self, PathId, TokenId};
+use crate::token_table;
 use crate::veryl_grammar_trait::*;
 use crate::veryl_token::{Token, TokenSource, VerylToken};
 use paste::paste;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenRange {
-    pub beg: Token,
-    pub end: Token,
+    pub beg: TokenId,
+    pub end: TokenId,
+    pub source: TokenSource,
 }
 
 impl TokenRange {
     pub fn new(beg: &VerylToken, end: &VerylToken) -> Self {
         Self {
-            beg: beg.token,
-            end: end.token,
+            beg: beg.token.id,
+            end: end.token.id,
+            source: beg.token.source,
         }
     }
 
+    pub fn beg(&self) -> Token {
+        token_table::get(self.beg)
+    }
+
+    pub fn end(&self) -> Token {
+        token_table::get(self.end)
+    }
+
     pub fn include(&self, path: PathId, line: u32, column: u32) -> bool {
-        if self.beg.source == path {
-            if self.beg.line == line {
-                if self.end.line == line {
-                    self.beg.column <= column && column <= self.end.column
+        let beg = self.beg();
+        let end = self.end();
+
+        if beg.source == path {
+            if beg.line == line {
+                if end.line == line {
+                    beg.column <= column && column <= end.column
                 } else {
-                    self.beg.column <= column
+                    beg.column <= column
                 }
-            } else if self.end.line == line {
-                column <= self.end.column
+            } else if end.line == line {
+                column <= end.column
             } else {
-                self.beg.line < line && line < self.end.line
+                beg.line < line && line < end.line
             }
         } else {
             false
         }
     }
 
+    pub fn include_token_range(&self, token: &TokenRange) -> bool {
+        if self.source == token.source {
+            self.beg <= token.beg && token.end <= self.end
+        } else {
+            false
+        }
+    }
+
     pub fn offset(&mut self, value: u32) {
-        self.beg.pos += value;
-        self.end.pos += value;
+        let mut beg = self.beg();
+        let mut end = self.end();
+
+        beg.id = resource_table::new_token_id();
+        end.id = resource_table::new_token_id();
+        beg.pos += value;
+        end.pos += value;
+        token_table::insert(beg.id, beg);
+        token_table::insert(end.id, end);
+
+        self.beg = beg.id;
+        self.end = end.id;
     }
 
     pub fn set_beg(&mut self, value: TokenRange) {
@@ -49,58 +81,73 @@ impl TokenRange {
     }
 
     pub fn source(&self) -> TokenSource {
-        self.beg.source
+        self.beg().source
+    }
+}
+
+impl Default for TokenRange {
+    fn default() -> Self {
+        let beg = Token::default();
+        let end = Token::default();
+        Self {
+            beg: beg.id,
+            end: end.id,
+            source: beg.source,
+        }
     }
 }
 
 impl From<&TokenRange> for miette::SourceSpan {
     fn from(x: &TokenRange) -> Self {
-        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
-        (x.beg.pos as usize, length).into()
+        let length = (x.end().pos - x.beg().pos + x.end().length) as usize;
+        (x.beg().pos as usize, length).into()
     }
 }
 
 impl From<TokenRange> for miette::SourceSpan {
     fn from(x: TokenRange) -> Self {
-        let length = (x.end.pos - x.beg.pos + x.end.length) as usize;
-        (x.beg.pos as usize, length).into()
+        let length = (x.end().pos - x.beg().pos + x.end().length) as usize;
+        (x.beg().pos as usize, length).into()
     }
 }
 
 impl From<Token> for TokenRange {
     fn from(value: Token) -> Self {
-        let beg = value;
-        let end = value;
-        TokenRange { beg, end }
+        let beg = value.id;
+        let end = value.id;
+        let source = value.source;
+        TokenRange { beg, end, source }
     }
 }
 
 impl From<&Token> for TokenRange {
     fn from(value: &Token) -> Self {
-        let beg = *value;
-        let end = *value;
-        TokenRange { beg, end }
+        let beg = value.id;
+        let end = value.id;
+        let source = value.source;
+        TokenRange { beg, end, source }
     }
 }
 
 impl From<&VerylToken> for TokenRange {
     fn from(value: &VerylToken) -> Self {
-        let beg = value.token;
-        let end = value.token;
-        TokenRange { beg, end }
+        let beg = value.token.id;
+        let end = value.token.id;
+        let source = value.token.source;
+        TokenRange { beg, end, source }
     }
 }
 
 pub trait TokenExt {
     fn range(&self) -> TokenRange;
     fn first(&self) -> Token {
-        self.range().beg
+        self.range().beg()
     }
     fn last(&self) -> Token {
-        self.range().end
+        self.range().end()
     }
     fn id(&self) -> TokenId {
-        self.first().id
+        self.range().beg
     }
     fn line(&self) -> u32 {
         self.first().line
@@ -126,6 +173,7 @@ macro_rules! impl_token_range {
                 TokenRange {
                     beg: beg.beg,
                     end: end.end,
+                    source: end.source,
                 }
             }
         }
@@ -146,9 +194,11 @@ macro_rules! impl_token_range_singular {
         paste! {
             impl From<&$typename> for TokenRange {
                 fn from(value: &$typename) -> Self {
-                    let beg = value.[<$typename:snake _token>].token;
+                    let token = value.[<$typename:snake _token>].token;
+                    let beg = token.id;
                     let end = beg;
-                    TokenRange { beg, end }
+                    let source = token.source;
+                    TokenRange { beg, end, source }
                 }
             }
             impl_token_ext!($typename);
@@ -185,8 +235,9 @@ macro_rules! expression_token_range {
                     let end: TokenRange = last.$prev.as_ref().into();
                     end.end
                 };
+                let source = beg.source;
                 let beg = beg.beg;
-                TokenRange { beg, end }
+                TokenRange { beg, end, source }
             }
         }
         impl_token_ext!($typename);
@@ -222,9 +273,10 @@ macro_rules! impl_token_range_group {
                 fn from(value: &$typename) -> Self {
                     let mut ret: TokenRange = match value.[<$typename:snake _group>].as_ref() {
                         [<$typename Group>]::[<LBrace $typename GroupListRBrace>](x) => {
-                            let beg = x.l_brace.l_brace_token.token;
-                            let end = x.r_brace.r_brace_token.token;
-                            TokenRange { beg, end }
+                            let beg = x.l_brace.l_brace_token.token.id;
+                            let end = x.r_brace.r_brace_token.token.id;
+                            let source = x.r_brace.r_brace_token.token.source;
+                            TokenRange { beg, end, source }
                         }
                         [<$typename Group>]::$item(x) => x.[<$item:snake>].as_ref().into(),
                     };
@@ -244,9 +296,10 @@ macro_rules! impl_token_range_group {
                 fn from(value: &$typename) -> Self {
                     let mut ret: TokenRange = match value.[<$typename:snake _group>].as_ref() {
                         [<$typename Group>]::[<LBrace $list RBrace>](x) => {
-                            let beg = x.l_brace.l_brace_token.token;
-                            let end = x.r_brace.r_brace_token.token;
-                            TokenRange { beg, end }
+                            let beg = x.l_brace.l_brace_token.token.id;
+                            let end = x.r_brace.r_brace_token.token.id;
+                            let source = x.r_brace.r_brace_token.token.source;
+                            TokenRange { beg, end, source }
                         }
                         [<$typename Group>]::$item(x) => x.[<$item:snake>].as_ref().into(),
                     };
@@ -350,9 +403,10 @@ impl_token_range_singular!(Converse);
 
 impl From<&Defaul> for TokenRange {
     fn from(value: &Defaul) -> Self {
-        let beg = value.default_token.token;
+        let beg = value.default_token.token.id;
         let end = beg;
-        TokenRange { beg, end }
+        let source = value.default_token.token.source;
+        TokenRange { beg, end, source }
     }
 }
 impl_token_ext!(Defaul);
@@ -406,9 +460,10 @@ impl_token_range_singular!(Step);
 
 impl From<&Strin> for TokenRange {
     fn from(value: &Strin) -> Self {
-        let beg = value.string_token.token;
+        let beg = value.string_token.token.id;
         let end = beg;
-        TokenRange { beg, end }
+        let source = value.string_token.token.source;
+        TokenRange { beg, end, source }
     }
 }
 impl_token_ext!(Strin);
@@ -581,19 +636,22 @@ impl From<&Factor> for TokenRange {
                 x.identifier_factor.expression_identifier.as_ref().into()
             }
             Factor::LParenExpressionRParen(x) => {
-                let beg = x.l_paren.l_paren_token.token;
-                let end = x.r_paren.r_paren_token.token;
-                TokenRange { beg, end }
+                let beg = x.l_paren.l_paren_token.token.id;
+                let end = x.r_paren.r_paren_token.token.id;
+                let source = x.r_paren.r_paren_token.token.source;
+                TokenRange { beg, end, source }
             }
             Factor::LBraceConcatenationListRBrace(x) => {
-                let beg = x.l_brace.l_brace_token.token;
-                let end = x.r_brace.r_brace_token.token;
-                TokenRange { beg, end }
+                let beg = x.l_brace.l_brace_token.token.id;
+                let end = x.r_brace.r_brace_token.token.id;
+                let source = x.r_brace.r_brace_token.token.source;
+                TokenRange { beg, end, source }
             }
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
-                let beg = x.quote_l_brace.quote_l_brace_token.token;
-                let end = x.r_brace.r_brace_token.token;
-                TokenRange { beg, end }
+                let beg = x.quote_l_brace.quote_l_brace_token.token.id;
+                let end = x.r_brace.r_brace_token.token.id;
+                let source = x.r_brace.r_brace_token.token.source;
+                TokenRange { beg, end, source }
             }
             Factor::CaseExpression(x) => x.case_expression.as_ref().into(),
             Factor::SwitchExpression(x) => x.switch_expression.as_ref().into(),
@@ -640,6 +698,7 @@ impl From<&FactorTypeFactor> for TokenRange {
         TokenRange {
             beg: beg.beg,
             end: end.end,
+            source: end.source,
         }
     }
 }
@@ -694,6 +753,7 @@ impl From<&ArrayLiteralItem> for TokenRange {
                 TokenRange {
                     beg: beg.beg,
                     end: end.end,
+                    source: end.source,
                 }
             }
         }
@@ -1031,9 +1091,10 @@ impl From<&AssignDestination> for TokenRange {
                 x.hierarchical_identifier.as_ref().into()
             }
             AssignDestination::LBraceAssignConcatenationListRBrace(x) => {
-                let beg = x.l_brace.l_brace_token.token;
-                let end = x.r_brace.r_brace_token.token;
-                TokenRange { beg, end }
+                let beg = x.l_brace.l_brace_token.token.id;
+                let end = x.r_brace.r_brace_token.token.id;
+                let source = x.r_brace.r_brace_token.token.source;
+                TokenRange { beg, end, source }
             }
         }
     }
@@ -1054,14 +1115,16 @@ impl From<&ModportDefault> for TokenRange {
             ModportDefault::Input(x) => x.input.as_ref().into(),
             ModportDefault::Output(x) => x.output.as_ref().into(),
             ModportDefault::SameLParenIdentifierRParen(x) => {
-                let beg = x.same.same_token.token;
-                let end = x.r_paren.r_paren_token.token;
-                TokenRange { beg, end }
+                let beg = x.same.same_token.token.id;
+                let end = x.r_paren.r_paren_token.token.id;
+                let source = x.r_paren.r_paren_token.token.source;
+                TokenRange { beg, end, source }
             }
             ModportDefault::ConverseLParenIdentifierRParen(x) => {
-                let beg = x.converse.converse_token.token;
-                let end = x.r_paren.r_paren_token.token;
-                TokenRange { beg, end }
+                let beg = x.converse.converse_token.token.id;
+                let end = x.r_paren.r_paren_token.token.id;
+                let source = x.r_paren.r_paren_token.token.source;
+                TokenRange { beg, end, source }
             }
         }
     }
@@ -1347,9 +1410,10 @@ impl_token_range!(GenerateNamedBlock, colon, r_brace);
 
 impl From<&GenerateOptionalNamedBlock> for TokenRange {
     fn from(value: &GenerateOptionalNamedBlock) -> Self {
-        let beg = value.l_brace.l_brace_token.token;
-        let end = value.r_brace.r_brace_token.token;
-        let mut ret = TokenRange { beg, end };
+        let beg = value.l_brace.l_brace_token.token.id;
+        let end = value.r_brace.r_brace_token.token.id;
+        let source = value.r_brace.r_brace_token.token.source;
+        let mut ret = TokenRange { beg, end, source };
         if let Some(x) = &value.generate_optional_named_block_opt {
             ret.set_beg(x.colon.as_ref().into());
         }
@@ -1430,6 +1494,7 @@ impl From<&ProtoDeclaration> for TokenRange {
         TokenRange {
             beg: beg.beg,
             end: end.end,
+            source: end.source,
         }
     }
 }
@@ -1489,6 +1554,7 @@ impl From<&EmbedItem> for TokenRange {
                 TokenRange {
                     beg: beg.beg,
                     end: end.end,
+                    source: end.source,
                 }
             }
             EmbedItem::EmbedScopedIdentifier(x) => x.embed_scoped_identifier.as_ref().into(),

@@ -24,7 +24,7 @@ where
     T: Clone + Eq + std::fmt::Display,
 {
     pub fn insert(&mut self, range: TokenRange, value: T) {
-        if let TokenSource::File { path, .. } = range.beg.source {
+        if let TokenSource::File { path, .. } = range.beg().source {
             self.table
                 .entry(path)
                 .and_modify(|x| x.push((range, value.clone())))
@@ -41,19 +41,23 @@ where
     pub fn end(&mut self, token: Token) {
         let (beg, value) = self.temporary.pop().unwrap();
         if let Some(value) = value {
-            let range = TokenRange { beg, end: token };
+            let range = TokenRange {
+                beg: beg.id,
+                end: token.id,
+                source: token.source,
+            };
             self.insert(range, value);
         }
     }
 
-    pub fn get(&self, token: &Token) -> Vec<T> {
+    pub fn get(&self, token: &TokenRange) -> Vec<T> {
         let mut ret = Vec::new();
 
         if let TokenSource::File { path, .. } = token.source
             && let Some(values) = self.table.get(&path)
         {
             for (range, value) in values {
-                if range.include(path, token.line, token.column) {
+                if range.include_token_range(token) {
                     ret.push(value.clone());
                 }
             }
@@ -69,7 +73,7 @@ where
         ret
     }
 
-    pub fn contains(&self, token: &Token, value: &T) -> bool {
+    pub fn contains(&self, token: &TokenRange, value: &T) -> bool {
         let attrs = self.get(token);
         attrs.contains(value)
     }
@@ -108,15 +112,17 @@ where
 
         for (_, v) in &vec {
             for (range, value) in v.iter() {
+                let beg = range.beg();
+                let end = range.end();
                 writeln!(
                     f,
                     "    {:value_width$} @ {}: {}:{} - {}:{},",
                     value,
-                    range.beg.source,
-                    range.beg.line,
-                    range.beg.column,
-                    range.end.line,
-                    range.end.column,
+                    beg.source,
+                    beg.line,
+                    beg.column,
+                    end.line,
+                    end.column,
                     value_width = value_width,
                 )?;
             }

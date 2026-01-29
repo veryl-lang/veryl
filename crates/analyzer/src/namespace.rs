@@ -28,14 +28,14 @@ impl DefineContext {
 
 impl From<Token> for DefineContext {
     fn from(token: Token) -> Self {
-        let attrs = attribute_table::get(&token);
+        let attrs = attribute_table::get(&token.into());
         attrs.as_slice().into()
     }
 }
 
 impl From<&VerylToken> for DefineContext {
     fn from(token: &VerylToken) -> Self {
-        let attrs = attribute_table::get(&token.token);
+        let attrs = attribute_table::get(&token.token.into());
         attrs.as_slice().into()
     }
 }

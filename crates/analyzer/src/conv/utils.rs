@@ -296,12 +296,12 @@ pub fn eval_assign_statement(
 ) -> IrResult<Vec<ir::Statement>> {
     let (comptime, expr) = expr;
 
-    check_clock_domain(context, &dst.comptime, comptime, &token.beg);
+    check_clock_domain(context, &dst.comptime, comptime, &token);
 
     if context.is_affiliated(Affiliation::AlwaysFf)
         && let Some(clock) = context.current_clock.clone()
     {
-        check_clock_domain(context, &dst.comptime, &clock, &token.beg);
+        check_clock_domain(context, &dst.comptime, &clock, &token);
     }
 
     let width = dst.total_width(context);

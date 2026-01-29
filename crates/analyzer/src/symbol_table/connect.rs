@@ -152,9 +152,9 @@ pub fn check_connect(list: Vec<Connect>) -> Vec<AnalyzerError> {
             rhs: rhs_operand,
         };
 
-        match is_valid_operation(&lhs_token.end, &rhs_token.end, &operation, is_statement) {
+        match is_valid_operation(&lhs_token.end(), &rhs_token.end(), &operation, is_statement) {
             Ok(_) => {
-                connect_operation_table::insert(&lhs_token.beg, operation);
+                connect_operation_table::insert(&lhs_token.beg(), operation);
             }
             Err(x) => ret.push(x),
         }

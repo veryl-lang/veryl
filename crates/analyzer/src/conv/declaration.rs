@@ -540,7 +540,7 @@ impl Conv<&AlwaysFfDeclaration> for ir::Declaration {
                 context,
                 &clock.comptime,
                 &reset.comptime,
-                &value.always_ff.always_ff_token.token,
+                &value.always_ff.always_ff_token.token.into(),
             );
         }
 
@@ -1015,7 +1015,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         }
 
         let in_module = context.is_affiliated(Affiliation::Module);
-        let token = value.inst.inst_token.token;
+        let token = value.inst.inst_token.token.into();
         check_inst(context, in_module, &token, &value.component_instantiation);
 
         let clock_domain = if let Ok(symbol) =
@@ -1092,7 +1092,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                                     if let Some(x) =
                                         clock_domain_table.get(&dst_comptime.clock_domain)
                                     {
-                                        check_clock_domain(context, x, &expr_comptime, &token.beg);
+                                        check_clock_domain(context, x, &expr_comptime, &token);
                                     } else {
                                         clock_domain_table
                                             .insert(dst_comptime.clock_domain, expr_comptime);
@@ -1206,7 +1206,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             if let Some((_, comptime)) = context.find_path(&dst_path.path) {
                                 // All port of SV instance should have the same clock domain
                                 if let Some(prev) = &prev_port {
-                                    check_clock_domain(context, &comptime, prev, &token.beg);
+                                    check_clock_domain(context, &comptime, prev, &token);
                                 }
 
                                 // Check implicit reset to SV instance
@@ -1299,7 +1299,7 @@ impl Conv<&BindDeclaration> for () {
             }
 
             let in_module = symbol.found.is_module(true);
-            let token = value.bind.bind_token.token;
+            let token = value.bind.bind_token.token.into();
             check_inst(context, in_module, &token, &value.component_instantiation);
         }
 
