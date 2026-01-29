@@ -1,4 +1,5 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, UnevaluableValueKind};
+use crate::attribute::EnumBaseTypeItem;
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_args;
@@ -723,8 +724,13 @@ pub fn eval_type(
 
                         ret?
                     } else {
+                        let kind = if matches!(x.base_type, EnumBaseTypeItem::Logic) {
+                            ir::TypeKind::Logic
+                        } else {
+                            ir::TypeKind::Bit
+                        };
                         ir::Type {
-                            kind: ir::TypeKind::Logic,
+                            kind,
                             width: Shape::new(vec![Some(x.width)]),
                             ..Default::default()
                         }

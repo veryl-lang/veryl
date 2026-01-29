@@ -4152,6 +4152,36 @@ fn mismatch_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        enum EnumA {
+            A,
+        }
+        const A: EnumA = EnumA::A;
+        const B: bit   = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        #[enum_base_type(bit)]
+        enum EnumA {
+            A,
+        }
+        const A: EnumA = EnumA::A;
+        const B: bit   = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -4731,6 +4761,21 @@ fn invalid_enum_variant() {
         enum EnumA{
             A,
             B = 3,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidEnumVariant { .. }
+    ));
+
+    let code = r#"
+    module ModuleD {
+        #[enum_base_type(bit)]
+        enum EnumA {
+            A = 1'bx,
         }
     }
     "#;

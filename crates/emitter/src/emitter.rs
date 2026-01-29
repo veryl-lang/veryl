@@ -4285,14 +4285,19 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
-        let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
-            self.enum_width = r#enum.width;
-            self.emit_enum_implicit_valiant = matches!(
-                r#enum.encoding,
-                EnumEncodingItem::OneHot | EnumEncodingItem::Gray
-            );
-        }
+        let r#enum = symbol_table::resolve(arg.identifier.as_ref())
+            .map(|symbol| {
+                let SymbolKind::Enum(x) = symbol.found.kind else {
+                    unreachable!();
+                };
+                x
+            })
+            .unwrap();
+        self.enum_width = r#enum.width;
+        self.emit_enum_implicit_valiant = matches!(
+            r#enum.encoding,
+            EnumEncodingItem::OneHot | EnumEncodingItem::Gray
+        );
 
         self.token(
             &arg.r#enum
@@ -4304,7 +4309,7 @@ impl VerylWalker for Emitter {
             self.enum_type = Some(x.scalar_type.as_ref().clone());
             self.emit_scalar_type(&x.scalar_type, false);
         } else {
-            self.str(&format!("logic [{}-1:0]", self.enum_width));
+            self.str(&format!("{} [{}-1:0]", r#enum.base_type, self.enum_width));
         }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);

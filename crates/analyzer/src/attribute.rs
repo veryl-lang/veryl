@@ -13,6 +13,7 @@ pub enum Attribute {
     Else(Vec<StrId>, Vec<StrId>),
     Sv(StrId),
     Allow(AllowItem),
+    EnumBaseType(EnumBaseTypeItem),
     EnumEncoding(EnumEncodingItem),
     EnumMemberPrefix(StrId),
     Test(Token, Option<StrId>),
@@ -67,6 +68,7 @@ impl fmt::Display for Attribute {
             Attribute::Else(_, _) => String::from("else"),
             Attribute::Sv(x) => format!("sv(\"{x}\")"),
             Attribute::Allow(x) => format!("allow({x})"),
+            Attribute::EnumBaseType(x) => format!("enum_base_type({x})"),
             Attribute::EnumEncoding(x) => format!("enum_encoding({x})"),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({x})"),
             Attribute::Test(x, _) => format!("test({})", x.text),
@@ -170,6 +172,9 @@ struct Pattern {
     pub missing_reset_statement: StrId,
     pub unused_variable: StrId,
     pub unassign_variable: StrId,
+    pub enum_base_type: StrId,
+    pub logic: StrId,
+    pub bit: StrId,
     pub enum_encoding: StrId,
     pub sequential: StrId,
     pub onehot: StrId,
@@ -204,6 +209,9 @@ impl Pattern {
             missing_reset_statement: resource_table::insert_str("missing_reset_statement"),
             unused_variable: resource_table::insert_str("unused_variable"),
             unassign_variable: resource_table::insert_str("unassign_variable"),
+            enum_base_type: resource_table::insert_str("enum_base_type"),
+            logic: resource_table::insert_str("logic"),
+            bit: resource_table::insert_str("bit"),
             enum_encoding: resource_table::insert_str("enum_encoding"),
             sequential: resource_table::insert_str("sequential"),
             onehot: resource_table::insert_str("onehot"),
@@ -284,6 +292,24 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         x if x == pat.unassign_variable => {
                             Ok(Attribute::Allow(AllowItem::UnassignVariable))
                         }
+                        _ => Err(err),
+                    }
+                } else {
+                    Err(err)
+                }
+            }
+            x if x == pat.enum_base_type => {
+                let arg = get_arg_ident(&value.attribute_opt, 0);
+
+                let err = AttributeError::MismatchArgs(format!(
+                    "base type: ({})",
+                    EnumBaseTypeItem::available()
+                ));
+
+                if let Some(arg) = arg {
+                    match arg.text {
+                        x if x == pat.logic => Ok(Attribute::EnumBaseType(EnumBaseTypeItem::Logic)),
+                        x if x == pat.bit => Ok(Attribute::EnumBaseType(EnumBaseTypeItem::Bit)),
                         _ => Err(err),
                     }
                 } else {
@@ -457,6 +483,36 @@ impl fmt::Display for AllowItem {
             AllowItem::MissingResetStatement => "missing_reset_statement",
             AllowItem::UnusedVariable => "unused_variable",
             AllowItem::UnassignVariable => "unassign_variable",
+        };
+        text.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, EnumIter)]
+pub enum EnumBaseTypeItem {
+    #[default]
+    Logic,
+    Bit,
+}
+
+impl EnumBaseTypeItem {
+    pub fn available() -> String {
+        let mut ret = String::new();
+        for (i, x) in Self::iter().enumerate() {
+            if i != 0 {
+                ret.push('|');
+            }
+            ret.push_str(&format!("{x}"));
+        }
+        ret
+    }
+}
+
+impl fmt::Display for EnumBaseTypeItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            EnumBaseTypeItem::Logic => "logic",
+            EnumBaseTypeItem::Bit => "bit",
         };
         text.fmt(f)
     }

@@ -2,7 +2,7 @@ use crate::analyzer_error::{
     AnalyzerError, InvalidModifierKind, InvalidTestKind, MultipleDefaultKind, UnevaluableValueKind,
 };
 use crate::attribute::Attribute as Attr;
-use crate::attribute::{AllowItem, EnumEncodingItem};
+use crate::attribute::{AllowItem, EnumBaseTypeItem, EnumEncodingItem};
 use crate::attribute_table;
 use crate::conv::utils::TypePosition;
 use crate::conv::{self, Conv};
@@ -76,6 +76,7 @@ pub struct CreateSymbolTable {
     anonymous_block: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
+    enum_base_type: EnumBaseTypeItem,
     enum_encoding: EnumEncodingItem,
     enum_member_prefix: Option<String>,
     enum_member_width: usize,
@@ -366,6 +367,13 @@ impl CreateSymbolTable {
                 let comptime = expr.eval_comptime(&mut context, None);
                 if let Ok(value) = comptime.get_value() {
                     if value.is_x() | value.is_z() {
+                        if matches!(self.enum_base_type, EnumBaseTypeItem::Bit) {
+                            self.errors.push(AnalyzerError::invalid_enum_variant(
+                                &arg.identifier.identifier_token.to_string(),
+                                &self.enum_encoding.to_string(),
+                                &arg.identifier.as_ref().into(),
+                            ));
+                        }
                         None
                     } else {
                         let value = value.to_usize();
@@ -1237,18 +1245,18 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
 
                 // reset enum encoding/width/value
+                self.enum_base_type = EnumBaseTypeItem::Logic;
                 self.enum_encoding = EnumEncodingItem::Sequential;
                 self.enum_member_width = 1;
                 self.enum_member_value = None;
 
                 let attrs = attribute_table::get(&arg.r#enum.enum_token.token);
                 for attr in attrs {
-                    if let Attr::EnumMemberPrefix(x) = attr {
-                        // overridden prefix by attribute
-                        self.enum_member_prefix = Some(x.to_string());
-                    } else if let Attr::EnumEncoding(x) = attr {
-                        // overridden encoding by attribute
-                        self.enum_encoding = x;
+                    match attr {
+                        Attr::EnumMemberPrefix(x) => self.enum_member_prefix = Some(x.to_string()),
+                        Attr::EnumBaseType(x) => self.enum_base_type = x,
+                        Attr::EnumEncoding(x) => self.enum_encoding = x,
+                        _ => {}
                     }
                 }
 
@@ -1295,6 +1303,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     r#type,
                     width,
                     members,
+                    base_type: self.enum_base_type,
                     encoding: self.enum_encoding,
                 };
                 let kind = SymbolKind::Enum(property);

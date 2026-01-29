@@ -1,5 +1,5 @@
 use crate::HashMap;
-use crate::attribute::EnumEncodingItem;
+use crate::attribute::{EnumBaseTypeItem, EnumEncodingItem};
 use crate::conv::utils::{TypePosition, eval_size, eval_type};
 use crate::conv::{Context, Conv};
 use crate::definition_table::DefinitionId;
@@ -2212,6 +2212,7 @@ pub struct EnumProperty {
     pub r#type: Option<Type>,
     pub width: usize,
     pub members: Vec<SymbolId>,
+    pub base_type: EnumBaseTypeItem,
     pub encoding: EnumEncodingItem,
 }
 
