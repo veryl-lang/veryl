@@ -2816,3 +2816,44 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn nested_concatenation() {
+    let code = r#"module ModuleA {
+    let _a: u32 = {1'b1};
+    let _b: u32 = {{1'b1}};
+    let _c: u32 = {{{1'b1}}};
+    let _d: u32 = {1'b1 repeat 0, 1'b1};
+    let _e: u32 = {{{1'b1}} repeat 0, 1'b1};
+    let _f: u32 = {{{1'b1} repeat 0}, {1'b1}};
+    let _g: u32 = {{{{{1'b1}} repeat 0}}, {{1'b1}}};
+    let _h: u32 = {1'b1, {1'b1 repeat 0}};
+    let _i: u32 = {1'b1, {{1'b1} repeat 0}};
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    int unsigned _a; always_comb _a = {1'b1};
+    int unsigned _b; always_comb _b = {1'b1};
+    int unsigned _c; always_comb _c = {1'b1};
+    int unsigned _d; always_comb _d = {{0{1'b1}}, 1'b1};
+    int unsigned _e; always_comb _e = {{0{{1'b1}}}, 1'b1};
+    int unsigned _f; always_comb _f = {{0{{1'b1}}}, {1'b1}};
+    int unsigned _g; always_comb _g = {{0{{1'b1}}}, {1'b1}};
+    int unsigned _h; always_comb _h = {1'b1, {0{1'b1}}};
+    int unsigned _i; always_comb _i = {1'b1, {0{{1'b1}}}};
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

@@ -2871,9 +2871,30 @@ impl VerylWalker for Emitter {
                 if x.l_brace.line() != x.r_brace.line() {
                     self.multi_line_start();
                 }
-                self.l_brace(&x.l_brace);
+                let remove_brace = {
+                    let single_concat = x.concatenation_list.concatenation_list_list.is_empty();
+                    let factor = x
+                        .concatenation_list
+                        .concatenation_item
+                        .expression
+                        .unwrap_factor();
+                    let is_concat =
+                        matches!(factor, Some(Factor::LBraceConcatenationListRBrace(_)));
+                    let is_repeat = x
+                        .concatenation_list
+                        .concatenation_item
+                        .concatenation_item_opt
+                        .is_some();
+
+                    single_concat && (is_concat || is_repeat)
+                };
+                if !remove_brace {
+                    self.l_brace(&x.l_brace);
+                }
                 self.concatenation_list(&x.concatenation_list);
-                self.r_brace(&x.r_brace);
+                if !remove_brace {
+                    self.r_brace(&x.r_brace);
+                }
                 if x.l_brace.line() != x.r_brace.line() {
                     self.multi_line_finish();
                 }
