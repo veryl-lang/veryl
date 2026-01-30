@@ -1,4 +1,3 @@
-use crate::analyzer_error::AnalyzerError;
 use crate::conv::utils::{
     TypePosition, argument_list, case_condition, eval_assign_statement, eval_expr, eval_for_range,
     eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
@@ -9,12 +8,11 @@ use crate::ir::{
     self, Comptime, IrResult, Shape, TypeKind, VarIndex, VarKind, VarPath, VarPathSelect,
     VarSelect, Variable,
 };
-use crate::ir_error;
 use crate::namespace::DefineContext;
 use crate::symbol::{Affiliation, SymbolKind};
 use crate::symbol_table;
 use crate::value::Value;
-use num_bigint::BigUint;
+use crate::{AnalyzerError, BigUint, ir_error};
 use veryl_parser::resource_table;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;

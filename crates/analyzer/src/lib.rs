@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod analyzer_error;
 pub mod attribute;
 pub mod attribute_table;
+pub mod bigint;
 pub mod connect_operation_table;
 pub mod conv;
 pub mod definition_table;
@@ -32,6 +33,9 @@ mod tests;
 
 type HashMap<K, V> = fxhash::FxHashMap<K, V>;
 type HashSet<V> = fxhash::FxHashSet<V>;
+type BigInt = bigint::BigInt;
+type BigUint = bigint::BigUint;
+type Sign = bigint::Sign;
 
 pub use smallvec::smallvec as svec;
 pub type SVec<T> = smallvec::SmallVec<[T; 4]>;

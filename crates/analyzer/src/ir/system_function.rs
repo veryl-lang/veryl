@@ -6,8 +6,7 @@ use crate::ir::{
 };
 use crate::symbol::ClockDomain;
 use crate::value::Value;
-use crate::{AnalyzerError, ir_error};
-use num_bigint::BigUint;
+use crate::{AnalyzerError, BigUint, ir_error};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;

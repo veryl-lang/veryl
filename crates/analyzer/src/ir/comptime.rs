@@ -1,16 +1,14 @@
-use crate::analyzer_error::AnalyzerError;
 use crate::conv::Context;
 use crate::conv::utils::get_component;
 use crate::ir::{
     Component, Expression, IrResult, Op, Shape, ShapeRef, Signature, VarIndex, VarPath, VarSelect,
     VarSelectOp,
 };
-use crate::ir_error;
 use crate::literal::TypeLiteral;
 use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
-use num_bigint::BigUint;
+use crate::{AnalyzerError, BigUint, ir_error};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;

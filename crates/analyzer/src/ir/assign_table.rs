@@ -2,8 +2,7 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::{Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
-use crate::{AnalyzerError, HashMap};
-use num_bigint::BigUint;
+use crate::{AnalyzerError, BigUint, HashMap};
 use std::borrow::Cow;
 use veryl_parser::token_range::TokenRange;
 

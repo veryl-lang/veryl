@@ -11,8 +11,7 @@ use crate::symbol::SymbolKind;
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{ir_error, msb_table};
-use num_bigint::BigUint;
+use crate::{BigUint, ir_error, msb_table};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
