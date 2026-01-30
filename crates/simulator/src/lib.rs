@@ -1,18 +1,12 @@
-pub struct Simulator;
+pub mod conv;
+pub mod cranelift;
+pub mod ir;
+pub mod simulator;
 
-impl Simulator {
-    pub fn new(_top: &str) -> Self {
-        Self
-    }
-
-    pub fn set(&mut self, _port: &str, _value: usize) {}
-
-    pub fn get(&mut self, _port: &str) -> usize {
-        0
-    }
-
-    pub fn step(&mut self) {}
-}
+pub use conv::Config;
+pub use simulator::Simulator;
 
 #[cfg(test)]
 mod tests;
+
+type HashMap<K, V> = fxhash::FxHashMap<K, V>;
