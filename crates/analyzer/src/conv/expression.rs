@@ -798,7 +798,7 @@ impl Conv<&Based> for Comptime {
         let token: TokenRange = value.into();
         let value: Value = value.into();
 
-        let kind = if value.is_x() | value.is_z() {
+        let kind = if value.is_xz() {
             TypeKind::Logic
         } else {
             TypeKind::Bit
@@ -851,7 +851,7 @@ impl Conv<&AllBit> for Comptime {
         let token: TokenRange = value.into();
         let value: Value = value.into();
 
-        let kind = if value.is_x() | value.is_z() {
+        let kind = if value.is_xz() {
             TypeKind::Logic
         } else {
             TypeKind::Bit

@@ -224,7 +224,13 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             )?;
 
                             let width = dst.total_width(context);
-                            let expr = ir::Expression::Binary(Box::new(src), op, Box::new(expr));
+                            let expr = if op == ir::Op::Sub {
+                                let expr = ir::Expression::Unary(ir::Op::Sub, Box::new(expr));
+                                ir::Expression::Binary(Box::new(src), ir::Op::Add, Box::new(expr))
+                            } else {
+                                ir::Expression::Binary(Box::new(src), op, Box::new(expr))
+                            };
+
                             let statement = ir::AssignStatement {
                                 dst: vec![dst],
                                 width,
@@ -629,7 +635,7 @@ impl Conv<&ForStatement> for ir::StatementBlock {
                     path,
                     kind,
                     comptime.r#type.clone(),
-                    vec![comptime.get_value().unwrap()],
+                    vec![comptime.get_value().unwrap().clone()],
                     c.get_affiliation(),
                     &token,
                 );

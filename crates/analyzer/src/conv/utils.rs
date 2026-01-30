@@ -376,7 +376,7 @@ fn eval_array_literal_expressions(
         part_value.trunc(part_width);
 
         value = if let Some(x) = value {
-            Some(x.concat(part_value))
+            Some(x.concat(&part_value))
         } else {
             Some(part_value)
         };

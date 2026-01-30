@@ -83,11 +83,7 @@ impl VerylGrammarTrait for CreateLiteralTable {
             let id = token.id;
             let value: Value = arg.into();
 
-            let actual_width = value
-                .payload
-                .bits()
-                .max(value.mask_x.bits())
-                .max(value.mask_z.bits()) as usize;
+            let actual_width = value.payload.bits().max(value.mask_xz.bits()) as usize;
             if actual_width > value.width {
                 self.errors
                     .push(AnalyzerError::too_large_number(value.width, &token.into()));
