@@ -17,11 +17,11 @@ veryl-path      = {version = "0.18.0", path = "../path"}
 veryl           = {version = "0.18.0", path = "../veryl"}
 
 [dev-dependencies]
-criterion = {package = "codspeed-criterion-compat", version = "4.0"}
+criterion = {workspace = true}
 insta     = "1.46"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-pprof = {version = "0.15.0", features = ["flamegraph"]}
+pprof = {workspace = true}
 
 [build-dependencies]
 walkdir = {workspace = true}

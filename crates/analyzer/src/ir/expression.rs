@@ -1313,7 +1313,7 @@ impl fmt::Display for ArrayLiteralItem {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// **
     Pow,
