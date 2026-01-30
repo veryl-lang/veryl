@@ -1,7 +1,8 @@
-use crate::conv::Context;
+use crate::conv::{Context, EvalContext};
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    AssignDestination, Component, Comptime, Expression, Statement, VarId, VarIndex, VarSelect,
+    AssignDestination, Component, Comptime, Event, Expression, Statement, VarId, VarIndex,
+    VarSelect,
 };
 use indent::indent_all_by;
 use std::fmt;
@@ -54,6 +55,17 @@ impl Declaration {
         }
         assign_table.refernced.clear();
     }
+
+    pub fn eval_step<T: EvalContext>(&mut self, context: &mut T, event: &Event) {
+        match self {
+            Declaration::Comb(x) => x.eval_step(context, event),
+            Declaration::Ff(x) => x.eval_step(context, event),
+            Declaration::Inst(x) => x.eval_step(context, event),
+            Declaration::Initial(x) => x.eval_step(context, event),
+            Declaration::Final(x) => x.eval_step(context, event),
+            Declaration::Null => (),
+        }
+    }
 }
 
 impl fmt::Display for Declaration {
@@ -78,6 +90,12 @@ impl CombDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for x in &self.statements {
             x.eval_assign(context, assign_table, AssignContext::Comb, &[]);
+        }
+    }
+
+    pub fn eval_step<T: EvalContext>(&self, context: &mut T, _event: &Event) {
+        for x in &self.statements {
+            x.eval_step(context, false);
         }
     }
 }
@@ -135,6 +153,27 @@ impl FfDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for x in &self.statements {
             x.eval_assign(context, assign_table, AssignContext::Ff, &[]);
+        }
+    }
+
+    pub fn eval_step<T: EvalContext>(&mut self, context: &mut T, event: &Event) {
+        let (update, reset) = match event {
+            Event::Clock(x) => (x == &self.clock.id, false),
+            Event::Reset(x) => {
+                if let Some(reset) = &self.reset {
+                    let ret = x == &reset.id;
+                    (ret, ret)
+                } else {
+                    (false, false)
+                }
+            }
+            _ => (false, false),
+        };
+
+        if update {
+            for x in &self.statements {
+                x.eval_step(context, reset);
+            }
         }
     }
 }
@@ -241,6 +280,14 @@ impl InstDeclaration {
             }
         }
     }
+
+    pub fn eval_step<T: EvalContext>(&mut self, _context: &mut T, event: &Event) {
+        // TODO port connection
+        // TODO event replace by clock/reset connection
+        if let Component::Module(x) = &mut self.component {
+            x.eval_step(event);
+        }
+    }
 }
 
 impl fmt::Display for InstDeclaration {
@@ -278,6 +325,14 @@ impl InitialDeclaration {
             x.eval_assign(context, assign_table, AssignContext::Initial, &[]);
         }
     }
+
+    pub fn eval_step<T: EvalContext>(&mut self, context: &mut T, event: &Event) {
+        if event == &Event::Initial {
+            for x in &self.statements {
+                x.eval_step(context, false);
+            }
+        }
+    }
 }
 
 impl fmt::Display for InitialDeclaration {
@@ -303,6 +358,14 @@ impl FinalDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for x in &self.statements {
             x.eval_assign(context, assign_table, AssignContext::Final, &[]);
+        }
+    }
+
+    pub fn eval_step<T: EvalContext>(&mut self, context: &mut T, event: &Event) {
+        if event == &Event::Final {
+            for x in &self.statements {
+                x.eval_step(context, false);
+            }
         }
     }
 }

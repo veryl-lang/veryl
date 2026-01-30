@@ -1,12 +1,15 @@
 use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
-use crate::conv::Context;
 use crate::conv::utils::eval_width_select;
-use crate::ir::{AssignDestination, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind};
+use crate::conv::{Context, EvalContext};
+use crate::ir::{
+    AssignDestination, AssignDestinationDefault, Expression, Factor, Op, Shape, ShapeRef, Type,
+    TypeKind,
+};
 use crate::symbol::Affiliation;
 use crate::value::{Value, gen_mask};
 use std::fmt;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Debug, Default)]
@@ -67,14 +70,15 @@ impl VarPathSelect {
                 // TODO
                 None
             } else {
-                Some(AssignDestination {
+                Some(AssignDestination::Default(AssignDestinationDefault {
                     id,
                     path,
                     index: array_select.to_index(),
                     select: width_select,
                     comptime,
                     token,
-                })
+                    ..Default::default()
+                }))
             }
         } else {
             // If base path is SystemVerilog, valid AssignDestination should be generated.
@@ -85,14 +89,14 @@ impl VarPathSelect {
                 let (array_select, _) = select.split(comptime.r#type.array.dims());
                 comptime.r#type.array.drain(0..array_select.dimension());
 
-                Some(AssignDestination {
+                Some(AssignDestination::Default(AssignDestinationDefault {
                     id,
                     path,
                     index: array_select.to_index(),
-                    select: VarSelect::default(),
                     comptime,
                     token,
-                })
+                    ..Default::default()
+                }))
             } else {
                 None
             }
@@ -102,11 +106,16 @@ impl VarPathSelect {
     pub fn to_expression(self, context: &Context) -> Option<Expression> {
         let (path, select, token) = self.into();
 
-        if let Some((id, mut comptime)) = context.find_path(&path) {
+        if let Some((id, comptime)) = context.find_path(&path) {
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
-            comptime.r#type.array.drain(0..array_select.dimension());
 
-            let src = Factor::Variable(id, array_select.to_index(), width_select, comptime, token);
+            let src = Factor::Variable {
+                id,
+                index: array_select.to_index(),
+                select: width_select,
+                comptime,
+                token,
+            };
             Some(Expression::Term(Box::new(src)))
         } else {
             None
@@ -127,25 +136,33 @@ impl VarPath {
     pub fn new(x: StrId) -> Self {
         Self(vec![x])
     }
+
     pub fn from_slice(x: &[StrId]) -> Self {
         Self(x.to_vec())
     }
+
+    #[inline]
     pub fn push(&mut self, x: StrId) {
         self.0.push(x)
     }
+
+    #[inline]
     pub fn pop(&mut self) {
         self.0.pop();
     }
+
     pub fn append(&mut self, x: &[StrId]) {
         for x in x {
             self.0.push(*x)
         }
     }
+
     pub fn add_prelude(&mut self, x: &[StrId]) {
         let mut ret = x.to_vec();
         ret.append(&mut self.0);
         self.0 = ret;
     }
+
     pub fn remove_prelude(&mut self, x: &[StrId]) {
         if self.starts_with(x) {
             for _ in 0..x.len() {
@@ -153,9 +170,13 @@ impl VarPath {
             }
         }
     }
+
+    #[inline]
     pub fn starts_with(&self, x: &[StrId]) -> bool {
         self.0.starts_with(x)
     }
+
+    #[inline]
     pub fn first(&self) -> StrId {
         self.0[0]
     }
@@ -171,6 +192,14 @@ impl fmt::Display for VarPath {
         }
 
         ret[1..].fmt(f)
+    }
+}
+
+impl std::str::FromStr for VarPath {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let id = resource_table::insert_str(s);
+        Ok(Self::new(id))
     }
 }
 
@@ -200,6 +229,7 @@ impl VarIndex {
         self.0.push(x)
     }
 
+    #[inline]
     pub fn dimension(&self) -> usize {
         self.0.len()
     }
@@ -218,7 +248,7 @@ impl VarIndex {
         }
     }
 
-    pub fn is_const(&self, context: &mut Context) -> bool {
+    pub fn is_const<T: EvalContext>(&self, context: &mut T) -> bool {
         let mut ret = true;
 
         for x in &self.0 {
@@ -230,7 +260,7 @@ impl VarIndex {
         ret
     }
 
-    pub fn eval_value(&self, context: &mut Context) -> Option<Vec<usize>> {
+    pub fn eval_value<T: EvalContext>(&self, context: &mut T) -> Option<Vec<usize>> {
         let mut ret = vec![];
         for x in &self.0 {
             if let Some(x) = x.eval_value(context, None) {
@@ -368,19 +398,22 @@ impl VarSelect {
         }
     }
 
+    #[inline]
     pub fn dimension(&self) -> usize {
         self.0.len()
     }
 
+    #[inline]
     pub fn is_range(&self) -> bool {
         self.1.is_some()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    pub fn is_const(&self, context: &mut Context) -> bool {
+    pub fn is_const<T: EvalContext>(&self, context: &mut T) -> bool {
         let mut ret = true;
 
         for x in &self.0 {
@@ -414,9 +447,9 @@ impl VarSelect {
         }
     }
 
-    pub fn eval_comptime(
+    pub fn eval_comptime<T: EvalContext>(
         &self,
-        context: &mut Context,
+        context: &mut T,
         r#type: &Type,
         is_array: bool,
     ) -> Option<Shape> {
@@ -545,9 +578,9 @@ impl VarSelect {
         }
     }
 
-    pub fn eval_value(
+    pub fn eval_value<T: EvalContext>(
         &self,
-        context: &mut Context,
+        context: &mut T,
         r#type: &Type,
         is_array: bool,
     ) -> Option<(usize, usize)> {
@@ -734,21 +767,31 @@ impl Variable {
         }
     }
 
-    pub fn get_value(&self, index: &[usize]) -> Option<&Value> {
-        let index = self.r#type.array.calc_index(index)?;
-        self.value.get(index)
+    pub fn get_value_from_raw_index(&self, index: Option<usize>) -> Option<&Value> {
+        if let Some(x) = index {
+            self.value.get(x)
+        } else {
+            None
+        }
     }
 
-    pub fn set_value(
+    pub fn get_value(&self, index: &[usize]) -> Option<&Value> {
+        let index = self.r#type.array.calc_index(index);
+        self.get_value_from_raw_index(index)
+    }
+
+    pub fn get_raw_index(&self, index: &[usize]) -> Option<usize> {
+        self.r#type.array.calc_index(index)
+    }
+
+    pub fn set_value_from_raw_index(
         &mut self,
-        index: &[usize],
+        index: usize,
         mut value: Value,
         range: Option<(usize, usize)>,
+        total_width: Option<usize>,
     ) -> bool {
-        let Some(index) = self.r#type.array.calc_index(index) else {
-            return false;
-        };
-        if let Some(total_width) = self.total_width() {
+        if let Some(total_width) = total_width {
             value.trunc(total_width);
             if let Some(x) = self.value.get_mut(index) {
                 if let Some((beg, end)) = range {
@@ -763,6 +806,18 @@ impl Variable {
         } else {
             false
         }
+    }
+
+    pub fn set_value(
+        &mut self,
+        index: &[usize],
+        value: Value,
+        range: Option<(usize, usize)>,
+    ) -> bool {
+        let Some(index) = self.r#type.array.calc_index(index) else {
+            return false;
+        };
+        self.set_value_from_raw_index(index, value, range, self.total_width())
     }
 
     pub fn set_assigned(&mut self, index: usize, value: BigUint) -> bool {
@@ -796,6 +851,7 @@ impl Variable {
         )
     }
 
+    #[inline]
     pub fn total_width(&self) -> Option<usize> {
         self.r#type.total_width()
     }

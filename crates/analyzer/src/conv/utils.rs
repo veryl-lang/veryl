@@ -3,7 +3,7 @@ use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_args;
 use crate::conv::instance::InstanceHistoryError;
-use crate::conv::{Context, Conv};
+use crate::conv::{Context, Conv, EvalContext};
 use crate::definition_table::{self, Definition};
 use crate::ir::{
     self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, Shape, ShapeRef,
@@ -236,7 +236,7 @@ pub fn eval_array_literal(
     Ok(Some(ret))
 }
 
-pub fn eval_repeat(context: &mut Context, expr: &mut ir::Expression) -> Option<Value> {
+pub fn eval_repeat<T: EvalContext>(context: &mut T, expr: &mut ir::Expression) -> Option<Value> {
     let token = expr.token_range();
     let repeat = expr.eval_comptime(context, None);
 
@@ -296,12 +296,12 @@ pub fn eval_assign_statement(
 ) -> IrResult<Vec<ir::Statement>> {
     let (comptime, expr) = expr;
 
-    check_clock_domain(context, &dst.comptime, comptime, &token.beg);
+    check_clock_domain(context, dst.comptime(), comptime, &token.beg);
 
     if context.is_affiliated(Affiliation::AlwaysFf)
         && let Some(clock) = context.current_clock.clone()
     {
-        check_clock_domain(context, &dst.comptime, &clock, &token.beg);
+        check_clock_domain(context, dst.comptime(), &clock, &token.beg);
     }
 
     let width = dst.total_width(context);
@@ -309,8 +309,8 @@ pub fn eval_assign_statement(
 
     let array_exprs = eval_array_literal(
         context,
-        Some(&dst.comptime.r#type.array),
-        Some(&dst.comptime.r#type.width),
+        Some(&dst.comptime().r#type.array),
+        Some(&dst.comptime().r#type.width),
         expr,
     )?;
     if let Some(exprs) = array_exprs {
@@ -321,8 +321,10 @@ pub fn eval_assign_statement(
             let select = expr.to_var_select();
 
             let mut dst = dst.clone();
-            dst.index.append(&index);
-            dst.select = select;
+            dst.index_mut().append(&index);
+            *dst.select_mut() = select;
+
+            dst.eval_comptime(context);
 
             let statement = ir::Statement::Assign(ir::AssignStatement {
                 dst: vec![dst],
@@ -334,6 +336,9 @@ pub fn eval_assign_statement(
         }
     } else {
         check_reset_non_elaborative(context, expr);
+
+        let mut dst = dst.clone();
+        dst.eval_comptime(context);
 
         let statement = ir::Statement::Assign(ir::AssignStatement {
             dst: vec![dst.clone()],
@@ -372,7 +377,8 @@ fn eval_array_literal_expressions(
         let mut part_value = expr
             .expr
             .eval_value(context, Some(part_width))
-            .ok_or_else(|| ir_error!(token))?;
+            .ok_or_else(|| ir_error!(token))?
+            .into_owned();
         part_value.trunc(part_width);
 
         value = if let Some(x) = value {
@@ -399,8 +405,8 @@ pub fn eval_const_assign(
 ) -> IrResult<()> {
     let (comptime, expr) = expr;
     let comptime = comptime.clone();
-    let path = &dst.path;
-    let r#type = &dst.comptime.r#type;
+    let path = dst.path();
+    let r#type = &dst.comptime().r#type;
     let token = expr.token_range();
 
     match expr {
@@ -417,7 +423,7 @@ pub fn eval_const_assign(
                     r#type.clone(),
                     values,
                     context.get_affiliation(),
-                    &dst.token,
+                    dst.token(),
                 );
                 context.insert_variable(id, variable);
             } else {
@@ -454,7 +460,7 @@ pub fn eval_const_assign(
                         r#type.clone(),
                         vec![value],
                         context.get_affiliation(),
-                        &dst.token,
+                        dst.token(),
                     );
                     context.insert_variable(id, variable);
                 }
@@ -1655,13 +1661,13 @@ pub fn get_port_connects(
             if member.1.is_input() | member.1.is_output() {
                 let member_path = member.0.clone();
                 let expr = if let Some((var_id, comptime)) = context.find_path(&member_path) {
-                    ir::Expression::Term(Box::new(ir::Factor::Variable(
-                        var_id,
-                        VarIndex::default(),
-                        VarSelect::default(),
+                    ir::Expression::Term(Box::new(ir::Factor::Variable {
+                        id: var_id,
+                        index: VarIndex::default(),
+                        select: VarSelect::default(),
                         comptime,
                         token,
-                    )))
+                    }))
                 } else {
                     ir::Expression::Term(Box::new(ir::Factor::Unknown(token)))
                 };
@@ -1705,13 +1711,13 @@ pub fn get_port_connects(
     } else if let Some((var_id, comptime)) = context.find_path(port_path) {
         check_compatibility(context, port_type, &comptime, &token);
 
-        let expr = ir::Expression::Term(Box::new(ir::Factor::Variable(
-            var_id,
-            VarIndex::default(),
-            VarSelect::default(),
+        let expr = ir::Expression::Term(Box::new(ir::Factor::Variable {
+            id: var_id,
+            index: VarIndex::default(),
+            select: VarSelect::default(),
             comptime,
             token,
-        )));
+        }));
         let dst = vec![VarPathSelect(
             port_path.clone(),
             VarSelect::default(),

@@ -3,6 +3,7 @@ pub mod analyzer_error;
 pub mod attribute;
 pub mod attribute_table;
 pub mod bigint;
+pub mod cached;
 pub mod connect_operation_table;
 pub mod conv;
 pub mod definition_table;

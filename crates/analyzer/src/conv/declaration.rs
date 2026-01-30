@@ -17,8 +17,8 @@ use crate::conv::utils::{
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
-    self, Comptime, FuncArg, FuncPath, IrResult, Shape, Signature, TypeKind, ValueVariant, VarId,
-    VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
+    self, Comptime, FuncArg, FuncPath, IrResult, Shape, Signature, TypeKind, ValueVariant, VarKind,
+    VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind};
@@ -377,14 +377,12 @@ impl Conv<&WithParameterItem> for () {
             // Get overridden parameter if it exists
             let mut expr = context.get_override(&path).cloned().unwrap_or(expr);
 
-            let dst = ir::AssignDestination {
-                id: VarId::default(),
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 path: path.clone(),
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime: Comptime::from_type(r#type, ClockDomain::None, TokenRange::default()),
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             eval_const_assign(context, kind, &dst, &mut expr)?;
 
@@ -619,14 +617,13 @@ impl Conv<&LetDeclaration> for ir::Declaration {
 
             let (id, comptime) = context.find_path(&path).ok_or_else(|| ir_error!(token))?;
 
-            let dst = ir::AssignDestination {
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 id,
                 path,
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime,
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             let mut expr = eval_expr(context, Some(r#type.clone()), &value.expression, false)?;
 
@@ -672,14 +669,12 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
                 ));
             }
 
-            let dst = ir::AssignDestination {
-                id: VarId::default(),
+            let dst = ir::AssignDestination::Default(ir::AssignDestinationDefault {
                 path: path.clone(),
-                index: VarIndex::default(),
-                select: VarSelect::default(),
                 comptime: Comptime::from_type(r#type, ClockDomain::None, TokenRange::default()),
                 token: variable_token,
-            };
+                ..Default::default()
+            });
 
             eval_const_assign(context, kind, &dst, &mut (comptime, expr))?;
 
@@ -707,7 +702,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                 if let Some(dst) = dst.to_assign_destination(context, false) {
                     let mut expr = eval_expr(
                         context,
-                        Some(dst.comptime.r#type.clone()),
+                        Some(dst.comptime().r#type.clone()),
                         &value.expression,
                         false,
                     )?;
@@ -1202,7 +1197,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             var_path_to_assign_destination(context, expanded_paths, true);
 
                         for dst_path in &dst_paths {
-                            if let Some((_, comptime)) = context.find_path(&dst_path.path) {
+                            if let Some((_, comptime)) = context.find_path(dst_path.path()) {
                                 // All port of SV instance should have the same clock domain
                                 if let Some(prev) = &prev_port {
                                     check_clock_domain(context, &comptime, prev, &token.beg);

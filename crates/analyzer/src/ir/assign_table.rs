@@ -1,8 +1,8 @@
-use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::{Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
-use crate::{AnalyzerError, BigUint, HashMap};
+use crate::{AnalyzerError, HashMap};
+use crate::{BigUint, HashSet};
 use std::borrow::Cow;
 use veryl_parser::token_range::TokenRange;
 
@@ -145,6 +145,28 @@ impl ReferencedEntry {
         }
     }
 
+    pub fn new_ref_raw(raw_index: usize, array: &ShapeRef, mask: &BigUint) -> Self {
+        let mut mask_ref = vec![];
+        let mut mask_assign = vec![];
+
+        if let Some(array) = array.total() {
+            for i in 0..array {
+                if raw_index == i {
+                    mask_ref.push(mask.clone());
+                } else {
+                    mask_ref.push(0u32.into());
+                }
+                mask_assign.push(0u32.into());
+            }
+        }
+
+        Self {
+            mask_ref,
+            mask_assign,
+            array: array.to_owned(),
+        }
+    }
+
     pub fn new_assign(index: &[usize], array: &ShapeRef, mask: &BigUint) -> Self {
         let mut mask_ref = vec![];
         let mut mask_assign = vec![];
@@ -170,9 +192,13 @@ impl ReferencedEntry {
     }
 
     pub fn add_ref(&mut self, index: &[usize], mask: &BigUint) {
-        if let Some(index) = self.array.calc_index(index)
-            && let Some(x) = self.mask_ref.get_mut(index)
-        {
+        if let Some(raw_index) = self.array.calc_index(index) {
+            self.add_ref_raw(raw_index, mask);
+        }
+    }
+
+    pub fn add_ref_raw(&mut self, raw_index: usize, mask: &BigUint) {
+        if let Some(x) = self.mask_ref.get_mut(raw_index) {
             *x |= mask;
         }
     }
@@ -258,6 +284,19 @@ impl AssignTable {
             .entry(variable.id)
             .and_modify(|x| x.add_ref(&index, &mask))
             .or_insert(ReferencedEntry::new_ref(&index, array, &mask));
+    }
+
+    pub fn insert_reference_raw(&mut self, variable: &Variable, raw_index: usize, mask: BigUint) {
+        if variable.r#type.total_array().unwrap_or(0) > self.array_limit {
+            return;
+        }
+
+        let array = &variable.r#type.array;
+
+        self.refernced
+            .entry(variable.id)
+            .and_modify(|x| x.add_ref_raw(raw_index, &mask))
+            .or_insert(ReferencedEntry::new_ref_raw(raw_index, array, &mask));
     }
 
     pub fn merge_by_or(

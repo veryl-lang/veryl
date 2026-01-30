@@ -1,4 +1,4 @@
-use crate::conv::Context;
+use crate::conv::{Context, EvalContext};
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
     AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
@@ -7,6 +7,7 @@ use crate::ir::{
 use crate::symbol::ClockDomain;
 use crate::value::Value;
 use crate::{AnalyzerError, BigUint, ir_error};
+use std::borrow::Cow;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -183,8 +184,8 @@ impl SystemFunctionCall {
         }
     }
 
-    pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
-        match &self.kind {
+    pub fn eval_value<'a, T: EvalContext>(&'a self, context: &mut T) -> Option<Cow<'a, Value>> {
+        let ret = match &self.kind {
             SystemFunctionKind::Bits(x) => {
                 let mut expr = x.0.clone();
                 let comptime = expr.eval_comptime(context, None);
@@ -210,7 +211,7 @@ impl SystemFunctionCall {
                 let ret = if value.payload == 0u32.into() {
                     BigUint::from(0u32)
                 } else {
-                    value.payload - BigUint::from(1u32)
+                    value.payload.clone() - BigUint::from(1u32)
                 };
                 Some(Value::new(ret.bits().into(), 32, false))
             }
@@ -220,11 +221,12 @@ impl SystemFunctionCall {
                 Some(Value::new(ret.into(), 1, false))
             }
             SystemFunctionKind::Readmemh(_, _) => None,
-        }
+        };
+        ret.map(Cow::Owned)
     }
 
-    pub fn eval_comptime(&self, context: &mut Context) -> Comptime {
-        let value = self.eval_value(context);
+    pub fn eval_comptime<T: EvalContext>(&self, context: &mut T) -> Comptime {
+        let value = self.eval_value(context).map(|x| x.into_owned());
         match &self.kind {
             SystemFunctionKind::Bits(_) => {
                 if let Some(x) = value {

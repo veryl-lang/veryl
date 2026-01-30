@@ -1,5 +1,5 @@
-use crate::conv::Context;
 use crate::conv::utils::check_compatibility;
+use crate::conv::{Context, EvalContext};
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
     AssignDestination, Comptime, Expression, IrResult, Shape, Signature, Statement, Type,
@@ -9,6 +9,7 @@ use crate::symbol::{ClockDomain, Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, gen_mask_range};
 use crate::{AnalyzerError, HashMap, ir_error};
 use indent::indent_all_by;
+use std::borrow::Cow;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -157,8 +158,8 @@ pub struct FunctionCall {
 }
 
 impl FunctionCall {
-    pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
-        let func = context.functions.get(&self.id)?;
+    pub fn eval_value<'a, T: EvalContext>(&'a self, context: &mut T) -> Option<Cow<'a, Value>> {
+        let func = context.functions().get(&self.id)?;
         let func = if let Some(x) = &self.index {
             func.get_function(x)
         } else {
@@ -169,8 +170,8 @@ impl FunctionCall {
         for (path, expr) in &self.inputs {
             let id = func.arg_map.get(path)?;
             let value = expr.eval_value(context, None)?;
-            let var = context.variables.get_mut(id)?;
-            var.set_value(&[], value, None);
+            let var = context.variables().get_mut(id)?;
+            var.set_value(&[], value.into_owned(), None);
         }
 
         for x in &func.statements {
@@ -180,17 +181,17 @@ impl FunctionCall {
         // TODO get outputs
 
         if let Some(x) = &func.ret {
-            let variable = context.variables.get(x)?;
-            variable.get_value(&[]).cloned()
+            let variable = context.variables().get(x)?;
+            variable.get_value(&[]).map(|x| Cow::Owned(x.clone()))
         } else {
             None
         }
     }
 
-    pub fn eval_comptime(&mut self, context: &mut Context) -> Comptime {
+    pub fn eval_comptime<T: EvalContext>(&mut self, context: &mut T) -> Comptime {
         let value = self.eval_value(context);
         let value = if let Some(x) = value {
-            ValueVariant::Numeric(x)
+            ValueVariant::Numeric(x.into_owned())
         } else {
             ValueVariant::Unknown
         };
@@ -225,14 +226,19 @@ impl FunctionCall {
     ) {
         for output in self.outputs.values() {
             for dst in output {
-                if let Some(index) = dst.index.eval_value(context) {
-                    let variable = context.get_variable_info(dst.id).unwrap();
+                if let Some(index) = dst.index().eval_value(context).as_ref() {
+                    let variable = context.get_variable_info(dst.id()).unwrap();
                     if let Some((beg, end)) =
-                        dst.select.eval_value(context, &variable.r#type, false)
+                        dst.select().eval_value(context, &variable.r#type, false)
                     {
                         let mask = gen_mask_range(beg, end);
-                        let (success, tokens) =
-                            assign_table.insert_assign(&variable, index, mask, false, self.token);
+                        let (success, tokens) = assign_table.insert_assign(
+                            &variable,
+                            index.clone(),
+                            mask,
+                            false,
+                            self.token,
+                        );
                         if !success & assign_context.is_ff() {
                             context.insert_error(AnalyzerError::multiple_assignment(
                                 &variable.path.to_string(),
@@ -244,6 +250,11 @@ impl FunctionCall {
                 }
             }
         }
+    }
+
+    pub fn eval_step<T: EvalContext>(&self, context: &mut T) {
+        // Ignore return value because eval_step is called from funciton call statement
+        self.eval_value(context);
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {

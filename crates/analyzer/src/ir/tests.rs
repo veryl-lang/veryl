@@ -86,23 +86,23 @@ fn basic() {
   var var7(f): logic = 'hx;
 
   comb {
-    var4 = var2;
+    opt var4[0] = opt var2[0];
   }
   ff (var0, var1) {
     if_reset {
-      var2 = 00000000;
-      var3 = 00000000;
+      opt var2[0] = 00000000;
+      opt var3[0] = 00000000;
     } else {
-      var2 = (~ var2);
-      var3 = (var3 + 00000001);
+      opt var2[0] = (~ opt var2[0]);
+      opt var3[0] = (opt var3[0] + 00000001);
     }
   }
   comb {
-    var5 = (var3 * 00000003);
-    if var7 {
-      var6 = 00000000;
+    opt var5[0] = (opt var3[0] * 00000003);
+    if opt var7[0] {
+      opt var6[0] = 00000000;
     } else {
-      var6 = 00000001;
+      opt var6[0] = 00000001;
     }
   }
 }
@@ -181,63 +181,63 @@ fn branch() {
 
   ff (var0, var1) {
     if_reset {
-      var2 = 00000000;
+      opt var2[0] = 00000000;
     } else {
-      if var8 {
-        var2 = 00000001;
+      if opt var8[0] {
+        opt var2[0] = 00000001;
       } else {
-        if var9 {
-          var2 = 00000002;
+        if opt var9[0] {
+          opt var2[0] = 00000002;
         } else {
-          var2 = 00000003;
+          opt var2[0] = 00000003;
         }
       }
     }
   }
   comb {
-    if var8 {
-      var3 = 00000000;
+    if opt var8[0] {
+      opt var3[0] = 00000000;
     } else {
-      if var9 {
-        var3 = 00000001;
+      if opt var9[0] {
+        opt var3[0] = 00000001;
       } else {
-        if var10 {
-          var3 = 00000002;
+        if opt var10[0] {
+          opt var3[0] = 00000002;
         } else {
-          var3 = 00000003;
+          opt var3[0] = 00000003;
         }
       }
     }
     if (var4 ==? 00000000) {
-      var5 = 00000000;
+      opt var5[0] = 00000000;
     } else {
       if (var4 ==? 00000001) {
-        var5 = 00000001;
+        opt var5[0] = 00000001;
       } else {
         if (var4 ==? 00000002) {
-          var5 = 00000002;
+          opt var5[0] = 00000002;
         } else {
           if (var4 ==? 00000003) {
-            var5 = 00000003;
+            opt var5[0] = 00000003;
           } else {
-            var5 = 00000004;
+            opt var5[0] = 00000004;
           }
         }
       }
     }
     if (var6 == 00000000) {
-      var7 = 00000000;
+      opt var7[0] = 00000000;
     } else {
       if (var6 >= 00000001) {
-        var7 = 00000001;
+        opt var7[0] = 00000001;
       } else {
         if (var6 >: 00000002) {
-          var7 = 00000002;
+          opt var7[0] = 00000002;
         } else {
           if (var6 <= 00000003) {
-            var7 = 00000003;
+            opt var7[0] = 00000003;
           } else {
-            var7 = 00000004;
+            opt var7[0] = 00000004;
           }
         }
       }
@@ -277,7 +277,7 @@ fn generate_if() {
   let var1(g.b): logic = 'hx;
 
   comb {
-    var1 = 00000002;
+    opt var1[0] = 00000002;
   }
 }
 module ModuleB {
@@ -285,7 +285,7 @@ module ModuleB {
   let var1(g.a): logic = 'hx;
 
   comb {
-    var1 = 00000001;
+    opt var1[0] = 00000001;
   }
 }
 "#;
@@ -317,16 +317,16 @@ fn generate_for() {
   let var8(g[3].a): logic = 'hx;
 
   comb {
-    var2 = 00000000;
+    opt var2[0] = 00000000;
   }
   comb {
-    var4 = 00000001;
+    opt var4[0] = 00000001;
   }
   comb {
-    var6 = 00000002;
+    opt var6[0] = 00000002;
   }
   comb {
-    var8 = 00000003;
+    opt var8[0] = 00000003;
   }
 }
 "#;
@@ -373,9 +373,9 @@ module ModuleB {
   output var3(o_dat): logic = 'hx;
 
   inst u (
-    var0 <- var0;
-    var1 <- var1;
-    var2 <- var2;
+    var0 <- opt var0[0];
+    var1 <- opt var1[0];
+    var2 <- opt var2[0];
     var3 -> var3;
   ) {
     module ModuleA {
@@ -426,22 +426,22 @@ fn system_function() {
   const var11(b5): bit<32> = 'h00000003;
 
   comb {
-    var0 = 00000000;
+    opt var0[0] = 00000000;
   }
   comb {
-    var1 = 00000000;
+    opt var1[0] = 00000000;
   }
   comb {
-    var2 = 00000001;
+    opt var2[0] = 00000001;
   }
   comb {
-    var3 = 00000002;
+    opt var3[0] = 00000002;
   }
   comb {
-    var4 = 00000002;
+    opt var4[0] = 00000002;
   }
   comb {
-    var5 = 00000003;
+    opt var5[0] = 00000003;
   }
 }
 "#;
@@ -498,10 +498,10 @@ fn msb_lsb() {
   let var2(c): logic = 'hx;
 
   comb {
-    var1 = var0[00000003];
+    opt var1[0] = var0[00000003];
   }
   comb {
-    var2 = var0[00000000];
+    opt var2[0] = var0[00000000];
   }
 }
 "#;
@@ -524,7 +524,7 @@ fn r#struct() {
         }
     }
     module ModuleA (
-        x: input PackageA::StructA = 2'b0101,
+        x: input PackageA::StructA = 4'b0101,
     ) {
         var a: PackageA::StructA;
         let b: PackageA::StructA = 1;
@@ -541,7 +541,7 @@ fn r#struct() {
   let var2(b): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 'hx;
 
   comb {
-    var2 = 00000001;
+    opt var2[0] = 00000001;
   }
   comb {
     var1[00000003] = 00000001;
@@ -599,8 +599,8 @@ fn interface() {
   }
 
   comb {
-    var6 = var8();
-    var7 = var10();
+    opt var6[0] = var8();
+    opt var7[0] = var10();
   }
 }
 "#;
@@ -641,8 +641,8 @@ fn array() {
   var var3(d): logic = 'hx;
 
   comb {
-    var2 = var0[00000002][00000001];
-    var3 = var1[00000002][00000003];
+    opt var2[0] = var0[00000002][00000001];
+    opt var3[0] = var1[00000002][00000003];
   }
 }
 "#;
@@ -714,20 +714,20 @@ fn function() {
   var var16(f): struct {x: logic<1>, y: logic<1>} = 'hx;
   var var17(g): struct {x: logic<1>, y: logic<1>} = 'hx;
   func var0(FuncA) -> var1 {
-    var4 = (var2 | var3);
-    var1 = (var2 & var4);
+    opt var4[0] = (opt var2[0] | opt var3[0]);
+    var1 = (opt var2[0] & opt var4[0]);
   }
   func var5(FuncB) {
-    var7 = var6;
+    opt var7[0] = opt var6[0];
   }
   func var8(FuncC) -> var9 {
-    var9 = var10;
+    var9 = opt var10[0];
   }
 
   comb {
-    var13 = var0(a: var11, b: var12);
+    opt var13[0] = var0(a: opt var11[0], b: opt var12[0]);
     var5(a: var14, b: var15);
-    var17 = var8(a: var16);
+    opt var17[0] = var8(a: opt var16[0]);
   }
 }
 "#;
@@ -769,16 +769,16 @@ fn array_literal() {
   const var4(Y): bit<3, 4> = 'habc;
 
   comb {
-    var0[00000000] = 00000000;
-    var0[00000001] = 00000001;
+    opt var0[0] = 00000000;
+    opt var0[1] = 00000001;
   }
   comb {
-    var1[00000000][00000000] = 00000001;
-    var1[00000000][00000001] = 00000002;
-    var1[00000000][00000002] = 00000003;
-    var1[00000001][00000000] = 00000004;
-    var1[00000001][00000001] = 00000005;
-    var1[00000001][00000002] = 00000006;
+    opt var1[0] = 00000001;
+    opt var1[1] = 00000002;
+    opt var1[2] = 00000003;
+    opt var1[3] = 00000004;
+    opt var1[4] = 00000005;
+    opt var1[5] = 00000006;
     var2[00000000][00000000] = 00000001;
     var2[00000000][00000001] = 00000002;
     var2[00000000][00000002] = 00000003;
@@ -874,18 +874,18 @@ fn assignment_operator() {
   var var0(a): logic = 'hx;
 
   comb {
-    var0 = (var0 + 00000000);
-    var0 = (var0 + (- 00000000));
-    var0 = (var0 * 00000000);
-    var0 = (var0 / 00000000);
-    var0 = (var0 % 00000000);
-    var0 = (var0 & 00000000);
-    var0 = (var0 | 00000000);
-    var0 = (var0 ^ 00000000);
-    var0 = (var0 << 00000000);
-    var0 = (var0 >> 00000000);
-    var0 = (var0 <<< 00000000);
-    var0 = (var0 >>> 00000000);
+    opt var0[0] = (opt var0[0] + 00000000);
+    opt var0[0] = (opt var0[0] + 00000000);
+    opt var0[0] = (opt var0[0] * 00000000);
+    opt var0[0] = (opt var0[0] / 00000000);
+    opt var0[0] = (opt var0[0] % 00000000);
+    opt var0[0] = (opt var0[0] & 00000000);
+    opt var0[0] = (opt var0[0] | 00000000);
+    opt var0[0] = (opt var0[0] ^ 00000000);
+    opt var0[0] = (opt var0[0] << 00000000);
+    opt var0[0] = (opt var0[0] >> 00000000);
+    opt var0[0] = (opt var0[0] <<< 00000000);
+    opt var0[0] = (opt var0[0] >>> 00000000);
   }
 }
 "#;
@@ -989,17 +989,17 @@ fn interface_function() {
   var var14(if_a.FuncA.return): logic = 'hx;
   output var15(if_a.FuncA.x): logic = 'hx;
   func var10(u.FuncA) -> var11 {
-    var12 = var3;
+    opt var12[0] = var3;
     var11 = var3;
   }
   func var13(if_a.FuncA) -> var14 {
-    var15 = var1;
+    opt var15[0] = var1;
     var14 = var1;
   }
 
   comb {
-    var6 = var10(x: var7);
-    var9 = var13(x: var8);
+    opt var6[0] = var10(x: var7);
+    opt var9[0] = var13(x: var8);
   }
 }
 "#;
@@ -1037,17 +1037,17 @@ fn package_function() {
   input var5(PackageA.FuncA.a): logic = 'hx;
   input var6(PackageA.FuncA.b): logic = 'hx;
   func var3(PackageA.FuncA) -> var4 {
-    var4 = (var5 & var6);
+    var4 = (opt var5[0] & opt var6[0]);
   }
 
   comb {
-    var0 = 00000001;
+    opt var0[0] = 00000001;
   }
   comb {
-    var1 = 00000001;
+    opt var1[0] = 00000001;
   }
   comb {
-    var2 = var3(a: var0, b: var1);
+    opt var2[0] = var3(a: opt var0[0], b: opt var1[0]);
   }
 }
 "#;
@@ -1120,10 +1120,10 @@ fn interface_array() {
   }
 
   comb {
-    var4[00000000] = var0[00000000];
-    var4[00000001] = var0[00000001];
-    var1[00000000] = var5[00000000];
-    var1[00000001] = var5[00000001];
+    opt var4[0] = opt var0[0];
+    opt var4[1] = opt var0[1];
+    opt var1[0] = opt var5[0];
+    opt var1[1] = opt var5[1];
     var8[00000000] = var9[0]();
     var8[00000001] = var9[1]();
     var8[00000002] = var11[0]();
@@ -1174,10 +1174,10 @@ fn enum_test() {
   var var3(d): enum {logic<3>} = 'hx;
 
   comb {
-    var0 = 0;
-    var1 = 1;
-    var2 = 00000007;
-    var3 = 00000002;
+    opt var0[0] = 0;
+    opt var1[0] = 1;
+    opt var2[0] = 00000007;
+    opt var3[0] = 00000002;
   }
 }
 "#;
@@ -1210,14 +1210,14 @@ fn generic_function() {
   var var5(FuncA.return): logic<10> = 'hxxx;
   input var6(FuncA.x): logic<10> = 'hxxx;
   func var4(FuncA) -> var5 {
-    var5 = (var6 + 00000001);
+    var5 = (opt var6[0] + 00000001);
   }
 
   comb {
-    var2 = 00000001;
+    opt var2[0] = 00000001;
   }
   comb {
-    var3 = var4(x: var2);
+    opt var3[0] = var4(x: opt var2[0]);
   }
 }
 "#;
@@ -1268,12 +1268,12 @@ fn complex_function_arg() {
   var var7(u.b): struct {x: logic<1>, y: logic<1>} = 'hx;
   var var10(a): logic = 'hx;
   func var0(FuncA) -> var1 {
-    var3 = 00000000;
-    var1 = var2;
+    opt var3[0] = 00000000;
+    var1 = opt var2[0];
   }
 
   comb {
-    var10 = var0(x.a: var6, x.b: var7);
+    opt var10[0] = var0(x.a: opt var6[0], x.b: var7);
   }
 }
 "#;
@@ -1316,8 +1316,8 @@ fn struct_constructor() {
   var var1(b): struct {v: struct {x: logic<32>, y: logic<32>}, w: struct {x: logic<32>, y: logic<32>}} = 'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
 
   comb {
-    var0 = 00000001000000020000000300000004;
-    var1 = 00000001ffffffff0000000000000000;
+    opt var0[0] = 00000001000000020000000300000004;
+    opt var1[0] = 00000001ffffffff0000000000000000;
   }
 }
 "#;
@@ -1368,7 +1368,7 @@ fn struct_port() {
   output var1(o): logic = 'hx;
 
   comb {
-    var1 = '0;
+    opt var1[0] = '0;
   }
 }
 module ModuleB {
@@ -1378,10 +1378,10 @@ module ModuleB {
   var var2(d): struct {x: logic<1>, y: logic<1>}<2> = 'hx;
 
   comb {
-    var1 = 00000000;
+    opt var1[0] = 00000000;
   }
   comb {
-    var0[00000001] = var1;
+    opt var0[1] = opt var1[0];
   }
   comb {
     var2[00000003:00000002] = var2[00000001:00000000];
@@ -1393,7 +1393,7 @@ module ModuleB {
       output var1(o): struct {x: logic<1>, y: logic<1>} = 'hx;
 
       comb {
-        var1 = '0;
+        opt var1[0] = '0;
       }
     }
   }
@@ -1404,7 +1404,7 @@ module ModuleB {
       output var1(o): struct {x: logic<1>, y: logic<1>} = 'hx;
 
       comb {
-        var1 = '0;
+        opt var1[0] = '0;
       }
     }
   }
@@ -1610,7 +1610,7 @@ fn generics_resolve() {
 
   ff (var0, var1) {
     if_reset {
-      var3 = '0;
+      opt var3[0] = '0;
     }
   }
 }
@@ -1628,7 +1628,7 @@ module ModuleB {
 
       ff (var0, var1) {
         if_reset {
-          var3 = '0;
+          opt var3[0] = '0;
         } else {
           var3[00000020] = var2[00000000];
           var3[0000001f:00000000] = 00000000;
@@ -1670,10 +1670,10 @@ fn generics_resolve2() {
   let var1(_b): logic = 'hx;
 
   comb {
-    var0 = 00000001;
+    opt var0[0] = 00000001;
   }
   comb {
-    var1 = var0;
+    opt var1[0] = opt var0[0];
   }
 }
 module ModuleB {
@@ -1685,10 +1685,10 @@ module ModuleB {
       let var1(_b): logic = 'hx;
 
       comb {
-        var0 = 00000001;
+        opt var0[0] = 00000001;
       }
       comb {
-        var1 = var0;
+        opt var1[0] = opt var0[0];
       }
     }
   }
@@ -1699,10 +1699,10 @@ module ModuleB {
       let var1(_b): logic = 'hx;
 
       comb {
-        var0 = 00000001;
+        opt var0[0] = 00000001;
       }
       comb {
-        var1 = var0;
+        opt var1[0] = opt var0[0];
       }
     }
   }

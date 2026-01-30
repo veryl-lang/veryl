@@ -5442,6 +5442,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "vcd"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4505774fc84de82eb04caa74d859342b0daa376f4c6df45149593245dd62c004"
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5509,6 +5515,7 @@ dependencies = [
  "strum_macros",
  "thiserror 2.0.18",
  "toml 0.9.11+spec-1.1.0",
+ "vcd",
  "veryl-metadata",
  "veryl-parser",
 ]
@@ -5636,7 +5643,11 @@ dependencies = [
 name = "veryl-simulator"
 version = "0.17.2"
 dependencies = [
+ "clap",
+ "codspeed-criterion-compat",
+ "pprof",
  "toml 0.9.11+spec-1.1.0",
+ "vcd",
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
