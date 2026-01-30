@@ -11,7 +11,7 @@ use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Debug)]
-pub struct Input(Expression);
+pub struct Input(pub Expression);
 
 impl fmt::Display for Input {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -20,7 +20,7 @@ impl fmt::Display for Input {
 }
 
 #[derive(Clone, Debug)]
-pub struct Output(Vec<AssignDestination>);
+pub struct Output(pub Vec<AssignDestination>);
 
 impl fmt::Display for Output {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -53,6 +53,7 @@ pub enum SystemFunctionKind {
     Clog2(Input),
     Onehot(Input),
     Readmemh(Input, Output),
+    Display(Vec<Input>),
 }
 
 fn create_input(
@@ -181,6 +182,16 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
+            "$display" => {
+                let inputs: Vec<Input> = args
+                    .into_iter()
+                    .map(|arg| create_input(context, name, None, arg))
+                    .collect();
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Display(inputs),
+                    comptime,
+                })
+            }
             _ => Err(ir_error!(token)),
         }
     }
@@ -223,6 +234,7 @@ impl SystemFunctionCall {
                 Some(Value::new(ret.into(), 1, false))
             }
             SystemFunctionKind::Readmemh(_, _) => None,
+            SystemFunctionKind::Display(_) => None,
         }
     }
 
@@ -240,6 +252,7 @@ impl SystemFunctionCall {
                 ret
             }
             SystemFunctionKind::Readmemh(_, _) => self.comptime.clone(),
+            SystemFunctionKind::Display(_) => self.comptime.clone(),
         }
     }
 
@@ -265,6 +278,10 @@ impl fmt::Display for SystemFunctionCall {
             SystemFunctionKind::Clog2(x) => format!("$clog2({x})").fmt(f),
             SystemFunctionKind::Onehot(x) => format!("$onehot({x})").fmt(f),
             SystemFunctionKind::Readmemh(x, y) => format!("$readmemh({x}, {y})").fmt(f),
+            SystemFunctionKind::Display(args) => {
+                let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
+                format!("$display({})", args_str.join(", ")).fmt(f)
+            }
         }
     }
 }

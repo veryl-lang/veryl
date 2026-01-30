@@ -1,0 +1,154 @@
+module WallaceMul32 (
+    a  : input  logic<32>,
+    b  : input  logic<32>,
+    out: output logic<64>,
+) {
+    // Shifted versions of a: sa[0]=a, sa[1]=a*2, sa[2]=a*4, ...
+    var sa: logic<64> [33];
+
+    assign sa[0] = a;
+    for i in 0..32 :g_sa {
+        assign sa[i + 1] = sa[i] + sa[i];
+    }
+
+    // Stage 0: Partial products
+    var pp: logic<64> [32];
+
+    // Branchless: mask = 0 - b[i] (all-ones if 1, all-zeros if 0)
+    var mask: logic<64> [32];
+
+    always_comb {
+        for i: u32 in 0..32 {
+            mask[i] = 64'b0 - b[i];
+            pp[i] = sa[i] & mask[i];
+        }
+    }
+
+    // CSA carry temporaries
+    var c1: logic<64> [10];
+    var c2: logic<64> [7];
+    var c3: logic<64> [5];
+    var c4: logic<64> [3];
+    var c5: logic<64> [2];
+    var c6: logic<64>;
+    var c7: logic<64>;
+    var c8: logic<64>;
+
+    // Stage 1: 32 -> 22 (10 CSAs + 2 pass-through)
+    var s1: logic<64> [22];
+
+    always_comb {
+        for i: u32 in 0..10 {
+            s1[i * 2] = pp[i * 3] ^ pp[i * 3 + 1] ^ pp[i * 3 + 2];
+            c1[i] = (pp[i * 3] & pp[i * 3 + 1]) | (pp[i * 3 + 1] & pp[i * 3 + 2]) | (pp[i * 3] & pp[i * 3 + 2]);
+            s1[i * 2 + 1] = c1[i] + c1[i];
+        }
+        s1[20] = pp[30];
+        s1[21] = pp[31];
+    }
+
+    // Stage 2: 22 -> 15 (7 CSAs + 1 pass-through)
+    var s2: logic<64> [15];
+
+    always_comb {
+        for i: u32 in 0..7 {
+            s2[i * 2] = s1[i * 3] ^ s1[i * 3 + 1] ^ s1[i * 3 + 2];
+            c2[i] = (s1[i * 3] & s1[i * 3 + 1]) | (s1[i * 3 + 1] & s1[i * 3 + 2]) | (s1[i * 3] & s1[i * 3 + 2]);
+            s2[i * 2 + 1] = c2[i] + c2[i];
+        }
+        s2[14] = s1[21];
+    }
+
+    // Stage 3: 15 -> 10 (5 CSAs)
+    var s3: logic<64> [10];
+
+    always_comb {
+        for i: u32 in 0..5 {
+            s3[i * 2] = s2[i * 3] ^ s2[i * 3 + 1] ^ s2[i * 3 + 2];
+            c3[i] = (s2[i * 3] & s2[i * 3 + 1]) | (s2[i * 3 + 1] & s2[i * 3 + 2]) | (s2[i * 3] & s2[i * 3 + 2]);
+            s3[i * 2 + 1] = c3[i] + c3[i];
+        }
+    }
+
+    // Stage 4: 10 -> 7 (3 CSAs + 1 pass-through)
+    var s4: logic<64> [7];
+
+    always_comb {
+        for i: u32 in 0..3 {
+            s4[i * 2] = s3[i * 3] ^ s3[i * 3 + 1] ^ s3[i * 3 + 2];
+            c4[i] = (s3[i * 3] & s3[i * 3 + 1]) | (s3[i * 3 + 1] & s3[i * 3 + 2]) | (s3[i * 3] & s3[i * 3 + 2]);
+            s4[i * 2 + 1] = c4[i] + c4[i];
+        }
+        s4[6] = s3[9];
+    }
+
+    // Stage 5: 7 -> 5 (2 CSAs + 1 pass-through)
+    var s5: logic<64> [5];
+
+    always_comb {
+        for i: u32 in 0..2 {
+            s5[i * 2] = s4[i * 3] ^ s4[i * 3 + 1] ^ s4[i * 3 + 2];
+            c5[i] = (s4[i * 3] & s4[i * 3 + 1]) | (s4[i * 3 + 1] & s4[i * 3 + 2]) | (s4[i * 3] & s4[i * 3 + 2]);
+            s5[i * 2 + 1] = c5[i] + c5[i];
+        }
+        s5[4] = s4[6];
+    }
+
+    // Stage 6: 5 -> 4 (1 CSA + 2 pass-through)
+    var s6: logic<64> [4];
+
+    always_comb {
+        s6[0] = s5[0] ^ s5[1] ^ s5[2];
+        c6 = (s5[0] & s5[1]) | (s5[1] & s5[2]) | (s5[0] & s5[2]);
+        s6[1] = c6 + c6;
+        s6[2] = s5[3];
+        s6[3] = s5[4];
+    }
+
+    // Stage 7: 4 -> 3 (1 CSA + 1 pass-through)
+    var s7: logic<64> [3];
+
+    always_comb {
+        s7[0] = s6[0] ^ s6[1] ^ s6[2];
+        c7 = (s6[0] & s6[1]) | (s6[1] & s6[2]) | (s6[0] & s6[2]);
+        s7[1] = c7 + c7;
+        s7[2] = s6[3];
+    }
+
+    // Stage 8: 3 -> 2 (1 CSA)
+    var s8: logic<64> [2];
+
+    always_comb {
+        s8[0] = s7[0] ^ s7[1] ^ s7[2];
+        c8 = (s7[0] & s7[1]) | (s7[1] & s7[2]) | (s7[0] & s7[2]);
+        s8[1] = c8 + c8;
+    }
+
+    // Final addition
+    assign out = s8[0] + s8[1];
+}
+
+module Top (
+    clk: input  clock     ,
+    rst: input  reset     ,
+    out: output logic<64> ,
+) {
+    var a: logic<32>;
+    var b: logic<32>;
+
+    always_ff {
+        if_reset {
+            a = 32'h12345678;
+            b = 32'hDEADBEEF;
+        } else {
+            a = a + 1;
+            b = b + a;
+        }
+    }
+
+    inst u_mul: WallaceMul32 (
+        a  ,
+        b  ,
+        out,
+    );
+}
