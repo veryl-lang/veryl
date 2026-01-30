@@ -1,5 +1,5 @@
 use crate::ir::{Shape, Type, TypeKind};
-use num_bigint::{BigInt, BigUint, Sign};
+use crate::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, Num, ToPrimitive};
 use std::fmt;
 use veryl_parser::veryl_grammar_trait as syntax_tree;

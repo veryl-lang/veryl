@@ -1,10 +1,10 @@
+use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::utils::eval_width_select;
 use crate::ir::{AssignDestination, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind};
 use crate::symbol::Affiliation;
 use crate::value::{Value, gen_mask};
-use num_bigint::BigUint;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;

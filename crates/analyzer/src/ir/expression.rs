@@ -8,7 +8,7 @@ use crate::ir::{
 };
 use crate::symbol::ClockDomain;
 use crate::value::{Value, gen_mask, gen_mask_range, to_biguint};
-use num_bigint::{BigInt, BigUint};
+use crate::{BigInt, BigUint};
 use num_traits::ToPrimitive;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
