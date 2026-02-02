@@ -11,4 +11,4 @@ description.workspace = true
 edition.workspace     = true
 
 [dependencies]
-veryl-parser = {version = "0.17.2", path = "../parser"}
+veryl-parser = {version = "0.18.0", path = "../parser"}

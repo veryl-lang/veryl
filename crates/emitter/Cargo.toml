@@ -18,7 +18,7 @@ strnum_bitwidth = {workspace = true}
 veryl-aligner   = {version = "0.17.2", path = "../aligner"}
 veryl-analyzer  = {version = "0.17.2", path = "../analyzer"}
 veryl-metadata  = {version = "0.17.2", path = "../metadata"}
-veryl-parser    = {version = "0.17.2", path = "../parser"}
+veryl-parser    = {version = "0.18.0", path = "../parser"}
 veryl-sourcemap = {version = "0.17.2", path = "../sourcemap"}
 
 [dev-dependencies]
