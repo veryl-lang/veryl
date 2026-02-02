@@ -5532,7 +5532,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-formatter"
-version = "0.17.2"
+version = "0.18.0"
 dependencies = [
  "toml 0.9.11+spec-1.1.0",
  "veryl-aligner",

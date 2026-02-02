@@ -44,7 +44,7 @@ tokio           = {workspace = true}
 tokio-util      = {version = "0.7.17", features = ["codec"]}
 veryl-analyzer  = {version = "0.18.0", path = "../analyzer"}
 veryl-emitter   = {version = "0.18.0", path = "../emitter"}
-veryl-formatter = {version = "0.17.2", path = "../formatter"}
+veryl-formatter = {version = "0.18.0", path = "../formatter"}
 veryl-metadata  = {version = "0.18.0", path = "../metadata"}
 veryl-migrator  = {version = "0.18.0", path = "../migrator"}
 veryl-parser    = {version = "0.18.0", path = "../parser"}
