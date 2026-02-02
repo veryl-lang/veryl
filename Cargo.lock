@@ -5658,7 +5658,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-std"
-version = "0.17.2"
+version = "0.18.0"
 dependencies = [
  "merkle_hash",
  "miette",
