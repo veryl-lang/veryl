@@ -49,4 +49,4 @@ veryl-metadata  = {version = "0.18.0", path = "../metadata"}
 veryl-migrator  = {version = "0.17.2", path = "../migrator"}
 veryl-parser    = {version = "0.18.0", path = "../parser"}
 veryl-path      = {version = "0.18.0", path = "../path"}
-veryl-sourcemap = {version = "0.17.2", path = "../sourcemap"}
+veryl-sourcemap = {version = "0.18.0", path = "../sourcemap"}
