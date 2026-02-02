@@ -3,6 +3,9 @@ use crate::veryl_token::{Token, VerylToken};
 use crate::veryl_walker::VerylWalker;
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table;
+use veryl_parser::veryl_grammar_trait::Identifier as NewIdentifier;
+use veryl_parser::veryl_grammar_trait::Veryl as NewVeryl;
+use veryl_parser::veryl_walker::VerylWalker as NewVerylWalker;
 
 #[cfg(target_os = "windows")]
 const NEWLINE: &str = "\r\n";
@@ -78,6 +81,26 @@ impl Migrator {
         for x in &x.comments {
             self.push_token(x);
         }
+    }
+
+    /// Check whether the valid syntax tree should be migrated
+    pub fn migratable(veryl: &NewVeryl) -> bool {
+        struct BoolChecker {
+            bool_exist: bool,
+        }
+
+        impl NewVerylWalker for BoolChecker {
+            fn identifier(&mut self, arg: &NewIdentifier) {
+                if arg.text().to_string() == "bool" {
+                    self.bool_exist = true;
+                }
+            }
+        }
+
+        let mut checker = BoolChecker { bool_exist: false };
+        checker.veryl(veryl);
+
+        checker.bool_exist
     }
 }
 
