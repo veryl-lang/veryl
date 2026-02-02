@@ -5493,7 +5493,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-analyzer"
-version = "0.17.2"
+version = "0.18.0"
 dependencies = [
  "bimap",
  "daggy",

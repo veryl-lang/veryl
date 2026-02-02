@@ -12,7 +12,7 @@ edition.workspace     = true
 
 [dependencies]
 toml           = {workspace = true}
-veryl-analyzer = {version = "0.17.2", path = "../analyzer"}
+veryl-analyzer = {version = "0.18.0", path = "../analyzer"}
 veryl-metadata = {version = "0.18.0", path = "../metadata"}
 veryl-parser   = {version = "0.18.0", path = "../parser"}
 veryl-path     = {version = "0.18.0", path = "../path"}

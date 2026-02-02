@@ -16,7 +16,7 @@ edition.workspace     = true
 serde           = {workspace = true}
 strnum_bitwidth = {workspace = true}
 veryl-aligner   = {version = "0.18.0", path = "../aligner"}
-veryl-analyzer  = {version = "0.17.2", path = "../analyzer"}
+veryl-analyzer  = {version = "0.18.0", path = "../analyzer"}
 veryl-metadata  = {version = "0.18.0", path = "../metadata"}
 veryl-parser    = {version = "0.18.0", path = "../parser"}
 veryl-sourcemap = {version = "0.18.0", path = "../sourcemap"}
