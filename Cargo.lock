@@ -5486,7 +5486,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-aligner"
-version = "0.17.2"
+version = "0.18.0"
 dependencies = [
  "veryl-parser",
 ]
