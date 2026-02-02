@@ -34,7 +34,13 @@ impl CmdMigrate {
             // Check whether new parser is passed
             let parser = Parser::parse(&input, &path.src);
 
-            if parser.is_err() {
+            let migrate = if let Ok(veryl) = parser {
+                Migrator::migratable(&veryl.veryl)
+            } else {
+                true
+            };
+
+            if migrate {
                 let parser = OldParser::parse(&input, &path.src)?;
                 let mut migrator = Migrator::new(metadata);
                 migrator.migrate(&parser.veryl);
