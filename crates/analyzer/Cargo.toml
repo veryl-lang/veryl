@@ -28,7 +28,7 @@ strnum_bitwidth = {workspace = true}
 strum           = "0.27.2"
 strum_macros    = "0.27.2"
 thiserror       = {workspace = true}
-veryl-metadata  = {version = "0.17.2", path = "../metadata"}
+veryl-metadata  = {version = "0.18.0", path = "../metadata"}
 veryl-parser    = {version = "0.18.0", path = "../parser"}
 
 [target.'cfg(target_family = "wasm")'.dependencies]

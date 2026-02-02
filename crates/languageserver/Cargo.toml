@@ -28,6 +28,6 @@ tokio             = {workspace = true}
 tower-lsp-server  = "0.23.0"
 veryl-analyzer    = {version = "0.17.2", path = "../analyzer"}
 veryl-formatter   = {version = "0.17.2", path = "../formatter"}
-veryl-metadata    = {version = "0.17.2", path = "../metadata"}
+veryl-metadata    = {version = "0.18.0", path = "../metadata"}
 veryl-parser      = {version = "0.18.0", path = "../parser"}
 veryl-path        = {version = "0.18.0", path = "../path"}
