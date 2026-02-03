@@ -553,6 +553,13 @@ impl Shape {
     }
 
     #[inline]
+    pub fn replace(&mut self, i: usize, x: Option<usize>) {
+        if i < self.dims() {
+            self.0[i] = x;
+        }
+    }
+
+    #[inline]
     pub fn drain<R: RangeBounds<usize>>(&mut self, x: R) -> Drain<'_, Option<usize>> {
         self.0.drain(x)
     }

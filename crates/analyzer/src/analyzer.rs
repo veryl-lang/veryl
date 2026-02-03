@@ -94,6 +94,7 @@ impl Analyzer {
 
         symbol_table::apply_import();
         symbol_table::resolve_user_defined();
+        ret.append(&mut symbol_table::resolve_enum());
         ret.append(&mut symbol_table::apply_bind());
         ret.append(&mut symbol_table::apply_msb());
         ret.append(&mut symbol_table::apply_connect());

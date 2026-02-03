@@ -243,8 +243,7 @@ impl Conv<&FactorType> for ir::Factor {
                     let exprs: Vec<_> = x.width.as_ref().into();
                     let mut ret = Shape::default();
                     for expr in exprs {
-                        let mut expr: ir::Expression = Conv::conv(context, expr)?;
-                        let (comptime, value) = eval_size(context, &mut expr);
+                        let (comptime, value) = eval_size(context, expr, false)?;
 
                         is_global &= comptime.is_global;
 

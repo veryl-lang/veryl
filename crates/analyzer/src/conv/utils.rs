@@ -273,18 +273,22 @@ pub fn eval_repeat(context: &mut Context, expr: &mut ir::Expression) -> Option<V
     }
 }
 
-pub fn eval_size(context: &mut Context, expr: &mut ir::Expression) -> (Comptime, Option<usize>) {
-    let comptime = expr.eval_comptime(context, None);
+pub fn eval_size(
+    context: &mut Context,
+    expr: &Expression,
+    allow_inferable_size: bool,
+) -> IrResult<(Comptime, Option<usize>)> {
+    let (comptime, expr) = eval_expr(context, None, expr, allow_inferable_size)?;
     if let Ok(x) = comptime.get_value() {
         let value = x.to_usize();
         let value = context.check_size(value, expr.token_range());
         if value == Some(0) {
-            (comptime, None)
+            Ok((comptime, None))
         } else {
-            (comptime, value)
+            Ok((comptime, value))
         }
     } else {
-        (comptime, None)
+        Ok((comptime, None))
     }
 }
 
@@ -675,7 +679,13 @@ pub fn eval_type(
                         for x in &x.members {
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
+
                             if let SymbolKind::StructMember(x) = member.kind {
+                                if symbol.found.token.text == x.r#type.token.beg.text {
+                                    // Prevent cyclic reference
+                                    continue;
+                                }
+
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
@@ -699,6 +709,11 @@ pub fn eval_type(
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
                             if let SymbolKind::UnionMember(x) = member.kind {
+                                if symbol.found.token.text == x.r#type.token.beg.text {
+                                    // Prevent cyclic reference
+                                    continue;
+                                }
+
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
@@ -714,10 +729,17 @@ pub fn eval_type(
                     })
                 }
                 SymbolKind::Enum(x) => {
-                    let r#type = if let Some(x) = &x.r#type {
+                    let r#type = if let Some(enum_type) = &x.r#type {
                         context.push_generic_map(map.clone());
 
-                        let ret = context.block(|c| x.to_ir_type(c, TypePosition::Variable));
+                        let mut ret =
+                            context.block(|c| enum_type.to_ir_type(c, TypePosition::Enum));
+                        if let Ok(r#type) = ret.as_mut() {
+                            // Infer width from member variants
+                            if r#type.is_inferable_width() {
+                                r#type.width.replace(0, Some(x.width));
+                            }
+                        }
 
                         context.pop_generic_map();
 
@@ -1208,17 +1230,24 @@ pub fn eval_external_symbol(
             return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
         }
         SymbolKind::EnumMember(x) => {
-            if let Some(width) = x.width {
-                match &x.value {
-                    EnumMemberValue::ImplicitValue(x) => {
-                        return Ok(ir::Expression::create_value((*x).into(), width, token));
-                    }
-                    EnumMemberValue::ExplicitValue(x, _) => {
-                        let (x, _) = eval_expr(context, None, x, false)?;
-                        return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
-                    }
-                    EnumMemberValue::UnevaluableValue => (),
+            let enum_symbol = symbol.found.get_parent().unwrap();
+            let SymbolKind::Enum(r#enum) = enum_symbol.kind else {
+                unreachable!();
+            };
+
+            match &x.value {
+                EnumMemberValue::ImplicitValue(x) => {
+                    return Ok(ir::Expression::create_value(
+                        (*x).into(),
+                        r#enum.width,
+                        token,
+                    ));
                 }
+                EnumMemberValue::ExplicitValue(x, _) => {
+                    let (x, _) = eval_expr(context, None, x, false)?;
+                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                }
+                EnumMemberValue::UnevaluableValue => (),
             }
         }
         SymbolKind::StructMember(_) => {

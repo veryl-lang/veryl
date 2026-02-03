@@ -2,7 +2,6 @@ pub mod alias;
 pub mod anonymous;
 pub mod bind;
 pub mod clock_domain;
-pub mod r#enum;
 pub mod generic;
 pub mod import;
 pub mod inst;

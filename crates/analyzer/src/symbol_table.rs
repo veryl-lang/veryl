@@ -1,4 +1,5 @@
 mod connect;
+mod r#enum;
 mod msb;
 
 use crate::namespace::Namespace;
@@ -1133,7 +1134,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn get_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {
+    pub fn resolve_user_defined(&self) -> Vec<(SymbolId, SymbolId)> {
         let mut resolved = Vec::new();
         for symbol in self.symbol_table.values() {
             if let Some(x) = symbol.kind.get_type()
@@ -1159,6 +1160,19 @@ impl SymbolTable {
                 x.symbol = Some(type_id);
             }
         }
+    }
+
+    pub fn get_enum_symbols(&self) -> Vec<Symbol> {
+        self.symbol_table
+            .values()
+            .filter_map(|symbol| {
+                if matches!(symbol.kind, SymbolKind::Enum(_)) {
+                    Some(symbol.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn find_project_symbol(&self, prj: StrId) -> Option<Symbol> {
@@ -1652,8 +1666,13 @@ pub fn apply_connect() -> Vec<AnalyzerError> {
 
 pub fn resolve_user_defined() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    let resolved = SYMBOL_TABLE.with(|f| f.borrow().get_user_defined());
+    let resolved = SYMBOL_TABLE.with(|f| f.borrow().resolve_user_defined());
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
+}
+
+pub fn resolve_enum() -> Vec<AnalyzerError> {
+    let list = SYMBOL_TABLE.with(|f| f.borrow().get_enum_symbols());
+    r#enum::resolve_enum(&list)
 }
 
 pub fn find_project_symbol(prj: StrId) -> Option<Symbol> {

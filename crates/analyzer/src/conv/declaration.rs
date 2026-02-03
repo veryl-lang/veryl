@@ -2,7 +2,6 @@ use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::bind::check_bind_target;
 use crate::conv::checker::clock_domain::check_clock_domain;
-use crate::conv::checker::r#enum::check_enum;
 use crate::conv::checker::generic::check_generic_args;
 use crate::conv::checker::generic::check_generic_bound;
 use crate::conv::checker::import::check_import;
@@ -11,8 +10,8 @@ use crate::conv::checker::modport::{check_modport, check_modport_default, check_
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
 use crate::conv::utils::{
     TypePosition, eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_for_range,
-    eval_reset, eval_size, eval_variable, expand_connect, expand_connect_const, get_component,
-    get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
+    eval_reset, eval_size, eval_type, eval_variable, expand_connect, expand_connect_const,
+    get_component, get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
     var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
@@ -957,6 +956,12 @@ impl Conv<&FunctionDeclaration> for () {
 
 impl Conv<&StructUnionDeclaration> for () {
     fn conv(context: &mut Context, value: &StructUnionDeclaration) -> IrResult<Self> {
+        eval_type(
+            context,
+            &value.identifier.as_ref().into(),
+            TypePosition::TypeDef,
+        )?;
+
         if let Some(x) = &value.struct_union_declaration_opt {
             check_generic_bound(context, &x.with_generic_parameter);
         }
@@ -975,7 +980,11 @@ impl Conv<&StructUnionDeclaration> for () {
 
 impl Conv<&EnumDeclaration> for () {
     fn conv(context: &mut Context, value: &EnumDeclaration) -> IrResult<Self> {
-        check_enum(context, value);
+        eval_type(
+            context,
+            &value.identifier.as_ref().into(),
+            TypePosition::TypeDef,
+        )?;
 
         if context.is_affiliated(Affiliation::Interface) {
             context.insert_error(AnalyzerError::invalid_type_declaration(
@@ -1127,8 +1136,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 if let Some(x) = &value.component_instantiation_opt0 {
                     let exprs: Vec<_> = x.array.as_ref().into();
                     for expr in exprs {
-                        let mut expr: ir::Expression = Conv::conv(context, expr)?;
-                        let (_, value) = eval_size(context, &mut expr);
+                        let (_, value) = eval_size(context, expr, false)?;
                         array.push(value)
                     }
                 }

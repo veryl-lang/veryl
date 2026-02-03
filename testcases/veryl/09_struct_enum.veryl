@@ -50,6 +50,13 @@ module Module09 {
         H_1,
     }
 
+    #[enum_encoding(onehot)]
+    enum I: bit<_> {
+        X,
+        Y,
+        Z,
+    }
+
     var a: A    ;
     var b: B    ;
     var c: C    ;
@@ -58,7 +65,8 @@ module Module09 {
     var f: F    ;
     var g: G    ;
     var h: H    ;
-    var i: logic;
+    var i: I    ;
+    var j: logic;
 
     assign a.a   = 1;
     assign a.aa  = 1;
@@ -70,5 +78,6 @@ module Module09 {
     assign f     = F::X;
     assign g     = G::X;
     assign h     = H::H_0;
-    assign i     = a.a;
+    assign i     = I::X;
+    assign j     = a.a;
 }
