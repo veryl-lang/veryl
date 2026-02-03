@@ -3267,6 +3267,16 @@ fn mismatch_type() {
 
     let code = r#"
     proto package ProtoPkgA {}
+    package PkgA {}
+    module ModuleA::<PKG: ProtoPkgA> {}
+    alias module A = ModuleA::<PkgA>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto package ProtoPkgA {}
     package PkgA for ProtoPkgA {}
     proto package ProtoPkgB {}
     package PkgB for ProtoPkgB {}
