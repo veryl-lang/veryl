@@ -1,4 +1,5 @@
 use crate::conv::Context;
+use crate::conv::checker::generic::check_generic_args;
 use crate::{AnalyzerError, symbol_table};
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -37,4 +38,6 @@ pub fn check_alias_target(context: &mut Context, value: &ScopedIdentifier, r#typ
             ));
         }
     }
+
+    check_generic_args(context, &value.into());
 }
