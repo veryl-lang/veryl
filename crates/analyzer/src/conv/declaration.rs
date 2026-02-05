@@ -934,6 +934,12 @@ impl Conv<&FunctionDeclaration> for () {
                 })
             });
 
+            let can_be_const: bool = if let Ok(body) = &body {
+                can_be_const_func(context, name, &path, body)
+            } else {
+                true
+            };
+
             context.pop_affiliation();
             context.pop_hierarchy();
 
@@ -944,6 +950,7 @@ impl Conv<&FunctionDeclaration> for () {
                 r#type,
                 array: Shape::default(),
                 functions: vec![body?],
+                can_be_const,
             };
 
             // function should be inserted outside the function scope
@@ -953,6 +960,40 @@ impl Conv<&FunctionDeclaration> for () {
             Err(ir_error!(token))
         }
     }
+}
+
+fn can_be_const_func(
+    context: &Context,
+    name: StrId,
+    path: &FuncPath,
+    body: &ir::FunctionBody,
+) -> bool {
+    let mut inner_path = path.path.clone();
+    inner_path.push(name);
+
+    let ids: Vec<_> = body
+        .statements
+        .iter()
+        .flat_map(|x| x.get_referenced_var_ids())
+        .collect();
+    for id in ids {
+        if let Some(var) = context.variables.get(&id) {
+            // remove variable name
+            let mut path = var.path.clone();
+            path.pop();
+
+            if !path.included(&inner_path) {
+                return false;
+            }
+        }
+        if let Some(func) = context.functions.get(&id)
+            && !func.can_be_const
+        {
+            return false;
+        }
+    }
+
+    true
 }
 
 impl Conv<&StructUnionDeclaration> for () {

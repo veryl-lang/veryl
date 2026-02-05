@@ -1,7 +1,7 @@
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
+    AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant, VarId,
     VarPathSelect,
 };
 use crate::symbol::ClockDomain;
@@ -277,6 +277,20 @@ impl SystemFunctionCall {
         if let SystemFunctionKind::Readmemh(_, x) = &self.kind {
             for x in &x.0 {
                 x.eval_assign(context, assign_table, assign_context);
+            }
+        }
+    }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        match &self.kind {
+            SystemFunctionKind::Bits(x)
+            | SystemFunctionKind::Size(x)
+            | SystemFunctionKind::Clog2(x)
+            | SystemFunctionKind::Onehot(x) => x.0.get_referenced_var_ids(),
+            SystemFunctionKind::Readmemh(x, y) => {
+                let mut ret = x.0.get_referenced_var_ids();
+                ret.append(&mut y.0.iter().map(|x| x.id).collect());
+                ret
             }
         }
     }

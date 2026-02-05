@@ -30,6 +30,43 @@ impl Expression {
     pub fn create_value(value: BigUint, width: usize, token: TokenRange) -> Self {
         Self::Term(Box::new(Factor::create_value(value, width, token)))
     }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        match self {
+            Expression::Term(x) => x.get_referenced_var_ids(),
+            Expression::Unary(_, x) => x.get_referenced_var_ids(),
+            Expression::Binary(a, _, b) => {
+                let mut ret = Vec::new();
+                ret.append(&mut a.get_referenced_var_ids());
+                ret.append(&mut b.get_referenced_var_ids());
+                ret
+            }
+            Expression::Ternary(a, b, c) => {
+                let mut ret = Vec::new();
+                ret.append(&mut a.get_referenced_var_ids());
+                ret.append(&mut b.get_referenced_var_ids());
+                ret.append(&mut c.get_referenced_var_ids());
+                ret
+            }
+            Expression::Concatenation(x) => {
+                let mut ret = Vec::new();
+                for (a, b) in x {
+                    ret.append(&mut a.get_referenced_var_ids());
+                    if let Some(b) = b {
+                        ret.append(&mut b.get_referenced_var_ids());
+                    }
+                }
+                ret
+            }
+            Expression::ArrayLiteral(x) => {
+                x.iter().flat_map(|x| x.get_referenced_var_ids()).collect()
+            }
+            Expression::StructConstructor(_, x) => x
+                .iter()
+                .flat_map(|(_, x)| x.get_referenced_var_ids())
+                .collect(),
+        }
+    }
 }
 
 impl fmt::Display for Expression {
@@ -1218,6 +1255,15 @@ impl Factor {
             Factor::Unknown(x) => *x,
         }
     }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        match self {
+            Factor::Variable(x, _, _, _, _) => vec![*x],
+            Factor::FunctionCall(x, _) => x.get_referenced_var_ids(),
+            Factor::SystemFunctionCall(x, _) => x.get_referenced_var_ids(),
+            _ => vec![],
+        }
+    }
 }
 
 impl fmt::Display for Factor {
@@ -1290,6 +1336,19 @@ impl ArrayLiteralItem {
                 ret
             }
             ArrayLiteralItem::Defaul(x) => x.eval_comptime(context, None).is_global,
+        }
+    }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        match self {
+            ArrayLiteralItem::Value(x, y) => {
+                let mut ret = x.get_referenced_var_ids();
+                if let Some(y) = y {
+                    ret.append(&mut y.get_referenced_var_ids());
+                }
+                ret
+            }
+            ArrayLiteralItem::Defaul(x) => x.get_referenced_var_ids(),
         }
     }
 }

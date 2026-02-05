@@ -159,6 +159,19 @@ impl VarPath {
     pub fn first(&self) -> StrId {
         self.0[0]
     }
+    pub fn included(&self, other: &VarPath) -> bool {
+        for (i, other_path) in other.0.iter().enumerate() {
+            if let Some(self_path) = self.0.get(i) {
+                if other_path != self_path {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 impl fmt::Display for VarPath {
@@ -170,7 +183,11 @@ impl fmt::Display for VarPath {
             ret.push_str(&format!("{id}"));
         }
 
-        ret[1..].fmt(f)
+        if ret.is_empty() {
+            ret.fmt(f)
+        } else {
+            ret[1..].fmt(f)
+        }
     }
 }
 

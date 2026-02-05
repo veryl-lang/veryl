@@ -1920,12 +1920,57 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             Shape::default()
         };
 
+        // copy variables and functions defined in the same namespace
+        // of the given function.
+        let copied_variables: Vec<_> = context
+            .variables
+            .iter()
+            .filter_map(|(id, var)| {
+                let mut var_path = var.path.clone();
+                var_path.pop();
+                if var_path == path.path {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let copied_functions: Vec<_> = context
+            .functions
+            .iter()
+            .filter_map(|(id, func)| {
+                if func.path.path == path.path {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let mut local_context = Context::default();
         local_context.var_id = context.var_id;
         local_context.inherit(context);
         local_context.extract_var_paths(context, &path.path, &array);
 
+        for id in &copied_variables {
+            local_context
+                .variables
+                .insert(*id, context.variables[id].clone());
+        }
+        for id in &copied_functions {
+            local_context
+                .functions
+                .insert(*id, context.functions[id].clone());
+        }
+
         let ret: IrResult<()> = Conv::conv(&mut local_context, &definition);
+
+        for id in &copied_variables {
+            local_context.variables.remove(id);
+        }
+        for id in &copied_functions {
+            local_context.functions.remove(id);
+        }
 
         context.extract_function(&mut local_context, &path.path, &array);
         context.inherit(&mut local_context);
