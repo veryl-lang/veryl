@@ -1,4 +1,6 @@
-module veryl_testcase_Module18;
+module veryl_testcase_Module18 (
+    input var logic i_clk
+);
     logic [20-1:0] a;
     logic          b;
     logic [20-1:0] c; always_comb c = 1;
@@ -34,6 +36,15 @@ module veryl_testcase_Module18;
     logic g;
     always_comb begin
         {f, g} = 1;
+    end
+
+    logic h ;
+    logic i ;
+    logic hh;
+    logic ii;
+    always_ff @ (posedge i_clk) begin
+        {h, i}   <= 1;
+        {hh, ii} <= 1;
     end
 endmodule
 

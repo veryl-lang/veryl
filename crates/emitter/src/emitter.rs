@@ -3403,11 +3403,18 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationAssignment'
     fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        self.align_start(align_kind::IDENTIFIER);
         self.l_brace(&arg.l_brace);
         self.assign_concatenation_list(&arg.assign_concatenation_list);
         self.r_brace(&arg.r_brace);
+        self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
+        self.align_start(align_kind::ASSIGNMENT);
+        if self.in_always_ff {
+            self.str("<");
+        }
         self.equ(&arg.equ);
+        self.align_finish(align_kind::ASSIGNMENT);
         self.space(1);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
