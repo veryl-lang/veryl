@@ -534,6 +534,20 @@ fn cyclic_type_dependency() {
     ));
 
     let code = r#"
+    module ModuleA {
+        union UnionA {
+            memberA: UnionA,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicTypeDependency { .. }
+    ));
+
+    let code = r#"
     module ModuleB {
         inst u: ModuleC;
     }
@@ -4162,6 +4176,49 @@ fn mismatch_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        enum EnumA: bit<_> {
+            A = 1'bx,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        enum EnumA {
+            A,
+        }
+        const A: EnumA = EnumA::A;
+        const B: bit   = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        enum EnumA: bit<_> {
+            A,
+        }
+        const A: EnumA = EnumA::A;
+        const B: bit   = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7387,6 +7444,192 @@ fn anonymous_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param A: bit<_> = 0,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA #(
+        param A: bit[_] = '{0}
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA #(
+        const A: bit<_> = 0,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA #(
+        const A: bit[_] = '{0},
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        a: input logic<_>,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        a: input logic[_],
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var _a: logic<_>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        var _a: logic[_];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic<_> = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: logic[_] = '{0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        type A = logic<_>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        type A = logic[_];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct A {
+            a: logic<_>,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        enum A: logic<_, 1> {
+            A,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        function F() -> logic<_> {
+            return 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::AnonymousIdentifierUsage { .. }
+    ));
 }
 
 #[test]

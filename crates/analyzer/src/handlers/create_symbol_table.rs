@@ -1,13 +1,10 @@
 use crate::analyzer_error::{
-    AnalyzerError, InvalidModifierKind, InvalidTestKind, MultipleDefaultKind, UnevaluableValueKind,
+    AnalyzerError, InvalidModifierKind, InvalidTestKind, MultipleDefaultKind,
 };
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
-use crate::conv::utils::TypePosition;
-use crate::conv::{self, Conv};
 use crate::definition_table::{self, Definition};
-use crate::ir::{self, IrResult};
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::reference_table::{self, ReferenceCandidate};
@@ -76,10 +73,7 @@ pub struct CreateSymbolTable {
     anonymous_block: usize,
     attribute_lines: HashSet<u32>,
     struct_or_union: Option<StructOrUnion>,
-    enum_encoding: EnumEncodingItem,
     enum_member_prefix: Option<String>,
-    enum_member_width: usize,
-    enum_member_value: Option<EnumMemberValue>,
     enum_members: Vec<Option<SymbolId>>,
     struct_union_members: Vec<Option<SymbolId>>,
     declaration_items: Vec<SymbolId>,
@@ -120,10 +114,6 @@ pub struct CreateSymbolTable {
 enum StructOrUnion {
     InStruct,
     InUnion,
-}
-
-fn calc_width(value: usize) -> usize {
-    (usize::BITS - value.leading_zeros()) as usize
 }
 
 impl CreateSymbolTable {
@@ -354,88 +344,6 @@ impl CreateSymbolTable {
                     .push(AnalyzerError::missing_clock_domain(&token.into()));
             }
             self.exist_clock_without_domain = true;
-        }
-    }
-
-    fn evaluate_enum_value(&mut self, arg: &EnumItem) -> EnumMemberValue {
-        if let Some(ref x) = arg.enum_item_opt {
-            let mut context = conv::Context::default();
-            let expr: IrResult<ir::Expression> = Conv::conv(&mut context, x.expression.as_ref());
-
-            let explicit_value = if let Ok(mut expr) = expr {
-                let comptime = expr.eval_comptime(&mut context, None);
-                if let Ok(value) = comptime.get_value() {
-                    if value.is_xz() {
-                        None
-                    } else {
-                        let value = value.to_usize();
-
-                        let valid_variant = match self.enum_encoding {
-                            EnumEncodingItem::OneHot => value.count_ones() == 1,
-                            EnumEncodingItem::Gray => {
-                                if let Some(expected) = self.enum_variant_next_value() {
-                                    value == expected
-                                } else {
-                                    true
-                                }
-                            }
-                            _ => true,
-                        };
-                        if !valid_variant {
-                            self.errors.push(AnalyzerError::invalid_enum_variant(
-                                &arg.identifier.identifier_token.to_string(),
-                                &self.enum_encoding.to_string(),
-                                &arg.identifier.as_ref().into(),
-                            ));
-                        }
-
-                        Some(value)
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let Some(value) = explicit_value {
-                EnumMemberValue::ExplicitValue(*x.expression.clone(), Some(value))
-            } else if self.enum_encoding == EnumEncodingItem::Sequential {
-                EnumMemberValue::ExplicitValue(*x.expression.clone(), None)
-            } else {
-                self.errors.push(AnalyzerError::unevaluable_value(
-                    UnevaluableValueKind::EnumVariant,
-                    &arg.identifier.as_ref().into(),
-                ));
-                EnumMemberValue::UnevaluableValue
-            }
-        } else if let Some(value) = self.enum_variant_next_value() {
-            EnumMemberValue::ImplicitValue(value)
-        } else {
-            self.errors.push(AnalyzerError::unevaluable_value(
-                UnevaluableValueKind::EnumVariant,
-                &arg.identifier.as_ref().into(),
-            ));
-            EnumMemberValue::UnevaluableValue
-        }
-    }
-
-    fn enum_variant_next_value(&mut self) -> Option<usize> {
-        if let Some(value) = &self.enum_member_value {
-            if let Some(value) = value.value() {
-                match self.enum_encoding {
-                    EnumEncodingItem::Sequential => Some(value + 1),
-                    EnumEncodingItem::OneHot => Some(value << 1),
-                    EnumEncodingItem::Gray => Some(((value + 1) >> 1) ^ (value + 1)),
-                }
-            } else {
-                None
-            }
-        } else {
-            match self.enum_encoding {
-                EnumEncodingItem::OneHot => Some(1),
-                _ => Some(0),
-            }
         }
     }
 
@@ -1233,22 +1141,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let name = arg.identifier.text();
                 self.namespace.push(name);
 
-                // default prefix
                 self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
-
-                // reset enum encoding/width/value
-                self.enum_encoding = EnumEncodingItem::Sequential;
-                self.enum_member_width = 1;
-                self.enum_member_value = None;
-
-                let attrs = attribute_table::get(&arg.r#enum.enum_token.token);
-                for attr in attrs {
+                for attr in attribute_table::get(&arg.r#enum.enum_token.token) {
                     if let Attr::EnumMemberPrefix(x) = attr {
                         // overridden prefix by attribute
                         self.enum_member_prefix = Some(x.to_string());
-                    } else if let Attr::EnumEncoding(x) = attr {
-                        // overridden encoding by attribute
-                        self.enum_encoding = x;
                     }
                 }
 
@@ -1258,44 +1155,31 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.namespace.pop();
                 self.enum_member_prefix = None;
 
-                let members: Vec<_> = self.enum_members.drain(0..).flatten().collect();
-                let r#type = arg
+                let enum_type: Option<SymType> = arg
                     .enum_declaration_opt
                     .as_ref()
                     .map(|x| x.scalar_type.as_ref().into());
-                if let Some(r#type) = &r#type
+
+                if let Some(ref r#type) = enum_type
                     && !self.check_identifer_with_type(&arg.identifier, r#type)
                 {
                     self.pop_type_dag_cand(None);
                     return Ok(());
                 }
 
-                let width = if let Some(x) = r#type.clone() {
-                    let mut context = conv::Context::default();
-                    let r#type = x.to_ir_type(&mut context, TypePosition::Enum);
-                    if let Ok(x) = r#type {
-                        x.total_width().unwrap_or(0)
-                    } else {
-                        0
-                    }
-                } else {
-                    calc_width(members.len() - 1).max(self.enum_member_width)
-                };
-
-                for member in &members {
-                    if let Some(mut x) = symbol_table::get(*member) {
-                        if let SymbolKind::EnumMember(property) = &mut x.kind {
-                            property.width = Some(width);
-                        }
-                        symbol_table::update(x);
+                let mut enum_encoding = EnumEncodingItem::Sequential;
+                for attr in attribute_table::get(&arg.r#enum.enum_token.token) {
+                    if let Attr::EnumEncoding(x) = attr {
+                        // overridden encoding by attribute
+                        enum_encoding = x;
                     }
                 }
 
                 let property = EnumProperty {
-                    r#type,
-                    width,
-                    members,
-                    encoding: self.enum_encoding,
+                    r#type: enum_type,
+                    width: 0,
+                    members: self.enum_members.drain(0..).flatten().collect(),
+                    encoding: enum_encoding,
                 };
                 let kind = SymbolKind::Enum(property);
                 if let Some(id) =
@@ -1319,13 +1203,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
         if let HandlerPoint::After = self.point {
             let token = arg.identifier.identifier_token.token;
 
-            let value = self.evaluate_enum_value(arg);
-            let prefix = self.enum_member_prefix.clone().unwrap();
-            let property = EnumMemberProperty {
-                value: value.clone(),
-                width: None,
-                prefix,
+            let value = if let Some(x) = &arg.enum_item_opt {
+                EnumMemberValue::ExplicitValue(x.expression.as_ref().clone(), None)
+            } else {
+                EnumMemberValue::ImplicitValue(0)
             };
+
+            let prefix = self.enum_member_prefix.clone().unwrap();
+            let property = EnumMemberProperty { value, prefix };
             let kind = SymbolKind::EnumMember(property);
             let id = self.insert_symbol(&token, kind, false);
             self.enum_members.push(id);
@@ -1343,11 +1228,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
             if let Some(namespace) = namespace {
                 self.namespace.push(namespace);
             }
-
-            self.enum_member_width = self
-                .enum_member_width
-                .max(calc_width(value.value().unwrap_or(0)));
-            self.enum_member_value = Some(value);
         }
         Ok(())
     }

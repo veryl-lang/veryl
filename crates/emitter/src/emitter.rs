@@ -68,6 +68,7 @@ pub struct Emitter {
     in_direction_with_var: bool,
     in_import: bool,
     in_scalar_type: bool,
+    scalar_width: usize,
     in_expression: Vec<()>,
     in_attribute: bool,
     in_named_argument: Vec<bool>,
@@ -111,6 +112,7 @@ impl Default for Emitter {
             aligner: Aligner::new(),
             measure: Measure::default(),
             in_start_token: false,
+            scalar_width: 0,
             consumed_next_newline: false,
             single_line: Vec::new(),
             multi_line: Vec::new(),
@@ -557,6 +559,7 @@ impl Emitter {
             ScalarTypeGroup::FactorType(x) => self.factor_type(&x.factor_type),
         }
         self.in_scalar_type = false;
+        self.scalar_width = 0;
         self.align_finish(align_kind::WIDTH);
     }
 
@@ -3261,7 +3264,11 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'Width'
     fn width(&mut self, arg: &Width) {
         self.token(&arg.l_angle.l_angle_token.replace("["));
-        self.expression(&arg.expression);
+        if arg.width_list.is_empty() && arg.expression.is_anonymous_expression() {
+            self.str(&self.scalar_width.to_string());
+        } else {
+            self.expression(&arg.expression);
+        }
         self.str("-1:0");
         for x in &arg.width_list {
             self.token(&x.comma.comma_token.replace("]["));
@@ -4314,13 +4321,14 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
         let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        if let SymbolKind::Enum(r#enum) = enum_symbol.found.kind {
-            self.enum_width = r#enum.width;
-            self.emit_enum_implicit_valiant = matches!(
-                r#enum.encoding,
-                EnumEncodingItem::OneHot | EnumEncodingItem::Gray
-            );
-        }
+        let SymbolKind::Enum(r#enum) = enum_symbol.found.kind else {
+            unreachable!();
+        };
+        self.enum_width = r#enum.width;
+        self.emit_enum_implicit_valiant = matches!(
+            r#enum.encoding,
+            EnumEncodingItem::OneHot | EnumEncodingItem::Gray
+        );
 
         self.token(
             &arg.r#enum
@@ -4330,6 +4338,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         if let Some(ref x) = arg.enum_declaration_opt {
             self.enum_type = Some(x.scalar_type.as_ref().clone());
+            self.scalar_width = self.enum_width;
             self.emit_scalar_type(&x.scalar_type, false);
         } else {
             self.str(&format!("logic [{}-1:0]", self.enum_width));

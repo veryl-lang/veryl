@@ -46,6 +46,12 @@ module veryl_testcase_Module09;
         FOO_H_1
     } H;
 
+    typedef enum bit [3-1:0] {
+        I_X = 3'd1,
+        I_Y = 3'd2,
+        I_Z = 3'd4
+    } I;
+
     A     a;
     B     b;
     C     c;
@@ -54,7 +60,8 @@ module veryl_testcase_Module09;
     F     f;
     G     g;
     H     h;
-    logic i;
+    I     i;
+    logic j;
 
     always_comb a.a   = 1;
     always_comb a.aa  = 1;
@@ -66,6 +73,7 @@ module veryl_testcase_Module09;
     always_comb f     = F_X;
     always_comb g     = G_X;
     always_comb h     = FOO_H_0;
-    always_comb i     = a.a;
+    always_comb i     = I_X;
+    always_comb j     = a.a;
 endmodule
 //# sourceMappingURL=../map/09_struct_enum.sv.map

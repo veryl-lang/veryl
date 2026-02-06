@@ -418,6 +418,10 @@ impl Type {
         None
     }
 
+    pub fn is_inferable_width(&self) -> bool {
+        self.width.dims() == 1 && self.width.last().unwrap().is_none()
+    }
+
     pub fn total_width(&self) -> Option<usize> {
         Some(self.kind.width()? * self.width.total()?)
     }

@@ -1,7 +1,7 @@
 use crate::HashMap;
 use crate::attribute::EnumEncodingItem;
+use crate::conv::Context;
 use crate::conv::utils::{TypePosition, eval_size, eval_type};
-use crate::conv::{Context, Conv};
 use crate::definition_table::DefinitionId;
 use crate::ir::{self, Shape};
 use crate::namespace::Namespace;
@@ -1208,17 +1208,17 @@ impl Type {
             | TypeKind::ResetSyncHigh
             | TypeKind::ResetSyncLow
             | TypeKind::Bit
-            | TypeKind::BBool
-            | TypeKind::LBool
             | TypeKind::Logic => {
                 let mut ret = Shape::default();
 
                 if self.width.is_empty() {
                     ret.push(Some(1));
                 } else {
+                    let allow_inferable = matches!(&self.kind, TypeKind::Bit | TypeKind::Logic)
+                        && self.width.len() == 1
+                        && pos == TypePosition::Enum;
                     for w in &self.width {
-                        let mut expr: ir::Expression = Conv::conv(context, w)?;
-                        let (_, value) = eval_size(context, &mut expr);
+                        let (_, value) = eval_size(context, w, allow_inferable)?;
                         ret.push(value);
                     }
                 }
@@ -1227,16 +1227,18 @@ impl Type {
             }
             TypeKind::UserDefined(_) => {
                 let mut ret = Shape::default();
-
                 for w in &self.width {
-                    let mut expr: ir::Expression = Conv::conv(context, w)?;
-                    let (_, value) = eval_size(context, &mut expr);
+                    let (_, value) = eval_size(context, w, false)?;
                     ret.push(value);
                 }
 
                 ret
             }
-            TypeKind::Type | TypeKind::String | TypeKind::AbstractInterface(_) => {
+            TypeKind::BBool
+            | TypeKind::LBool
+            | TypeKind::Type
+            | TypeKind::String
+            | TypeKind::AbstractInterface(_) => {
                 // TODO packed array is forbidden
                 Shape::default()
             }
@@ -1246,8 +1248,7 @@ impl Type {
         let mut array = Shape::default();
 
         for w in &self.array {
-            let mut expr: ir::Expression = Conv::conv(context, w)?;
-            let (_, value) = eval_size(context, &mut expr);
+            let (_, value) = eval_size(context, w, false)?;
             array.push(value);
         }
 
@@ -2235,7 +2236,6 @@ impl EnumMemberValue {
 #[derive(Debug, Clone)]
 pub struct EnumMemberProperty {
     pub value: EnumMemberValue,
-    pub width: Option<usize>,
     pub prefix: String,
 }
 
