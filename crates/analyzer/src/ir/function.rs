@@ -76,6 +76,7 @@ pub struct Function {
     pub r#type: Option<Type>,
     pub array: Shape,
     pub functions: Vec<FunctionBody>,
+    pub can_be_const: bool,
 }
 
 impl Function {
@@ -195,7 +196,11 @@ impl FunctionCall {
             ValueVariant::Unknown
         };
 
-        let mut is_const = true;
+        let mut is_const = context
+            .functions
+            .get(&self.id)
+            .map(|f| f.can_be_const)
+            .unwrap_or(true);
         for expr in self.inputs.values_mut() {
             is_const &= expr.eval_comptime(context, None).is_const;
         }
@@ -255,6 +260,20 @@ impl FunctionCall {
                 x.set_index(index);
             }
         }
+    }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        let mut ret = Vec::new();
+
+        ret.push(self.id);
+        for input in self.inputs.values() {
+            ret.append(&mut input.get_referenced_var_ids());
+        }
+        for output in self.outputs.values() {
+            ret.append(&mut output.iter().map(|x| x.id).collect());
+        }
+
+        ret
     }
 }
 

@@ -14,6 +14,15 @@ use veryl_parser::token_range::TokenRange;
 #[derive(Clone, Default)]
 pub struct StatementBlock(pub Vec<Statement>);
 
+impl StatementBlock {
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        self.0
+            .iter()
+            .flat_map(|x| x.get_referenced_var_ids())
+            .collect()
+    }
+}
+
 #[derive(Clone)]
 pub enum Statement {
     Assign(AssignStatement),
@@ -70,6 +79,16 @@ impl Statement {
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
             Statement::Null => (),
+        }
+    }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        match self {
+            Statement::Assign(x) => x.get_referenced_var_ids(),
+            Statement::If(x) => x.get_referenced_var_ids(),
+            Statement::IfReset(x) => x.get_referenced_var_ids(),
+            Statement::FunctionCall(x) => x.get_referenced_var_ids(),
+            _ => vec![],
         }
     }
 }
@@ -228,6 +247,14 @@ impl AssignStatement {
         }
         self.expr.set_index(index);
     }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        let mut ret = self.expr.get_referenced_var_ids();
+        for dst in &self.dst {
+            ret.push(dst.id);
+        }
+        ret
+    }
 }
 
 impl fmt::Display for AssignStatement {
@@ -311,6 +338,25 @@ impl IfStatement {
             x.set_index(index);
         }
     }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        let mut ret = self.cond.get_referenced_var_ids();
+        ret.append(
+            &mut self
+                .true_side
+                .iter()
+                .flat_map(|x| x.get_referenced_var_ids())
+                .collect(),
+        );
+        ret.append(
+            &mut self
+                .false_side
+                .iter()
+                .flat_map(|x| x.get_referenced_var_ids())
+                .collect(),
+        );
+        ret
+    }
 }
 
 impl fmt::Display for IfStatement {
@@ -380,6 +426,25 @@ impl IfResetStatement {
         for x in &mut self.false_side {
             x.set_index(index);
         }
+    }
+
+    pub fn get_referenced_var_ids(&self) -> Vec<VarId> {
+        let mut ret = Vec::new();
+        ret.append(
+            &mut self
+                .true_side
+                .iter()
+                .flat_map(|x| x.get_referenced_var_ids())
+                .collect(),
+        );
+        ret.append(
+            &mut self
+                .false_side
+                .iter()
+                .flat_map(|x| x.get_referenced_var_ids())
+                .collect(),
+        );
+        ret
     }
 }
 
