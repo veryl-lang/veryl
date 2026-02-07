@@ -4,7 +4,7 @@ use crate::conv::Context;
 use crate::conv::utils::eval_width_select;
 use crate::ir::{AssignDestination, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind};
 use crate::symbol::Affiliation;
-use crate::value::{Value, gen_mask};
+use crate::value::{Value, ValueBigUint};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -191,7 +191,7 @@ impl VarIndex {
         let ret: Vec<_> = ret
             .into_iter()
             .rev()
-            .map(|x| Expression::create_value(x.into(), 32, token))
+            .map(|x| Expression::create_value(Value::new(x as u64, 32, false), token))
             .collect();
         Self(ret)
     }
@@ -234,7 +234,7 @@ impl VarIndex {
         let mut ret = vec![];
         for x in &self.0 {
             if let Some(x) = x.eval_value(context, None) {
-                ret.push(x.to_usize())
+                ret.push(x.to_usize().unwrap_or(0))
             } else {
                 return None;
             }
@@ -286,8 +286,7 @@ impl VarSelectOp {
                 let minus_one = Expression::Unary(
                     Op::Sub,
                     Box::new(Expression::create_value(
-                        1u32.into(),
-                        32,
+                        Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
                 );
@@ -301,8 +300,7 @@ impl VarSelectOp {
                     Box::new(expr),
                     Op::Add,
                     Box::new(Expression::create_value(
-                        1u32.into(),
-                        32,
+                        Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
                 );
@@ -315,8 +313,7 @@ impl VarSelectOp {
                 let minus_one = Expression::Unary(
                     Op::Sub,
                     Box::new(Expression::create_value(
-                        1u32.into(),
-                        32,
+                        Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
                 );
@@ -438,7 +435,7 @@ impl VarSelect {
                 let beg = beg.eval_value(context, None);
 
                 let beg = if let Some(beg) = beg {
-                    beg.to_usize()
+                    beg.to_usize().unwrap_or(0)
                 } else {
                     // Even if beg is unknown, single select can be determined
                     if self.1.is_none() {
@@ -457,7 +454,7 @@ impl VarSelect {
 
                 let (beg, end) = if let Some((op, x)) = &self.1 {
                     range.set_end(x.token_range());
-                    let end = x.eval_value(context, None)?.to_usize();
+                    let end = x.eval_value(context, None)?.to_usize().unwrap_or(0);
                     op.eval_value(beg, end)
                 } else {
                     (beg, beg)
@@ -502,7 +499,7 @@ impl VarSelect {
                             continue;
                         }
 
-                        let beg = beg.to_usize();
+                        let beg = beg.to_usize().unwrap_or(0);
                         let mut out_of_range = beg >= size;
 
                         if i == dim - 1 {
@@ -573,9 +570,9 @@ impl VarSelect {
         let dim = self.dimension();
         if r#type.dims() < dim {
             if dim == 1 && r#type.dims() == 0 && !is_array {
-                let x = self.0[0].eval_value(context, None)?.to_usize();
+                let x = self.0[0].eval_value(context, None)?.to_usize().unwrap_or(0);
                 let (x, y) = if let Some((op, y)) = &self.1 {
-                    let y = y.eval_value(context, None)?.to_usize();
+                    let y = y.eval_value(context, None)?.to_usize().unwrap_or(0);
                     op.eval_value(x, y)
                 } else {
                     (x, x)
@@ -590,10 +587,10 @@ impl VarSelect {
             if let Some(w) = w {
                 if i == skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x.eval_value(context, None)?.to_usize();
+                    let x = x.eval_value(context, None)?.to_usize().unwrap_or(0);
 
                     let (x, y) = if let Some((op, y)) = &self.1 {
-                        let y = y.eval_value(context, None)?.to_usize();
+                        let y = y.eval_value(context, None)?.to_usize().unwrap_or(0);
                         op.eval_value(x, y)
                     } else {
                         (x, x)
@@ -608,7 +605,7 @@ impl VarSelect {
                     }
                 } else if i > skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x.eval_value(context, None)?.to_usize();
+                    let x = x.eval_value(context, None)?.to_usize().unwrap_or(0);
 
                     beg += x * base;
                     end += x * base;
@@ -777,7 +774,7 @@ impl Variable {
     pub fn unassigned(&self) -> Vec<usize> {
         let mut ret = vec![];
         if let Some(total_width) = self.total_width() {
-            let mask = gen_mask(total_width);
+            let mask = ValueBigUint::gen_mask(total_width);
 
             for (i, assigned) in self.assigned.iter().enumerate() {
                 if *assigned != mask {
@@ -838,7 +835,7 @@ impl fmt::Display for Variable {
             }
             ret.push_str(&format!("{}", r#type));
 
-            ret.push_str(&format!(" = 'h{:x};\n", value));
+            ret.push_str(&format!(" = {:x};\n", value));
         }
         ret.trim_end().fmt(f)
     }
@@ -882,13 +879,13 @@ mod tests {
 
         for x in x {
             let token = TokenRange::default();
-            let expr = Expression::create_value((*x).into(), 8, token);
+            let expr = Expression::create_value(Value::new(*x as u64, 8, false), token);
             ret.push(expr);
         }
 
         if let Some(y) = y {
             let token = TokenRange::default();
-            let expr = Expression::create_value(y.into(), 8, token);
+            let expr = Expression::create_value(Value::new(y as u64, 8, false), token);
             let op = VarSelectOp::Colon;
             ret.1 = Some((op, expr));
         }
@@ -907,12 +904,12 @@ mod tests {
         let x4 = gen_var_select(&[2], None);
         let x5 = gen_var_select(&[2], Some(3));
 
-        assert_eq!(x0.to_string(), "[02][03][04]");
-        assert_eq!(x1.to_string(), "[02][03][04:05]");
-        assert_eq!(x2.to_string(), "[02][03]");
-        assert_eq!(x3.to_string(), "[02][03:04]");
-        assert_eq!(x4.to_string(), "[02]");
-        assert_eq!(x5.to_string(), "[02:03]");
+        assert_eq!(x0.to_string(), "[8'h02][8'h03][8'h04]");
+        assert_eq!(x1.to_string(), "[8'h02][8'h03][8'h04:8'h05]");
+        assert_eq!(x2.to_string(), "[8'h02][8'h03]");
+        assert_eq!(x3.to_string(), "[8'h02][8'h03:8'h04]");
+        assert_eq!(x4.to_string(), "[8'h02]");
+        assert_eq!(x5.to_string(), "[8'h02:8'h03]");
 
         let array = Shape::new(vec![Some(4), Some(5), Some(6)]);
 
@@ -965,12 +962,12 @@ mod tests {
         let x5 = gen_var_select(&[3], Some(2));
         let x6 = gen_var_select(&[], None);
 
-        assert_eq!(x0.to_string(), "[02][03][04]");
-        assert_eq!(x1.to_string(), "[02][03][05:04]");
-        assert_eq!(x2.to_string(), "[02][03]");
-        assert_eq!(x3.to_string(), "[02][04:03]");
-        assert_eq!(x4.to_string(), "[02]");
-        assert_eq!(x5.to_string(), "[03:02]");
+        assert_eq!(x0.to_string(), "[8'h02][8'h03][8'h04]");
+        assert_eq!(x1.to_string(), "[8'h02][8'h03][8'h05:8'h04]");
+        assert_eq!(x2.to_string(), "[8'h02][8'h03]");
+        assert_eq!(x3.to_string(), "[8'h02][8'h04:8'h03]");
+        assert_eq!(x4.to_string(), "[8'h02]");
+        assert_eq!(x5.to_string(), "[8'h03:8'h02]");
         assert_eq!(x6.to_string(), "");
 
         let width = Shape::new(vec![Some(4), Some(5), Some(6)]);
@@ -1045,29 +1042,101 @@ mod tests {
         let x22 = VarIndex::from_index(22, &array);
         let x23 = VarIndex::from_index(23, &array);
 
-        assert_eq!(x00.to_string(), "[00000000][00000000][00000000]");
-        assert_eq!(x01.to_string(), "[00000000][00000000][00000001]");
-        assert_eq!(x02.to_string(), "[00000000][00000000][00000002]");
-        assert_eq!(x03.to_string(), "[00000000][00000000][00000003]");
-        assert_eq!(x04.to_string(), "[00000000][00000001][00000000]");
-        assert_eq!(x05.to_string(), "[00000000][00000001][00000001]");
-        assert_eq!(x06.to_string(), "[00000000][00000001][00000002]");
-        assert_eq!(x07.to_string(), "[00000000][00000001][00000003]");
-        assert_eq!(x08.to_string(), "[00000000][00000002][00000000]");
-        assert_eq!(x09.to_string(), "[00000000][00000002][00000001]");
-        assert_eq!(x10.to_string(), "[00000000][00000002][00000002]");
-        assert_eq!(x11.to_string(), "[00000000][00000002][00000003]");
-        assert_eq!(x12.to_string(), "[00000001][00000000][00000000]");
-        assert_eq!(x13.to_string(), "[00000001][00000000][00000001]");
-        assert_eq!(x14.to_string(), "[00000001][00000000][00000002]");
-        assert_eq!(x15.to_string(), "[00000001][00000000][00000003]");
-        assert_eq!(x16.to_string(), "[00000001][00000001][00000000]");
-        assert_eq!(x17.to_string(), "[00000001][00000001][00000001]");
-        assert_eq!(x18.to_string(), "[00000001][00000001][00000002]");
-        assert_eq!(x19.to_string(), "[00000001][00000001][00000003]");
-        assert_eq!(x20.to_string(), "[00000001][00000002][00000000]");
-        assert_eq!(x21.to_string(), "[00000001][00000002][00000001]");
-        assert_eq!(x22.to_string(), "[00000001][00000002][00000002]");
-        assert_eq!(x23.to_string(), "[00000001][00000002][00000003]");
+        assert_eq!(
+            x00.to_string(),
+            "[32'h00000000][32'h00000000][32'h00000000]"
+        );
+        assert_eq!(
+            x01.to_string(),
+            "[32'h00000000][32'h00000000][32'h00000001]"
+        );
+        assert_eq!(
+            x02.to_string(),
+            "[32'h00000000][32'h00000000][32'h00000002]"
+        );
+        assert_eq!(
+            x03.to_string(),
+            "[32'h00000000][32'h00000000][32'h00000003]"
+        );
+        assert_eq!(
+            x04.to_string(),
+            "[32'h00000000][32'h00000001][32'h00000000]"
+        );
+        assert_eq!(
+            x05.to_string(),
+            "[32'h00000000][32'h00000001][32'h00000001]"
+        );
+        assert_eq!(
+            x06.to_string(),
+            "[32'h00000000][32'h00000001][32'h00000002]"
+        );
+        assert_eq!(
+            x07.to_string(),
+            "[32'h00000000][32'h00000001][32'h00000003]"
+        );
+        assert_eq!(
+            x08.to_string(),
+            "[32'h00000000][32'h00000002][32'h00000000]"
+        );
+        assert_eq!(
+            x09.to_string(),
+            "[32'h00000000][32'h00000002][32'h00000001]"
+        );
+        assert_eq!(
+            x10.to_string(),
+            "[32'h00000000][32'h00000002][32'h00000002]"
+        );
+        assert_eq!(
+            x11.to_string(),
+            "[32'h00000000][32'h00000002][32'h00000003]"
+        );
+        assert_eq!(
+            x12.to_string(),
+            "[32'h00000001][32'h00000000][32'h00000000]"
+        );
+        assert_eq!(
+            x13.to_string(),
+            "[32'h00000001][32'h00000000][32'h00000001]"
+        );
+        assert_eq!(
+            x14.to_string(),
+            "[32'h00000001][32'h00000000][32'h00000002]"
+        );
+        assert_eq!(
+            x15.to_string(),
+            "[32'h00000001][32'h00000000][32'h00000003]"
+        );
+        assert_eq!(
+            x16.to_string(),
+            "[32'h00000001][32'h00000001][32'h00000000]"
+        );
+        assert_eq!(
+            x17.to_string(),
+            "[32'h00000001][32'h00000001][32'h00000001]"
+        );
+        assert_eq!(
+            x18.to_string(),
+            "[32'h00000001][32'h00000001][32'h00000002]"
+        );
+        assert_eq!(
+            x19.to_string(),
+            "[32'h00000001][32'h00000001][32'h00000003]"
+        );
+        assert_eq!(
+            x20.to_string(),
+            "[32'h00000001][32'h00000002][32'h00000000]"
+        );
+        assert_eq!(
+            x21.to_string(),
+            "[32'h00000001][32'h00000002][32'h00000001]"
+        );
+        assert_eq!(
+            x22.to_string(),
+            "[32'h00000001][32'h00000002][32'h00000002]"
+        );
+        assert_eq!(
+            x23.to_string(),
+            "[32'h00000001][32'h00000002][32'h00000003]"
+        );
     }
 }

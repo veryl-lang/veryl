@@ -55,12 +55,12 @@ pub fn eval_expr(
 pub fn eval_range(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
     let beg = beg.eval_comptime(context, None);
-    let beg = beg.get_value()?.to_usize();
+    let beg = beg.get_value()?.to_usize().unwrap_or(0);
 
     let end = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
         let end = end.eval_comptime(context, None);
-        let end = end.get_value()?.to_usize();
+        let end = end.get_value()?.to_usize().unwrap_or(0);
 
         if matches!(x.range_operator.as_ref(), RangeOperator::DotDotEqu(_)) {
             end + 1
@@ -85,7 +85,10 @@ impl ArrayLiteralExpression {
     pub fn to_var_index(&self) -> VarIndex {
         let mut ret = vec![];
         for i in &self.index {
-            let expr = ir::Expression::create_value((*i).into(), 32, TokenRange::default());
+            let expr = ir::Expression::create_value(
+                Value::new(*i as u64, 32, false),
+                TokenRange::default(),
+            );
             ret.push(expr);
         }
         VarIndex(ret)
@@ -94,7 +97,10 @@ impl ArrayLiteralExpression {
     pub fn to_var_select(&self) -> VarSelect {
         let mut ret = vec![];
         for i in &self.select {
-            let expr = ir::Expression::create_value((*i).into(), 32, TokenRange::default());
+            let expr = ir::Expression::create_value(
+                Value::new(*i as u64, 32, false),
+                TokenRange::default(),
+            );
             ret.push(expr);
         }
         VarSelect(ret, None)
@@ -145,7 +151,7 @@ pub fn eval_array_literal(
                     let repeat = if let Some(repeat) = repeat {
                         let repeat =
                             eval_repeat(context, repeat).ok_or_else(|| ir_error!(token))?;
-                        repeat.to_usize()
+                        repeat.to_usize().unwrap_or(0)
                     } else {
                         1
                     };
@@ -280,7 +286,7 @@ pub fn eval_size(
 ) -> IrResult<(Comptime, Option<usize>)> {
     let (comptime, expr) = eval_expr(context, None, expr, allow_inferable_size)?;
     if let Ok(x) = comptime.get_value() {
-        let value = x.to_usize();
+        let value = x.to_usize().unwrap_or(0);
         let value = context.check_size(value, expr.token_range());
         if value == Some(0) {
             Ok((comptime, None))
@@ -642,7 +648,7 @@ pub fn eval_type(
                 x.kind
             }
             ValueVariant::Numeric(x) => {
-                let value = x.to_usize();
+                let value = x.to_usize().unwrap_or(0);
                 let value = context.check_size(value, path.paths[0].base.into());
                 width.push(value);
                 ir::TypeKind::Bit
@@ -998,7 +1004,7 @@ pub fn eval_for_range(
     if let Some((op, expr)) = step {
         let mut step: ir::Expression = Conv::conv(context, expr)?;
         let step = step.eval_comptime(context, None);
-        let step = step.get_value()?.to_usize();
+        let step = step.get_value()?.to_usize().unwrap_or(0);
         let op: ir::Op = Conv::conv(context, op)?;
 
         let mut ret = vec![];
@@ -1238,8 +1244,7 @@ pub fn eval_external_symbol(
             match &x.value {
                 EnumMemberValue::ImplicitValue(x) => {
                     return Ok(ir::Expression::create_value(
-                        (*x).into(),
-                        r#enum.width,
+                        Value::new(*x as u64, r#enum.width, false),
                         token,
                     ));
                 }

@@ -139,7 +139,7 @@ fn eval_enum_member_value(
                 enum_member.value.clone()
             }
         } else {
-            let value = value.to_usize();
+            let value = value.to_usize().unwrap_or(0);
             let is_valid = match r#enum.encoding {
                 EnumEncodingItem::OneHot => value.count_ones() == 1,
                 EnumEncodingItem::Gray => get_enum_member_next_value(r#enum.encoding, pre_value)

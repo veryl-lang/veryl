@@ -11,7 +11,7 @@ use crate::symbol::SymbolKind;
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{BigUint, ir_error, msb_table};
+use crate::{ir_error, msb_table};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -353,13 +353,13 @@ impl Conv<&CastingType> for ir::Factor {
                 }
                 CastingType::Based(x) => {
                     let value: Comptime = Conv::conv(context, x.based.as_ref())?;
-                    let value = value.get_value().unwrap().to_usize();
+                    let value = value.get_value().unwrap().to_usize().unwrap_or(0);
                     let value = context.check_size(value, x.based.based_token.token.into());
                     (TypeKind::Bit, Shape::new(vec![value]), false)
                 }
                 CastingType::BaseLess(x) => {
                     let value: Comptime = Conv::conv(context, x.base_less.as_ref())?;
-                    let value = value.get_value().unwrap().to_usize();
+                    let value = value.get_value().unwrap().to_usize().unwrap_or(0);
                     let value = context.check_size(value, x.base_less.base_less_token.token.into());
                     (TypeKind::Bit, Shape::new(vec![value]), false)
                 }
@@ -440,10 +440,10 @@ impl Conv<&Factor> for ir::Expression {
             }
             Factor::BooleanLiteral(x) => {
                 let x = match x.boolean_literal.as_ref() {
-                    BooleanLiteral::True(_) => 1u32,
-                    BooleanLiteral::False(_) => 0u32,
+                    BooleanLiteral::True(_) => 1,
+                    BooleanLiteral::False(_) => 0,
                 };
-                let value = Value::new(BigUint::from(x), 1, false);
+                let value = Value::new(x, 1, false);
                 let r#type = Type {
                     kind: TypeKind::Bit,
                     width: Shape::new(vec![Some(1)]),
@@ -567,7 +567,7 @@ impl Conv<&Factor> for ir::Expression {
             }
             Factor::StringLiteral(x) => {
                 let text = x.string_literal.string_literal_token.token.text;
-                let value = Value::new(text.0.into(), 32, false);
+                let value = Value::new(text.0 as u64, 32, false);
                 let r#type = Type {
                     kind: TypeKind::String,
                     ..Default::default()
@@ -615,9 +615,10 @@ impl Conv<&Factor> for ir::Expression {
                                 };
                             let comptime = if let Some(width) = width {
                                 let msb = width.saturating_sub(1);
-                                Comptime::create_value(msb.into(), 32, token)
+                                Comptime::create_value(Value::new(msb as u64, 32, false), token)
                             } else {
-                                let mut ret = Comptime::create_value(0u32.into(), 32, token);
+                                let mut ret =
+                                    Comptime::create_value(Value::new(0, 32, false), token);
                                 ret.value = ValueVariant::Unknown;
                                 ret
                             };
@@ -642,13 +643,19 @@ impl Conv<&Factor> for ir::Expression {
                             } else {
                                 0
                             };
-                            Ok(ir::Expression::create_value(msb.into(), 32, token))
+                            Ok(ir::Expression::create_value(
+                                Value::new(msb as u64, 32, false),
+                                token,
+                            ))
                         } else {
                             context.insert_error(AnalyzerError::unknown_msb(&token));
                             Err(ir_error!(token))
                         }
                     }
-                    FactorGroup::Lsb(_) => Ok(ir::Expression::create_value(0u32.into(), 32, token)),
+                    FactorGroup::Lsb(_) => Ok(ir::Expression::create_value(
+                        Value::new(0, 32, false),
+                        token,
+                    )),
                 }
             }
             Factor::InsideExpression(x) => {
@@ -802,12 +809,12 @@ impl Conv<&Based> for Comptime {
             TypeKind::Bit
         };
 
-        let width = context.check_size(value.width, token);
+        let width = context.check_size(value.width(), token);
 
         let r#type = Type {
             kind,
             width: Shape::new(vec![width]),
-            signed: value.signed,
+            signed: value.signed(),
             ..Default::default()
         };
 
@@ -962,10 +969,10 @@ mod tests {
         let x2 = x2.get_value().unwrap();
         let x3 = x3.get_value().unwrap();
 
-        assert_eq!(format!("{x0:x}"), "00000000");
-        assert_eq!(format!("{x1:x}"), "00000001");
-        assert_eq!(format!("{x2:x}"), "00000064");
-        assert_eq!(format!("{x3:x}"), "00002710");
+        assert_eq!(format!("{x0:x}"), "32'sh00000000");
+        assert_eq!(format!("{x1:x}"), "32'sh00000001");
+        assert_eq!(format!("{x2:x}"), "32'sh00000064");
+        assert_eq!(format!("{x3:x}"), "32'sh00002710");
     }
 
     #[test]
@@ -999,14 +1006,14 @@ mod tests {
         let x6 = x6.get_value().unwrap();
         let x7 = x7.get_value().unwrap();
 
-        assert_eq!(format!("{x0:x}"), "00f5");
-        assert_eq!(format!("{x1:x}"), "0xzz");
-        assert_eq!(format!("{x2:x}"), "438299");
-        assert_eq!(format!("{x3:x}"), "2zzexx");
-        assert_eq!(format!("{x4:x}"), "075bcd15");
-        assert_eq!(format!("{x5:x}"), "3ade68b1");
-        assert_eq!(format!("{x6:x}"), "12a45f78");
-        assert_eq!(format!("{x7:x}"), "fx7z5x32");
+        assert_eq!(format!("{x0:x}"), "16'h00f5");
+        assert_eq!(format!("{x1:x}"), "16'h0XZZ");
+        assert_eq!(format!("{x2:x}"), "24'h438299");
+        assert_eq!(format!("{x3:x}"), "24'h2ZZeXX");
+        assert_eq!(format!("{x4:x}"), "32'h075bcd15");
+        assert_eq!(format!("{x5:x}"), "32'h3ade68b1");
+        assert_eq!(format!("{x6:x}"), "32'h12a45f78");
+        assert_eq!(format!("{x7:x}"), "32'hfx7z5x32");
     }
 
     #[test]
@@ -1040,14 +1047,14 @@ mod tests {
         let x6 = x6.get_value().unwrap();
         let x7 = x7.get_value().unwrap();
 
-        assert_eq!(format!("{x0:x}"), "f5");
-        assert_eq!(format!("{x1:x}"), "xzz");
-        assert_eq!(format!("{x2:x}"), "438299");
-        assert_eq!(format!("{x3:x}"), "2zzexx");
-        assert_eq!(format!("{x4:x}"), "75bcd15");
-        assert_eq!(format!("{x5:x}"), "3ade68b1");
-        assert_eq!(format!("{x6:x}"), "12a45f78");
-        assert_eq!(format!("{x7:x}"), "fx7z5x32");
+        assert_eq!(format!("{x0:x}"), "8'hf5");
+        assert_eq!(format!("{x1:x}"), "11'hXZZ");
+        assert_eq!(format!("{x2:x}"), "23'h438299");
+        assert_eq!(format!("{x3:x}"), "22'h2ZZeXX");
+        assert_eq!(format!("{x4:x}"), "27'h75bcd15");
+        assert_eq!(format!("{x5:x}"), "30'h3ade68b1");
+        assert_eq!(format!("{x6:x}"), "29'h12a45f78");
+        assert_eq!(format!("{x7:x}"), "32'hfx7z5x32");
     }
 
     #[test]
@@ -1105,11 +1112,11 @@ mod tests {
         let x3 = x3.get_value().unwrap();
         let x4 = x4.get_value().unwrap();
 
-        assert_eq!(format!("{x0:x}"), "419d6f34540ca458");
-        assert_eq!(format!("{x1:x}"), "441ac53a7e04bcda");
-        assert_eq!(format!("{x2:x}"), "3f202e85be180b74");
-        assert_eq!(format!("{x3:x}"), "441ac53a7e04bcda");
-        assert_eq!(format!("{x4:x}"), "3f202e85be180b74");
+        assert_eq!(format!("{x0:x}"), "64'h419d6f34540ca458");
+        assert_eq!(format!("{x1:x}"), "64'h441ac53a7e04bcda");
+        assert_eq!(format!("{x2:x}"), "64'h3f202e85be180b74");
+        assert_eq!(format!("{x3:x}"), "64'h441ac53a7e04bcda");
+        assert_eq!(format!("{x4:x}"), "64'h3f202e85be180b74");
     }
 
     #[test]
@@ -1138,16 +1145,16 @@ mod tests {
         let x8: ir::Expression = Conv::conv(&mut context, &x8).unwrap();
         let x9: ir::Expression = Conv::conv(&mut context, &x9).unwrap();
 
-        assert_eq!(format!("{x0}"), "(+ 00000001)");
-        assert_eq!(format!("{x1}"), "(- 00000001)");
-        assert_eq!(format!("{x2}"), "(! 00000001)");
-        assert_eq!(format!("{x3}"), "(~ 00000001)");
-        assert_eq!(format!("{x4}"), "(& 00000001)");
-        assert_eq!(format!("{x5}"), "(| 00000001)");
-        assert_eq!(format!("{x6}"), "(^ 00000001)");
-        assert_eq!(format!("{x7}"), "(~& 00000001)");
-        assert_eq!(format!("{x8}"), "(~| 00000001)");
-        assert_eq!(format!("{x9}"), "(~^ 00000001)");
+        assert_eq!(format!("{x0}"), "(+ 32'sh00000001)");
+        assert_eq!(format!("{x1}"), "(- 32'sh00000001)");
+        assert_eq!(format!("{x2}"), "(! 32'sh00000001)");
+        assert_eq!(format!("{x3}"), "(~ 32'sh00000001)");
+        assert_eq!(format!("{x4}"), "(& 32'sh00000001)");
+        assert_eq!(format!("{x5}"), "(| 32'sh00000001)");
+        assert_eq!(format!("{x6}"), "(^ 32'sh00000001)");
+        assert_eq!(format!("{x7}"), "(~& 32'sh00000001)");
+        assert_eq!(format!("{x8}"), "(~| 32'sh00000001)");
+        assert_eq!(format!("{x9}"), "(~^ 32'sh00000001)");
     }
 
     #[test]
@@ -1206,33 +1213,33 @@ mod tests {
         let x23: ir::Expression = Conv::conv(&mut context, &x23).unwrap();
         let x24: ir::Expression = Conv::conv(&mut context, &x24).unwrap();
 
-        assert_eq!(format!("{x00}"), "(00000001 ** 00000001)");
-        assert_eq!(format!("{x01}"), "(00000001 * 00000001)");
-        assert_eq!(format!("{x02}"), "(00000001 / 00000001)");
-        assert_eq!(format!("{x03}"), "(00000001 % 00000001)");
-        assert_eq!(format!("{x04}"), "(00000001 + 00000001)");
-        assert_eq!(format!("{x05}"), "(00000001 + (- 00000001))");
-        assert_eq!(format!("{x06}"), "(00000001 << 00000001)");
-        assert_eq!(format!("{x07}"), "(00000001 >> 00000001)");
-        assert_eq!(format!("{x08}"), "(00000001 <<< 00000001)");
-        assert_eq!(format!("{x09}"), "(00000001 >>> 00000001)");
-        assert_eq!(format!("{x10}"), "(00000001 <: 00000001)");
-        assert_eq!(format!("{x11}"), "(00000001 <= 00000001)");
-        assert_eq!(format!("{x12}"), "(00000001 >: 00000001)");
-        assert_eq!(format!("{x13}"), "(00000001 >= 00000001)");
-        assert_eq!(format!("{x14}"), "(00000001 == 00000001)");
-        assert_eq!(format!("{x15}"), "(00000001 != 00000001)");
-        assert_eq!(format!("{x16}"), "(00000001 ==? 00000001)");
-        assert_eq!(format!("{x17}"), "(00000001 !=? 00000001)");
-        assert_eq!(format!("{x18}"), "(00000001 & 00000001)");
-        assert_eq!(format!("{x19}"), "(00000001 ^ 00000001)");
-        assert_eq!(format!("{x20}"), "(00000001 ~^ 00000001)");
-        assert_eq!(format!("{x21}"), "(00000001 | 00000001)");
-        assert_eq!(format!("{x22}"), "(00000001 && 00000001)");
-        assert_eq!(format!("{x23}"), "(00000001 || 00000001)");
+        assert_eq!(format!("{x00}"), "(32'sh00000001 ** 32'sh00000001)");
+        assert_eq!(format!("{x01}"), "(32'sh00000001 * 32'sh00000001)");
+        assert_eq!(format!("{x02}"), "(32'sh00000001 / 32'sh00000001)");
+        assert_eq!(format!("{x03}"), "(32'sh00000001 % 32'sh00000001)");
+        assert_eq!(format!("{x04}"), "(32'sh00000001 + 32'sh00000001)");
+        assert_eq!(format!("{x05}"), "(32'sh00000001 + (- 32'sh00000001))");
+        assert_eq!(format!("{x06}"), "(32'sh00000001 << 32'sh00000001)");
+        assert_eq!(format!("{x07}"), "(32'sh00000001 >> 32'sh00000001)");
+        assert_eq!(format!("{x08}"), "(32'sh00000001 <<< 32'sh00000001)");
+        assert_eq!(format!("{x09}"), "(32'sh00000001 >>> 32'sh00000001)");
+        assert_eq!(format!("{x10}"), "(32'sh00000001 <: 32'sh00000001)");
+        assert_eq!(format!("{x11}"), "(32'sh00000001 <= 32'sh00000001)");
+        assert_eq!(format!("{x12}"), "(32'sh00000001 >: 32'sh00000001)");
+        assert_eq!(format!("{x13}"), "(32'sh00000001 >= 32'sh00000001)");
+        assert_eq!(format!("{x14}"), "(32'sh00000001 == 32'sh00000001)");
+        assert_eq!(format!("{x15}"), "(32'sh00000001 != 32'sh00000001)");
+        assert_eq!(format!("{x16}"), "(32'sh00000001 ==? 32'sh00000001)");
+        assert_eq!(format!("{x17}"), "(32'sh00000001 !=? 32'sh00000001)");
+        assert_eq!(format!("{x18}"), "(32'sh00000001 & 32'sh00000001)");
+        assert_eq!(format!("{x19}"), "(32'sh00000001 ^ 32'sh00000001)");
+        assert_eq!(format!("{x20}"), "(32'sh00000001 ~^ 32'sh00000001)");
+        assert_eq!(format!("{x21}"), "(32'sh00000001 | 32'sh00000001)");
+        assert_eq!(format!("{x22}"), "(32'sh00000001 && 32'sh00000001)");
+        assert_eq!(format!("{x23}"), "(32'sh00000001 || 32'sh00000001)");
         assert_eq!(
             format!("{x24}"),
-            "(((00000001 ** 00000001) + 00000001) + (- ((00000001 / 00000001) % 00000001)))"
+            "(((32'sh00000001 ** 32'sh00000001) + 32'sh00000001) + (- ((32'sh00000001 / 32'sh00000001) % 32'sh00000001)))"
         );
     }
 
@@ -1246,10 +1253,13 @@ mod tests {
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
-        assert_eq!(format!("{x0}"), "(00000001 ? 00000002 : 00000003)");
+        assert_eq!(
+            format!("{x0}"),
+            "(32'sh00000001 ? 32'sh00000002 : 32'sh00000003)"
+        );
         assert_eq!(
             format!("{x1}"),
-            "(00000001 ? 00000002 : (00000003 ? 00000004 : 00000005))"
+            "(32'sh00000001 ? 32'sh00000002 : (32'sh00000003 ? 32'sh00000004 : 32'sh00000005))"
         );
     }
 
@@ -1263,8 +1273,8 @@ mod tests {
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
-        assert_eq!(format!("{x0}"), "1");
-        assert_eq!(format!("{x1}"), "0");
+        assert_eq!(format!("{x0}"), "1'h1");
+        assert_eq!(format!("{x1}"), "1'h0");
     }
 
     #[test]
@@ -1277,8 +1287,14 @@ mod tests {
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
-        assert_eq!(format!("{x0}"), "((00000001 + 00000002) * 00000003)");
-        assert_eq!(format!("{x1}"), "(00000001 + (00000002 * 00000003))");
+        assert_eq!(
+            format!("{x0}"),
+            "((32'sh00000001 + 32'sh00000002) * 32'sh00000003)"
+        );
+        assert_eq!(
+            format!("{x1}"),
+            "(32'sh00000001 + (32'sh00000002 * 32'sh00000003))"
+        );
     }
 
     #[test]
@@ -1291,10 +1307,13 @@ mod tests {
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
-        assert_eq!(format!("{x0}"), "{00000001, 00000002, 00000003}");
+        assert_eq!(
+            format!("{x0}"),
+            "{32'sh00000001, 32'sh00000002, 32'sh00000003}"
+        );
         assert_eq!(
             format!("{x1}"),
-            "{00000001 repeat 00000002, 00000002, 00000003 repeat 00000004}"
+            "{32'sh00000001 repeat 32'sh00000002, 32'sh00000002, 32'sh00000003 repeat 32'sh00000004}"
         );
     }
 
@@ -1310,11 +1329,11 @@ mod tests {
 
         assert_eq!(
             format!("{x0}"),
-            "((0000000a ==? 00000000) ? 00000001 : ((0000000a ==? 00000001) ? 00000002 : 00000003))"
+            "((32'sh0000000a ==? 32'sh00000000) ? 32'sh00000001 : ((32'sh0000000a ==? 32'sh00000001) ? 32'sh00000002 : 32'sh00000003))"
         );
         assert_eq!(
             format!("{x1}"),
-            "(((00000000 <= 0000000a) && (0000000a <= 00000002)) ? 00000001 : (((00000004 <= 0000000a) && (0000000a <: 00000005)) ? 00000002 : 00000003))"
+            "(((32'sh00000000 <= 32'sh0000000a) && (32'sh0000000a <= 32'sh00000002)) ? 32'sh00000001 : (((32'sh00000004 <= 32'sh0000000a) && (32'sh0000000a <: 32'sh00000005)) ? 32'sh00000002 : 32'sh00000003))"
         );
     }
 
@@ -1328,7 +1347,7 @@ mod tests {
 
         assert_eq!(
             format!("{x0}"),
-            "((00000000 == 00000001) ? 00000002 : ((00000001 <: 00000002) ? 00000002 : 00000003))"
+            "((32'sh00000000 == 32'sh00000001) ? 32'sh00000002 : ((32'sh00000001 <: 32'sh00000002) ? 32'sh00000002 : 32'sh00000003))"
         );
     }
 }

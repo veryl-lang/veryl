@@ -5,7 +5,7 @@ use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
 use crate::ir::{
     Comptime, Expression, FunctionCall, SystemFunctionCall, VarId, VarIndex, VarPath, VarSelect,
 };
-use crate::value::{gen_mask, gen_mask_range};
+use crate::value::ValueBigUint;
 use indent::indent_all_by;
 use std::borrow::Cow;
 use std::fmt;
@@ -131,13 +131,13 @@ impl AssignDestination {
                 let Some(width) = variable.total_width() else {
                     return;
                 };
-                gen_mask(width)
+                ValueBigUint::gen_mask(width)
             } else {
                 let Some((beg, end)) = self.select.eval_value(context, &variable.r#type, false)
                 else {
                     return;
                 };
-                gen_mask_range(beg, end)
+                ValueBigUint::gen_mask_range(beg, end)
             };
 
             let mut errors = vec![];

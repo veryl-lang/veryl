@@ -12,7 +12,7 @@ use crate::namespace::DefineContext;
 use crate::symbol::{Affiliation, SymbolKind};
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{AnalyzerError, BigUint, ir_error};
+use crate::{AnalyzerError, ir_error};
 use veryl_parser::resource_table;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -354,7 +354,7 @@ fn check_true_false(comptime: &Comptime) -> (bool, bool) {
     if comptime.is_const
         && let Ok(value) = comptime.get_value()
     {
-        if value.to_usize() != 0 {
+        if value.to_usize().unwrap_or(0) != 0 {
             (true, false)
         } else {
             (false, true)
@@ -626,11 +626,8 @@ impl Conv<&ForStatement> for ir::StatementBlock {
                 let mut comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
                 comptime.is_const = true;
                 if let Some(total_width) = r#type.total_width() {
-                    comptime.value = ir::ValueVariant::Numeric(Value::new(
-                        BigUint::from(i),
-                        total_width,
-                        r#type.signed,
-                    ));
+                    comptime.value =
+                        ir::ValueVariant::Numeric(Value::new(i as u64, total_width, r#type.signed));
                 }
 
                 let id = c.insert_var_path(path.clone(), comptime.clone());

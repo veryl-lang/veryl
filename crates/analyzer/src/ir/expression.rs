@@ -3,13 +3,11 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_repeat;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    Comptime, FunctionCall, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant, VarId,
+    Comptime, FunctionCall, Op, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant, VarId,
     VarIndex, VarSelect,
 };
 use crate::symbol::ClockDomain;
-use crate::value::{Value, gen_mask, gen_mask_range, to_biguint};
-use crate::{BigInt, BigUint};
-use num_traits::ToPrimitive;
+use crate::value::{Value, ValueBigUint};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -27,8 +25,8 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub fn create_value(value: BigUint, width: usize, token: TokenRange) -> Self {
-        Self::Term(Box::new(Factor::create_value(value, width, token)))
+    pub fn create_value(value: Value, token: TokenRange) -> Self {
+        Self::Term(Box::new(Factor::create_value(value, token)))
     }
 }
 
@@ -89,296 +87,25 @@ impl Expression {
         match self {
             Expression::Term(x) => x.eval_value(context, context_width),
             Expression::Unary(op, x) => {
-                let mut ret = x.eval_value(context, context_width)?;
-                let ret = match op {
-                    Op::BitAnd => reduction(ret, |x, y| x & y),
-                    Op::BitOr => reduction(ret, |x, y| x | y),
-                    Op::BitXor => reduction(ret, |x, y| x ^ y),
-                    Op::BitXnor => {
-                        let mut ret = reduction(ret, |x, y| x ^ y);
-                        ret.payload = (ret.payload == 0u32.into()).into();
-                        ret
-                    }
-                    Op::BitNand => {
-                        let mut ret = reduction(ret, |x, y| x & y);
-                        ret.payload = (ret.payload == 0u32.into()).into();
-                        ret
-                    }
-                    Op::BitNor => {
-                        let mut ret = reduction(ret, |x, y| x | y);
-                        ret.payload = (ret.payload == 0u32.into()).into();
-                        ret
-                    }
-                    Op::BitNot => {
-                        for i in 0..ret.width {
-                            let i = i as u64;
-                            ret.payload.set_bit(i, !ret.payload.bit(i));
-                            if ret.mask_xz.bit(i) {
-                                ret.payload.set_bit(i, false);
-                            }
-                        }
-                        ret
-                    }
-                    Op::LogicNot => {
-                        ret.payload = (ret.payload == 0u32.into()).into();
-                        ret.width = 1;
-                        ret.signed = false;
-                        ret
-                    }
-                    Op::Add => ret,
-                    Op::Sub => {
-                        let width = ret.width.max(context_width.unwrap_or(0));
-                        let mask = gen_mask(width);
-                        ret.payload ^= mask.clone();
-                        ret.payload += BigUint::from(1u32);
-                        ret.payload &= mask;
-                        ret
-                    }
-                    _ => unreachable!(),
-                };
+                let x_context_width = op.unary_context_width(context_width);
+
+                let ret = x.eval_value(context, x_context_width)?;
+                let ret = op.eval_unary(&ret, context_width);
                 Some(ret)
             }
             Expression::Binary(x, op, y) => {
-                let x = x.eval_value(context, context_width)?;
+                let x_context_width = op.binary_x_context_width(context_width);
+                let y_context_width = op.binary_y_context_width(context_width);
+
+                let x = x.eval_value(context, x_context_width)?;
 
                 if op == &Op::As {
                     return Some(x);
                 }
 
-                let y = y.eval_value(context, context_width)?;
-                let ret = match op {
-                    Op::Pow => binary_op_signed(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, _, z| x.max(z.unwrap_or(0)),
-                        |x, y| Some(x.pow(y.to_u32()?)),
-                        |x, y| x & y,
-                    ),
-                    Op::Div => binary_op_signed(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| x.checked_div(y),
-                        |x, y| x & y,
-                    ),
-                    Op::Rem => binary_op_signed(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| if y == &0u32.into() { None } else { Some(x % y) },
-                        |x, y| x & y,
-                    ),
-                    Op::Mul => binary_op_signed(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| Some(x * y),
-                        |x, y| x & y,
-                    ),
-                    Op::Add => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| Some(x + y),
-                        |x, y| x & y,
-                    ),
-                    // "a - b" is converted to "a + (-b)" to avoid overflow
-                    Op::Sub => unreachable!(),
-                    Op::ArithShiftL => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, _, z| x.max(z.unwrap_or(0)),
-                        |x, y| Some(x << y.to_u32()?),
-                        |x, y| x & y,
-                    ),
-                    Op::ArithShiftR => {
-                        let width = x.width;
-                        binary_op(
-                            &x,
-                            &y,
-                            context_width,
-                            |x, _, z| x.max(z.unwrap_or(0)),
-                            |x, y| {
-                                let sign = x.bit(width as u64 - 1);
-                                let y = y.to_u32()?;
-                                let mask = if sign {
-                                    let shift = y as usize;
-                                    let mask = gen_mask(shift);
-                                    mask << (width - shift)
-                                } else {
-                                    0u32.into()
-                                };
-                                Some((x >> y) | mask.clone())
-                            },
-                            |x, y| x & y,
-                        )
-                    }
-                    Op::LogicShiftL => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, _, z| x.max(z.unwrap_or(0)),
-                        |x, y| Some(x << y.to_u32()?),
-                        |x, y| x & y,
-                    ),
-                    Op::LogicShiftR => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, _, z| x.max(z.unwrap_or(0)),
-                        |x, y| Some(x >> y.to_u32()?),
-                        |x, y| x & y,
-                    ),
-                    Op::LessEq => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some((x <= y).into()),
-                        |_, _| false,
-                    ),
-                    Op::GreaterEq => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some((x >= y).into()),
-                        |_, _| false,
-                    ),
-                    Op::Less => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some((x < y).into()),
-                        |_, _| false,
-                    ),
-                    Op::Greater => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some((x > y).into()),
-                        |_, _| false,
-                    ),
-                    Op::Eq => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some((x == y).into()),
-                        |_, _| false,
-                    ),
-                    Op::EqWildcard => {
-                        let width = x.width.max(y.width);
-                        let mut ret = true;
-                        for i in 0..width {
-                            let i = i as u64;
-                            let x_bit = x.payload.bit(i);
-                            let y_bit = y.payload.bit(i);
-                            if !y.mask_xz.bit(i) {
-                                ret = ret && (x_bit == y_bit);
-                            }
-                        }
-                        Value {
-                            payload: ret.into(),
-                            mask_xz: 0u32.into(),
-                            width: 1,
-                            signed: false,
-                        }
-                    }
-                    Op::Ne => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some((x != y).into()),
-                        |_, _| false,
-                    ),
-                    Op::NeWildcard => {
-                        let width = x.width.max(y.width);
-                        let mut ret = false;
-                        for i in 0..width {
-                            let i = i as u64;
-                            let x_bit = x.payload.bit(i);
-                            let y_bit = y.payload.bit(i);
-                            if !y.mask_xz.bit(i) {
-                                ret = ret || (x_bit != y_bit);
-                            }
-                        }
-                        Value {
-                            payload: ret.into(),
-                            mask_xz: 0u32.into(),
-                            width: 1,
-                            signed: false,
-                        }
-                    }
-                    Op::LogicAnd => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some(((x != &0u32.into()) & (y != &0u32.into())).into()),
-                        |x, y| x & y,
-                    ),
-                    Op::LogicOr => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |_, _, _| 1,
-                        |x, y| Some(((x != &0u32.into()) | (y != &0u32.into())).into()),
-                        |x, y| x & y,
-                    ),
-                    Op::BitAnd => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| Some(x & y),
-                        |x, y| x & y,
-                    ),
-                    Op::BitOr => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| Some(x | y),
-                        |x, y| x & y,
-                    ),
-                    Op::BitXor => binary_op(
-                        &x,
-                        &y,
-                        context_width,
-                        |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                        |x, y| Some(x ^ y),
-                        |x, y| x & y,
-                    ),
-                    Op::BitXnor => {
-                        let mut ret = binary_op(
-                            &x,
-                            &y,
-                            context_width,
-                            |x, y, z| x.max(y).max(z.unwrap_or(0)),
-                            |x, y| Some(x ^ y),
-                            |x, y| x & y,
-                        );
-                        for i in 0..ret.width {
-                            let i = i as u64;
-                            ret.payload.set_bit(i, !ret.payload.bit(i));
-                            if ret.mask_xz.bit(i) {
-                                ret.payload.set_bit(i, false);
-                            }
-                        }
-                        ret
-                    }
-                    _ => unreachable!(),
-                };
+                let y = y.eval_value(context, y_context_width)?;
+
+                let ret = op.eval_binary(&x, &y, context_width);
                 Some(ret)
             }
             Expression::Ternary(x, y, z) => {
@@ -386,45 +113,31 @@ impl Expression {
                 let y = y.eval_value(context, context_width)?;
                 let z = z.eval_value(context, context_width)?;
 
-                let width = y.width.max(z.width);
+                let width = y.width().max(z.width());
 
-                let mut ret = if x.payload == 0u32.into() { z } else { y };
-                ret.width = width;
+                let ret = if x.to_usize().unwrap_or(0) == 0 { z } else { y };
+                let ret = ret.expand(width, false).into_owned();
                 Some(ret)
             }
             Expression::Concatenation(x) => {
-                let mut payload = BigUint::from(0u32);
-                let mut mask_xz = BigUint::from(0u32);
-                let mut width = 0;
+                let mut ret = Value::new(0, 0, false);
                 for (exp, rep) in x.iter() {
                     let exp = exp.eval_value(context, context_width)?;
 
                     let rep = if let Some(rep) = rep {
                         let token = rep.token_range();
                         let rep = rep.eval_value(context, context_width)?;
-                        let rep = rep.payload.to_usize()?;
+                        let rep = rep.to_usize()?;
                         context.check_size(rep, token)?
                     } else {
                         1
                     };
 
                     for _ in 0..rep {
-                        payload <<= exp.width;
-                        mask_xz <<= exp.width;
-
-                        payload |= &exp.payload;
-                        mask_xz |= &exp.mask_xz;
-
-                        width += exp.width;
+                        ret = ret.concat(&exp);
                     }
                 }
-
-                Some(Value {
-                    payload,
-                    mask_xz,
-                    width,
-                    signed: false,
-                })
+                Some(ret)
             }
             Expression::StructConstructor(r#type, exprs) => {
                 let mut ret = Value::new(0u32.into(), 0, false);
@@ -459,7 +172,8 @@ impl Expression {
             Expression::Term(x) => x.eval_comptime(context, context_width),
             Expression::Unary(op, x) => {
                 let range = x.token_range();
-                let x = x.eval_comptime(context, context_width);
+                let x_context_width = op.unary_context_width(context_width);
+                let x = x.eval_comptime(context, x_context_width);
                 let mut ret = x.clone();
                 ret.value = value;
 
@@ -515,8 +229,11 @@ impl Expression {
                 let range_x = x.token_range();
                 let range_y = y.token_range();
 
-                let x = x.eval_comptime(context, context_width);
-                let y = y.eval_comptime(context, context_width);
+                let x_context_width = op.binary_x_context_width(context_width);
+                let y_context_width = op.binary_y_context_width(context_width);
+
+                let x = x.eval_comptime(context, x_context_width);
+                let y = y.eval_comptime(context, y_context_width);
 
                 let mut ret = x.clone();
                 ret.value = value;
@@ -760,7 +477,7 @@ impl Expression {
                             if let Some(total_width) = expr.r#type.total_width()
                                 && let Some(width) = &mut width
                             {
-                                *width += total_width * repeat.to_usize();
+                                *width += total_width * repeat.to_usize().unwrap_or(0);
                             } else {
                                 width = None;
                             }
@@ -822,8 +539,7 @@ impl Expression {
             && let Ok(value) = ret.get_value()
             && !value.is_xz()
         {
-            *self =
-                Expression::create_value(value.payload.clone(), value.width, self.token_range());
+            *self = Expression::create_value(value.clone(), self.token_range());
         }
 
         ret
@@ -939,103 +655,6 @@ impl Expression {
     }
 }
 
-fn reduction<T: Fn(BigUint, BigUint) -> BigUint>(value: Value, func: T) -> Value {
-    let mask_xz = if value.is_xz() { 1u32 } else { 0u32 }.into();
-
-    let mut tmp = value.payload;
-    let mut payload = tmp.clone() & BigUint::from(1u32);
-    for _ in 0..value.width - 1 {
-        tmp >>= 1;
-        payload = func(payload, tmp.clone() & BigUint::from(1u32));
-    }
-
-    Value {
-        payload,
-        mask_xz,
-        width: 1,
-        signed: false,
-    }
-}
-
-fn binary_op<
-    T: Fn(usize, usize, Option<usize>) -> usize,
-    U: Fn(&BigUint, &BigUint) -> Option<BigUint>,
-    V: Fn(bool, bool) -> bool,
->(
-    x: &Value,
-    y: &Value,
-    context_width: Option<usize>,
-    calc_width: T,
-    calc_value: U,
-    calc_signed: V,
-) -> Value {
-    let width = calc_width(x.width, y.width, context_width);
-
-    let mut mask_xz = if x.is_xz() | y.is_xz() {
-        gen_mask(width)
-    } else {
-        BigUint::from(0u32)
-    };
-
-    let payload = if let Some(payload) = calc_value(&x.payload, &y.payload) {
-        if payload.bits() as usize > width {
-            payload & gen_mask(width)
-        } else {
-            payload
-        }
-    } else {
-        mask_xz = gen_mask(width);
-        BigUint::from(0u32)
-    };
-    let signed = calc_signed(x.signed, y.signed);
-
-    Value {
-        payload,
-        mask_xz,
-        width,
-        signed,
-    }
-}
-
-fn binary_op_signed<
-    T: Fn(usize, usize, Option<usize>) -> usize,
-    U: Fn(&BigInt, &BigInt) -> Option<BigInt>,
-    V: Fn(bool, bool) -> bool,
->(
-    x: &Value,
-    y: &Value,
-    context_width: Option<usize>,
-    calc_width: T,
-    calc_value: U,
-    calc_signed: V,
-) -> Value {
-    let width = calc_width(x.width, y.width, context_width);
-
-    let mut mask_xz = if x.is_xz() | y.is_xz() {
-        gen_mask(width)
-    } else {
-        BigUint::from(0u32)
-    };
-
-    let x_payload = x.to_bigint();
-    let y_payload = y.to_bigint();
-
-    let payload = if let Some(payload) = calc_value(&x_payload, &y_payload) {
-        to_biguint(payload, width)
-    } else {
-        mask_xz = gen_mask(width);
-        BigUint::from(0u32)
-    };
-    let signed = calc_signed(x.signed, y.signed);
-
-    Value {
-        payload,
-        mask_xz,
-        width,
-        signed,
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Factor {
     Variable(VarId, VarIndex, VarSelect, Comptime, TokenRange),
@@ -1048,8 +667,8 @@ pub enum Factor {
 }
 
 impl Factor {
-    pub fn create_value(value: BigUint, width: usize, token: TokenRange) -> Self {
-        let comptime = Comptime::create_value(value, width, token);
+    pub fn create_value(value: Value, token: TokenRange) -> Self {
+        let comptime = Comptime::create_value(value, token);
         Factor::Value(comptime, token)
     }
 
@@ -1181,7 +800,7 @@ impl Factor {
                     && let Some(variable) = context.variables.get(id).cloned()
                     && let Some((beg, end)) = select.eval_value(context, &variable.r#type, false)
                 {
-                    let mask = gen_mask_range(beg, end);
+                    let mask = ValueBigUint::gen_mask_range(beg, end);
                     assign_table.insert_reference(&variable, index, mask);
                 }
             }
@@ -1313,141 +932,6 @@ impl fmt::Display for ArrayLiteralItem {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Op {
-    /// **
-    Pow,
-    /// /
-    Div,
-    /// %
-    Rem,
-    /// *
-    Mul,
-    /// +
-    Add,
-    /// -
-    Sub,
-    /// <<<
-    ArithShiftL,
-    /// >>>
-    ArithShiftR,
-    /// <<
-    LogicShiftL,
-    /// >>
-    LogicShiftR,
-    /// <=
-    LessEq,
-    /// >=
-    GreaterEq,
-    /// <:
-    Less,
-    /// >:
-    Greater,
-    /// ==
-    Eq,
-    /// ==?
-    EqWildcard,
-    /// !=
-    Ne,
-    /// !=?
-    NeWildcard,
-    /// &&
-    LogicAnd,
-    /// ||
-    LogicOr,
-    /// !
-    LogicNot,
-    /// &
-    BitAnd,
-    /// |
-    BitOr,
-    /// ^
-    BitXor,
-    /// ~^
-    BitXnor,
-    /// ~&
-    BitNand,
-    /// ~|
-    BitNor,
-    /// ~
-    BitNot,
-    /// as
-    As,
-    /// ternary
-    Ternary,
-    /// concatenation
-    Concatenation,
-    /// array literal
-    ArrayLiteral,
-    /// condition
-    Condition,
-    /// repeat
-    Repeat,
-}
-
-impl Op {
-    pub fn eval(&self, x: usize, y: usize) -> usize {
-        match self {
-            Op::Add => x + y,
-            Op::Sub => x - y,
-            Op::Mul => x * y,
-            Op::Div => x / y,
-            Op::Rem => x % y,
-            Op::BitAnd => x & y,
-            Op::BitOr => x | y,
-            Op::BitXor => x ^ y,
-            Op::ArithShiftL => x << y,
-            Op::ArithShiftR => x >> y,
-            Op::LogicShiftL => x << y,
-            Op::LogicShiftR => x >> y,
-            _ => unimplemented!(),
-        }
-    }
-}
-
-impl fmt::Display for Op {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let str = match self {
-            Op::Pow => "**",
-            Op::Div => "/",
-            Op::Rem => "%",
-            Op::Mul => "*",
-            Op::Add => "+",
-            Op::Sub => "-",
-            Op::ArithShiftL => "<<<",
-            Op::ArithShiftR => ">>>",
-            Op::LogicShiftL => "<<",
-            Op::LogicShiftR => ">>",
-            Op::LessEq => "<=",
-            Op::GreaterEq => ">=",
-            Op::Less => "<:",
-            Op::Greater => ">:",
-            Op::Eq => "==",
-            Op::EqWildcard => "==?",
-            Op::Ne => "!=",
-            Op::NeWildcard => "!=?",
-            Op::LogicAnd => "&&",
-            Op::LogicOr => "||",
-            Op::LogicNot => "!",
-            Op::BitAnd => "&",
-            Op::BitOr => "|",
-            Op::BitXor => "^",
-            Op::BitXnor => "~^",
-            Op::BitNand => "~&",
-            Op::BitNor => "~|",
-            Op::BitNot => "~",
-            Op::As => "as",
-            Op::Ternary => "ternary",
-            Op::Concatenation => "concatenation",
-            Op::ArrayLiteral => "array litaral",
-            Op::Condition => "condition",
-            Op::Repeat => "repeat",
-        };
-
-        str.fmt(f)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1477,18 +961,18 @@ mod tests {
         let x10 = calc_expression("-8 >> 2", None);
         let x11 = calc_expression("-8 >>> 2", None);
 
-        assert_eq!(format!("{:x}", x00), "00000003");
-        assert_eq!(format!("{:x}", x01), "00000004");
-        assert_eq!(format!("{:x}", x02), "0000000e");
-        assert_eq!(format!("{:x}", x03), "00000002");
-        assert_eq!(format!("{:x}", x04), "00000001");
-        assert_eq!(format!("{:x}", x05), "00000008");
-        assert_eq!(format!("{:x}", x06), "00000005");
-        assert_eq!(format!("{:x}", x07), "ffffffff");
-        assert_eq!(format!("{:x}", x08), "00000004");
-        assert_eq!(format!("{:x}", x09), "00000004");
-        assert_eq!(format!("{:x}", x10), "3ffffffe");
-        assert_eq!(format!("{:x}", x11), "fffffffe");
+        assert_eq!(format!("{:x}", x00), "32'sh00000003");
+        assert_eq!(format!("{:x}", x01), "32'sh00000004");
+        assert_eq!(format!("{:x}", x02), "32'sh0000000e");
+        assert_eq!(format!("{:x}", x03), "32'sh00000002");
+        assert_eq!(format!("{:x}", x04), "32'sh00000001");
+        assert_eq!(format!("{:x}", x05), "32'sh00000008");
+        assert_eq!(format!("{:x}", x06), "32'sh00000005");
+        assert_eq!(format!("{:x}", x07), "32'shffffffff");
+        assert_eq!(format!("{:x}", x08), "32'h00000004");
+        assert_eq!(format!("{:x}", x09), "32'sh00000004");
+        assert_eq!(format!("{:x}", x10), "32'h3ffffffe");
+        assert_eq!(format!("{:x}", x11), "32'shfffffffe");
     }
 
     #[test]
@@ -1502,14 +986,14 @@ mod tests {
         let x6 = calc_expression("2 <= 2", None);
         let x7 = calc_expression("2 >= 2", None);
 
-        assert_eq!(format!("{:x}", x0), "1");
-        assert_eq!(format!("{:x}", x1), "0");
-        assert_eq!(format!("{:x}", x2), "1");
-        assert_eq!(format!("{:x}", x3), "0");
-        assert_eq!(format!("{:x}", x4), "0");
-        assert_eq!(format!("{:x}", x5), "0");
-        assert_eq!(format!("{:x}", x6), "1");
-        assert_eq!(format!("{:x}", x7), "1");
+        assert_eq!(format!("{:x}", x0), "1'h1");
+        assert_eq!(format!("{:x}", x1), "1'h0");
+        assert_eq!(format!("{:x}", x2), "1'h1");
+        assert_eq!(format!("{:x}", x3), "1'h0");
+        assert_eq!(format!("{:x}", x4), "1'h0");
+        assert_eq!(format!("{:x}", x5), "1'h0");
+        assert_eq!(format!("{:x}", x6), "1'h1");
+        assert_eq!(format!("{:x}", x7), "1'h1");
     }
 
     #[test]
@@ -1519,10 +1003,10 @@ mod tests {
         let x2 = calc_expression("2 == 2", None);
         let x3 = calc_expression("2 != 2", None);
 
-        assert_eq!(format!("{:x}", x0), "0");
-        assert_eq!(format!("{:x}", x1), "1");
-        assert_eq!(format!("{:x}", x2), "1");
-        assert_eq!(format!("{:x}", x3), "0");
+        assert_eq!(format!("{:x}", x0), "1'h0");
+        assert_eq!(format!("{:x}", x1), "1'h1");
+        assert_eq!(format!("{:x}", x2), "1'h1");
+        assert_eq!(format!("{:x}", x3), "1'h0");
     }
 
     #[test]
@@ -1536,14 +1020,14 @@ mod tests {
         let x6 = calc_expression("4'b0100 !=? 4'b00xx", None);
         let x7 = calc_expression("4'b0111 !=? 4'b00xx", None);
 
-        assert_eq!(format!("{:x}", x0), "1");
-        assert_eq!(format!("{:x}", x1), "1");
-        assert_eq!(format!("{:x}", x2), "0");
-        assert_eq!(format!("{:x}", x3), "0");
-        assert_eq!(format!("{:x}", x4), "0");
-        assert_eq!(format!("{:x}", x5), "0");
-        assert_eq!(format!("{:x}", x6), "1");
-        assert_eq!(format!("{:x}", x7), "1");
+        assert_eq!(format!("{:x}", x0), "1'h0");
+        assert_eq!(format!("{:x}", x1), "1'h0");
+        assert_eq!(format!("{:x}", x2), "1'h0");
+        assert_eq!(format!("{:x}", x3), "1'h0");
+        assert_eq!(format!("{:x}", x4), "1'h1");
+        assert_eq!(format!("{:x}", x5), "1'h1");
+        assert_eq!(format!("{:x}", x6), "1'h1");
+        assert_eq!(format!("{:x}", x7), "1'h1");
     }
 
     #[test]
@@ -1553,10 +1037,10 @@ mod tests {
         let x2 = calc_expression("!0", None);
         let x3 = calc_expression("!10", None);
 
-        assert_eq!(format!("{:x}", x0), "0");
-        assert_eq!(format!("{:x}", x1), "1");
-        assert_eq!(format!("{:x}", x2), "1");
-        assert_eq!(format!("{:x}", x3), "0");
+        assert_eq!(format!("{:x}", x0), "1'h0");
+        assert_eq!(format!("{:x}", x1), "1'h1");
+        assert_eq!(format!("{:x}", x2), "1'h1");
+        assert_eq!(format!("{:x}", x3), "1'h0");
     }
 
     #[test]
@@ -1567,11 +1051,11 @@ mod tests {
         let x3 = calc_expression("4'b0001 ~^ 4'b0101", None);
         let x4 = calc_expression("~4'b0101", None);
 
-        assert_eq!(format!("{:x}", x0), "1");
-        assert_eq!(format!("{:x}", x1), "5");
-        assert_eq!(format!("{:x}", x2), "4");
-        assert_eq!(format!("{:x}", x3), "b");
-        assert_eq!(format!("{:x}", x4), "a");
+        assert_eq!(format!("{:x}", x0), "4'h1");
+        assert_eq!(format!("{:x}", x1), "4'h5");
+        assert_eq!(format!("{:x}", x2), "4'h4");
+        assert_eq!(format!("{:x}", x3), "4'hb");
+        assert_eq!(format!("{:x}", x4), "4'ha");
     }
 
     #[test]
@@ -1604,33 +1088,33 @@ mod tests {
         let x22 = calc_expression("~|4'b1000", None);
         let x23 = calc_expression("~^4'b1000", None);
 
-        assert_eq!(format!("{:x}", x00), "0");
-        assert_eq!(format!("{:x}", x01), "0");
-        assert_eq!(format!("{:x}", x02), "0");
-        assert_eq!(format!("{:x}", x03), "1");
-        assert_eq!(format!("{:x}", x04), "1");
-        assert_eq!(format!("{:x}", x05), "1");
+        assert_eq!(format!("{:x}", x00), "1'h0");
+        assert_eq!(format!("{:x}", x01), "1'h0");
+        assert_eq!(format!("{:x}", x02), "1'h0");
+        assert_eq!(format!("{:x}", x03), "1'h1");
+        assert_eq!(format!("{:x}", x04), "1'h1");
+        assert_eq!(format!("{:x}", x05), "1'h1");
 
-        assert_eq!(format!("{:x}", x06), "1");
-        assert_eq!(format!("{:x}", x07), "1");
-        assert_eq!(format!("{:x}", x08), "0");
-        assert_eq!(format!("{:x}", x09), "0");
-        assert_eq!(format!("{:x}", x10), "0");
-        assert_eq!(format!("{:x}", x11), "1");
+        assert_eq!(format!("{:x}", x06), "1'h1");
+        assert_eq!(format!("{:x}", x07), "1'h1");
+        assert_eq!(format!("{:x}", x08), "1'h0");
+        assert_eq!(format!("{:x}", x09), "1'h0");
+        assert_eq!(format!("{:x}", x10), "1'h0");
+        assert_eq!(format!("{:x}", x11), "1'h1");
 
-        assert_eq!(format!("{:x}", x12), "0");
-        assert_eq!(format!("{:x}", x13), "1");
-        assert_eq!(format!("{:x}", x14), "0");
-        assert_eq!(format!("{:x}", x15), "1");
-        assert_eq!(format!("{:x}", x16), "0");
-        assert_eq!(format!("{:x}", x17), "1");
+        assert_eq!(format!("{:x}", x12), "1'h0");
+        assert_eq!(format!("{:x}", x13), "1'h1");
+        assert_eq!(format!("{:x}", x14), "1'h0");
+        assert_eq!(format!("{:x}", x15), "1'h1");
+        assert_eq!(format!("{:x}", x16), "1'h0");
+        assert_eq!(format!("{:x}", x17), "1'h1");
 
-        assert_eq!(format!("{:x}", x18), "0");
-        assert_eq!(format!("{:x}", x19), "1");
-        assert_eq!(format!("{:x}", x20), "1");
-        assert_eq!(format!("{:x}", x21), "1");
-        assert_eq!(format!("{:x}", x22), "0");
-        assert_eq!(format!("{:x}", x23), "0");
+        assert_eq!(format!("{:x}", x18), "1'h0");
+        assert_eq!(format!("{:x}", x19), "1'h1");
+        assert_eq!(format!("{:x}", x20), "1'h1");
+        assert_eq!(format!("{:x}", x21), "1'h1");
+        assert_eq!(format!("{:x}", x22), "1'h0");
+        assert_eq!(format!("{:x}", x23), "1'h0");
     }
 
     #[test]
@@ -1638,8 +1122,8 @@ mod tests {
         let x0 = calc_expression("if 0 ? 1 : 2", None);
         let x1 = calc_expression("if 1 ? 1 : 2", None);
 
-        assert_eq!(format!("{:x}", x0), "00000002");
-        assert_eq!(format!("{:x}", x1), "00000001");
+        assert_eq!(format!("{:x}", x0), "32'sh00000002");
+        assert_eq!(format!("{:x}", x1), "32'sh00000001");
     }
 
     #[test]
@@ -1647,8 +1131,8 @@ mod tests {
         let x0 = calc_expression("{4'h1, 4'h3}", None);
         let x1 = calc_expression("{4'h1 repeat 3, 4'h3}", None);
 
-        assert_eq!(format!("{:x}", x0), "13");
-        assert_eq!(format!("{:x}", x1), "1113");
+        assert_eq!(format!("{:x}", x0), "8'h13");
+        assert_eq!(format!("{:x}", x1), "16'h1113");
     }
 
     #[test]
@@ -1662,14 +1146,14 @@ mod tests {
         let x6 = calc_expression("outside 5 {3, 2..=10}", None);
         let x7 = calc_expression("outside 1 {3, 2..=10}", None);
 
-        assert_eq!(format!("{:x}", x0), "1");
-        assert_eq!(format!("{:x}", x1), "0");
-        assert_eq!(format!("{:x}", x2), "1");
-        assert_eq!(format!("{:x}", x3), "0");
-        assert_eq!(format!("{:x}", x4), "0");
-        assert_eq!(format!("{:x}", x5), "1");
-        assert_eq!(format!("{:x}", x6), "0");
-        assert_eq!(format!("{:x}", x7), "1");
+        assert_eq!(format!("{:x}", x0), "1'h1");
+        assert_eq!(format!("{:x}", x1), "1'h0");
+        assert_eq!(format!("{:x}", x2), "1'h1");
+        assert_eq!(format!("{:x}", x3), "1'h0");
+        assert_eq!(format!("{:x}", x4), "1'h0");
+        assert_eq!(format!("{:x}", x5), "1'h1");
+        assert_eq!(format!("{:x}", x6), "1'h0");
+        assert_eq!(format!("{:x}", x7), "1'h1");
     }
 
     fn token_range() -> TokenRange {
@@ -1712,7 +1196,7 @@ mod tests {
 
     fn value(value: usize) -> Box<Expression> {
         let ret = Comptime {
-            value: ValueVariant::Numeric(Value::new(BigUint::from(value), 32, false)),
+            value: ValueVariant::Numeric(Value::new(value as u64, 32, false)),
             r#type: Type {
                 kind: TypeKind::Logic,
                 width: Shape::new(vec![Some(32)]),
