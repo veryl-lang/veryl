@@ -766,3 +766,69 @@ pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
         ..converse(read_master)
     }
 }
+
+///### AXI4-Stream bus interface
+///
+///#### Modports:
+///* transmitter - AXI4-Stream Transmitter IP
+///
+///* receiver - AXI4-Receiver IP
+///
+///#### Convenience functions:
+///* t_ack() = tready && tvalid
+///
+///#### Instantiation:
+///```
+///inst c: axi4_stream_if::< axi4_stream_pkg::< DATA_W_BYTES, DEST_W, ID_W, USER_W > >;
+///```
+///#### Usage in module definition with modport:
+///```
+///module my_axi4_stream_receiver ( aclk: input clock_posedge,
+///                            aresetn: input reset_sync_low,
+///                            axi: modport axi4_stream_if::<axi4_stream_pkg::<4, 2, 8, 5>>::receiver )
+///{
+///
+///}
+///```
+pub interface axi4_stream_if::<PKG: axi4_stream_prototype> {
+
+    import PKG::*;
+
+    var tvalid : logic ;
+    var tready : logic ;
+    var tdata  : data_t;
+    var tstrb  : strb_t;
+    var tkeep  : keep_t;
+    var tlast  : logic ;
+    var tid    : id_t  ;
+    var tdest  : dest_t;
+    var tuser  : user_t;
+    var twakeup: logic ;
+
+    function t_ack () -> logic {
+        return tready && tvalid;
+    }
+
+    modport transmitter {
+
+        t_ack: import,
+
+        tvalid : output,
+        tready : output,
+        tdata  : output,
+        tstrb  : output,
+        tkeep  : output,
+        tlast  : output,
+        tid    : output,
+        tdest  : output,
+        tuser  : output,
+        twakeup: output,
+    }
+
+    modport receiver {
+
+        t_ack: import,
+
+        ..converse(transmitter)
+    }
+}
