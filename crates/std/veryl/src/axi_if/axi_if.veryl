@@ -814,7 +814,7 @@ pub interface axi4_stream_if::<PKG: axi4_stream_prototype> {
         t_ack: import,
 
         tvalid : output,
-        tready : input,
+        tready : input ,
         tdata  : output,
         tstrb  : output,
         tkeep  : output,
