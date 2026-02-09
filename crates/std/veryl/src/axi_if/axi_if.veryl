@@ -772,7 +772,7 @@ pub interface axi4_lite_if::<PKG: axi4_lite_prototype> {
 ///#### Modports:
 ///* transmitter - AXI4-Stream Transmitter IP
 ///
-///* receiver - AXI4-Receiver IP
+///* receiver - AXI4-Stream Receiver IP
 ///
 ///#### Convenience functions:
 ///* t_ack() = tready && tvalid
@@ -794,16 +794,15 @@ pub interface axi4_stream_if::<PKG: axi4_stream_prototype> {
 
     import PKG::*;
 
-    var tvalid : logic ;
-    var tready : logic ;
-    var tdata  : data_t;
-    var tstrb  : strb_t;
-    var tkeep  : keep_t;
-    var tlast  : logic ;
-    var tid    : id_t  ;
-    var tdest  : dest_t;
-    var tuser  : user_t;
-    var twakeup: logic ;
+    var tvalid: logic ;
+    var tready: logic ;
+    var tdata : data_t;
+    var tstrb : strb_t;
+    var tkeep : keep_t;
+    var tlast : logic ;
+    var tid   : id_t  ;
+    var tdest : dest_t;
+    var tuser : user_t;
 
     function t_ack () -> logic {
         return tready && tvalid;
@@ -813,16 +812,15 @@ pub interface axi4_stream_if::<PKG: axi4_stream_prototype> {
 
         t_ack: import,
 
-        tvalid : output,
-        tready : input ,
-        tdata  : output,
-        tstrb  : output,
-        tkeep  : output,
-        tlast  : output,
-        tid    : output,
-        tdest  : output,
-        tuser  : output,
-        twakeup: output,
+        tvalid: output,
+        tready: input ,
+        tdata : output,
+        tstrb : output,
+        tkeep : output,
+        tlast : output,
+        tid   : output,
+        tdest : output,
+        tuser : output,
     }
 
     modport receiver {
