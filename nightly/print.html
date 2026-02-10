@@ -320,6 +320,11 @@
     <td class="table_list_item">### AXI4-Lite bus interface
 </td>
 </tr>
+<tr>
+    <th class="table_list_item"><a href="axi4_stream_if.html">axi4_stream_if::&lt;PKG&gt;</a></th>
+    <td class="table_list_item">### AXI4-Stream bus interface
+</td>
+</tr>
 </tbody>
 </table>
 <h2 id="packages"><a class="header" href="#packages">Packages</a></h2>
@@ -354,6 +359,11 @@
 <tr>
     <th class="table_list_item"><a href="axi4_pkg.html">axi4_pkg::&lt;ADDR_W, DATA_W_BYTES, ID_W, AWUSER_W, WUSER_W, BUSER_W, ARUSER_W, RUSER_W&gt;</a></th>
     <td class="table_list_item">### AXI4 bus package
+</td>
+</tr>
+<tr>
+    <th class="table_list_item"><a href="axi4_stream_pkg.html">axi4_stream_pkg::&lt;DATA_W_BYTES, DEST_W, ID_W, USER_W&gt;</a></th>
+    <td class="table_list_item">### AXI4-Stream bus package
 </td>
 </tr>
 <tr>
@@ -2227,6 +2237,11 @@ a bit vector with a unary encoding.</p>
     <td class="table_list_item">### AXI4-Lite bus interface
 </td>
 </tr>
+<tr>
+    <th class="table_list_item"><a href="axi4_stream_if.html">axi4_stream_if::&lt;PKG&gt;</a></th>
+    <td class="table_list_item">### AXI4-Stream bus interface
+</td>
+</tr>
 </tbody>
 </table>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="axi3_ifpkg"><a class="header" href="#axi3_ifpkg">axi3_if::&lt;PKG&gt;</a></h2>
@@ -2399,6 +2414,32 @@ a bit vector with a unary encoding.</p>
 <h4 id="note"><a class="header" href="#note">Note:</a></h4>
 <p>The awid, arid, bid and rid signals on the slave* modports are optional.
 These and are used to connect compatible AXI4-Lite slaves to a full AXI4 interface (AXI ID reflection on slave required).</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="axi4_stream_ifpkg"><a class="header" href="#axi4_stream_ifpkg">axi4_stream_if::&lt;PKG&gt;</a></h2>
+<h3 id="axi4-stream-bus-interface"><a class="header" href="#axi4-stream-bus-interface">AXI4-Stream bus interface</a></h3>
+<h4 id="modports-3"><a class="header" href="#modports-3">Modports:</a></h4>
+<ul>
+<li>
+<p>transmitter - AXI4-Stream Transmitter IP</p>
+</li>
+<li>
+<p>receiver - AXI4-Stream Receiver IP</p>
+</li>
+</ul>
+<h4 id="convenience-functions-3"><a class="header" href="#convenience-functions-3">Convenience functions:</a></h4>
+<ul>
+<li>t_ack() = tready &amp;&amp; tvalid</li>
+</ul>
+<h4 id="instantiation-3"><a class="header" href="#instantiation-3">Instantiation:</a></h4>
+<pre><code>inst c: axi4_stream_if::&lt; axi4_stream_pkg::&lt; DATA_W_BYTES, DEST_W, ID_W, USER_W &gt; &gt;;
+</code></pre>
+<h4 id="usage-in-module-definition-with-modport-3"><a class="header" href="#usage-in-module-definition-with-modport-3">Usage in module definition with modport:</a></h4>
+<pre><code>module my_axi4_stream_receiver ( aclk: input clock_posedge,
+                            aresetn: input reset_sync_low,
+                            axi: modport axi4_stream_if::&lt;axi4_stream_pkg::&lt;4, 2, 8, 5&gt;&gt;::receiver )
+{
+
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="packages-1"><a class="header" href="#packages-1">Packages</a></h2>
 <hr />
 <table class="table_list">
@@ -2434,6 +2475,11 @@ These and are used to connect compatible AXI4-Lite slaves to a full AXI4 interfa
 </td>
 </tr>
 <tr>
+    <th class="table_list_item"><a href="axi4_stream_pkg.html">axi4_stream_pkg::&lt;DATA_W_BYTES, DEST_W, ID_W, USER_W&gt;</a></th>
+    <td class="table_list_item">### AXI4-Stream bus package
+</td>
+</tr>
+<tr>
     <th class="table_list_item"><a href="selector_pkg.html">selector_pkg</a></th>
     <td class="table_list_item"></td>
 </tr>
@@ -2456,6 +2502,8 @@ These and are used to connect compatible AXI4-Lite slaves to a full AXI4 interfa
 <h3 id="axi4-lite-bus-package"><a class="header" href="#axi4-lite-bus-package">AXI4-Lite bus package</a></h3>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="axi4_pkgaddr_w-data_w_bytes-id_w-awuser_w-wuser_w-buser_w-aruser_w-ruser_w"><a class="header" href="#axi4_pkgaddr_w-data_w_bytes-id_w-awuser_w-wuser_w-buser_w-aruser_w-ruser_w">axi4_pkg::&lt;ADDR_W, DATA_W_BYTES, ID_W, AWUSER_W, WUSER_W, BUSER_W, ARUSER_W, RUSER_W&gt;</a></h2>
 <h3 id="axi4-bus-package"><a class="header" href="#axi4-bus-package">AXI4 bus package</a></h3>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="axi4_stream_pkgdata_w_bytes-dest_w-id_w-user_w"><a class="header" href="#axi4_stream_pkgdata_w_bytes-dest_w-id_w-user_w">axi4_stream_pkg::&lt;DATA_W_BYTES, DEST_W, ID_W, USER_W&gt;</a></h2>
+<h3 id="axi4-stream-bus-package"><a class="header" href="#axi4-stream-bus-package">AXI4-Stream bus package</a></h3>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="selector_pkg"><a class="header" href="#selector_pkg">selector_pkg</a></h2>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="types"><a class="header" href="#types">types</a></h2>
 <p>A package for pre-defined types</p>
