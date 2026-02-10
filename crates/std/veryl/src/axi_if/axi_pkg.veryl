@@ -69,6 +69,21 @@ pub proto package axi4_lite_prototype {
     type resp_t          ;
 }
 
+///### AXI4-Stream bus package prototype
+pub proto package axi4_stream_prototype {
+    const TDATA_WIDTH      : u32;
+    const TDATA_WIDTH_BYTES: u32;
+    const TDEST_WIDTH      : u32;
+    const TID_WIDTH        : u32;
+    const TUSER_WIDTH      : u32;
+    type data_t           ;
+    type dest_t           ;
+    type id_t             ;
+    type keep_t           ;
+    type strb_t           ;
+    type user_t           ;
+}
+
 ///### AXI4 configuration definitions
 pub package axi4_config {
 
@@ -252,5 +267,22 @@ pub package axi4_lite_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32> for axi4_
 
     type proto_t = axi4_lite_config::axprot_bits  ;
     type resp_t  = axi4_lite_config::resp_variants;
+
+}
+
+///### AXI4-Stream bus package
+pub package axi4_stream_pkg::<DATA_W_BYTES: u32, DEST_W: u32, ID_W: u32, USER_W: u32> for axi4_stream_prototype {
+    const TDATA_WIDTH      : u32 = (DATA_W_BYTES * 8);
+    const TDATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
+    const TDEST_WIDTH      : u32 = DEST_W;
+    const TID_WIDTH        : u32 = ID_W;
+    const TUSER_WIDTH      : u32 = USER_W;
+
+    type data_t = logic<TDATA_WIDTH>      ;
+    type dest_t = logic<TDEST_WIDTH>      ;
+    type id_t   = logic<TID_WIDTH>        ;
+    type keep_t = logic<TDATA_WIDTH_BYTES>;
+    type strb_t = logic<TDATA_WIDTH_BYTES>;
+    type user_t = logic<TUSER_WIDTH>      ;
 
 }

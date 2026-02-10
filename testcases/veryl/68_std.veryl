@@ -21,28 +21,34 @@ module Module68A (
     );
 }
 
-module Module68B::<AXI4_PKG: $std::axi4_prototype, AXI4_LITE_PKG: $std::axi4_lite_prototype> (
-    axi4_if     : modport $std::axi4_if::<AXI4_PKG>::slave          ,
-    axi4_lite_if: modport $std::axi4_lite_if::<AXI4_LITE_PKG>::slave,
+module Module68B::<AXI4_PKG: $std::axi4_prototype, AXI4_LITE_PKG: $std::axi4_lite_prototype, AXI4_STREAM_PKG: $std::axi4_stream_prototype> (
+    axi4_if       : modport $std::axi4_if::<AXI4_PKG>::slave                 ,
+    axi4_lite_if  : modport $std::axi4_lite_if::<AXI4_LITE_PKG>::slave       ,
+    axi4_stream_if: modport $std::axi4_stream_if::<AXI4_STREAM_PKG>::receiver,
 ) {
-    connect axi4_if      <> 0;
-    connect axi4_lite_if <> 0;
+    connect axi4_if        <> 0;
+    connect axi4_lite_if   <> 0;
+    connect axi4_stream_if <> 0;
 }
 
 alias package axi_pkg = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>;
 alias package axi_lite_pkg = $std::axi4_lite_pkg::<axi_pkg::ADDRESS_WIDTH, axi_pkg::DATA_WIDTH_BYTES, axi_pkg::ID_LENGTH>;
+alias package axi_stream_pkg = $std::axi4_stream_pkg::<axi_pkg::DATA_WIDTH_BYTES, 2, axi_pkg::ID_LENGTH, 5>;
 
 module Module68C {
-    inst axi4_if            : $std::axi4_if::<axi_pkg>;
-    inst axi4_lite_if       : $std::axi4_lite_if::<axi_lite_pkg>;
-    connect axi4_if.master      <> 0;
-    connect axi4_lite_if.master <> 0;
+    inst axi4_if                   : $std::axi4_if::<axi_pkg>;
+    inst axi4_lite_if              : $std::axi4_lite_if::<axi_lite_pkg>;
+    inst axi4_stream_if            : $std::axi4_stream_if::<axi_stream_pkg>;
+    connect axi4_if.master             <> 0;
+    connect axi4_lite_if.master        <> 0;
+    connect axi4_stream_if.transmitter <> 0;
 
     assign axi4_lite_if.awid = 0;
     assign axi4_lite_if.arid = 0;
 
-    inst u: Module68B::<axi_pkg, axi_lite_pkg> (
-        axi4_if     : axi4_if     ,
-        axi4_lite_if: axi4_lite_if,
+    inst u: Module68B::<axi_pkg, axi_lite_pkg, axi_stream_pkg> (
+        axi4_if       : axi4_if       ,
+        axi4_lite_if  : axi4_lite_if  ,
+        axi4_stream_if: axi4_stream_if,
     );
 }
