@@ -193,7 +193,7 @@ impl SystemFunctionCall {
                     ValueVariant::Type(x) => x.total_width(),
                     _ => None,
                 };
-                value.map(|x| Value::new(x.into(), 32, false))
+                value.map(|x| Value::new(x as u64, 32, false))
             }
             SystemFunctionKind::Size(x) => {
                 let mut expr = x.0.clone();
@@ -203,20 +203,21 @@ impl SystemFunctionCall {
                     ValueVariant::Type(x) => x.total_width(),
                     _ => None,
                 };
-                value.map(|x| Value::new(x.into(), 32, false))
+                value.map(|x| Value::new(x as u64, 32, false))
             }
             SystemFunctionKind::Clog2(x) => {
                 let value = x.0.eval_value(context, None)?;
-                let ret = if value.payload == 0u32.into() {
+                let value = value.payload();
+                let ret = if value.as_ref() == &BigUint::from(0u32) {
                     BigUint::from(0u32)
                 } else {
-                    value.payload - BigUint::from(1u32)
+                    value.as_ref() - BigUint::from(1u32)
                 };
-                Some(Value::new(ret.bits().into(), 32, false))
+                Some(Value::new(ret.bits(), 32, false))
             }
             SystemFunctionKind::Onehot(x) => {
                 let value = x.0.eval_value(context, None)?;
-                let ret = value.payload.count_ones() == 1;
+                let ret = value.payload().count_ones() == 1;
                 Some(Value::new(ret.into(), 1, false))
             }
             SystemFunctionKind::Readmemh(_, _) => None,
@@ -228,7 +229,7 @@ impl SystemFunctionCall {
         match &self.kind {
             SystemFunctionKind::Bits(_) => {
                 if let Some(x) = value {
-                    Comptime::create_value(x.payload, 32, self.token)
+                    Comptime::create_value(x, self.token)
                 } else {
                     let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
                     ret.is_const = true;
@@ -237,7 +238,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Size(_) => {
                 if let Some(x) = value {
-                    Comptime::create_value(x.payload, 32, self.token)
+                    Comptime::create_value(x, self.token)
                 } else {
                     let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
                     ret.is_const = true;
@@ -246,7 +247,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Clog2(_) => {
                 if let Some(x) = value {
-                    Comptime::create_value(x.payload, 32, self.token)
+                    Comptime::create_value(x, self.token)
                 } else {
                     let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
                     ret.is_const = true;
@@ -255,7 +256,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Onehot(_) => {
                 if let Some(x) = value {
-                    Comptime::create_value(x.payload, 1, self.token)
+                    Comptime::create_value(x, self.token)
                 } else {
                     let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
                     ret.is_const = true;

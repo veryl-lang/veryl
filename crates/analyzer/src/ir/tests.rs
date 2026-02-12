@@ -76,33 +76,33 @@ fn basic() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0(clk): clock = 'hx;
-  input var1(rst): reset = 'hx;
-  output var2(a): logic = 'hx;
-  output var3(b): logic<32> = 'hxxxxxxxx;
-  let var4(c): logic = 'hx;
-  var var5(d): logic<32> = 'hxxxxxxxx;
-  var var6(e): logic = 'hx;
-  var var7(f): logic = 'hx;
+  input var0(clk): clock = 1'hx;
+  input var1(rst): reset = 1'hx;
+  output var2(a): logic = 1'hx;
+  output var3(b): logic<32> = 32'hxxxxxxxx;
+  let var4(c): logic = 1'hx;
+  var var5(d): logic<32> = 32'hxxxxxxxx;
+  var var6(e): logic = 1'hx;
+  var var7(f): logic = 1'hx;
 
   comb {
     var4 = var2;
   }
   ff (var0, var1) {
     if_reset {
-      var2 = 00000000;
-      var3 = 00000000;
+      var2 = 32'sh00000000;
+      var3 = 32'sh00000000;
     } else {
       var2 = (~ var2);
-      var3 = (var3 + 00000001);
+      var3 = (var3 + 32'sh00000001);
     }
   }
   comb {
-    var5 = (var3 * 00000003);
+    var5 = (var3 * 32'sh00000003);
     if var7 {
-      var6 = 00000000;
+      var6 = 32'sh00000000;
     } else {
-      var6 = 00000001;
+      var6 = 32'sh00000001;
     }
   }
 }
@@ -167,77 +167,77 @@ fn branch() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0(clk): clock = 'hx;
-  input var1(rst): reset = 'hx;
-  output var2(a): logic<32> = 'hxxxxxxxx;
-  output var3(b): logic<32> = 'hxxxxxxxx;
-  input var4(c): logic<32> = 'hxxxxxxxx;
-  output var5(d): logic<32> = 'hxxxxxxxx;
-  input var6(e): logic<32> = 'hxxxxxxxx;
-  output var7(f): logic<32> = 'hxxxxxxxx;
-  var var8(g): logic = 'hx;
-  var var9(h): logic = 'hx;
-  var var10(i): logic = 'hx;
+  input var0(clk): clock = 1'hx;
+  input var1(rst): reset = 1'hx;
+  output var2(a): logic<32> = 32'hxxxxxxxx;
+  output var3(b): logic<32> = 32'hxxxxxxxx;
+  input var4(c): logic<32> = 32'hxxxxxxxx;
+  output var5(d): logic<32> = 32'hxxxxxxxx;
+  input var6(e): logic<32> = 32'hxxxxxxxx;
+  output var7(f): logic<32> = 32'hxxxxxxxx;
+  var var8(g): logic = 1'hx;
+  var var9(h): logic = 1'hx;
+  var var10(i): logic = 1'hx;
 
   ff (var0, var1) {
     if_reset {
-      var2 = 00000000;
+      var2 = 32'sh00000000;
     } else {
       if var8 {
-        var2 = 00000001;
+        var2 = 32'sh00000001;
       } else {
         if var9 {
-          var2 = 00000002;
+          var2 = 32'sh00000002;
         } else {
-          var2 = 00000003;
+          var2 = 32'sh00000003;
         }
       }
     }
   }
   comb {
     if var8 {
-      var3 = 00000000;
+      var3 = 32'sh00000000;
     } else {
       if var9 {
-        var3 = 00000001;
+        var3 = 32'sh00000001;
       } else {
         if var10 {
-          var3 = 00000002;
+          var3 = 32'sh00000002;
         } else {
-          var3 = 00000003;
+          var3 = 32'sh00000003;
         }
       }
     }
-    if (var4 ==? 00000000) {
-      var5 = 00000000;
+    if (var4 ==? 32'sh00000000) {
+      var5 = 32'sh00000000;
     } else {
-      if (var4 ==? 00000001) {
-        var5 = 00000001;
+      if (var4 ==? 32'sh00000001) {
+        var5 = 32'sh00000001;
       } else {
-        if (var4 ==? 00000002) {
-          var5 = 00000002;
+        if (var4 ==? 32'sh00000002) {
+          var5 = 32'sh00000002;
         } else {
-          if (var4 ==? 00000003) {
-            var5 = 00000003;
+          if (var4 ==? 32'sh00000003) {
+            var5 = 32'sh00000003;
           } else {
-            var5 = 00000004;
+            var5 = 32'sh00000004;
           }
         }
       }
     }
-    if (var6 == 00000000) {
-      var7 = 00000000;
+    if (var6 == 32'sh00000000) {
+      var7 = 32'sh00000000;
     } else {
-      if (var6 >= 00000001) {
-        var7 = 00000001;
+      if (var6 >= 32'sh00000001) {
+        var7 = 32'sh00000001;
       } else {
-        if (var6 >: 00000002) {
-          var7 = 00000002;
+        if (var6 >: 32'sh00000002) {
+          var7 = 32'sh00000002;
         } else {
-          if (var6 <= 00000003) {
-            var7 = 00000003;
+          if (var6 <= 32'sh00000003) {
+            var7 = 32'sh00000003;
           } else {
-            var7 = 00000004;
+            var7 = 32'sh00000004;
           }
         }
       }
@@ -273,19 +273,19 @@ fn generate_if() {
     "#;
 
     let exp = r#"module ModuleA {
-  param var0(N): bit<32> = 'h00000001;
-  let var1(g.b): logic = 'hx;
+  param var0(N): bit<32> = 32'sh00000001;
+  let var1(g.b): logic = 1'hx;
 
   comb {
-    var1 = 00000002;
+    var1 = 32'sh00000002;
   }
 }
 module ModuleB {
-  param var0(N): bit<32> = 'h00000000;
-  let var1(g.a): logic = 'hx;
+  param var0(N): bit<32> = 32'sh00000000;
+  let var1(g.a): logic = 1'hx;
 
   comb {
-    var1 = 00000001;
+    var1 = 32'sh00000001;
   }
 }
 "#;
@@ -306,27 +306,27 @@ fn generate_for() {
     "#;
 
     let exp = r#"module ModuleA {
-  param var0(N): bit<32> = 'h00000004;
-  const var1(g[0].i): bit<32> = 'h00000000;
-  let var2(g[0].a): logic = 'hx;
-  const var3(g[1].i): bit<32> = 'h00000001;
-  let var4(g[1].a): logic = 'hx;
-  const var5(g[2].i): bit<32> = 'h00000002;
-  let var6(g[2].a): logic = 'hx;
-  const var7(g[3].i): bit<32> = 'h00000003;
-  let var8(g[3].a): logic = 'hx;
+  param var0(N): bit<32> = 32'sh00000004;
+  const var1(g[0].i): bit<32> = 32'h00000000;
+  let var2(g[0].a): logic = 1'hx;
+  const var3(g[1].i): bit<32> = 32'h00000001;
+  let var4(g[1].a): logic = 1'hx;
+  const var5(g[2].i): bit<32> = 32'h00000002;
+  let var6(g[2].a): logic = 1'hx;
+  const var7(g[3].i): bit<32> = 32'h00000003;
+  let var8(g[3].a): logic = 1'hx;
 
   comb {
-    var2 = 00000000;
+    var2 = 32'h00000000;
   }
   comb {
-    var4 = 00000001;
+    var4 = 32'h00000001;
   }
   comb {
-    var6 = 00000002;
+    var6 = 32'h00000002;
   }
   comb {
-    var8 = 00000003;
+    var8 = 32'h00000003;
   }
 }
 "#;
@@ -360,17 +360,17 @@ fn inst() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0(i_clk): clock = 'hx;
-  input var1(i_rst): reset = 'hx;
-  input var2(i_dat): logic = 'hx;
-  output var3(o_dat): logic = 'hx;
+  input var0(i_clk): clock = 1'hx;
+  input var1(i_rst): reset = 1'hx;
+  input var2(i_dat): logic = 1'hx;
+  output var3(o_dat): logic = 1'hx;
 
 }
 module ModuleB {
-  input var0(i_clk): clock = 'hx;
-  input var1(i_rst): reset = 'hx;
-  input var2(i_dat): logic = 'hx;
-  output var3(o_dat): logic = 'hx;
+  input var0(i_clk): clock = 1'hx;
+  input var1(i_rst): reset = 1'hx;
+  input var2(i_dat): logic = 1'hx;
+  output var3(o_dat): logic = 1'hx;
 
   inst u (
     var0 <- var0;
@@ -379,10 +379,10 @@ module ModuleB {
     var3 -> var3;
   ) {
     module ModuleA {
-      input var0(i_clk): clock = 'hx;
-      input var1(i_rst): reset = 'hx;
-      input var2(i_dat): logic = 'hx;
-      output var3(o_dat): logic = 'hx;
+      input var0(i_clk): clock = 1'hx;
+      input var1(i_rst): reset = 1'hx;
+      input var2(i_dat): logic = 1'hx;
+      output var3(o_dat): logic = 1'hx;
 
     }
   }
@@ -412,36 +412,36 @@ fn system_function() {
     "#;
 
     let exp = r#"module ModuleA {
-  let var0(a0): logic = 'hx;
-  let var1(a1): logic = 'hx;
-  let var2(a2): logic = 'hx;
-  let var3(a3): logic = 'hx;
-  let var4(a4): logic = 'hx;
-  let var5(a5): logic = 'hx;
-  const var6(b0): bit<32> = 'h00000000;
-  const var7(b1): bit<32> = 'h00000000;
-  const var8(b2): bit<32> = 'h00000001;
-  const var9(b3): bit<32> = 'h00000002;
-  const var10(b4): bit<32> = 'h00000002;
-  const var11(b5): bit<32> = 'h00000003;
+  let var0(a0): logic = 1'hx;
+  let var1(a1): logic = 1'hx;
+  let var2(a2): logic = 1'hx;
+  let var3(a3): logic = 1'hx;
+  let var4(a4): logic = 1'hx;
+  let var5(a5): logic = 1'hx;
+  const var6(b0): bit<32> = 32'h00000000;
+  const var7(b1): bit<32> = 32'h00000000;
+  const var8(b2): bit<32> = 32'h00000001;
+  const var9(b3): bit<32> = 32'h00000002;
+  const var10(b4): bit<32> = 32'h00000002;
+  const var11(b5): bit<32> = 32'h00000003;
 
   comb {
-    var0 = 00000000;
+    var0 = 32'h00000000;
   }
   comb {
-    var1 = 00000000;
+    var1 = 32'h00000000;
   }
   comb {
-    var2 = 00000001;
+    var2 = 32'h00000001;
   }
   comb {
-    var3 = 00000002;
+    var3 = 32'h00000002;
   }
   comb {
-    var4 = 00000002;
+    var4 = 32'h00000002;
   }
   comb {
-    var5 = 00000003;
+    var5 = 32'h00000003;
   }
 }
 "#;
@@ -464,17 +464,17 @@ fn comb_for() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(a): logic<4> = 'hx;
-  const var1([0].i): bit<32> = 'h00000000;
-  const var2([1].i): bit<32> = 'h00000001;
-  const var3([2].i): bit<32> = 'h00000002;
-  const var4([3].i): bit<32> = 'h00000003;
+  var var0(a): logic<4> = 4'hx;
+  const var1([0].i): bit<32> = 32'h00000000;
+  const var2([1].i): bit<32> = 32'h00000001;
+  const var3([2].i): bit<32> = 32'h00000002;
+  const var4([3].i): bit<32> = 32'h00000003;
 
   comb {
-    var0[00000000] = 00000001;
-    var0[00000001] = 00000002;
-    var0[00000002] = 00000003;
-    var0[00000003] = 00000004;
+    var0[32'h00000000] = 32'h00000001;
+    var0[32'h00000001] = 32'h00000002;
+    var0[32'h00000002] = 32'h00000003;
+    var0[32'h00000003] = 32'h00000004;
   }
 }
 "#;
@@ -493,15 +493,15 @@ fn msb_lsb() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(a): logic<4> = 'hx;
-  let var1(b): logic = 'hx;
-  let var2(c): logic = 'hx;
+  var var0(a): logic<4> = 4'hx;
+  let var1(b): logic = 1'hx;
+  let var2(c): logic = 1'hx;
 
   comb {
-    var1 = var0[00000003];
+    var1 = var0[32'h00000003];
   }
   comb {
-    var2 = var0[00000000];
+    var2 = var0[32'h00000000];
   }
 }
 "#;
@@ -536,21 +536,21 @@ fn r#struct() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0(x): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 'h5;
-  var var1(a): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 'hx;
-  let var2(b): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 'hx;
+  input var0(x): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 2'h5;
+  var var1(a): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 4'hx;
+  let var2(b): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 4'hx;
 
   comb {
-    var2 = 00000001;
+    var2 = 32'sh00000001;
   }
   comb {
-    var1[00000003] = 00000001;
+    var1[32'h00000003] = 32'sh00000001;
   }
   comb {
-    var1[00000002] = 00000001;
+    var1[32'h00000002] = 32'sh00000001;
   }
   comb {
-    var1[00000001:00000000] = 00000001;
+    var1[32'h00000001:32'h00000000] = 32'sh00000001;
   }
 }
 "#;
@@ -583,14 +583,14 @@ fn interface() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(u0.x): logic = 'hx;
-  var var1(u0.y): logic = 'hx;
-  var var3(u1.x): logic = 'hx;
-  var var4(u1.y): logic = 'hx;
-  var var6(a): logic = 'hx;
-  var var7(b): logic = 'hx;
-  var var9(u0.FuncB.return): logic = 'hx;
-  var var11(u1.FuncB.return): logic = 'hx;
+  var var0(u0.x): logic = 1'hx;
+  var var1(u0.y): logic = 1'hx;
+  var var3(u1.x): logic = 1'hx;
+  var var4(u1.y): logic = 1'hx;
+  var var6(a): logic = 1'hx;
+  var var7(b): logic = 1'hx;
+  var var9(u0.FuncB.return): logic = 1'hx;
+  var var11(u1.FuncB.return): logic = 1'hx;
   func var8(u0.FuncB) -> var9 {
     var9 = var0;
   }
@@ -631,18 +631,18 @@ fn array() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0[0](a): logic<2> = 'hx;
-  var var0[1](a): logic<2> = 'hx;
-  var var0[2](a): logic<2> = 'hx;
-  var var1[0](b): struct {x: logic<1>, y: logic<1>}<2> = 'hx;
-  var var1[1](b): struct {x: logic<1>, y: logic<1>}<2> = 'hx;
-  var var1[2](b): struct {x: logic<1>, y: logic<1>}<2> = 'hx;
-  var var2(c): logic = 'hx;
-  var var3(d): logic = 'hx;
+  var var0[0](a): logic<2> = 2'hx;
+  var var0[1](a): logic<2> = 2'hx;
+  var var0[2](a): logic<2> = 2'hx;
+  var var1[0](b): struct {x: logic<1>, y: logic<1>}<2> = 4'hx;
+  var var1[1](b): struct {x: logic<1>, y: logic<1>}<2> = 4'hx;
+  var var1[2](b): struct {x: logic<1>, y: logic<1>}<2> = 4'hx;
+  var var2(c): logic = 1'hx;
+  var var3(d): logic = 1'hx;
 
   comb {
-    var2 = var0[00000002][00000001];
-    var3 = var1[00000002][00000003];
+    var2 = var0[32'sh00000002][32'sh00000001];
+    var3 = var1[32'sh00000002][32'h00000003];
   }
 }
 "#;
@@ -698,21 +698,21 @@ fn function() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var1(FuncA.return): logic = 'hx;
-  input var2(FuncA.a): logic = 'hx;
-  input var3(FuncA.b): logic = 'hx;
-  var var4(FuncA.c): logic = 'hx;
-  input var6(FuncB.a): logic = 'hx;
-  output var7(FuncB.b): logic = 'hx;
-  var var9(FuncC.return): logic<2> = 'hx;
-  input var10(FuncC.a): struct {x: logic<1>, y: logic<1>} = 'hx;
-  var var11(a): logic = 'hx;
-  var var12(b): logic = 'hx;
-  var var13(c): logic = 'hx;
-  var var14(d): logic = 'hx;
-  var var15(e): logic = 'hx;
-  var var16(f): struct {x: logic<1>, y: logic<1>} = 'hx;
-  var var17(g): struct {x: logic<1>, y: logic<1>} = 'hx;
+  var var1(FuncA.return): logic = 1'hx;
+  input var2(FuncA.a): logic = 1'hx;
+  input var3(FuncA.b): logic = 1'hx;
+  var var4(FuncA.c): logic = 1'hx;
+  input var6(FuncB.a): logic = 1'hx;
+  output var7(FuncB.b): logic = 1'hx;
+  var var9(FuncC.return): logic<2> = 2'hx;
+  input var10(FuncC.a): struct {x: logic<1>, y: logic<1>} = 2'hx;
+  var var11(a): logic = 1'hx;
+  var var12(b): logic = 1'hx;
+  var var13(c): logic = 1'hx;
+  var var14(d): logic = 1'hx;
+  var var15(e): logic = 1'hx;
+  var var16(f): struct {x: logic<1>, y: logic<1>} = 2'hx;
+  var var17(g): struct {x: logic<1>, y: logic<1>} = 2'hx;
   func var0(FuncA) -> var1 {
     var4 = (var2 | var3);
     var1 = (var2 & var4);
@@ -754,35 +754,35 @@ fn array_literal() {
     "#;
 
     let exp = r#"module ModuleA {
-  let var0[0](a): logic = 'hx;
-  let var0[1](a): logic = 'hx;
-  var var1[0](b): logic = 'hx;
-  var var1[1](b): logic = 'hx;
-  var var1[2](b): logic = 'hx;
-  var var1[3](b): logic = 'hx;
-  var var1[4](b): logic = 'hx;
-  var var1[5](b): logic = 'hx;
-  var var2(c): logic<2, 3, 4> = 'hxxxxxx;
-  const var3[0](X): bit<32> = 'h0000000a;
-  const var3[1](X): bit<32> = 'h0000000b;
-  const var3[2](X): bit<32> = 'h0000000c;
-  const var4(Y): bit<3, 4> = 'habc;
+  let var0[0](a): logic = 1'hx;
+  let var0[1](a): logic = 1'hx;
+  var var1[0](b): logic = 1'hx;
+  var var1[1](b): logic = 1'hx;
+  var var1[2](b): logic = 1'hx;
+  var var1[3](b): logic = 1'hx;
+  var var1[4](b): logic = 1'hx;
+  var var1[5](b): logic = 1'hx;
+  var var2(c): logic<2, 3, 4> = 24'hxxxxxx;
+  const var3[0](X): bit<32> = 32'sh0000000a;
+  const var3[1](X): bit<32> = 32'sh0000000b;
+  const var3[2](X): bit<32> = 32'sh0000000c;
+  const var4(Y): bit<3, 4> = 12'habc;
 
   comb {
-    var0[00000000] = 00000000;
-    var0[00000001] = 00000001;
+    var0[32'h00000000] = 32'sh00000000;
+    var0[32'h00000001] = 32'sh00000001;
   }
   comb {
-    var1[00000000][00000000] = 00000001;
-    var1[00000000][00000001] = 00000002;
-    var1[00000000][00000002] = 00000003;
-    var1[00000001][00000000] = 00000004;
-    var1[00000001][00000001] = 00000005;
-    var1[00000001][00000002] = 00000006;
-    var2[00000000][00000000] = 00000001;
-    var2[00000000][00000001] = 00000002;
-    var2[00000000][00000002] = 00000003;
-    var2[00000001] = 0000000a;
+    var1[32'h00000000][32'h00000000] = 32'sh00000001;
+    var1[32'h00000000][32'h00000001] = 32'sh00000002;
+    var1[32'h00000000][32'h00000002] = 32'sh00000003;
+    var1[32'h00000001][32'h00000000] = 32'sh00000004;
+    var1[32'h00000001][32'h00000001] = 32'sh00000005;
+    var1[32'h00000001][32'h00000002] = 32'sh00000006;
+    var2[32'h00000000][32'h00000000] = 32'sh00000001;
+    var2[32'h00000000][32'h00000001] = 32'sh00000002;
+    var2[32'h00000000][32'h00000002] = 32'sh00000003;
+    var2[32'h00000001] = 32'sh0000000a;
   }
 }
 "#;
@@ -824,14 +824,14 @@ fn connect() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(u0.x): logic = 'hx;
-  var var1(u0.y): struct {z: logic<1>} = 'hx;
-  var var5(u1.x): logic = 'hx;
-  var var6(u1.y): struct {z: logic<1>} = 'hx;
-  var var10(u2.x): logic = 'hx;
-  var var11(u2.y): struct {z: logic<1>} = 'hx;
-  var var15(u3.x): logic = 'hx;
-  var var16(u3.y): struct {z: logic<1>} = 'hx;
+  var var0(u0.x): logic = 1'hx;
+  var var1(u0.y): struct {z: logic<1>} = 1'hx;
+  var var5(u1.x): logic = 1'hx;
+  var var6(u1.y): struct {z: logic<1>} = 1'hx;
+  var var10(u2.x): logic = 1'hx;
+  var var11(u2.y): struct {z: logic<1>} = 1'hx;
+  var var15(u3.x): logic = 1'hx;
+  var var16(u3.y): struct {z: logic<1>} = 1'hx;
 
   comb {
     var0 = var5;
@@ -871,21 +871,21 @@ fn assignment_operator() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(a): logic = 'hx;
+  var var0(a): logic = 1'hx;
 
   comb {
-    var0 = (var0 + 00000000);
-    var0 = (var0 + (- 00000000));
-    var0 = (var0 * 00000000);
-    var0 = (var0 / 00000000);
-    var0 = (var0 % 00000000);
-    var0 = (var0 & 00000000);
-    var0 = (var0 | 00000000);
-    var0 = (var0 ^ 00000000);
-    var0 = (var0 << 00000000);
-    var0 = (var0 >> 00000000);
-    var0 = (var0 <<< 00000000);
-    var0 = (var0 >>> 00000000);
+    var0 = (var0 + 32'sh00000000);
+    var0 = (var0 + (- 32'sh00000000));
+    var0 = (var0 * 32'sh00000000);
+    var0 = (var0 / 32'sh00000000);
+    var0 = (var0 % 32'sh00000000);
+    var0 = (var0 & 32'sh00000000);
+    var0 = (var0 | 32'sh00000000);
+    var0 = (var0 ^ 32'sh00000000);
+    var0 = (var0 << 32'sh00000000);
+    var0 = (var0 >> 32'sh00000000);
+    var0 = (var0 <<< 32'sh00000000);
+    var0 = (var0 >>> 32'sh00000000);
   }
 }
 "#;
@@ -920,7 +920,7 @@ fn generic_module() {
       inst u (
       ) {
         module ModuleC {
-          var var0(a): logic = 'hx;
+          var var0(a): logic = 1'hx;
 
         }
       }
@@ -937,7 +937,7 @@ module ModuleB {
   }
 }
 module ModuleC {
-  var var0(a): logic = 'hx;
+  var var0(a): logic = 1'hx;
 
 }
 "#;
@@ -979,15 +979,15 @@ fn interface_function() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var3(u.a): logic = 'hx;
-  var var6(a): logic = 'hx;
-  var var7(b): logic = 'hx;
-  var var8(c): logic = 'hx;
-  var var9(d): logic = 'hx;
-  var var11(u.FuncA.return): logic = 'hx;
-  output var12(u.FuncA.x): logic = 'hx;
-  var var14(if_a.FuncA.return): logic = 'hx;
-  output var15(if_a.FuncA.x): logic = 'hx;
+  var var3(u.a): logic = 1'hx;
+  var var6(a): logic = 1'hx;
+  var var7(b): logic = 1'hx;
+  var var8(c): logic = 1'hx;
+  var var9(d): logic = 1'hx;
+  var var11(u.FuncA.return): logic = 1'hx;
+  output var12(u.FuncA.x): logic = 1'hx;
+  var var14(if_a.FuncA.return): logic = 1'hx;
+  output var15(if_a.FuncA.x): logic = 1'hx;
   func var10(u.FuncA) -> var11 {
     var12 = var3;
     var11 = var3;
@@ -1030,21 +1030,21 @@ fn package_function() {
     "#;
 
     let exp = r#"module ModuleA {
-  let var0(a): logic = 'hx;
-  let var1(b): logic = 'hx;
-  var var2(c): logic = 'hx;
-  var var4(PackageA.FuncA.return): logic = 'hx;
-  input var5(PackageA.FuncA.a): logic = 'hx;
-  input var6(PackageA.FuncA.b): logic = 'hx;
+  let var0(a): logic = 1'hx;
+  let var1(b): logic = 1'hx;
+  var var2(c): logic = 1'hx;
+  var var4(PackageA.FuncA.return): logic = 1'hx;
+  input var5(PackageA.FuncA.a): logic = 1'hx;
+  input var6(PackageA.FuncA.b): logic = 1'hx;
   func var3(PackageA.FuncA) -> var4 {
     var4 = (var5 & var6);
   }
 
   comb {
-    var0 = 00000001;
+    var0 = 32'sh00000001;
   }
   comb {
-    var1 = 00000001;
+    var1 = 32'sh00000001;
   }
   comb {
     var2 = var3(a: var0, b: var1);
@@ -1093,41 +1093,41 @@ fn interface_array() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0[0](if_a.a): logic = 'hx;
-  input var0[1](if_a.a): logic = 'hx;
-  output var1[0](if_a.b): logic = 'hx;
-  output var1[1](if_a.b): logic = 'hx;
-  var var4[0](u.a): logic = 'hx;
-  var var4[1](u.a): logic = 'hx;
-  var var5[0](u.b): logic = 'hx;
-  var var5[1](u.b): logic = 'hx;
-  var var8(a): logic<4> = 'hx;
-  var var10[0](u.FuncA.return): logic = 'hx;
-  var var10[1](u.FuncA.return): logic = 'hx;
-  var var12[0](if_a.FuncA.return): logic = 'hx;
-  var var12[1](if_a.FuncA.return): logic = 'hx;
+  input var0[0](if_a.a): logic = 1'hx;
+  input var0[1](if_a.a): logic = 1'hx;
+  output var1[0](if_a.b): logic = 1'hx;
+  output var1[1](if_a.b): logic = 1'hx;
+  var var4[0](u.a): logic = 1'hx;
+  var var4[1](u.a): logic = 1'hx;
+  var var5[0](u.b): logic = 1'hx;
+  var var5[1](u.b): logic = 1'hx;
+  var var8(a): logic<4> = 4'hx;
+  var var10[0](u.FuncA.return): logic = 1'hx;
+  var var10[1](u.FuncA.return): logic = 1'hx;
+  var var12[0](if_a.FuncA.return): logic = 1'hx;
+  var var12[1](if_a.FuncA.return): logic = 1'hx;
   func var9[0](u.FuncA) -> var10 {
-    var10[00000000] = var4[00000000];
+    var10[32'h00000000] = var4[32'h00000000];
   }
   func var9[1](u.FuncA) -> var10 {
-    var10[00000001] = var4[00000001];
+    var10[32'h00000001] = var4[32'h00000001];
   }
   func var11[0](if_a.FuncA) -> var12 {
-    var12[00000000] = var0[00000000];
+    var12[32'h00000000] = var0[32'h00000000];
   }
   func var11[1](if_a.FuncA) -> var12 {
-    var12[00000001] = var0[00000001];
+    var12[32'h00000001] = var0[32'h00000001];
   }
 
   comb {
-    var4[00000000] = var0[00000000];
-    var4[00000001] = var0[00000001];
-    var1[00000000] = var5[00000000];
-    var1[00000001] = var5[00000001];
-    var8[00000000] = var9[0]();
-    var8[00000001] = var9[1]();
-    var8[00000002] = var11[0]();
-    var8[00000003] = var11[1]();
+    var4[32'sh00000000] = var0[32'sh00000000];
+    var4[32'sh00000001] = var0[32'sh00000001];
+    var1[32'sh00000000] = var5[32'sh00000000];
+    var1[32'sh00000001] = var5[32'sh00000001];
+    var8[32'sh00000000] = var9[0]();
+    var8[32'sh00000001] = var9[1]();
+    var8[32'sh00000002] = var11[0]();
+    var8[32'sh00000003] = var11[1]();
   }
 }
 "#;
@@ -1168,16 +1168,16 @@ fn enum_test() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(a): enum {logic<2>} = 'hx;
-  var var1(b): enum {logic<2>} = 'hx;
-  var var2(c): enum {logic<3>} = 'hx;
-  var var3(d): enum {logic<3>} = 'hx;
+  var var0(a): enum {logic<2>} = 2'hx;
+  var var1(b): enum {logic<2>} = 2'hx;
+  var var2(c): enum {logic<3>} = 3'hx;
+  var var3(d): enum {logic<3>} = 3'hx;
 
   comb {
-    var0 = 0;
-    var1 = 1;
-    var2 = 00000007;
-    var3 = 00000002;
+    var0 = 2'h0;
+    var1 = 2'h1;
+    var2 = 32'sh00000007;
+    var3 = 32'sh00000002;
   }
 }
 "#;
@@ -1205,16 +1205,16 @@ fn generic_function() {
     "#;
 
     let exp = r#"module ModuleA {
-  let var2(a): logic<10> = 'hxxx;
-  var var3(b): logic<10> = 'hxxx;
-  var var5(FuncA.return): logic<10> = 'hxxx;
-  input var6(FuncA.x): logic<10> = 'hxxx;
+  let var2(a): logic<10> = 10'hxxx;
+  var var3(b): logic<10> = 10'hxxx;
+  var var5(FuncA.return): logic<10> = 10'hxxx;
+  input var6(FuncA.x): logic<10> = 10'hxxx;
   func var4(FuncA) -> var5 {
-    var5 = (var6 + 00000001);
+    var5 = (var6 + 32'sh00000001);
   }
 
   comb {
-    var2 = 00000001;
+    var2 = 32'sh00000001;
   }
   comb {
     var3 = var4(x: var2);
@@ -1261,14 +1261,14 @@ fn complex_function_arg() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var1(FuncA.return): logic = 'hx;
-  input var2(FuncA.x.a): logic = 'hx;
-  output var3(FuncA.x.b): struct {x: logic<1>, y: logic<1>} = 'h0;
-  var var6(u.a): logic = 'hx;
-  var var7(u.b): struct {x: logic<1>, y: logic<1>} = 'hx;
-  var var10(a): logic = 'hx;
+  var var1(FuncA.return): logic = 1'hx;
+  input var2(FuncA.x.a): logic = 1'hx;
+  output var3(FuncA.x.b): struct {x: logic<1>, y: logic<1>} = 2'h0;
+  var var6(u.a): logic = 1'hx;
+  var var7(u.b): struct {x: logic<1>, y: logic<1>} = 2'hx;
+  var var10(a): logic = 1'hx;
   func var0(FuncA) -> var1 {
-    var3 = 00000000;
+    var3 = 32'sh00000000;
     var1 = var2;
   }
 
@@ -1312,12 +1312,12 @@ fn struct_constructor() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(a): struct {v: struct {x: logic<32>, y: logic<32>}, w: struct {x: logic<32>, y: logic<32>}} = 'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
-  var var1(b): struct {v: struct {x: logic<32>, y: logic<32>}, w: struct {x: logic<32>, y: logic<32>}} = 'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
+  var var0(a): struct {v: struct {x: logic<32>, y: logic<32>}, w: struct {x: logic<32>, y: logic<32>}} = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
+  var var1(b): struct {v: struct {x: logic<32>, y: logic<32>}, w: struct {x: logic<32>, y: logic<32>}} = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
 
   comb {
-    var0 = 00000001000000020000000300000004;
-    var1 = 00000001ffffffff0000000000000000;
+    var0 = 128'h00000001000000020000000300000004;
+    var1 = 128'h00000001ffffffff0000000000000000;
   }
 }
 "#;
@@ -1365,32 +1365,32 @@ fn struct_port() {
     "#;
 
     let exp = r#"module ModuleA {
-  output var1(o): logic = 'hx;
+  output var1(o): logic = 1'hx;
 
   comb {
     var1 = '0;
   }
 }
 module ModuleB {
-  var var0[0](a): struct {x: logic<1>, y: logic<1>} = 'hx;
-  var var0[1](a): struct {x: logic<1>, y: logic<1>} = 'hx;
-  var var1(c): struct {x: logic<1>, y: logic<1>} = 'hx;
-  var var2(d): struct {x: logic<1>, y: logic<1>}<2> = 'hx;
+  var var0[0](a): struct {x: logic<1>, y: logic<1>} = 2'hx;
+  var var0[1](a): struct {x: logic<1>, y: logic<1>} = 2'hx;
+  var var1(c): struct {x: logic<1>, y: logic<1>} = 2'hx;
+  var var2(d): struct {x: logic<1>, y: logic<1>}<2> = 4'hx;
 
   comb {
-    var1 = 00000000;
+    var1 = 32'sh00000000;
   }
   comb {
-    var0[00000001] = var1;
+    var0[32'sh00000001] = var1;
   }
   comb {
-    var2[00000003:00000002] = var2[00000001:00000000];
+    var2[32'h00000003:32'h00000002] = var2[32'h00000001:32'h00000000];
   }
   inst u0 (
-    var1 -> var0[00000000];
+    var1 -> var0[32'sh00000000];
   ) {
     module ModuleA {
-      output var1(o): struct {x: logic<1>, y: logic<1>} = 'hx;
+      output var1(o): struct {x: logic<1>, y: logic<1>} = 2'hx;
 
       comb {
         var1 = '0;
@@ -1398,10 +1398,10 @@ module ModuleB {
     }
   }
   inst u1 (
-    var1 -> var2[00000001:00000000];
+    var1 -> var2[32'h00000001:32'h00000000];
   ) {
     module ModuleA {
-      output var1(o): struct {x: logic<1>, y: logic<1>} = 'hx;
+      output var1(o): struct {x: logic<1>, y: logic<1>} = 2'hx;
 
       comb {
         var1 = '0;
@@ -1454,13 +1454,13 @@ fn string() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(S): string = 'h0000010b;
-  const var1(T): string = 'h0000010e;
-  var var2(g1._a): logic = 'hx;
-  var var3(g2._d): logic = 'hx;
-  var var4(g3._f): logic = 'hx;
-  var var5(g4._g): logic = 'hx;
-  var var6(g5._i): logic = 'hx;
+  const var0(S): string = 32'h0000010b;
+  const var1(T): string = 32'h0000010e;
+  var var2(g1._a): logic = 1'hx;
+  var var3(g2._d): logic = 1'hx;
+  var var4(g3._f): logic = 1'hx;
+  var var5(g4._g): logic = 1'hx;
+  var var6(g5._i): logic = 1'hx;
 
 }
 "#;
@@ -1521,35 +1521,35 @@ fn union() {
     "#;
 
     let exp = r#"module ModuleA {
-  var var0(a): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>} = 'hxx;
-  var var1(b): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>}<2> = 'hxxxx;
-  var var2[0](c): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>}<2> = 'hxxxx;
-  var var2[1](c): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>}<2> = 'hxxxx;
+  var var0(a): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>} = 8'hxx;
+  var var1(b): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>}<2> = 16'hxxxx;
+  var var2[0](c): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>}<2> = 16'hxxxx;
+  var var2[1](c): union {x: struct {v: logic<1>, w: logic<3>}<2>, y: struct {s: logic<6>, t: logic<2>}, z: logic<2, 4>}<2> = 16'hxxxx;
 
   comb {
-    var0[00000002:00000000] = var0[00000002:00000000];
-    var0[00000003] = var0[00000003];
-    var0[00000006:00000004] = var0[00000006:00000004];
-    var0[00000007] = var0[00000007];
-    var0[00000001:00000000] = var0[00000001:00000000];
-    var0[00000007:00000002] = var0[00000007:00000002];
-    var0[00000007:00000000] = var0[00000007:00000000];
-    var0[00000000] = var0[00000000];
-    var0[00000003] = var0[00000003];
-    var0[00000004] = var0[00000004];
-    var0[00000007] = var0[00000007];
-    var0[00000000] = var0[00000000];
-    var0[00000002] = var0[00000002];
-    var0[00000003:00000000] = var0[00000003:00000000];
-    var0[00000000] = var0[00000000];
-    var0[00000001:00000000] = var0[00000001:00000000];
-    var0[00000003] = var0[00000003];
-    var0[00000005:00000004] = var0[00000005:00000004];
-    var0[00000007] = var0[00000007];
-    var0[00000001:00000000] = var0[00000001:00000000];
-    var0[00000003:00000002] = var0[00000003:00000002];
-    var0[00000007:00000000] = var0[00000007:00000000];
-    var0[00000001:00000000] = var0[00000001:00000000];
+    var0[32'h00000002:32'h00000000] = var0[32'h00000002:32'h00000000];
+    var0[32'h00000003] = var0[32'h00000003];
+    var0[32'h00000006:32'h00000004] = var0[32'h00000006:32'h00000004];
+    var0[32'h00000007] = var0[32'h00000007];
+    var0[32'h00000001:32'h00000000] = var0[32'h00000001:32'h00000000];
+    var0[32'h00000007:32'h00000002] = var0[32'h00000007:32'h00000002];
+    var0[32'h00000007:32'h00000000] = var0[32'h00000007:32'h00000000];
+    var0[32'h00000000] = var0[32'h00000000];
+    var0[32'h00000003] = var0[32'h00000003];
+    var0[32'h00000004] = var0[32'h00000004];
+    var0[32'h00000007] = var0[32'h00000007];
+    var0[32'h00000000] = var0[32'h00000000];
+    var0[32'h00000002] = var0[32'h00000002];
+    var0[32'h00000003:32'h00000000] = var0[32'h00000003:32'h00000000];
+    var0[32'h00000000] = var0[32'h00000000];
+    var0[32'h00000001:32'h00000000] = var0[32'h00000001:32'h00000000];
+    var0[32'h00000003] = var0[32'h00000003];
+    var0[32'h00000005:32'h00000004] = var0[32'h00000005:32'h00000004];
+    var0[32'h00000007] = var0[32'h00000007];
+    var0[32'h00000001:32'h00000000] = var0[32'h00000001:32'h00000000];
+    var0[32'h00000003:32'h00000002] = var0[32'h00000003:32'h00000002];
+    var0[32'h00000007:32'h00000000] = var0[32'h00000007:32'h00000000];
+    var0[32'h00000001:32'h00000000] = var0[32'h00000001:32'h00000000];
   }
 }
 "#;
@@ -1603,9 +1603,9 @@ fn generics_resolve() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0(i_clk): clock = 'hx;
-  input var1(i_rst): reset = 'hx;
-  var var2(a): logic = 'hx;
+  input var0(i_clk): clock = 1'hx;
+  input var1(i_rst): reset = 1'hx;
+  var var2(a): logic = 1'hx;
 
 
   ff (var0, var1) {
@@ -1621,17 +1621,17 @@ module ModuleB {
     var1 <- '0;
   ) {
     module ModuleA {
-      input var0(i_clk): clock = 'hx;
-      input var1(i_rst): reset = 'hx;
-      var var2(a): logic = 'hx;
-      var var3(b): struct {a: logic<1>, b: logic<32>} = 'hxxxxxxxxx;
+      input var0(i_clk): clock = 1'hx;
+      input var1(i_rst): reset = 1'hx;
+      var var2(a): logic = 1'hx;
+      var var3(b): struct {a: logic<1>, b: logic<32>} = 33'hxxxxxxxxx;
 
       ff (var0, var1) {
         if_reset {
           var3 = '0;
         } else {
-          var3[00000020] = var2[00000000];
-          var3[0000001f:00000000] = 00000000;
+          var3[32'h00000020] = var2[32'h00000000];
+          var3[32'h0000001f:32'h00000000] = 32'sh00000000;
         }
       }
     }
@@ -1666,11 +1666,11 @@ fn generics_resolve2() {
     "#;
 
     let exp = r#"module ModuleA {
-  let var0(a): unknown = 'hx;
-  let var1(_b): logic = 'hx;
+  let var0(a): unknown = 1'hx;
+  let var1(_b): logic = 1'hx;
 
   comb {
-    var0 = 00000001;
+    var0 = 32'sh00000001;
   }
   comb {
     var1 = var0;
@@ -1681,11 +1681,11 @@ module ModuleB {
   inst u0 (
   ) {
     module ModuleA {
-      let var0(a): logic = 'hx;
-      let var1(_b): logic = 'hx;
+      let var0(a): logic = 1'hx;
+      let var1(_b): logic = 1'hx;
 
       comb {
-        var0 = 00000001;
+        var0 = 32'sh00000001;
       }
       comb {
         var1 = var0;
@@ -1695,11 +1695,11 @@ module ModuleB {
   inst u1 (
   ) {
     module ModuleA {
-      let var0(a): bit = 'hx;
-      let var1(_b): logic = 'hx;
+      let var0(a): bit = 1'hx;
+      let var1(_b): logic = 1'hx;
 
       comb {
-        var0 = 00000001;
+        var0 = 32'sh00000001;
       }
       comb {
         var1 = var0;

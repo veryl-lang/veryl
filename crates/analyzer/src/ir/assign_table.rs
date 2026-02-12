@@ -424,7 +424,7 @@ impl AssignTable {
 mod tests {
     use super::*;
     use crate::ir::{Type, VarKind};
-    use crate::value::gen_mask_range;
+    use crate::value::ValueBigUint;
 
     #[test]
     fn insert() {
@@ -441,15 +441,15 @@ mod tests {
         );
         let variable = VariableInfo::new(&variable);
 
-        let mask = gen_mask_range(10, 1);
+        let mask = ValueBigUint::gen_mask_range(10, 1);
         let ret = table.insert_assign(&variable, vec![], mask, false, TokenRange::default());
         assert_eq!(ret.0, true);
 
-        let mask = gen_mask_range(20, 11);
+        let mask = ValueBigUint::gen_mask_range(20, 11);
         let ret = table.insert_assign(&variable, vec![], mask, false, TokenRange::default());
         assert_eq!(ret.0, true);
 
-        let mask = gen_mask_range(14, 8);
+        let mask = ValueBigUint::gen_mask_range(14, 8);
         let ret = table.insert_assign(&variable, vec![], mask, false, TokenRange::default());
         assert_eq!(ret.0, false);
     }

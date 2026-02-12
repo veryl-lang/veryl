@@ -24,7 +24,7 @@ use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{BigUint, HashMap, ir_error};
+use crate::{HashMap, ir_error};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -151,7 +151,7 @@ impl Conv<&GenerateIfDeclaration> for ir::DeclarationBlock {
         let (comptime, _) = eval_expr(context, None, value.expression.as_ref(), false)?;
         let cond = comptime.get_value()?;
 
-        if cond.to_usize() != 0 {
+        if cond.to_usize().unwrap_or(0) != 0 {
             context.push_hierarchy(label);
 
             let block = context.block(|c| {
@@ -168,7 +168,7 @@ impl Conv<&GenerateIfDeclaration> for ir::DeclarationBlock {
 
                 let cond = comptime.get_value()?;
 
-                if cond.to_usize() != 0 {
+                if cond.to_usize().unwrap_or(0) != 0 {
                     let label = get_label(&x.generate_optional_named_block, label);
 
                     context.push_hierarchy(label);
@@ -262,7 +262,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
             let index = value.identifier.text();
             let path = VarPath::new(index);
             let kind = VarKind::Const;
-            let comptime = Comptime::create_value(BigUint::from(i), 32, token);
+            let comptime = Comptime::create_value(Value::new(i as u64, 32, false), token);
 
             context.push_hierarchy(label);
 

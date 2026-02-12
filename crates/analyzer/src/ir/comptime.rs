@@ -8,7 +8,7 @@ use crate::literal::TypeLiteral;
 use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
-use crate::{AnalyzerError, BigUint, ir_error};
+use crate::{AnalyzerError, ir_error};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -78,14 +78,14 @@ impl PartSelectPath {
                 if remaining_dims != 0 {
                     let mut sel = sel.to_vec();
                     for _ in 0..remaining_dims {
-                        sel.push(Expression::create_value(0u32.into(), 32, token));
+                        sel.push(Expression::create_value(Value::new(0, 32, false), token));
                     }
                     x.r#type.width.calc_index_expr(&sel)?
                 } else {
                     x.r#type.width.calc_index_expr(sel)?
                 }
             } else {
-                Expression::create_value(0u32.into(), 32, TokenRange::default())
+                Expression::create_value(Value::new(0, 32, false), TokenRange::default())
             };
 
             let remaining_width = x.r#type.width.as_shape_ref();
@@ -107,13 +107,13 @@ impl PartSelectPath {
             };
 
             // pos += x.pos + width * index;
-            let x_pos = Expression::create_value(x.pos.into(), 32, token);
+            let x_pos = Expression::create_value(Value::new(x.pos as u64, 32, false), token);
 
             let expr = if remaining_dims != 0 {
                 // If remaining_dims exists, width is already considered by index
                 Expression::Binary(Box::new(x_pos), Op::Add, Box::new(index))
             } else {
-                let expr = Expression::create_value(width.into(), 32, token);
+                let expr = Expression::create_value(Value::new(width as u64, 32, false), token);
                 let expr = Expression::Binary(Box::new(expr), Op::Mul, Box::new(index));
                 Expression::Binary(Box::new(x_pos), Op::Add, Box::new(expr))
             };
@@ -128,11 +128,11 @@ impl PartSelectPath {
 
         if let Some((pos, width, range_width)) = pos_width {
             let single = width == 1;
-            let width = Expression::create_value(width.into(), 32, token);
+            let width = Expression::create_value(Value::new(width as u64, 32, false), token);
 
             // beg = pos + width - 1
             // end = pos
-            let one = Expression::create_value(1u32.into(), 32, token);
+            let one = Expression::create_value(Value::new(1, 32, false), token);
             let minus_one = Expression::Unary(Op::Sub, Box::new(one.clone()));
             let expr = Expression::Binary(Box::new(pos.clone()), Op::Add, Box::new(width.clone()));
             let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one.clone()));
@@ -142,7 +142,8 @@ impl PartSelectPath {
             // beg = end + (range_beg + 1) * range_width - 1
             // end = end + range_end * range_width
             if let Some((range_beg, range_end)) = range_select {
-                let range_width = Expression::create_value(range_width?.into(), 32, token);
+                let range_width =
+                    Expression::create_value(Value::new(range_width? as u64, 32, false), token);
 
                 let expr = Expression::Binary(Box::new(range_beg), Op::Add, Box::new(one.clone()));
                 let expr =
@@ -205,8 +206,8 @@ impl Comptime {
         }
     }
 
-    pub fn create_value(value: BigUint, width: usize, token: TokenRange) -> Self {
-        let value = Value::new(value, width, false);
+    pub fn create_value(value: Value, token: TokenRange) -> Self {
+        let width = value.width();
         Self {
             value: ValueVariant::Numeric(value),
             r#type: Type {
@@ -295,7 +296,7 @@ pub enum ValueVariant {
 impl ValueVariant {
     pub fn expand_value(&mut self, width: usize) {
         if let ValueVariant::Numeric(x) = self {
-            x.expand(width);
+            x.expand(width, false);
         }
     }
 }
@@ -1058,12 +1059,15 @@ mod tests {
         let mut expr = vec![];
         let token = TokenRange::default();
         for x in select {
-            expr.push(Expression::create_value((*x).into(), 32, token));
+            expr.push(Expression::create_value(
+                Value::new(*x as u64, 32, false),
+                token,
+            ));
         }
         let end = if let Some(end) = end {
             Some((
                 VarSelectOp::Colon,
-                Expression::create_value(end.into(), 32, token),
+                Expression::create_value(Value::new(end as u64, 32, false), token),
             ))
         } else {
             None

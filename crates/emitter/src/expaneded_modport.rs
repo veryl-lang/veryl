@@ -462,7 +462,7 @@ fn evaluate_array_size(array_size: &[Expression], generic_map: &[GenericMap]) ->
             let mut expr: ir::Expression = Conv::conv(&mut context, x).ok()?;
             let comptime = expr.eval_comptime(&mut context, None);
             let value = comptime.get_value().ok()?;
-            Some(value.to_usize() as isize)
+            Some(value.to_usize().unwrap_or(0) as isize)
         })
         .collect()
 }

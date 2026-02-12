@@ -34,7 +34,7 @@ impl Literal {
                 (ValueVariant::Numeric(value), r#type)
             }
             Literal::String(x) => {
-                let value = Value::new(x.0.into(), 32, false);
+                let value = Value::new(x.0 as u64, 32, false);
                 let r#type = Type {
                     kind: TypeKind::String,
                     width: Shape::new(vec![Some(1)]),

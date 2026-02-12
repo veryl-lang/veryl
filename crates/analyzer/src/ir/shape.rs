@@ -2,6 +2,7 @@
 // https://lo48576.gitlab.io/rust-custom-slice-book/
 
 use crate::ir::{Expression, Op};
+use crate::value::Value;
 use std::borrow::{Borrow, BorrowMut, Cow, ToOwned};
 use std::fmt;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeBounds, RangeFrom};
@@ -130,7 +131,7 @@ impl ShapeRef {
     pub fn calc_index_expr(&self, index: &[Expression]) -> Option<Expression> {
         if self.is_empty() || (self.dims() == 1 && self[0] == Some(1) && index.is_empty()) {
             let token = TokenRange::default();
-            let expr = Expression::create_value(0u32.into(), 32, token);
+            let expr = Expression::create_value(Value::new(0, 32, false), token);
             Some(expr)
         } else if index.len() != self.dims() {
             None
@@ -141,7 +142,8 @@ impl ShapeRef {
                 if let Some(x) = x {
                     let index_expr = index[i].clone();
                     let token = index_expr.token_range();
-                    let base_expr = Expression::create_value(base.into(), 32, token);
+                    let base_expr =
+                        Expression::create_value(Value::new(base as u64, 32, false), token);
                     let expr =
                         Expression::Binary(Box::new(index_expr), Op::Mul, Box::new(base_expr));
 

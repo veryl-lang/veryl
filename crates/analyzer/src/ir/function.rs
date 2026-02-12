@@ -6,7 +6,7 @@ use crate::ir::{
     ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
 };
 use crate::symbol::{ClockDomain, Direction, Symbol, SymbolId, SymbolKind};
-use crate::value::{Value, gen_mask_range};
+use crate::value::{Value, ValueBigUint};
 use crate::{AnalyzerError, HashMap, ir_error};
 use indent::indent_all_by;
 use std::fmt;
@@ -230,7 +230,7 @@ impl FunctionCall {
                     if let Some((beg, end)) =
                         dst.select.eval_value(context, &variable.r#type, false)
                     {
-                        let mask = gen_mask_range(beg, end);
+                        let mask = ValueBigUint::gen_mask_range(beg, end);
                         let (success, tokens) =
                             assign_table.insert_assign(&variable, index, mask, false, self.token);
                         if !success & assign_context.is_ff() {
