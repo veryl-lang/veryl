@@ -1621,6 +1621,29 @@ fn mismatch_function_arity() {
     //    errors[0],
     //    AnalyzerError::MismatchFunctionArity { .. }
     //));
+
+    let code = r#"
+    module ModuleA () {
+        function func (
+            a: input logic<2>,
+            b: input logic   ,
+        ) -> logic {
+            return 0;
+        }
+    
+        inst u: $sv::IF;
+    
+        always_comb {
+            u.a = func(1'b1);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
 }
 
 #[test]

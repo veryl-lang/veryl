@@ -202,6 +202,9 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                                 eval_assign_statement(context, &dst, &mut expr, token)?;
                             Ok(ir::StatementBlock(statements))
                         } else {
+                            // check expression even if dst can't be determined
+                            let _ = eval_expr(context, None, &x.assignment.expression, false)?;
+
                             Err(ir_error!(token))
                         }
                     }
@@ -238,6 +241,9 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             let statement = ir::Statement::Assign(statement);
                             Ok(ir::StatementBlock(vec![statement]))
                         } else {
+                            // check expression even if dst can't be determined
+                            let _ = eval_expr(context, None, &x.assignment.expression, false)?;
+
                             Err(ir_error!(token))
                         }
                     }
