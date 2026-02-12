@@ -83,6 +83,7 @@ pub struct CreateSymbolTable {
     port_connects: HashMap<Token, ConnectTarget>,
     parameters: Vec<Vec<Parameter>>,
     ports: Vec<Vec<Port>>,
+    reference_paths: Vec<Vec<GenericSymbolPath>>,
     needs_default_generic_argument: bool,
     generic_context: GenericContext,
     default_clock: Option<SymbolId>,
@@ -686,6 +687,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 if let Some(x) = self.type_dag_candidates.last_mut() {
                     x.push(cand);
                 }
+            }
+
+            if let Some(paths) = self.reference_paths.last_mut() {
+                let path: GenericSymbolPath = arg.into();
+                paths.push(path);
             }
         }
         Ok(())
@@ -1715,6 +1721,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.generic_context.push();
                 }
                 self.ports.push(Vec::new());
+                self.reference_paths.push(Vec::new());
                 self.affiliation.push(Affiliation::Function);
                 self.push_type_dag_cand();
             }
@@ -1728,6 +1735,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     vec![]
                 };
                 let ports: Vec<_> = self.ports.pop().unwrap();
+                let reference_paths: Vec<_> = self.reference_paths.pop().unwrap();
 
                 let ret = arg
                     .function_declaration_opt1
@@ -1755,6 +1763,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_references: vec![],
                     ports,
                     ret,
+                    reference_paths,
+                    constantable: None,
                     definition: Some(definition),
                 };
 
@@ -2314,6 +2324,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_references: vec![],
                     ports,
                     ret,
+                    reference_paths: vec![],
+                    constantable: None,
                     definition: None,
                 };
 

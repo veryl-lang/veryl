@@ -75,6 +75,7 @@ pub struct Function {
     pub path: FuncPath,
     pub r#type: Option<Type>,
     pub array: Shape,
+    pub constantable: bool,
     pub functions: Vec<FunctionBody>,
 }
 
@@ -195,7 +196,11 @@ impl FunctionCall {
             ValueVariant::Unknown
         };
 
-        let mut is_const = true;
+        let mut is_const = context
+            .functions
+            .get(&self.id)
+            .map(|func| func.constantable)
+            .unwrap_or(true);
         for expr in self.inputs.values_mut() {
             is_const &= expr.eval_comptime(context, None).is_const;
         }
