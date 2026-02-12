@@ -236,6 +236,7 @@ mod error {
     use insta::Settings;
     use miette::{GraphicalReportHandler, GraphicalTheme, Report};
     use std::fs;
+    use veryl_analyzer::ir::Ir;
     use veryl_analyzer::{Analyzer, Context};
     use veryl_metadata::Metadata;
     use veryl_parser::Parser;
@@ -266,10 +267,16 @@ mod error {
                 let mut context = Context::default();
                 let analyzer = Analyzer::new(&metadata);
                 let mut errors = vec![];
+                let mut ir = Ir::default();
 
                 errors.append(&mut analyzer.analyze_pass1(&prj, &ret.veryl));
                 errors.append(&mut Analyzer::analyze_post_pass1());
-                errors.append(&mut analyzer.analyze_pass2(&prj, &ret.veryl, &mut context, None));
+                errors.append(&mut analyzer.analyze_pass2(
+                    &prj,
+                    &ret.veryl,
+                    &mut context,
+                    Some(&mut ir),
+                ));
                 errors.append(&mut Analyzer::analyze_post_pass2());
 
                 let err = Report::from(errors.remove(0));

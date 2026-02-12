@@ -396,11 +396,13 @@ impl Context {
 
     pub fn check_size(&mut self, x: usize, token: TokenRange) -> Option<usize> {
         if x > self.config.evaluate_size_limit {
-            self.insert_error(AnalyzerError::exceed_limit(
-                ExceedLimitKind::EvaluateSize,
-                x,
-                &token,
-            ));
+            if self.config.use_ir {
+                self.insert_error(AnalyzerError::exceed_limit(
+                    ExceedLimitKind::EvaluateSize,
+                    x,
+                    &token,
+                ));
+            }
             None
         } else {
             Some(x)

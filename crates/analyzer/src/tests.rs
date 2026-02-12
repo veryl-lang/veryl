@@ -1,4 +1,5 @@
 use crate::conv::Context;
+use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
 use std::thread;
 use veryl_metadata::Metadata;
@@ -18,6 +19,26 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
     errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None));
+    errors.append(&mut Analyzer::analyze_post_pass2());
+    dbg!(&errors);
+    errors
+}
+
+#[track_caller]
+fn analyze_with_ir(code: &str) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(&code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2());
     dbg!(&errors);
     errors
@@ -9192,7 +9213,7 @@ fn exceed_limit() {
     }
     "#;
 
-    let errors = analyze(code);
+    let errors = analyze_with_ir(code);
     assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
 
     let code = r#"
@@ -9201,7 +9222,7 @@ fn exceed_limit() {
     }
     "#;
 
-    let errors = analyze(code);
+    let errors = analyze_with_ir(code);
     assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
 
     let code = r#"
@@ -9217,6 +9238,19 @@ fn exceed_limit() {
                 }
             }
         }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module TopModule {
+        const W: u32 = 64;
+        function ext::<WIDTH: u32> () -> logic<64> {
+            return {1'b0 repeat W - 1, 1'b0};
+        }
+        let _a: logic<64> = ext::<64>();
     }
     "#;
 
