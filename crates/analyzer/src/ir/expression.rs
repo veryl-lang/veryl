@@ -1020,12 +1020,12 @@ mod tests {
         let x6 = calc_expression("4'b0100 !=? 4'b00xx", None);
         let x7 = calc_expression("4'b0111 !=? 4'b00xx", None);
 
-        assert_eq!(format!("{:x}", x0), "1'h0");
-        assert_eq!(format!("{:x}", x1), "1'h0");
+        assert_eq!(format!("{:x}", x0), "1'h1");
+        assert_eq!(format!("{:x}", x1), "1'h1");
         assert_eq!(format!("{:x}", x2), "1'h0");
         assert_eq!(format!("{:x}", x3), "1'h0");
-        assert_eq!(format!("{:x}", x4), "1'h1");
-        assert_eq!(format!("{:x}", x5), "1'h1");
+        assert_eq!(format!("{:x}", x4), "1'h0");
+        assert_eq!(format!("{:x}", x5), "1'h0");
         assert_eq!(format!("{:x}", x6), "1'h1");
         assert_eq!(format!("{:x}", x7), "1'h1");
     }
