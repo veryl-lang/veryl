@@ -2081,6 +2081,8 @@ pub struct FunctionProperty {
     pub generic_references: Vec<GenericSymbolPath>,
     pub ports: Vec<Port>,
     pub ret: Option<Type>,
+    pub reference_paths: Vec<GenericSymbolPath>,
+    pub constantable: Option<bool>,
     pub definition: Option<DefinitionId>,
 }
 

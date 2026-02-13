@@ -1,5 +1,6 @@
 mod connect;
 mod r#enum;
+mod function;
 mod msb;
 
 use crate::namespace::Namespace;
@@ -1162,6 +1163,19 @@ impl SymbolTable {
         }
     }
 
+    pub fn get_function_symbols(&self) -> Vec<Symbol> {
+        self.symbol_table
+            .values()
+            .filter_map(|symbol| {
+                if matches!(symbol.kind, SymbolKind::Function(_)) {
+                    Some(symbol.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub fn get_enum_symbols(&self) -> Vec<Symbol> {
         self.symbol_table
             .values()
@@ -1668,6 +1682,11 @@ pub fn resolve_user_defined() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
     let resolved = SYMBOL_TABLE.with(|f| f.borrow().resolve_user_defined());
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
+}
+
+pub fn resolve_function() {
+    let list = SYMBOL_TABLE.with(|f| f.borrow().get_function_symbols());
+    function::resolve_function(&list);
 }
 
 pub fn resolve_enum() -> Vec<AnalyzerError> {

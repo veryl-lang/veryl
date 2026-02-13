@@ -801,6 +801,7 @@ impl Conv<&FunctionDeclaration> for () {
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && let SymbolKind::Function(x) = symbol.found.kind
         {
+            let constantable = x.constantable.unwrap();
             let ret_type = if let Some(x) = &x.ret {
                 let mut r#type = x.to_ir_type(context, TypePosition::Variable)?;
                 if r#type.is_struct() {
@@ -942,6 +943,7 @@ impl Conv<&FunctionDeclaration> for () {
                 path,
                 r#type,
                 array: Shape::default(),
+                constantable,
                 functions: vec![body?],
             };
 

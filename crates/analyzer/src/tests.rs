@@ -7001,6 +7001,54 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock,
+        i_rst: input  reset,
+    ) {
+        let a: logic = 1;
+        var b: logic;
+
+        function f() -> logic {
+            return a;
+        }
+
+        always_ff {
+            if f() {
+                b = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface IfA {
+        var a: logic;
+        function get_a() -> logic {
+            return a;
+        }
+    }
+    module ModuleA (
+        i_clk: input clock,
+    ) {
+        inst if_a: IfA;
+        assign if_a.a = '1;
+
+        var d: logic;
+        always_ff {
+            if if_a.get_a() {
+                d = '1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
