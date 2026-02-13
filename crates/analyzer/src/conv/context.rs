@@ -1,9 +1,9 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
-    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncArg, FuncPath, FuncProto,
-    Function, Interface, IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath,
-    VarSelect, Variable, VariableInfo,
+    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function,
+    FunctionCall, Interface, IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind,
+    VarPath, VarSelect, Variable, VariableInfo,
 };
 use crate::namespace_table;
 use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
@@ -38,9 +38,10 @@ pub struct Context {
     pub config: Config,
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
-    pub func_paths: HashMap<FuncPath, FuncProto>,
+    pub func_paths: HashMap<FuncPath, VarId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
+    pub function_calls: HashMap<VarId, FunctionCall>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
     pub modports: HashMap<StrId, Vec<(StrId, Direction)>>,
     pub declarations: Vec<Declaration>,
@@ -52,6 +53,7 @@ pub struct Context {
     pub ignore_var_func: bool,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
+    function_call_id: VarId,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,
@@ -64,11 +66,13 @@ pub struct Context {
 
 impl Context {
     pub fn inherit(&mut self, tgt: &mut Context) {
+        std::mem::swap(&mut self.function_calls, &mut tgt.function_calls);
         std::mem::swap(&mut self.overrides, &mut tgt.overrides);
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         self.config = tgt.config.clone();
+        self.function_call_id = tgt.function_call_id;
     }
 
     pub fn get_override(&self, x: &VarPath) -> Option<&(Comptime, Expression)> {
@@ -114,40 +118,6 @@ impl Context {
         }
     }
 
-    pub fn insert_func_path(
-        &mut self,
-        name: StrId,
-        path: FuncPath,
-        ret: Option<Comptime>,
-        arity: usize,
-        args: Vec<FuncArg>,
-        token: TokenRange,
-    ) -> VarId {
-        let id = self.var_id;
-
-        if let Some(x) = self.hierarchical_functions.last_mut() {
-            x.push(path.clone());
-        }
-
-        let proto = FuncProto {
-            name,
-            id,
-            ret,
-            arity,
-            args,
-            token,
-        };
-        self.func_paths.insert(path, proto);
-        self.var_id.inc();
-        id
-    }
-
-    pub fn insert_func_args(&mut self, path: &FuncPath, args: Vec<FuncArg>) {
-        if let Some(x) = self.func_paths.get_mut(path) {
-            x.args = args;
-        }
-    }
-
     pub fn insert_variable(&mut self, id: VarId, mut variable: Variable) {
         if self.ignore_var_func {
             return;
@@ -162,6 +132,34 @@ impl Context {
 
     pub fn insert_port_type(&mut self, path: VarPath, r#type: Type, clock_domain: ClockDomain) {
         self.port_types.insert(path, (r#type, clock_domain));
+    }
+
+    pub fn insert_func_path(&mut self, path: FuncPath) -> VarId {
+        let id = self.var_id;
+        self.func_paths.insert(path, id);
+        self.var_id.inc();
+        id
+    }
+
+    pub fn insert_func_call(&mut self, func_call: FunctionCall) -> VarId {
+        let id = self.function_call_id;
+        self.function_calls.insert(id, func_call);
+        self.function_call_id.inc();
+        id
+    }
+
+    pub fn get_func_call(&self, id: VarId) -> Option<FunctionCall> {
+        self.function_calls.get(&id).cloned()
+    }
+
+    pub fn update_func_call<F, T>(&mut self, id: VarId, f: F) -> T
+    where
+        F: FnOnce(&mut Context, &mut FunctionCall) -> T,
+    {
+        let mut func_call = self.get_func_call(id).unwrap();
+        let ret = f(self, &mut func_call);
+        self.function_calls.insert(id, func_call);
+        ret
     }
 
     pub fn insert_function(&mut self, id: VarId, mut function: Function) {
@@ -233,14 +231,12 @@ impl Context {
             self.variables.insert(id, variable);
         }
 
-        for (mut path, proto) in context.func_paths.drain() {
-            path.add_prelude(&base.0);
-            self.func_paths.insert(path, proto);
+        for (path, id) in context.func_paths.drain() {
+            self.func_paths.insert(path, id);
         }
 
-        for (id, mut function) in context.functions.drain() {
-            function.path.add_prelude(&base.0);
-
+        let functions: Vec<_> = context.functions.drain().collect();
+        for (id, mut function) in functions {
             if !array.is_empty() {
                 let total_array = array.total();
                 let func_body = function.functions.remove(0);
@@ -248,7 +244,7 @@ impl Context {
                     for i in 0..total_array {
                         let var_index = VarIndex::from_index(i, array);
                         let mut func_body = func_body.clone();
-                        func_body.set_index(&var_index);
+                        func_body.set_index(context, &var_index);
                         function.functions.push(func_body);
                     }
                 }
@@ -516,7 +512,7 @@ impl Context {
         self.var_paths.drain().collect()
     }
 
-    pub fn drain_func_paths(&mut self) -> HashMap<FuncPath, FuncProto> {
+    pub fn drain_func_paths(&mut self) -> HashMap<FuncPath, VarId> {
         self.func_paths.drain().collect()
     }
 

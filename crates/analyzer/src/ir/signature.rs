@@ -168,6 +168,10 @@ impl Signature {
         }
         vec![ret]
     }
+
+    pub fn is_generic(&self) -> bool {
+        !self.generic_parameters.is_empty()
+    }
 }
 
 impl fmt::Display for Signature {

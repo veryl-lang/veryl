@@ -84,7 +84,7 @@ impl CmdDump {
         }
 
         if self.opt.ir {
-            println!("{}", ir);
+            println!("{}", ir.to_string(&analyzer_context));
 
             let check_error = CheckError::new(metadata.build.error_count_limit);
             check_error.append(&mut ir_error).check_err()?;

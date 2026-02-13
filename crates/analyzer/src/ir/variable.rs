@@ -106,6 +106,7 @@ impl VarPathSelect {
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             comptime.r#type.array.drain(0..array_select.dimension());
 
+            let comptime = Box::new(comptime);
             let src = Factor::Variable(id, array_select.to_index(), width_select, comptime, token);
             Some(Expression::Term(Box::new(src)))
         } else {
@@ -245,15 +246,13 @@ impl VarIndex {
     pub fn to_select(self) -> VarSelect {
         VarSelect(self.0, None)
     }
-}
 
-impl fmt::Display for VarIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
         for i in &self.0 {
-            ret.push_str(&format!("[{i}]"));
+            ret.push_str(&format!("[{}]", i.to_string(context)));
         }
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -337,13 +336,13 @@ impl VarSelectOp {
 pub struct VarSelect(pub Vec<Expression>, pub Option<(VarSelectOp, Expression)>);
 
 impl VarSelect {
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         for x in &mut self.0 {
-            x.set_index(index);
+            x.set_index(context, index);
         }
 
         if let Some((_, x)) = &mut self.1 {
-            x.set_index(index);
+            x.set_index(context, index);
         }
     }
 
@@ -622,24 +621,26 @@ impl VarSelect {
 
         Some((beg, end))
     }
-}
 
-impl fmt::Display for VarSelect {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
         let len = self.0.len();
         for (i, x) in self.0.iter().enumerate() {
             if i == len - 1 {
                 if let Some((op, y)) = &self.1 {
-                    ret.push_str(&format!("[{x}{op}{y}]"));
+                    ret.push_str(&format!(
+                        "[{}{op}{}]",
+                        x.to_string(context),
+                        y.to_string(context)
+                    ));
                 } else {
-                    ret.push_str(&format!("[{x}]"));
+                    ret.push_str(&format!("[{}]", x.to_string(context)));
                 }
             } else {
-                ret.push_str(&format!("[{x}]"));
+                ret.push_str(&format!("[{}]", x.to_string(context)));
             }
         }
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -904,12 +905,12 @@ mod tests {
         let x4 = gen_var_select(&[2], None);
         let x5 = gen_var_select(&[2], Some(3));
 
-        assert_eq!(x0.to_string(), "[8'h02][8'h03][8'h04]");
-        assert_eq!(x1.to_string(), "[8'h02][8'h03][8'h04:8'h05]");
-        assert_eq!(x2.to_string(), "[8'h02][8'h03]");
-        assert_eq!(x3.to_string(), "[8'h02][8'h03:8'h04]");
-        assert_eq!(x4.to_string(), "[8'h02]");
-        assert_eq!(x5.to_string(), "[8'h02:8'h03]");
+        assert_eq!(x0.to_string(&context), "[8'h02][8'h03][8'h04]");
+        assert_eq!(x1.to_string(&context), "[8'h02][8'h03][8'h04:8'h05]");
+        assert_eq!(x2.to_string(&context), "[8'h02][8'h03]");
+        assert_eq!(x3.to_string(&context), "[8'h02][8'h03:8'h04]");
+        assert_eq!(x4.to_string(&context), "[8'h02]");
+        assert_eq!(x5.to_string(&context), "[8'h02:8'h03]");
 
         let array = Shape::new(vec![Some(4), Some(5), Some(6)]);
 
@@ -962,13 +963,13 @@ mod tests {
         let x5 = gen_var_select(&[3], Some(2));
         let x6 = gen_var_select(&[], None);
 
-        assert_eq!(x0.to_string(), "[8'h02][8'h03][8'h04]");
-        assert_eq!(x1.to_string(), "[8'h02][8'h03][8'h05:8'h04]");
-        assert_eq!(x2.to_string(), "[8'h02][8'h03]");
-        assert_eq!(x3.to_string(), "[8'h02][8'h04:8'h03]");
-        assert_eq!(x4.to_string(), "[8'h02]");
-        assert_eq!(x5.to_string(), "[8'h03:8'h02]");
-        assert_eq!(x6.to_string(), "");
+        assert_eq!(x0.to_string(&context), "[8'h02][8'h03][8'h04]");
+        assert_eq!(x1.to_string(&context), "[8'h02][8'h03][8'h05:8'h04]");
+        assert_eq!(x2.to_string(&context), "[8'h02][8'h03]");
+        assert_eq!(x3.to_string(&context), "[8'h02][8'h04:8'h03]");
+        assert_eq!(x4.to_string(&context), "[8'h02]");
+        assert_eq!(x5.to_string(&context), "[8'h03:8'h02]");
+        assert_eq!(x6.to_string(&context), "");
 
         let width = Shape::new(vec![Some(4), Some(5), Some(6)]);
 
@@ -1042,100 +1043,102 @@ mod tests {
         let x22 = VarIndex::from_index(22, &array);
         let x23 = VarIndex::from_index(23, &array);
 
+        let context = Context::default();
+
         assert_eq!(
-            x00.to_string(),
+            x00.to_string(&context),
             "[32'h00000000][32'h00000000][32'h00000000]"
         );
         assert_eq!(
-            x01.to_string(),
+            x01.to_string(&context),
             "[32'h00000000][32'h00000000][32'h00000001]"
         );
         assert_eq!(
-            x02.to_string(),
+            x02.to_string(&context),
             "[32'h00000000][32'h00000000][32'h00000002]"
         );
         assert_eq!(
-            x03.to_string(),
+            x03.to_string(&context),
             "[32'h00000000][32'h00000000][32'h00000003]"
         );
         assert_eq!(
-            x04.to_string(),
+            x04.to_string(&context),
             "[32'h00000000][32'h00000001][32'h00000000]"
         );
         assert_eq!(
-            x05.to_string(),
+            x05.to_string(&context),
             "[32'h00000000][32'h00000001][32'h00000001]"
         );
         assert_eq!(
-            x06.to_string(),
+            x06.to_string(&context),
             "[32'h00000000][32'h00000001][32'h00000002]"
         );
         assert_eq!(
-            x07.to_string(),
+            x07.to_string(&context),
             "[32'h00000000][32'h00000001][32'h00000003]"
         );
         assert_eq!(
-            x08.to_string(),
+            x08.to_string(&context),
             "[32'h00000000][32'h00000002][32'h00000000]"
         );
         assert_eq!(
-            x09.to_string(),
+            x09.to_string(&context),
             "[32'h00000000][32'h00000002][32'h00000001]"
         );
         assert_eq!(
-            x10.to_string(),
+            x10.to_string(&context),
             "[32'h00000000][32'h00000002][32'h00000002]"
         );
         assert_eq!(
-            x11.to_string(),
+            x11.to_string(&context),
             "[32'h00000000][32'h00000002][32'h00000003]"
         );
         assert_eq!(
-            x12.to_string(),
+            x12.to_string(&context),
             "[32'h00000001][32'h00000000][32'h00000000]"
         );
         assert_eq!(
-            x13.to_string(),
+            x13.to_string(&context),
             "[32'h00000001][32'h00000000][32'h00000001]"
         );
         assert_eq!(
-            x14.to_string(),
+            x14.to_string(&context),
             "[32'h00000001][32'h00000000][32'h00000002]"
         );
         assert_eq!(
-            x15.to_string(),
+            x15.to_string(&context),
             "[32'h00000001][32'h00000000][32'h00000003]"
         );
         assert_eq!(
-            x16.to_string(),
+            x16.to_string(&context),
             "[32'h00000001][32'h00000001][32'h00000000]"
         );
         assert_eq!(
-            x17.to_string(),
+            x17.to_string(&context),
             "[32'h00000001][32'h00000001][32'h00000001]"
         );
         assert_eq!(
-            x18.to_string(),
+            x18.to_string(&context),
             "[32'h00000001][32'h00000001][32'h00000002]"
         );
         assert_eq!(
-            x19.to_string(),
+            x19.to_string(&context),
             "[32'h00000001][32'h00000001][32'h00000003]"
         );
         assert_eq!(
-            x20.to_string(),
+            x20.to_string(&context),
             "[32'h00000001][32'h00000002][32'h00000000]"
         );
         assert_eq!(
-            x21.to_string(),
+            x21.to_string(&context),
             "[32'h00000001][32'h00000002][32'h00000001]"
         );
         assert_eq!(
-            x22.to_string(),
+            x22.to_string(&context),
             "[32'h00000001][32'h00000002][32'h00000002]"
         );
         assert_eq!(
-            x23.to_string(),
+            x23.to_string(&context),
             "[32'h00000001][32'h00000002][32'h00000003]"
         );
     }

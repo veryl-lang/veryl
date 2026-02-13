@@ -6,7 +6,6 @@ use crate::ir::assign_table::AssignTable;
 use crate::ir::{Declaration, Function, Type, VarId, VarIndex, VarPath, Variable};
 use crate::symbol::ClockDomain;
 use indent::indent_all_by;
-use std::fmt;
 use veryl_parser::resource_table::StrId;
 
 #[derive(Clone)]
@@ -70,7 +69,7 @@ impl Module {
                     ) {
                         let index = VarIndex::from_index(*index, &variable.r#type.array);
                         context.insert_error(crate::AnalyzerError::unassign_variable(
-                            &format!("{}{index}", variable.path),
+                            &format!("{}{}", variable.path, index.to_string(context)),
                             &variable.token,
                         ));
                     }
@@ -78,10 +77,8 @@ impl Module {
             }
         }
     }
-}
 
-impl fmt::Display for Module {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = format!("module {} {{\n", self.name);
 
         let mut variables: Vec<_> = self.variables.iter().collect();
@@ -96,18 +93,18 @@ impl fmt::Display for Module {
         }
 
         for (_, x) in functions {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('\n');
 
         for x in &self.declarations {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }

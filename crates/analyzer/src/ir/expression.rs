@@ -3,12 +3,11 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_repeat;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    Comptime, FunctionCall, Op, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant, VarId,
-    VarIndex, VarSelect,
+    Comptime, Op, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant, VarId, VarIndex,
+    VarSelect,
 };
 use crate::symbol::ClockDomain;
 use crate::value::{Value, ValueBigUint};
-use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::ExpressionIdentifier;
@@ -28,28 +27,35 @@ impl Expression {
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         Self::Term(Box::new(Factor::create_value(value, token)))
     }
-}
 
-impl fmt::Display for Expression {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ret = match self {
-            Expression::Term(x) => x.to_string(),
+    pub fn to_string(&self, context: &Context) -> String {
+        match self {
+            Expression::Term(x) => x.to_string(context),
             Expression::Unary(x, y) => {
-                format!("({x} {y})")
+                format!("({x} {})", y.to_string(context))
             }
             Expression::Binary(x, y, z) => {
-                format!("({x} {y} {z})")
+                format!("({} {y} {})", x.to_string(context), z.to_string(context))
             }
             Expression::Ternary(x, y, z) => {
-                format!("({x} ? {y} : {z})")
+                format!(
+                    "({} ? {} : {})",
+                    x.to_string(context),
+                    y.to_string(context),
+                    z.to_string(context)
+                )
             }
             Expression::Concatenation(x) => {
                 let mut ret = String::new();
                 for (x, y) in x {
                     if let Some(y) = y {
-                        ret = format!("{ret}, {x} repeat {y}")
+                        ret = format!(
+                            "{ret}, {} repeat {}",
+                            x.to_string(context),
+                            y.to_string(context)
+                        )
                     } else {
-                        ret = format!("{ret}, {x}")
+                        ret = format!("{ret}, {}", x.to_string(context))
                     }
                 }
                 format!("{{{}}}", &ret[2..])
@@ -57,20 +63,18 @@ impl fmt::Display for Expression {
             Expression::ArrayLiteral(x) => {
                 let mut ret = String::new();
                 for x in x {
-                    ret = format!("{ret}, {x}")
+                    ret = format!("{ret}, {}", x.to_string(context))
                 }
                 format!("'{{{}}}", &ret[2..])
             }
             Expression::StructConstructor(_, x) => {
                 let mut ret = String::new();
                 for x in x {
-                    ret = format!("{ret}, {}: {}", x.0, x.1)
+                    ret = format!("{ret}, {}: {}", x.0, x.1.to_string(context))
                 }
                 format!("'{{{}}}", &ret[2..])
             }
-        };
-
-        ret.fmt(f)
+        }
     }
 }
 
@@ -581,30 +585,30 @@ impl Expression {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         match self {
-            Expression::Term(x) => x.set_index(index),
-            Expression::Unary(_, x) => x.set_index(index),
+            Expression::Term(x) => x.set_index(context, index),
+            Expression::Unary(_, x) => x.set_index(context, index),
             Expression::Binary(x, _, y) => {
-                x.set_index(index);
-                y.set_index(index);
+                x.set_index(context, index);
+                y.set_index(context, index);
             }
             Expression::Ternary(x, y, z) => {
-                x.set_index(index);
-                y.set_index(index);
-                z.set_index(index);
+                x.set_index(context, index);
+                y.set_index(context, index);
+                z.set_index(context, index);
             }
             Expression::Concatenation(x) => {
                 for (x, y) in x {
-                    x.set_index(index);
+                    x.set_index(context, index);
                     if let Some(y) = y {
-                        y.set_index(index);
+                        y.set_index(context, index);
                     }
                 }
             }
             Expression::StructConstructor(_, exprs) => {
                 for (_, expr) in exprs {
-                    expr.set_index(index);
+                    expr.set_index(context, index);
                 }
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
@@ -657,10 +661,10 @@ impl Expression {
 
 #[derive(Clone, Debug)]
 pub enum Factor {
-    Variable(VarId, VarIndex, VarSelect, Comptime, TokenRange),
-    Value(Comptime, TokenRange),
+    Variable(VarId, VarIndex, VarSelect, Box<Comptime>, TokenRange),
+    Value(Box<Comptime>, TokenRange),
     SystemFunctionCall(SystemFunctionCall, TokenRange),
-    FunctionCall(FunctionCall, TokenRange),
+    FunctionCall(VarId, TokenRange),
     Anonymous(TokenRange),
     Unresolved(ExpressionIdentifier, TokenRange),
     Unknown(TokenRange),
@@ -669,7 +673,7 @@ pub enum Factor {
 impl Factor {
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         let comptime = Comptime::create_value(value, token);
-        Factor::Value(comptime, token)
+        Factor::Value(Box::new(comptime), token)
     }
 
     pub fn is_assignable(&self) -> bool {
@@ -700,7 +704,10 @@ impl Factor {
             }
             Factor::Value(x, _) => x.get_value().ok().cloned(),
             Factor::SystemFunctionCall(x, _) => x.eval_value(context),
-            Factor::FunctionCall(x, _) => x.eval_value(context),
+            Factor::FunctionCall(x, _) => {
+                let func_call = context.get_func_call(*x).unwrap();
+                func_call.eval_value(context)
+            }
             Factor::Anonymous(_) => None,
             Factor::Unresolved(_, _) => None,
             Factor::Unknown(_) => None,
@@ -715,7 +722,7 @@ impl Factor {
         let value = self.eval_value(context, context_width);
         match self {
             Factor::Variable(_, index, select, comptime, _) => {
-                let mut ret = comptime.clone();
+                let mut ret = *(comptime.clone());
 
                 let value = if let Some(x) = value {
                     ValueVariant::Numeric(x)
@@ -737,9 +744,11 @@ impl Factor {
                 ret.value = value;
                 ret
             }
-            Factor::Value(x, _) => x.clone(),
+            Factor::Value(x, _) => *x.clone(),
             Factor::SystemFunctionCall(x, _) => x.eval_comptime(context),
-            Factor::FunctionCall(x, _) => x.eval_comptime(context),
+            Factor::FunctionCall(x, _) => {
+                context.update_func_call(*x, |c, func_call| func_call.eval_comptime(c))
+            }
             Factor::Anonymous(token) => {
                 let value = ValueVariant::Unknown;
                 let r#type = Type {
@@ -805,7 +814,8 @@ impl Factor {
                 }
             }
             Factor::FunctionCall(x, _) => {
-                x.eval_assign(context, assign_table, assign_context);
+                let func_call = context.get_func_call(*x).unwrap();
+                func_call.eval_assign(context, assign_table, assign_context);
             }
             Factor::SystemFunctionCall(x, _) => {
                 x.eval_assign(context, assign_table, assign_context);
@@ -814,13 +824,13 @@ impl Factor {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         match self {
             Factor::Variable(_, i, _, _, _) => {
                 *i = index.clone();
             }
             Factor::FunctionCall(x, _) => {
-                x.set_index(index);
+                context.update_func_call(*x, |c, func_call| func_call.set_index(c, index));
             }
             _ => (),
         }
@@ -837,13 +847,15 @@ impl Factor {
             Factor::Unknown(x) => *x,
         }
     }
-}
 
-impl fmt::Display for Factor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ret = match self {
+    pub fn to_string(&self, context: &Context) -> String {
+        match self {
             Factor::Variable(id, index, select, _, _) => {
-                format!("{id}{index}{select}")
+                format!(
+                    "{id}{}{}",
+                    index.to_string(context),
+                    select.to_string(context)
+                )
             }
             Factor::Value(x, _) => {
                 if let Ok(x) = x.get_value() {
@@ -852,14 +864,15 @@ impl fmt::Display for Factor {
                     String::from("unknown")
                 }
             }
-            Factor::SystemFunctionCall(x, _) => x.to_string(),
-            Factor::FunctionCall(x, _) => x.to_string(),
+            Factor::SystemFunctionCall(x, _) => x.to_string(context),
+            Factor::FunctionCall(x, _) => {
+                let func = context.function_calls.get(x).unwrap();
+                func.to_string(context)
+            }
             Factor::Anonymous(_) => String::from("_"),
             Factor::Unresolved(_, _) => String::from("unresolved"),
             Factor::Unknown(_) => String::from("unknown"),
-        };
-
-        ret.fmt(f)
+        }
     }
 }
 
@@ -911,24 +924,20 @@ impl ArrayLiteralItem {
             ArrayLiteralItem::Defaul(x) => x.eval_comptime(context, None).is_global,
         }
     }
-}
 
-impl fmt::Display for ArrayLiteralItem {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ret = match self {
+    pub fn to_string(&self, context: &Context) -> String {
+        match self {
             ArrayLiteralItem::Value(x, y) => {
                 if let Some(y) = y {
-                    format!("{} repeat {}", x, y)
+                    format!("{} repeat {}", x.to_string(context), y.to_string(context))
                 } else {
-                    format!("{}", x)
+                    x.to_string(context)
                 }
             }
             ArrayLiteralItem::Defaul(x) => {
-                format!("default: {}", x)
+                format!("default: {}", x.to_string(context))
             }
-        };
-
-        ret.fmt(f)
+        }
     }
 }
 
@@ -1173,7 +1182,7 @@ mod tests {
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(
-            ret,
+            Box::new(ret),
             token_range(),
         ))))
     }
@@ -1189,7 +1198,7 @@ mod tests {
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(
-            ret,
+            Box::new(ret),
             token_range(),
         ))))
     }
@@ -1207,7 +1216,7 @@ mod tests {
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(
-            ret,
+            Box::new(ret),
             token_range(),
         ))))
     }

@@ -307,7 +307,7 @@ impl Conv<&FactorType> for ir::Factor {
             token,
             ..Default::default()
         };
-        Ok(ir::Factor::Value(ret, token))
+        Ok(ir::Factor::Value(Box::new(ret), token))
     }
 }
 
@@ -385,7 +385,7 @@ impl Conv<&CastingType> for ir::Factor {
             token,
             ..Default::default()
         };
-        Ok(ir::Factor::Value(ret, token))
+        Ok(ir::Factor::Value(Box::new(ret), token))
     }
 }
 
@@ -436,7 +436,10 @@ impl Conv<&Factor> for ir::Expression {
         match value {
             Factor::Number(x) => {
                 let x: Comptime = Conv::conv(context, x.number.as_ref())?;
-                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))))
+                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
+                    Box::new(x),
+                    token,
+                ))))
             }
             Factor::BooleanLiteral(x) => {
                 let x = match x.boolean_literal.as_ref() {
@@ -458,7 +461,8 @@ impl Conv<&Factor> for ir::Expression {
                     ..Default::default()
                 };
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    ret, token,
+                    Box::new(ret),
+                    token,
                 ))))
             }
             Factor::IdentifierFactor(x) => Conv::conv(context, x.identifier_factor.as_ref()),
@@ -581,7 +585,8 @@ impl Conv<&Factor> for ir::Expression {
                     ..Default::default()
                 };
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    ret, token,
+                    Box::new(ret),
+                    token,
                 ))))
             }
             Factor::FactorGroup(x) => {
@@ -623,7 +628,8 @@ impl Conv<&Factor> for ir::Expression {
                                 ret
                             };
                             Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                                comptime, token,
+                                Box::new(comptime),
+                                token,
                             ))))
                         } else if let Ok(symbol) = symbol_table::resolve(&generic_path)
                             && let SymbolKind::Parameter(x) = symbol.found.kind
@@ -685,7 +691,8 @@ impl Conv<&Factor> for ir::Expression {
                     ..Default::default()
                 };
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    ret, token,
+                    Box::new(ret),
+                    token,
                 ))))
             }
             Factor::FactorTypeFactor(x) => {
@@ -750,15 +757,15 @@ impl Conv<&IdentifierFactor> for ir::Expression {
                     let index = array_select.to_index();
 
                     if comptime.r#type.is_type() {
-                        ir::Factor::Value(comptime, token)
+                        ir::Factor::Value(Box::new(comptime), token)
                     } else {
-                        ir::Factor::Variable(var_id, index, width_select, comptime, token)
+                        ir::Factor::Variable(var_id, index, width_select, Box::new(comptime), token)
                     }
                 }
             } else {
                 let path = generic_path;
                 if let Some(x) = path.to_literal() {
-                    let x = x.eval_comptime(token);
+                    let x = Box::new(x.eval_comptime(token));
                     ir::Factor::Value(x, token)
                 } else if let Ok(symbol) = symbol_table::resolve(&path) {
                     // To resolve external symbol reference,
@@ -1145,16 +1152,16 @@ mod tests {
         let x8: ir::Expression = Conv::conv(&mut context, &x8).unwrap();
         let x9: ir::Expression = Conv::conv(&mut context, &x9).unwrap();
 
-        assert_eq!(format!("{x0}"), "(+ 32'sh00000001)");
-        assert_eq!(format!("{x1}"), "(- 32'sh00000001)");
-        assert_eq!(format!("{x2}"), "(! 32'sh00000001)");
-        assert_eq!(format!("{x3}"), "(~ 32'sh00000001)");
-        assert_eq!(format!("{x4}"), "(& 32'sh00000001)");
-        assert_eq!(format!("{x5}"), "(| 32'sh00000001)");
-        assert_eq!(format!("{x6}"), "(^ 32'sh00000001)");
-        assert_eq!(format!("{x7}"), "(~& 32'sh00000001)");
-        assert_eq!(format!("{x8}"), "(~| 32'sh00000001)");
-        assert_eq!(format!("{x9}"), "(~^ 32'sh00000001)");
+        assert_eq!(x0.to_string(&context), "(+ 32'sh00000001)");
+        assert_eq!(x1.to_string(&context), "(- 32'sh00000001)");
+        assert_eq!(x2.to_string(&context), "(! 32'sh00000001)");
+        assert_eq!(x3.to_string(&context), "(~ 32'sh00000001)");
+        assert_eq!(x4.to_string(&context), "(& 32'sh00000001)");
+        assert_eq!(x5.to_string(&context), "(| 32'sh00000001)");
+        assert_eq!(x6.to_string(&context), "(^ 32'sh00000001)");
+        assert_eq!(x7.to_string(&context), "(~& 32'sh00000001)");
+        assert_eq!(x8.to_string(&context), "(~| 32'sh00000001)");
+        assert_eq!(x9.to_string(&context), "(~^ 32'sh00000001)");
     }
 
     #[test]
@@ -1213,32 +1220,35 @@ mod tests {
         let x23: ir::Expression = Conv::conv(&mut context, &x23).unwrap();
         let x24: ir::Expression = Conv::conv(&mut context, &x24).unwrap();
 
-        assert_eq!(format!("{x00}"), "(32'sh00000001 ** 32'sh00000001)");
-        assert_eq!(format!("{x01}"), "(32'sh00000001 * 32'sh00000001)");
-        assert_eq!(format!("{x02}"), "(32'sh00000001 / 32'sh00000001)");
-        assert_eq!(format!("{x03}"), "(32'sh00000001 % 32'sh00000001)");
-        assert_eq!(format!("{x04}"), "(32'sh00000001 + 32'sh00000001)");
-        assert_eq!(format!("{x05}"), "(32'sh00000001 + (- 32'sh00000001))");
-        assert_eq!(format!("{x06}"), "(32'sh00000001 << 32'sh00000001)");
-        assert_eq!(format!("{x07}"), "(32'sh00000001 >> 32'sh00000001)");
-        assert_eq!(format!("{x08}"), "(32'sh00000001 <<< 32'sh00000001)");
-        assert_eq!(format!("{x09}"), "(32'sh00000001 >>> 32'sh00000001)");
-        assert_eq!(format!("{x10}"), "(32'sh00000001 <: 32'sh00000001)");
-        assert_eq!(format!("{x11}"), "(32'sh00000001 <= 32'sh00000001)");
-        assert_eq!(format!("{x12}"), "(32'sh00000001 >: 32'sh00000001)");
-        assert_eq!(format!("{x13}"), "(32'sh00000001 >= 32'sh00000001)");
-        assert_eq!(format!("{x14}"), "(32'sh00000001 == 32'sh00000001)");
-        assert_eq!(format!("{x15}"), "(32'sh00000001 != 32'sh00000001)");
-        assert_eq!(format!("{x16}"), "(32'sh00000001 ==? 32'sh00000001)");
-        assert_eq!(format!("{x17}"), "(32'sh00000001 !=? 32'sh00000001)");
-        assert_eq!(format!("{x18}"), "(32'sh00000001 & 32'sh00000001)");
-        assert_eq!(format!("{x19}"), "(32'sh00000001 ^ 32'sh00000001)");
-        assert_eq!(format!("{x20}"), "(32'sh00000001 ~^ 32'sh00000001)");
-        assert_eq!(format!("{x21}"), "(32'sh00000001 | 32'sh00000001)");
-        assert_eq!(format!("{x22}"), "(32'sh00000001 && 32'sh00000001)");
-        assert_eq!(format!("{x23}"), "(32'sh00000001 || 32'sh00000001)");
+        assert_eq!(x00.to_string(&context), "(32'sh00000001 ** 32'sh00000001)");
+        assert_eq!(x01.to_string(&context), "(32'sh00000001 * 32'sh00000001)");
+        assert_eq!(x02.to_string(&context), "(32'sh00000001 / 32'sh00000001)");
+        assert_eq!(x03.to_string(&context), "(32'sh00000001 % 32'sh00000001)");
+        assert_eq!(x04.to_string(&context), "(32'sh00000001 + 32'sh00000001)");
         assert_eq!(
-            format!("{x24}"),
+            x05.to_string(&context),
+            "(32'sh00000001 + (- 32'sh00000001))"
+        );
+        assert_eq!(x06.to_string(&context), "(32'sh00000001 << 32'sh00000001)");
+        assert_eq!(x07.to_string(&context), "(32'sh00000001 >> 32'sh00000001)");
+        assert_eq!(x08.to_string(&context), "(32'sh00000001 <<< 32'sh00000001)");
+        assert_eq!(x09.to_string(&context), "(32'sh00000001 >>> 32'sh00000001)");
+        assert_eq!(x10.to_string(&context), "(32'sh00000001 <: 32'sh00000001)");
+        assert_eq!(x11.to_string(&context), "(32'sh00000001 <= 32'sh00000001)");
+        assert_eq!(x12.to_string(&context), "(32'sh00000001 >: 32'sh00000001)");
+        assert_eq!(x13.to_string(&context), "(32'sh00000001 >= 32'sh00000001)");
+        assert_eq!(x14.to_string(&context), "(32'sh00000001 == 32'sh00000001)");
+        assert_eq!(x15.to_string(&context), "(32'sh00000001 != 32'sh00000001)");
+        assert_eq!(x16.to_string(&context), "(32'sh00000001 ==? 32'sh00000001)");
+        assert_eq!(x17.to_string(&context), "(32'sh00000001 !=? 32'sh00000001)");
+        assert_eq!(x18.to_string(&context), "(32'sh00000001 & 32'sh00000001)");
+        assert_eq!(x19.to_string(&context), "(32'sh00000001 ^ 32'sh00000001)");
+        assert_eq!(x20.to_string(&context), "(32'sh00000001 ~^ 32'sh00000001)");
+        assert_eq!(x21.to_string(&context), "(32'sh00000001 | 32'sh00000001)");
+        assert_eq!(x22.to_string(&context), "(32'sh00000001 && 32'sh00000001)");
+        assert_eq!(x23.to_string(&context), "(32'sh00000001 || 32'sh00000001)");
+        assert_eq!(
+            x24.to_string(&context),
             "(((32'sh00000001 ** 32'sh00000001) + 32'sh00000001) + (- ((32'sh00000001 / 32'sh00000001) % 32'sh00000001)))"
         );
     }
@@ -1254,11 +1264,11 @@ mod tests {
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
         assert_eq!(
-            format!("{x0}"),
+            x0.to_string(&context),
             "(32'sh00000001 ? 32'sh00000002 : 32'sh00000003)"
         );
         assert_eq!(
-            format!("{x1}"),
+            x1.to_string(&context),
             "(32'sh00000001 ? 32'sh00000002 : (32'sh00000003 ? 32'sh00000004 : 32'sh00000005))"
         );
     }
@@ -1273,8 +1283,8 @@ mod tests {
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
-        assert_eq!(format!("{x0}"), "1'h1");
-        assert_eq!(format!("{x1}"), "1'h0");
+        assert_eq!(x0.to_string(&context), "1'h1");
+        assert_eq!(x1.to_string(&context), "1'h0");
     }
 
     #[test]
@@ -1288,11 +1298,11 @@ mod tests {
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
         assert_eq!(
-            format!("{x0}"),
+            x0.to_string(&context),
             "((32'sh00000001 + 32'sh00000002) * 32'sh00000003)"
         );
         assert_eq!(
-            format!("{x1}"),
+            x1.to_string(&context),
             "(32'sh00000001 + (32'sh00000002 * 32'sh00000003))"
         );
     }
@@ -1308,11 +1318,11 @@ mod tests {
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
         assert_eq!(
-            format!("{x0}"),
+            x0.to_string(&context),
             "{32'sh00000001, 32'sh00000002, 32'sh00000003}"
         );
         assert_eq!(
-            format!("{x1}"),
+            x1.to_string(&context),
             "{32'sh00000001 repeat 32'sh00000002, 32'sh00000002, 32'sh00000003 repeat 32'sh00000004}"
         );
     }
@@ -1328,11 +1338,11 @@ mod tests {
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
 
         assert_eq!(
-            format!("{x0}"),
+            x0.to_string(&context),
             "((32'sh0000000a ==? 32'sh00000000) ? 32'sh00000001 : ((32'sh0000000a ==? 32'sh00000001) ? 32'sh00000002 : 32'sh00000003))"
         );
         assert_eq!(
-            format!("{x1}"),
+            x1.to_string(&context),
             "(((32'sh00000000 <= 32'sh0000000a) && (32'sh0000000a <= 32'sh00000002)) ? 32'sh00000001 : (((32'sh00000004 <= 32'sh0000000a) && (32'sh0000000a <: 32'sh00000005)) ? 32'sh00000002 : 32'sh00000003))"
         );
     }
@@ -1346,7 +1356,7 @@ mod tests {
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
 
         assert_eq!(
-            format!("{x0}"),
+            x0.to_string(&context),
             "((32'sh00000000 == 32'sh00000001) ? 32'sh00000002 : ((32'sh00000001 <: 32'sh00000002) ? 32'sh00000002 : 32'sh00000003))"
         );
     }

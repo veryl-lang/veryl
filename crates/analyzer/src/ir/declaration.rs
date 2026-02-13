@@ -4,7 +4,6 @@ use crate::ir::{
     AssignDestination, Component, Comptime, Expression, Statement, VarId, VarIndex, VarSelect,
 };
 use indent::indent_all_by;
-use std::fmt;
 use veryl_parser::resource_table::StrId;
 
 #[derive(Clone, Default)]
@@ -54,17 +53,15 @@ impl Declaration {
         }
         assign_table.refernced.clear();
     }
-}
 
-impl fmt::Display for Declaration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         match self {
-            Declaration::Comb(x) => x.fmt(f),
-            Declaration::Ff(x) => x.fmt(f),
-            Declaration::Inst(x) => x.fmt(f),
-            Declaration::Initial(x) => x.fmt(f),
-            Declaration::Final(x) => x.fmt(f),
-            Declaration::Null => "".fmt(f),
+            Declaration::Comb(x) => x.to_string(context),
+            Declaration::Ff(x) => x.to_string(context),
+            Declaration::Inst(x) => x.to_string(context),
+            Declaration::Initial(x) => x.to_string(context),
+            Declaration::Final(x) => x.to_string(context),
+            Declaration::Null => "".to_string(),
         }
     }
 }
@@ -80,19 +77,17 @@ impl CombDeclaration {
             x.eval_assign(context, assign_table, AssignContext::Comb, &[]);
         }
     }
-}
 
-impl fmt::Display for CombDeclaration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = "comb {\n".to_string();
 
         for x in &self.statements {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -104,9 +99,14 @@ pub struct FfClock {
     pub comptime: Comptime,
 }
 
-impl fmt::Display for FfClock {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        format!("{}{}{}", self.id, self.index, self.select).fmt(f)
+impl FfClock {
+    pub fn to_string(&self, context: &Context) -> String {
+        format!(
+            "{}{}{}",
+            self.id,
+            self.index.to_string(context),
+            self.select.to_string(context)
+        )
     }
 }
 
@@ -118,9 +118,14 @@ pub struct FfReset {
     pub comptime: Comptime,
 }
 
-impl fmt::Display for FfReset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        format!("{}{}{}", self.id, self.index, self.select).fmt(f)
+impl FfReset {
+    pub fn to_string(&self, context: &Context) -> String {
+        format!(
+            "{}{}{}",
+            self.id,
+            self.index.to_string(context),
+            self.select.to_string(context)
+        )
     }
 }
 
@@ -137,23 +142,25 @@ impl FfDeclaration {
             x.eval_assign(context, assign_table, AssignContext::Ff, &[]);
         }
     }
-}
 
-impl fmt::Display for FfDeclaration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = if let Some(x) = &self.reset {
-            format!("ff ({}, {}) {{\n", self.clock, x)
+            format!(
+                "ff ({}, {}) {{\n",
+                self.clock.to_string(context),
+                x.to_string(context)
+            )
         } else {
-            format!("ff ({}) {{\n", self.clock)
+            format!("ff ({}) {{\n", self.clock.to_string(context))
         };
 
         for x in &self.statements {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -163,8 +170,8 @@ pub struct InstInput {
     pub expr: Expression,
 }
 
-impl fmt::Display for InstInput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl InstInput {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
 
         if self.id.len() == 1 {
@@ -177,9 +184,9 @@ impl fmt::Display for InstInput {
             ret.push('}');
         }
 
-        ret.push_str(&format!(" <- {}", self.expr));
+        ret.push_str(&format!(" <- {}", self.expr.to_string(context)));
 
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -189,8 +196,8 @@ pub struct InstOutput {
     pub dst: Vec<AssignDestination>,
 }
 
-impl fmt::Display for InstOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl InstOutput {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
 
         if self.id.len() == 1 {
@@ -206,16 +213,16 @@ impl fmt::Display for InstOutput {
         ret.push_str(" -> ");
 
         if self.dst.len() == 1 {
-            ret.push_str(&format!("{}", self.dst[0]));
+            ret.push_str(&self.dst[0].to_string(context));
         } else if !self.dst.is_empty() {
-            ret.push_str(&format!("{{{}", self.dst[0]));
+            ret.push_str(&format!("{{{}", self.dst[0].to_string(context)));
             for d in &self.dst[1..] {
-                ret.push_str(&format!(", {}", d));
+                ret.push_str(&format!(", {}", d.to_string(context)));
             }
             ret.push('}');
         }
 
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -241,29 +248,27 @@ impl InstDeclaration {
             }
         }
     }
-}
 
-impl fmt::Display for InstDeclaration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = format!("inst {} (\n", self.name);
 
         for x in &self.inputs {
-            let text = format!("{};\n", x);
+            let text = format!("{};\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         for x in &self.outputs {
-            let text = format!("{};\n", x);
+            let text = format!("{};\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push_str(") {\n");
 
-        let text = format!("{}\n", self.component);
+        let text = format!("{}\n", self.component.to_string(context));
         ret.push_str(&indent_all_by(2, text));
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -278,19 +283,17 @@ impl InitialDeclaration {
             x.eval_assign(context, assign_table, AssignContext::Initial, &[]);
         }
     }
-}
 
-impl fmt::Display for InitialDeclaration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = "initial {\n".to_string();
 
         for x in &self.statements {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -305,18 +308,16 @@ impl FinalDeclaration {
             x.eval_assign(context, assign_table, AssignContext::Final, &[]);
         }
     }
-}
 
-impl fmt::Display for FinalDeclaration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = "final {\n".to_string();
 
         for x in &self.statements {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }

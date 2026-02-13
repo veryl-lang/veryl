@@ -11,8 +11,8 @@ use crate::conv::checker::port::{check_direction, check_port_default_value, chec
 use crate::conv::utils::{
     TypePosition, eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_for_range,
     eval_reset, eval_size, eval_type, eval_variable, expand_connect, expand_connect_const,
-    get_component, get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
-    var_path_to_assign_destination,
+    get_component, get_overridden_params, get_port_connects, get_return_str,
+    insert_generic_function_insts, insert_port_connect, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
@@ -82,6 +82,7 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 if x.function_declaration.function_declaration_opt.is_some() {
                     context.config.use_ir = use_ir;
                     context.ignore_var_func = false;
+                    insert_generic_function_insts(context, &x.function_declaration)?;
                 } else {
                     // check IrError for non-generic function
                     ret?;
@@ -788,17 +789,21 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
     }
 }
 
-impl Conv<&FunctionDeclaration> for () {
-    fn conv(context: &mut Context, value: &FunctionDeclaration) -> IrResult<Self> {
-        let name = value.identifier.text();
+impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
+    fn conv(
+        context: &mut Context,
+        value: (&FunctionDeclaration, Option<&FuncPath>),
+    ) -> IrResult<Self> {
+        let (func_def, path) = value;
+        let name = func_def.identifier.text();
 
-        let token: TokenRange = (&value.identifier.identifier_token).into();
+        let token: TokenRange = (&func_def.identifier.identifier_token).into();
 
-        if let Some(x) = &value.function_declaration_opt {
+        if let Some(x) = &func_def.function_declaration_opt {
             check_generic_bound(context, &x.with_generic_parameter);
         }
 
-        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
             && let SymbolKind::Function(x) = symbol.found.kind
         {
             let constantable = x.constantable.unwrap();
@@ -818,7 +823,7 @@ impl Conv<&FunctionDeclaration> for () {
                 None
             };
 
-            let arg_items: Vec<_> = if let Some(x) = &value.function_declaration_opt0
+            let arg_items: Vec<_> = if let Some(x) = &func_def.function_declaration_opt0
                 && let Some(x) = &x.port_declaration.port_declaration_opt
             {
                 x.port_declaration_list.as_ref().into()
@@ -828,16 +833,24 @@ impl Conv<&FunctionDeclaration> for () {
 
             // insert VarPath for function before statement_block conv
             // because it may be refered by recursive function
-            let path = FuncPath::new(symbol.found.id);
+            let path = if let Some(path) = path {
+                path.clone()
+            } else {
+                FuncPath::new(symbol.found.id)
+            };
+            let id = if let Some(id) = context.func_paths.get(&path) {
+                *id
+            } else {
+                context.insert_func_path(path.clone())
+            };
             let arity = arg_items.len();
-            let args = vec![]; // args are collected later
             let token: TokenRange = symbol.found.token.into();
-            let id =
-                context.insert_func_path(name, path.clone(), ret_type.clone(), arity, args, token);
 
             context.push_affiliation(Affiliation::Function);
             context.push_hierarchy(name);
 
+            let mut arg_map = HashMap::default();
+            let mut args = vec![];
             let body = context.block(|c| {
                 // insert return value as variable
                 let ret_id = if let Some(ret_type) = ret_type.clone() {
@@ -873,9 +886,6 @@ impl Conv<&FunctionDeclaration> for () {
                 } else {
                     None
                 };
-
-                let mut arg_map = HashMap::default();
-                let mut args = vec![];
 
                 for item in arg_items {
                     let ret: IrResult<()> = Conv::conv(c, item);
@@ -923,9 +933,8 @@ impl Conv<&FunctionDeclaration> for () {
                     }
                 }
 
-                c.insert_func_args(&path, args);
-
-                let statements: ir::StatementBlock = Conv::conv(c, value.statement_block.as_ref())?;
+                let statements: ir::StatementBlock =
+                    Conv::conv(c, func_def.statement_block.as_ref())?;
 
                 Ok(ir::FunctionBody {
                     ret: ret_id,
@@ -937,14 +946,17 @@ impl Conv<&FunctionDeclaration> for () {
             context.pop_affiliation();
             context.pop_hierarchy();
 
-            let r#type = ret_type.as_ref().map(|x| x.r#type.clone());
             let function = ir::Function {
+                name,
                 id,
                 path,
-                r#type,
+                r#type: ret_type.as_ref().cloned(),
                 array: Shape::default(),
+                arity,
+                args,
                 constantable,
                 functions: vec![body?],
+                token,
             };
 
             // function should be inserted outside the function scope
@@ -953,6 +965,12 @@ impl Conv<&FunctionDeclaration> for () {
         } else {
             Err(ir_error!(token))
         }
+    }
+}
+
+impl Conv<&FunctionDeclaration> for () {
+    fn conv(context: &mut Context, value: &FunctionDeclaration) -> IrResult<Self> {
+        Conv::conv(context, (value, None))
     }
 }
 

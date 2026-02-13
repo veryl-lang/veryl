@@ -7,37 +7,36 @@ use crate::ir::{
 use crate::symbol::ClockDomain;
 use crate::value::Value;
 use crate::{AnalyzerError, BigUint, ir_error};
-use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Debug)]
 pub struct Input(Expression);
 
-impl fmt::Display for Input {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+impl Input {
+    pub fn to_string(&self, context: &Context) -> String {
+        self.0.to_string(context)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct Output(Vec<AssignDestination>);
 
-impl fmt::Display for Output {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Output {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
 
         if self.0.len() == 1 {
-            ret.push_str(&format!("{}", self.0[0]));
+            ret.push_str(&self.0[0].to_string(context));
         } else if !self.0.is_empty() {
-            ret.push_str(&format!("{{{}", self.0[0]));
+            ret.push_str(&format!("{{{}", self.0[0].to_string(context)));
             for d in &self.0[1..] {
-                ret.push_str(&format!(", {}", d));
+                ret.push_str(&format!(", {}", d.to_string(context)));
             }
             ret.push_str("}}");
         }
 
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -281,16 +280,18 @@ impl SystemFunctionCall {
             }
         }
     }
-}
 
-impl fmt::Display for SystemFunctionCall {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         match &self.kind {
-            SystemFunctionKind::Bits(x) => format!("$bits({x})").fmt(f),
-            SystemFunctionKind::Size(x) => format!("$size({x})").fmt(f),
-            SystemFunctionKind::Clog2(x) => format!("$clog2({x})").fmt(f),
-            SystemFunctionKind::Onehot(x) => format!("$onehot({x})").fmt(f),
-            SystemFunctionKind::Readmemh(x, y) => format!("$readmemh({x}, {y})").fmt(f),
+            SystemFunctionKind::Bits(x) => format!("$bits({})", x.to_string(context)),
+            SystemFunctionKind::Size(x) => format!("$size({})", x.to_string(context)),
+            SystemFunctionKind::Clog2(x) => format!("$clog2({})", x.to_string(context)),
+            SystemFunctionKind::Onehot(x) => format!("$onehot({})", x.to_string(context)),
+            SystemFunctionKind::Readmemh(x, y) => format!(
+                "$readmemh({}, {})",
+                x.to_string(context),
+                y.to_string(context)
+            ),
         }
     }
 }

@@ -23,7 +23,7 @@ pub use declaration::{
     FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput, InstOutput,
 };
 pub use expression::{ArrayLiteralItem, Expression, Factor};
-pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
+pub use function::{Arguments, FuncArg, FuncPath, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
 pub use ir::{Component, Ir, IrError, IrResult, SystemVerilog};
 pub use module::Module;

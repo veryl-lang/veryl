@@ -2,8 +2,8 @@ use crate::conv::Context;
 use crate::conv::utils::check_compatibility;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    AssignDestination, Comptime, Expression, IrResult, Shape, Signature, Statement, Type,
-    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
+    AssignDestination, Comptime, Expression, IrResult, Shape, Signature, Statement, ValueVariant,
+    VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
 };
 use crate::symbol::{ClockDomain, Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
@@ -53,16 +53,6 @@ impl fmt::Display for FuncPath {
 }
 
 #[derive(Clone)]
-pub struct FuncProto {
-    pub name: StrId,
-    pub id: VarId,
-    pub ret: Option<Comptime>,
-    pub arity: usize,
-    pub args: Vec<FuncArg>,
-    pub token: TokenRange,
-}
-
-#[derive(Clone)]
 pub struct FuncArg {
     pub name: StrId,
     pub comptime: Comptime,
@@ -71,12 +61,16 @@ pub struct FuncArg {
 
 #[derive(Clone)]
 pub struct Function {
+    pub name: StrId,
     pub id: VarId,
     pub path: FuncPath,
-    pub r#type: Option<Type>,
+    pub r#type: Option<Comptime>,
     pub array: Shape,
+    pub arity: usize,
+    pub args: Vec<FuncArg>,
     pub constantable: bool,
     pub functions: Vec<FunctionBody>,
+    pub token: TokenRange,
 }
 
 impl Function {
@@ -86,15 +80,41 @@ impl Function {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         for x in &mut self.functions {
-            x.set_index(index);
+            x.set_index(context, index);
         }
     }
 
     pub fn get_function(&self, index: &[usize]) -> Option<FunctionBody> {
         let index = self.array.calc_index(index)?;
         self.functions.get(index).cloned()
+    }
+
+    pub fn to_string(&self, context: &Context) -> String {
+        let mut ret = String::new();
+
+        for (i, f) in self.functions.iter().enumerate() {
+            if self.functions.len() == 1 {
+                ret.push_str(&format!("func {}({})", self.id, self.path));
+            } else {
+                ret.push_str(&format!("func {}[{}]({})", self.id, i, self.path));
+            }
+
+            if let Some(x) = f.ret {
+                ret.push_str(&format!(" -> {x}"));
+            }
+            ret.push_str(" {\n");
+
+            for s in &f.statements {
+                let text = format!("{}\n", s.to_string(context));
+                ret.push_str(&indent_all_by(2, text));
+            }
+
+            ret.push_str("}\n");
+        }
+
+        ret.trim_end().to_string()
     }
 }
 
@@ -112,38 +132,10 @@ impl FunctionBody {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         for x in &mut self.statements {
-            x.set_index(index);
+            x.set_index(context, index);
         }
-    }
-}
-
-impl fmt::Display for Function {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = String::new();
-
-        for (i, f) in self.functions.iter().enumerate() {
-            if self.functions.len() == 1 {
-                ret.push_str(&format!("func {}({})", self.id, self.path));
-            } else {
-                ret.push_str(&format!("func {}[{}]({})", self.id, i, self.path));
-            }
-
-            if let Some(x) = f.ret {
-                ret.push_str(&format!(" -> {x}"));
-            }
-            ret.push_str(" {\n");
-
-            for s in &f.statements {
-                let text = format!("{}\n", s);
-                ret.push_str(&indent_all_by(2, text));
-            }
-
-            ret.push_str("}\n");
-        }
-
-        ret.trim_end().fmt(f)
     }
 }
 
@@ -152,12 +144,32 @@ pub struct FunctionCall {
     pub id: VarId,
     pub index: Option<Vec<usize>>,
     pub ret: Option<Comptime>,
+    pub args: Arguments,
     pub inputs: HashMap<VarPath, Expression>,
     pub outputs: HashMap<VarPath, Vec<AssignDestination>>,
     pub token: TokenRange,
 }
 
 impl FunctionCall {
+    pub fn apply_args(&mut self, context: &mut Context) -> IrResult<()> {
+        let func = context.functions.get(&self.id).cloned().unwrap();
+        let (inputs, outputs) = self
+            .args
+            .clone()
+            .to_function_args(context, &func, self.token)?;
+        self.inputs.extend(inputs);
+        self.outputs.extend(outputs);
+        Ok(())
+    }
+
+    pub fn apply_ret(&mut self, context: &Context) {
+        if let Some(func) = context.functions.get(&self.id)
+            && let Some(ret) = &func.r#type
+        {
+            self.ret = Some(ret.clone());
+        }
+    }
+
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
         let func = context.functions.get(&self.id)?;
         let func = if let Some(x) = &self.index {
@@ -251,20 +263,18 @@ impl FunctionCall {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         for x in self.inputs.values_mut() {
-            x.set_index(index);
+            x.set_index(context, index);
         }
         for x in self.outputs.values_mut() {
             for x in x {
-                x.set_index(index);
+                x.set_index(context, index);
             }
         }
     }
-}
 
-impl fmt::Display for FunctionCall {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut args = String::new();
 
         let mut inputs: Vec<_> = self.inputs.iter().collect();
@@ -273,15 +283,15 @@ impl fmt::Display for FunctionCall {
         outputs.sort_by_key(|x| x.0);
 
         for (id, val) in &inputs {
-            args.push_str(&format!("{id}: {val}, "));
+            args.push_str(&format!("{id}: {}, ", val.to_string(context)));
         }
         for (id, val) in &outputs {
             if val.len() == 1 {
-                args.push_str(&format!("{id}: {}, ", val[0]));
+                args.push_str(&format!("{id}: {}, ", val[0].to_string(context)));
             } else {
-                args.push_str(&format!("{id}: {{{}", val[0]));
+                args.push_str(&format!("{id}: {{{}", val[0].to_string(context)));
                 for x in &val[1..] {
-                    args.push_str(&format!(", {x}"));
+                    args.push_str(&format!(", {}", x.to_string(context)));
                 }
                 args.push_str("}}, ");
             }
@@ -299,7 +309,7 @@ impl fmt::Display for FunctionCall {
             }
         }
 
-        format!("{}{}({})", self.id, index, args).fmt(f)
+        format!("{}{}({})", self.id, index, args)
     }
 }
 
@@ -310,7 +320,7 @@ pub type FunctionArgs = (
     HashMap<VarPath, Vec<AssignDestination>>,
 );
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Arguments {
     Positional(PositionalArgs),
     Named(NamedArgs),
@@ -368,7 +378,7 @@ impl Arguments {
     pub fn to_function_args(
         self,
         context: &mut Context,
-        func: &FuncProto,
+        func: &Function,
         token: TokenRange,
     ) -> IrResult<FunctionArgs> {
         let mut inputs = HashMap::default();

@@ -2,13 +2,10 @@ use crate::AnalyzerError;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
-use crate::ir::{
-    Comptime, Expression, FunctionCall, SystemFunctionCall, VarId, VarIndex, VarPath, VarSelect,
-};
+use crate::ir::{Comptime, Expression, SystemFunctionCall, VarId, VarIndex, VarPath, VarSelect};
 use crate::value::ValueBigUint;
 use indent::indent_all_by;
 use std::borrow::Cow;
-use std::fmt;
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Default)]
@@ -20,7 +17,7 @@ pub enum Statement {
     If(IfStatement),
     IfReset(IfResetStatement),
     SystemFunctionCall(SystemFunctionCall),
-    FunctionCall(Box<FunctionCall>),
+    FunctionCall(VarId),
     Null,
 }
 
@@ -37,7 +34,8 @@ impl Statement {
             Statement::IfReset(_) => (),
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => {
-                x.eval_value(context);
+                let func_call = context.get_func_call(*x).unwrap();
+                func_call.eval_value(context);
             }
             Statement::Null => (),
         }
@@ -57,32 +55,38 @@ impl Statement {
             Statement::SystemFunctionCall(x) => {
                 x.eval_assign(context, assign_table, assign_context)
             }
-            Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
+            Statement::FunctionCall(x) => {
+                let func_call = context.get_func_call(*x).unwrap();
+                func_call.eval_assign(context, assign_table, assign_context)
+            }
             Statement::Null => (),
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         match self {
-            Statement::Assign(x) => x.set_index(index),
-            Statement::If(x) => x.set_index(index),
-            Statement::IfReset(x) => x.set_index(index),
+            Statement::Assign(x) => x.set_index(context, index),
+            Statement::If(x) => x.set_index(context, index),
+            Statement::IfReset(x) => x.set_index(context, index),
             Statement::SystemFunctionCall(_) => (),
-            Statement::FunctionCall(x) => x.set_index(index),
+            Statement::FunctionCall(x) => {
+                context.update_func_call(*x, |c, func_call| func_call.set_index(c, index))
+            }
             Statement::Null => (),
         }
     }
-}
 
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         match self {
-            Statement::Assign(x) => x.fmt(f),
-            Statement::If(x) => x.fmt(f),
-            Statement::IfReset(x) => x.fmt(f),
-            Statement::SystemFunctionCall(x) => format!("{x};").fmt(f),
-            Statement::FunctionCall(x) => format!("{x};").fmt(f),
-            Statement::Null => "".fmt(f),
+            Statement::Assign(x) => x.to_string(context),
+            Statement::If(x) => x.to_string(context),
+            Statement::IfReset(x) => x.to_string(context),
+            Statement::SystemFunctionCall(x) => format!("{};", x.to_string(context)),
+            Statement::FunctionCall(x) => {
+                let func_call = context.function_calls.get(x).unwrap();
+                format!("{};", func_call.to_string(context))
+            }
+            Statement::Null => "".to_string(),
         }
     }
 }
@@ -174,15 +178,17 @@ impl AssignDestination {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, _context: &mut Context, index: &VarIndex) {
         self.index.add_prelude(index);
     }
-}
 
-impl fmt::Display for AssignDestination {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ret = format!("{}{}{}", self.id, self.index, self.select);
-        ret.fmt(f)
+    pub fn to_string(&self, context: &Context) -> String {
+        format!(
+            "{}{}{}",
+            self.id,
+            self.index.to_string(context),
+            self.select.to_string(context)
+        )
     }
 }
 
@@ -222,28 +228,30 @@ impl AssignStatement {
         }
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         for dst in &mut self.dst {
-            dst.set_index(index);
+            dst.set_index(context, index);
         }
-        self.expr.set_index(index);
+        self.expr.set_index(context, index);
     }
-}
 
-impl fmt::Display for AssignStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
 
         if self.dst.len() == 1 {
-            ret.push_str(&format!("{} = {};", self.dst[0], self.expr));
+            ret.push_str(&format!(
+                "{} = {};",
+                self.dst[0].to_string(context),
+                self.expr.to_string(context)
+            ));
         } else {
-            ret.push_str(&format!("{{{}", self.dst[0]));
+            ret.push_str(&format!("{{{}", self.dst[0].to_string(context)));
             for d in &self.dst[1..] {
-                ret.push_str(&format!(", {}", d));
+                ret.push_str(&format!(", {}", d.to_string(context)));
             }
-            ret.push_str(&format!("}} = {};", self.expr));
+            ret.push_str(&format!("}} = {};", self.expr.to_string(context)));
         }
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -302,34 +310,32 @@ impl IfStatement {
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
-        self.cond.set_index(index);
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
+        self.cond.set_index(context, index);
         for x in &mut self.true_side {
-            x.set_index(index);
+            x.set_index(context, index);
         }
         for x in &mut self.false_side {
-            x.set_index(index);
+            x.set_index(context, index);
         }
     }
-}
 
-impl fmt::Display for IfStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = format!("if {} {{\n", self.cond);
+    pub fn to_string(&self, context: &Context) -> String {
+        let mut ret = format!("if {} {{\n", self.cond.to_string(context));
         for x in &self.true_side {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
         ret.push('}');
         if !self.false_side.is_empty() {
             ret.push_str(" else {\n");
             for x in &self.false_side {
-                let text = format!("{}\n", x);
+                let text = format!("{}\n", x.to_string(context));
                 ret.push_str(&indent_all_by(2, text));
             }
             ret.push('}');
         }
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -373,32 +379,30 @@ impl IfResetStatement {
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
-    pub fn set_index(&mut self, index: &VarIndex) {
+    pub fn set_index(&mut self, context: &mut Context, index: &VarIndex) {
         for x in &mut self.true_side {
-            x.set_index(index);
+            x.set_index(context, index);
         }
         for x in &mut self.false_side {
-            x.set_index(index);
+            x.set_index(context, index);
         }
     }
-}
 
-impl fmt::Display for IfResetStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = "if_reset {\n".to_string();
         for x in &self.true_side {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
         ret.push('}');
         if !self.false_side.is_empty() {
             ret.push_str(" else {\n");
             for x in &self.false_side {
-                let text = format!("{}\n", x);
+                let text = format!("{}\n", x.to_string(context));
                 ret.push_str(&indent_all_by(2, text));
             }
             ret.push('}');
         }
-        ret.fmt(f)
+        ret
     }
 }

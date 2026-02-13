@@ -292,7 +292,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         )]))
                     }
                     SymbolKind::Function(x) => {
-                        let ret = function_call(
+                        let id = function_call(
                             context,
                             value.expression_identifier.as_ref(),
                             args,
@@ -306,14 +306,12 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             ));
                         }
 
-                        Ok(ir::StatementBlock(vec![ir::Statement::FunctionCall(
-                            Box::new(ret),
-                        )]))
+                        Ok(ir::StatementBlock(vec![ir::Statement::FunctionCall(id)]))
                     }
                     SymbolKind::ModportFunctionMember(x) => {
                         let symbol = symbol_table::get(x.function).unwrap();
                         if let SymbolKind::Function(x) = &symbol.kind {
-                            let ret = function_call(
+                            let id = function_call(
                                 context,
                                 value.expression_identifier.as_ref(),
                                 args,
@@ -327,9 +325,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                                 ));
                             }
 
-                            Ok(ir::StatementBlock(vec![ir::Statement::FunctionCall(
-                                Box::new(ret),
-                            )]))
+                            Ok(ir::StatementBlock(vec![ir::Statement::FunctionCall(id)]))
                         } else {
                             unreachable!();
                         }

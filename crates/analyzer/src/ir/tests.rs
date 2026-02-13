@@ -29,7 +29,7 @@ fn check_ir(code: &str, exp: &str) {
         .collect();
     dbg!(&errors);
 
-    let ir = ir.to_string();
+    let ir = ir.to_string(&context);
     let diff = TextDiff::from_lines(ir.as_str(), exp);
     for change in diff.iter_all_changes() {
         if matches!(change.tag(), ChangeTag::Insert | ChangeTag::Delete) {
@@ -38,6 +38,7 @@ fn check_ir(code: &str, exp: &str) {
         }
     }
 
+    println!("ret\n{}exp\n{}", ir, exp);
     assert!(ir.as_str() == exp);
     assert!(errors.is_empty());
 }
@@ -1209,7 +1210,7 @@ fn generic_function() {
   var var3(b): logic<10> = 10'hxxx;
   var var5(FuncA.return): logic<10> = 10'hxxx;
   input var6(FuncA.x): logic<10> = 10'hxxx;
-  func var4(FuncA) -> var5 {
+  func var4(FuncA::<10>) -> var5 {
     var5 = (var6 + 32'sh00000001);
   }
 
@@ -1218,6 +1219,58 @@ fn generic_function() {
   }
   comb {
     var3 = var4(x: var2);
+  }
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        let a: logic = 1;
+        var b: logic<4>;
+        var c: logic<8>;
+
+        always_comb {
+            b = FuncA::<4>(a);
+            c = FuncA::<8>(a);
+        }
+
+        let d: logic = 1;
+
+        function FuncA::<W: u32>(
+            a: input logic,
+        ) -> logic<W> {
+            return a + d;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  let var0(a): logic = 1'hx;
+  var var1(b): logic<4> = 4'hx;
+  var var2(c): logic<8> = 8'hxx;
+  let var5(d): logic = 1'hx;
+  var var8(FuncA.return): logic<8> = 8'hxx;
+  input var9(FuncA.a): logic = 1'hx;
+  var var10(FuncA.return): logic<4> = 4'hx;
+  input var11(FuncA.a): logic = 1'hx;
+  func var3(FuncA::<4>) -> var10 {
+    var10 = (var11 + var5);
+  }
+  func var4(FuncA::<8>) -> var8 {
+    var8 = (var9 + var5);
+  }
+
+  comb {
+    var0 = 32'sh00000001;
+  }
+  comb {
+    var1 = var3(a: var0);
+    var2 = var4(a: var0);
+  }
+  comb {
+    var5 = 32'sh00000001;
   }
 }
 "#;

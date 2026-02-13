@@ -934,8 +934,12 @@ impl From<&syntax_tree::GenericArgIdentifier> for GenericSymbolPath {
 impl fmt::Display for GenericSymbolPath {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        for path in &self.paths {
-            text.push_str(&format!("{} ", path.mangled()));
+        for (i, path) in self.paths.iter().enumerate() {
+            if i == 0 {
+                text.push_str(&format!("{}", path.mangled()));
+            } else {
+                text.push_str(&format!(" {}", path.mangled()));
+            }
         }
         text.fmt(f)
     }

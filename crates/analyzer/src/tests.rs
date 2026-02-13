@@ -1651,9 +1651,9 @@ fn mismatch_function_arity() {
         ) -> logic {
             return 0;
         }
-    
+
         inst u: $sv::IF;
-    
+
         always_comb {
             u.a = func(1'b1);
         }
@@ -5380,6 +5380,30 @@ fn referring_before_definition() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+    ) {
+        var a: logic<4>;
+        always_ff {
+            if get_b() {
+                a = get_c::<4>();
+            }
+        }
+        let b: logic = '1;
+        function get_b() -> logic {
+            return b;
+        }
+        let c: logic = '1;
+        function get_c::<W: u32>() -> logic<W> {
+            return c as W;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7042,6 +7066,25 @@ fn unassign_variable() {
         always_ff {
             if if_a.get_a() {
                 d = '1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param N: u32 = 4,
+    ) {
+        always_comb {
+            f();
+        }
+        function f() {
+            var a: u32;
+            for _i: u32 in 0..N {
+                a = 0;
             }
         }
     }

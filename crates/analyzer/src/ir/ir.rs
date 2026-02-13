@@ -1,6 +1,5 @@
 use crate::conv::Context;
 use crate::ir::{AssignDestination, Interface, Module};
-use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -19,15 +18,13 @@ impl Ir {
             x.eval_assign(context);
         }
     }
-}
 
-impl fmt::Display for Ir {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = String::new();
         for x in &self.components {
-            ret.push_str(&format!("{}\n", x));
+            ret.push_str(&format!("{}\n", x.to_string(context)));
         }
-        ret.fmt(f)
+        ret
     }
 }
 
@@ -64,14 +61,12 @@ impl Component {
             Component::SystemVerilog(_) => (),
         }
     }
-}
 
-impl fmt::Display for Component {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         match self {
-            Component::Module(x) => x.fmt(f),
-            Component::Interface(x) => x.fmt(f),
-            Component::SystemVerilog(_) => "".fmt(f),
+            Component::Module(x) => x.to_string(context),
+            Component::Interface(x) => x.to_string(context),
+            Component::SystemVerilog(_) => "".to_string(),
         }
     }
 }

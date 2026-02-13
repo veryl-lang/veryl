@@ -1,15 +1,14 @@
-use crate::HashMap;
-use crate::ir::{Comptime, FuncPath, FuncProto, Function, VarId, VarPath, Variable};
+use crate::ir::{Comptime, FuncPath, Function, VarId, VarPath, Variable};
 use crate::symbol::Direction;
+use crate::{Context, HashMap};
 use indent::indent_all_by;
-use std::fmt;
 use veryl_parser::resource_table::StrId;
 
 #[derive(Clone)]
 pub struct Interface {
     pub name: StrId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
-    pub func_paths: HashMap<FuncPath, FuncProto>,
+    pub func_paths: HashMap<FuncPath, VarId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub modports: HashMap<StrId, Vec<(StrId, Direction)>>,
@@ -25,10 +24,8 @@ impl Interface {
         }
         ret
     }
-}
 
-impl fmt::Display for Interface {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn to_string(&self, context: &Context) -> String {
         let mut ret = format!("interface {} {{\n", self.name);
 
         let mut variables: Vec<_> = self.variables.iter().collect();
@@ -43,11 +40,11 @@ impl fmt::Display for Interface {
         }
 
         for (_, x) in functions {
-            let text = format!("{}\n", x);
+            let text = format!("{}\n", x.to_string(context));
             ret.push_str(&indent_all_by(2, text));
         }
 
         ret.push('}');
-        ret.fmt(f)
+        ret
     }
 }
