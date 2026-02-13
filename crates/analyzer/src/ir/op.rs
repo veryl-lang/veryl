@@ -674,17 +674,25 @@ impl Op {
                 let x = x.expand(width, false);
                 let y = y.expand(width, false);
 
-                let is_one = match (x.as_ref(), y.as_ref()) {
+                let (is_zero, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        (x.payload == y.payload) && (x.mask_xz == y.mask_xz)
+                        let wildcard = !y.mask_xz;
+                        let is_zero = x.payload & wildcard != y.payload & wildcard;
+                        let is_x = x.mask_xz & wildcard != 0;
+                        (is_zero, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        (x.payload == y.payload) && (x.mask_xz == y.mask_xz)
+                        let wildcard = ValueBigUint::gen_mask(y.width as usize);
+                        let wildcard = y.mask_xz() ^ wildcard;
+
+                        let is_zero = x.payload() & &wildcard != y.payload() & &wildcard;
+                        let is_x = x.mask_xz() & &wildcard != b0();
+                        (is_zero, is_x)
                     }
                     _ => unreachable!(),
                 };
 
-                let ret = ValueU64::new(is_one.into(), 1, false);
+                let ret = ValueU64::new_bit_x0(is_x, is_zero);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
@@ -692,17 +700,25 @@ impl Op {
                 let x = x.expand(width, false);
                 let y = y.expand(width, false);
 
-                let is_one = match (x.as_ref(), y.as_ref()) {
+                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        !((x.payload == y.payload) && (x.mask_xz == y.mask_xz))
+                        let wildcard = !y.mask_xz;
+                        let is_one = x.payload & wildcard != y.payload & wildcard;
+                        let is_x = x.mask_xz & wildcard != 0;
+                        (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        !((x.payload == y.payload) && (x.mask_xz == y.mask_xz))
+                        let wildcard = ValueBigUint::gen_mask(y.width as usize);
+                        let wildcard = y.mask_xz() ^ wildcard;
+
+                        let is_one = x.payload() & &wildcard != y.payload() & &wildcard;
+                        let is_x = x.mask_xz() & &wildcard != b0();
+                        (is_one, is_x)
                     }
                     _ => unreachable!(),
                 };
 
-                let ret = ValueU64::new(is_one.into(), 1, false);
+                let ret = ValueU64::new_bit_x1(is_x, is_one);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
