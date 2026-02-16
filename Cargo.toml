@@ -37,7 +37,7 @@ edition     = "2024"
 anyhow          = "1.0"
 clap            = {version = "4.5.58", features = ["derive"]}
 console         = "0.16.2"
-futures         = "0.3.31"
+futures         = "0.3.32"
 fxhash          = "0.2.1"
 handlebars      = "6.4"
 log             = "0.4.29"
