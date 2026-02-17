@@ -634,8 +634,9 @@ impl Op {
                 }
             }
             Op::Eq => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, false);
+                let y = y.expand(xy_width, false);
 
                 let (is_zero, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -662,8 +663,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::Ne => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, false);
+                let y = y.expand(xy_width, false);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -690,8 +692,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::EqWildcard => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, false);
+                let y = y.expand(xy_width, false);
 
                 let (is_zero, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -716,8 +719,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::NeWildcard => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, false);
+                let y = y.expand(xy_width, false);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -742,8 +746,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::Greater => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, true);
+                let y = y.expand(xy_width, true);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -776,8 +781,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::GreaterEq => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, true);
+                let y = y.expand(xy_width, true);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -810,8 +816,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::Less => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, true);
+                let y = y.expand(xy_width, true);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -844,8 +851,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::LessEq => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, true);
+                let y = y.expand(xy_width, true);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -878,8 +886,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::LogicAnd => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, false);
+                let y = y.expand(xy_width, false);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -905,8 +914,9 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::LogicOr => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let xy_width = x.width().max(y.width());
+                let x = x.expand(xy_width, false);
+                let y = y.expand(xy_width, false);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
