@@ -8,6 +8,7 @@ use crate::ir::{
 use crate::namespace_table;
 use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
+use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -52,6 +53,7 @@ pub struct Context {
     pub ignore_var_func: bool,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
+    pub mask_cache: MaskCache,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,
