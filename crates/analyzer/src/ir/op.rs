@@ -1,9 +1,9 @@
 use crate::BigUint;
-use crate::value::{Value, ValueBigUint, ValueU64};
+use crate::value::{MaskCache, Value, ValueBigUint, ValueU64};
 use num_traits::{One, Zero};
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// **
     Pow,
@@ -135,7 +135,7 @@ impl Op {
         }
     }
 
-    pub fn eval_binary_width(&self, x: &Value, y: &Value, context: Option<usize>) -> usize {
+    pub fn eval_binary_width_usize(&self, x: usize, y: usize, context: Option<usize>) -> usize {
         match self {
             Op::Add
             | Op::Sub
@@ -145,7 +145,7 @@ impl Op {
             | Op::BitAnd
             | Op::BitOr
             | Op::BitXor
-            | Op::BitXnor => x.width().max(y.width()).max(context.unwrap_or(0)),
+            | Op::BitXnor => x.max(y).max(context.unwrap_or(0)),
             Op::Eq
             | Op::EqWildcard
             | Op::Ne
@@ -157,15 +157,19 @@ impl Op {
             | Op::LogicAnd
             | Op::LogicOr => 1.max(context.unwrap_or(0)),
             Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR | Op::Pow => {
-                x.width().max(context.unwrap_or(0))
+                x.max(context.unwrap_or(0))
             }
             _ => unimplemented!(),
         }
     }
 
-    pub fn eval_unary_width(&self, x: &Value, context: Option<usize>) -> usize {
+    pub fn eval_binary_width(&self, x: &Value, y: &Value, context: Option<usize>) -> usize {
+        self.eval_binary_width_usize(x.width(), y.width(), context)
+    }
+
+    pub fn eval_unary_width_usize(&self, x: usize, context: Option<usize>) -> usize {
         match self {
-            Op::Add | Op::Sub | Op::BitNot => x.width().max(context.unwrap_or(0)),
+            Op::Add | Op::Sub | Op::BitNot => x.max(context.unwrap_or(0)),
             Op::BitAnd
             | Op::BitNand
             | Op::BitOr
@@ -177,7 +181,16 @@ impl Op {
         }
     }
 
-    pub fn eval_unary(&self, x: &Value, context: Option<usize>) -> Value {
+    pub fn eval_unary_width(&self, x: &Value, context: Option<usize>) -> usize {
+        self.eval_unary_width_usize(x.width(), context)
+    }
+
+    pub fn eval_unary(
+        &self,
+        x: &Value,
+        context: Option<usize>,
+        mask_cache: &mut MaskCache,
+    ) -> Value {
         let width = self.eval_unary_width(x, context);
 
         match self {
@@ -205,10 +218,10 @@ impl Op {
                         if ret.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, x.signed))
                         } else {
-                            let mask = ValueBigUint::gen_mask(width);
-                            *ret.payload ^= &mask;
+                            let mask = mask_cache.get(width);
+                            *ret.payload ^= mask;
                             *ret.payload += b1();
-                            *ret.payload &= &mask;
+                            *ret.payload &= mask;
                             Value::BigUint(ret)
                         }
                     }
@@ -226,9 +239,9 @@ impl Op {
                     }
                     Value::BigUint(x) => {
                         let mut ret = x.clone();
-                        let mask = ValueBigUint::gen_mask(width);
-                        *ret.payload ^= &mask;
-                        *ret.payload &= ret.mask_xz() ^ &mask;
+                        let mask = mask_cache.get(width);
+                        *ret.payload ^= mask;
+                        *ret.payload &= ret.mask_xz() ^ mask;
                         Value::BigUint(ret)
                     }
                 }
@@ -242,8 +255,8 @@ impl Op {
                         (is_zero, is_x)
                     }
                     Value::BigUint(x) => {
-                        let mask = ValueBigUint::gen_mask(x.width as usize);
-                        let is_zero = x.payload() | x.mask_xz() != mask;
+                        let mask = mask_cache.get(x.width as usize);
+                        let is_zero = x.payload() | x.mask_xz() != *mask;
                         let is_x = x.mask_xz() != &b0();
                         (is_zero, is_x)
                     }
@@ -262,8 +275,8 @@ impl Op {
                         (is_one, is_x)
                     }
                     Value::BigUint(x) => {
-                        let mask = ValueBigUint::gen_mask(x.width as usize);
-                        let is_one = x.payload() | x.mask_xz() != mask;
+                        let mask = mask_cache.get(x.width as usize);
+                        let is_one = x.payload() | x.mask_xz() != *mask;
                         let is_x = x.mask_xz() != &b0();
                         (is_one, is_x)
                     }
@@ -282,7 +295,7 @@ impl Op {
                         (is_one, is_x)
                     }
                     Value::BigUint(x) => {
-                        let mask = ValueBigUint::gen_mask(x.width as usize);
+                        let mask = mask_cache.get(x.width as usize);
                         let is_one = x.payload() & (x.mask_xz() ^ mask) != b0();
                         let is_x = x.mask_xz() != &b0();
                         (is_one, is_x)
@@ -302,7 +315,7 @@ impl Op {
                         (is_zero, is_x)
                     }
                     Value::BigUint(x) => {
-                        let mask = ValueBigUint::gen_mask(x.width as usize);
+                        let mask = mask_cache.get(x.width as usize);
                         let is_zero = x.payload() & (x.mask_xz() ^ mask) != b0();
                         let is_x = x.mask_xz() != &b0();
                         (is_zero, is_x)
@@ -343,7 +356,13 @@ impl Op {
         }
     }
 
-    pub fn eval_binary(&self, x: &Value, y: &Value, context: Option<usize>) -> Value {
+    pub fn eval_binary(
+        &self,
+        x: &Value,
+        y: &Value,
+        context: Option<usize>,
+        mask_cache: &mut MaskCache,
+    ) -> Value {
         let width = self.eval_binary_width(x, y, context);
         match self {
             Op::Add => {
@@ -367,7 +386,7 @@ impl Op {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else {
                             let mut payload = x.payload() + y.payload();
-                            payload &= ValueBigUint::gen_mask(width);
+                            payload &= mask_cache.get(width);
                             Value::BigUint(ValueBigUint::new_biguint(payload, width, signed))
                         }
                     }
@@ -394,11 +413,11 @@ impl Op {
                         if x.is_xz() | y.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else {
-                            let mask = ValueBigUint::gen_mask(width);
+                            let mask = mask_cache.get(width);
                             // create -y
-                            let y = ((y.payload() ^ &mask) + b1()) & &mask;
+                            let y = ((y.payload() ^ mask) + b1()) & mask;
                             let mut payload = x.payload() + y;
-                            payload &= &mask;
+                            payload &= mask;
                             Value::BigUint(ValueBigUint::new_biguint(payload, width, signed))
                         }
                     }
@@ -426,7 +445,7 @@ impl Op {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else {
                             let mut payload = x.payload() * y.payload();
-                            payload &= ValueBigUint::gen_mask(width);
+                            payload &= mask_cache.get(width);
                             Value::BigUint(ValueBigUint::new_biguint(payload, width, signed))
                         }
                     }
@@ -466,7 +485,7 @@ impl Op {
                             Value::BigUint(ValueBigUint::new_bigint(payload, width, signed))
                         } else {
                             let mut payload = x.payload() / y.payload();
-                            payload &= ValueBigUint::gen_mask(width);
+                            payload &= mask_cache.get(width);
                             Value::BigUint(ValueBigUint::new_biguint(payload, width, signed))
                         }
                     }
@@ -506,7 +525,7 @@ impl Op {
                             Value::BigUint(ValueBigUint::new_bigint(payload, width, signed))
                         } else {
                             let mut payload = x.payload() % y.payload();
-                            payload &= ValueBigUint::gen_mask(width);
+                            payload &= mask_cache.get(width);
                             Value::BigUint(ValueBigUint::new_biguint(payload, width, signed))
                         }
                     }
@@ -530,11 +549,11 @@ impl Op {
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let payload = x.payload() & y.payload();
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
-                        let mask = ValueBigUint::gen_mask(width);
+                        let mask = mask_cache.get(width);
                         *ret.mask_xz = (x.mask_xz() & y.mask_xz())
-                            | (x.mask_xz() & (y.mask_xz() ^ &mask) & y.payload())
-                            | (y.mask_xz() & (x.mask_xz() ^ &mask) & x.payload());
-                        *ret.payload &= ret.mask_xz() ^ &mask;
+                            | (x.mask_xz() & (y.mask_xz() ^ mask) & y.payload())
+                            | (y.mask_xz() & (x.mask_xz() ^ mask) & x.payload());
+                        *ret.payload &= ret.mask_xz() ^ mask;
                         Value::BigUint(ret)
                     }
                     _ => unreachable!(),
@@ -557,11 +576,11 @@ impl Op {
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let payload = x.payload() | y.payload();
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
-                        let mask = ValueBigUint::gen_mask(width);
+                        let mask = mask_cache.get(width);
                         *ret.mask_xz = (x.mask_xz() & y.mask_xz())
-                            | (x.mask_xz() & (y.mask_xz() ^ &mask) & (y.payload() ^ &mask))
-                            | (y.mask_xz() & (x.mask_xz() ^ &mask) & (x.payload() ^ &mask));
-                        *ret.payload &= ret.mask_xz() ^ &mask;
+                            | (x.mask_xz() & (y.mask_xz() ^ mask) & (y.payload() ^ mask))
+                            | (y.mask_xz() & (x.mask_xz() ^ mask) & (x.payload() ^ mask));
+                        *ret.payload &= ret.mask_xz() ^ mask;
                         Value::BigUint(ret)
                     }
                     _ => unreachable!(),
@@ -582,9 +601,9 @@ impl Op {
                     (Value::BigUint(x), Value::BigUint(y)) => {
                         let payload = x.payload() ^ y.payload();
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
-                        let mask = ValueBigUint::gen_mask(width);
+                        let mask = mask_cache.get(width);
                         *ret.mask_xz = x.mask_xz() | y.mask_xz();
-                        *ret.payload &= ret.mask_xz() ^ &mask;
+                        *ret.payload &= ret.mask_xz() ^ mask;
                         Value::BigUint(ret)
                     }
                     _ => unreachable!(),
@@ -604,11 +623,11 @@ impl Op {
                         Value::U64(ret)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let mask = ValueBigUint::gen_mask(width);
-                        let payload = x.payload() ^ y.payload() ^ &mask;
+                        let mask = mask_cache.get(width);
+                        let payload = x.payload() ^ y.payload() ^ mask;
                         let mut ret = ValueBigUint::new_biguint(payload, width, false);
                         *ret.mask_xz = x.mask_xz() | y.mask_xz();
-                        *ret.payload &= ret.mask_xz() ^ &mask;
+                        *ret.payload &= ret.mask_xz() ^ mask;
                         Value::BigUint(ret)
                     }
                     _ => unreachable!(),
@@ -626,8 +645,8 @@ impl Op {
                         (is_zero, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let x_mask = ValueBigUint::gen_mask(x.width as usize);
-                        let y_mask = ValueBigUint::gen_mask(y.width as usize);
+                        let x_mask = mask_cache.get(x.width as usize).clone();
+                        let y_mask = mask_cache.get(y.width as usize);
 
                         let is_zero = (x.payload() & (x.mask_xz() ^ x_mask))
                             != (y.payload() & (y.mask_xz() ^ y_mask));
@@ -654,8 +673,8 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let x_mask = ValueBigUint::gen_mask(x.width as usize);
-                        let y_mask = ValueBigUint::gen_mask(y.width as usize);
+                        let x_mask = mask_cache.get(x.width as usize).clone();
+                        let y_mask = mask_cache.get(y.width as usize);
 
                         let is_one = (x.payload() & (x.mask_xz() ^ x_mask))
                             != (y.payload() & (y.mask_xz() ^ y_mask));
@@ -682,7 +701,7 @@ impl Op {
                         (is_zero, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let wildcard = ValueBigUint::gen_mask(y.width as usize);
+                        let wildcard = mask_cache.get(y.width as usize);
                         let wildcard = y.mask_xz() ^ wildcard;
 
                         let is_zero = x.payload() & &wildcard != y.payload() & &wildcard;
@@ -708,7 +727,7 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let wildcard = ValueBigUint::gen_mask(y.width as usize);
+                        let wildcard = mask_cache.get(y.width as usize);
                         let wildcard = y.mask_xz() ^ wildcard;
 
                         let is_one = x.payload() & &wildcard != y.payload() & &wildcard;
@@ -870,8 +889,8 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let x_mask = ValueBigUint::gen_mask(x.width as usize);
-                        let y_mask = ValueBigUint::gen_mask(y.width as usize);
+                        let x_mask = mask_cache.get(x.width as usize).clone();
+                        let y_mask = mask_cache.get(y.width as usize);
                         let is_one = (x.payload() & (x.mask_xz() ^ x_mask) != b0())
                             && (y.payload() & (y.mask_xz() ^ y_mask) != b0());
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
@@ -897,8 +916,8 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let x_mask = ValueBigUint::gen_mask(x.width as usize);
-                        let y_mask = ValueBigUint::gen_mask(y.width as usize);
+                        let x_mask = mask_cache.get(x.width as usize).clone();
+                        let y_mask = mask_cache.get(y.width as usize);
                         let is_one = (x.payload() & (x.mask_xz() ^ x_mask) != b0())
                             || (y.payload() & (y.mask_xz() ^ y_mask) != b0());
                         let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
@@ -965,13 +984,13 @@ impl Op {
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
-                            let mask = ValueBigUint::gen_mask(width);
+                            let mask = mask_cache.get(width);
                             let mut ret = x.clone();
                             ret.signed = false;
                             *ret.payload <<= y;
                             *ret.mask_xz <<= y;
-                            *ret.payload &= &mask;
-                            *ret.mask_xz &= &mask;
+                            *ret.payload &= mask;
+                            *ret.mask_xz &= mask;
                             let ret = Value::BigUint(ret);
                             ret.expand(width, false).into_owned()
                         } else {
@@ -1017,8 +1036,8 @@ impl Op {
                             let mut ret = x.clone();
 
                             let (ext_payload, ext_mask_xz) = if x.signed {
-                                let mut ext_mask = ValueBigUint::gen_mask(width - y);
-                                ext_mask ^= ValueBigUint::gen_mask(width);
+                                let mut ext_mask = mask_cache.get(width - y).clone();
+                                ext_mask ^= mask_cache.get(width);
 
                                 let payload_msb = ((x.payload() >> (x.width - 1)) & b1()) == b1();
                                 let mask_xz_msb = ((x.mask_xz() >> (x.width - 1)) & b1()) == b1();
@@ -1062,12 +1081,12 @@ impl Op {
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
-                            let mask = ValueBigUint::gen_mask(width);
+                            let mask = mask_cache.get(width);
                             let mut ret = x.clone();
                             *ret.payload <<= y;
                             *ret.mask_xz <<= y;
-                            *ret.payload &= &mask;
-                            *ret.mask_xz &= &mask;
+                            *ret.payload &= mask;
+                            *ret.mask_xz &= mask;
                             let ret = Value::BigUint(ret);
                             ret.expand(width, false).into_owned()
                         } else {
