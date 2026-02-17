@@ -32,9 +32,9 @@ mod tests;
 
 type HashMap<K, V> = fxhash::FxHashMap<K, V>;
 type HashSet<V> = fxhash::FxHashSet<V>;
-type BigInt = num_bigint::BigInt;
-type BigUint = num_bigint::BigUint;
-type Sign = num_bigint::Sign;
+type BigInt = malachite_bigint::BigInt;
+type BigUint = malachite_bigint::BigUint;
+type Sign = malachite_bigint::Sign;
 
 pub use smallvec::smallvec as svec;
 pub type SVec<T> = smallvec::SmallVec<[T; 4]>;
