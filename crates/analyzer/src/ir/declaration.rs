@@ -1,7 +1,8 @@
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    AssignDestination, Component, Comptime, Expression, Statement, VarId, VarIndex, VarSelect,
+    AssignDestination, Component, Comptime, Expression, FfTable, Statement, VarId, VarIndex,
+    VarSelect,
 };
 use indent::indent_all_by;
 use std::fmt;
@@ -53,6 +54,12 @@ impl Declaration {
             Declaration::Null => (),
         }
         assign_table.refernced.clear();
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        if let Declaration::Ff(x) = self {
+            x.gather_ff(context, table, decl);
+        }
     }
 }
 
@@ -135,6 +142,12 @@ impl FfDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for x in &self.statements {
             x.eval_assign(context, assign_table, AssignContext::Ff, &[]);
+        }
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for x in &self.statements {
+            x.gather_ff(context, table, decl);
         }
     }
 }
