@@ -6,7 +6,7 @@ use crate::ir::{AssignDestination, Expression, Factor, Op, Shape, ShapeRef, Type
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Debug, Default)]
@@ -171,6 +171,14 @@ impl fmt::Display for VarPath {
         }
 
         ret[1..].fmt(f)
+    }
+}
+
+impl std::str::FromStr for VarPath {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let id = resource_table::insert_str(s);
+        Ok(Self::new(id))
     }
 }
 
