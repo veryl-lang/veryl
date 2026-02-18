@@ -2,6 +2,7 @@ mod assign_table;
 mod comptime;
 mod declaration;
 mod expression;
+mod ff_table;
 mod function;
 mod interface;
 #[allow(clippy::module_inception)]
@@ -23,6 +24,7 @@ pub use declaration::{
     FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput, InstOutput,
 };
 pub use expression::{ArrayLiteralItem, Expression, Factor};
+pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
 pub use ir::{Component, Ir, IrError, IrResult, SystemVerilog};

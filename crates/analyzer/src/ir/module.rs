@@ -3,7 +3,7 @@ use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::Context;
 use crate::ir::assign_table::AssignTable;
-use crate::ir::{Declaration, Function, Type, VarId, VarIndex, VarPath, Variable};
+use crate::ir::{Declaration, FfTable, Function, Type, VarId, VarIndex, VarPath, Variable};
 use crate::symbol::ClockDomain;
 use indent::indent_all_by;
 use std::fmt;
@@ -76,6 +76,12 @@ impl Module {
                     }
                 }
             }
+        }
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable) {
+        for (i, x) in self.declarations.iter().enumerate() {
+            x.gather_ff(context, table, i);
         }
     }
 }

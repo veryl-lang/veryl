@@ -2,7 +2,7 @@ use crate::conv::Context;
 use crate::conv::utils::check_compatibility;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    AssignDestination, Comptime, Expression, IrResult, Shape, Signature, Statement, Type,
+    AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement, Type,
     ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
 };
 use crate::symbol::{ClockDomain, Direction, Symbol, SymbolId, SymbolKind};
@@ -248,6 +248,12 @@ impl FunctionCall {
                     }
                 }
             }
+        }
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for input in self.inputs.values() {
+            input.gather_ff(context, table, decl);
         }
     }
 

@@ -3,8 +3,8 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_repeat;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    Comptime, FunctionCall, Op, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant, VarId,
-    VarIndex, VarSelect,
+    Comptime, FfTable, FunctionCall, Op, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant,
+    VarId, VarIndex, VarSelect,
 };
 use crate::symbol::ClockDomain;
 use crate::value::{Value, ValueBigUint};
@@ -581,6 +581,37 @@ impl Expression {
         }
     }
 
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        match self {
+            Expression::Term(x) => x.gather_ff(context, table, decl),
+            Expression::Unary(_, x) => x.gather_ff(context, table, decl),
+            Expression::Binary(x, _, y) => {
+                x.gather_ff(context, table, decl);
+                y.gather_ff(context, table, decl);
+            }
+            Expression::Ternary(x, y, z) => {
+                x.gather_ff(context, table, decl);
+                y.gather_ff(context, table, decl);
+                z.gather_ff(context, table, decl);
+            }
+            Expression::Concatenation(x) => {
+                for (x, y) in x {
+                    x.gather_ff(context, table, decl);
+                    if let Some(y) = y {
+                        y.gather_ff(context, table, decl);
+                    }
+                }
+            }
+            Expression::StructConstructor(_, exprs) => {
+                for (_, expr) in exprs {
+                    expr.gather_ff(context, table, decl);
+                }
+            }
+            // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
+            Expression::ArrayLiteral(_) => (),
+        }
+    }
+
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
             Expression::Term(x) => x.set_index(index),
@@ -809,6 +840,28 @@ impl Factor {
             }
             Factor::SystemFunctionCall(x, _) => {
                 x.eval_assign(context, assign_table, assign_context);
+            }
+            _ => (),
+        }
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        match self {
+            Factor::Variable(id, index, _, _, _) => {
+                if let Some(variable) = context.get_variable_info(*id) {
+                    if let Some(index) = index.eval_value(context) {
+                        if let Some(index) = variable.r#type.array.calc_index(&index) {
+                            table.insert_refered(*id, index, decl);
+                        }
+                    } else if let Some(total_array) = variable.r#type.total_array() {
+                        for i in 0..total_array {
+                            table.insert_refered(*id, i, decl);
+                        }
+                    }
+                }
+            }
+            Factor::FunctionCall(x, _) => {
+                x.gather_ff(context, table, decl);
             }
             _ => (),
         }

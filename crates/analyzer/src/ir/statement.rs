@@ -3,7 +3,8 @@ use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
 use crate::ir::{
-    Comptime, Expression, FunctionCall, SystemFunctionCall, VarId, VarIndex, VarPath, VarSelect,
+    Comptime, Expression, FfTable, FunctionCall, SystemFunctionCall, VarId, VarIndex, VarPath,
+    VarSelect,
 };
 use crate::value::ValueBigUint;
 use indent::indent_all_by;
@@ -59,6 +60,16 @@ impl Statement {
             }
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
             Statement::Null => (),
+        }
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        match self {
+            Statement::Assign(x) => x.gather_ff(context, table, decl),
+            Statement::If(x) => x.gather_ff(context, table, decl),
+            Statement::IfReset(x) => x.gather_ff(context, table, decl),
+            Statement::FunctionCall(x) => x.gather_ff(context, table, decl),
+            _ => (),
         }
     }
 
@@ -174,6 +185,20 @@ impl AssignDestination {
         }
     }
 
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        if let Some(variable) = context.get_variable_info(self.id) {
+            if let Some(index) = self.index.eval_value(context) {
+                if let Some(index) = variable.r#type.array.calc_index(&index) {
+                    table.insert_assigned(self.id, index, decl);
+                }
+            } else if let Some(total_array) = variable.r#type.total_array() {
+                for i in 0..total_array {
+                    table.insert_assigned(self.id, i, decl);
+                }
+            }
+        }
+    }
+
     pub fn set_index(&mut self, index: &VarIndex) {
         self.index.add_prelude(index);
     }
@@ -219,6 +244,13 @@ impl AssignStatement {
         self.expr.eval_assign(context, assign_table, assign_context);
         for dst in &self.dst {
             dst.eval_assign(context, assign_table, assign_context);
+        }
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        self.expr.gather_ff(context, table, decl);
+        for dst in &self.dst {
+            dst.gather_ff(context, table, decl);
         }
     }
 
@@ -302,6 +334,16 @@ impl IfStatement {
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
     }
 
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        self.cond.gather_ff(context, table, decl);
+        for x in &self.true_side {
+            x.gather_ff(context, table, decl);
+        }
+        for x in &self.false_side {
+            x.gather_ff(context, table, decl);
+        }
+    }
+
     pub fn set_index(&mut self, index: &VarIndex) {
         self.cond.set_index(index);
         for x in &mut self.true_side {
@@ -371,6 +413,15 @@ impl IfResetStatement {
         true_table.merge_by_or(context, &mut false_table, false);
         assign_table.merge_by_or(context, &mut true_table, false);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for x in &self.true_side {
+            x.gather_ff(context, table, decl);
+        }
+        for x in &self.false_side {
+            x.gather_ff(context, table, decl);
+        }
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {
