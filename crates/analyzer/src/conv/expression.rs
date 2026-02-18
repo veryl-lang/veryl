@@ -171,14 +171,12 @@ impl Conv<&Expression09> for ir::Expression {
         for x in &value.expression09_list {
             let right: ir::Expression = Conv::conv(context, x.expression10.as_ref())?;
             let op = x.operator10.operator10_token.to_string();
-            ret = match op.as_str() {
-                "+" => ir::Expression::Binary(Box::new(ret), Op::Add, Box::new(right)),
-                "-" => {
-                    let right = ir::Expression::Unary(Op::Sub, Box::new(right));
-                    ir::Expression::Binary(Box::new(ret), Op::Add, Box::new(right))
-                }
+            let op = match op.as_str() {
+                "+" => Op::Add,
+                "-" => Op::Sub,
                 _ => unreachable!(),
             };
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
         }
         Ok(ret)
     }
@@ -1218,7 +1216,7 @@ mod tests {
         assert_eq!(format!("{x02}"), "(32'sh00000001 / 32'sh00000001)");
         assert_eq!(format!("{x03}"), "(32'sh00000001 % 32'sh00000001)");
         assert_eq!(format!("{x04}"), "(32'sh00000001 + 32'sh00000001)");
-        assert_eq!(format!("{x05}"), "(32'sh00000001 + (- 32'sh00000001))");
+        assert_eq!(format!("{x05}"), "(32'sh00000001 - 32'sh00000001)");
         assert_eq!(format!("{x06}"), "(32'sh00000001 << 32'sh00000001)");
         assert_eq!(format!("{x07}"), "(32'sh00000001 >> 32'sh00000001)");
         assert_eq!(format!("{x08}"), "(32'sh00000001 <<< 32'sh00000001)");
@@ -1239,7 +1237,7 @@ mod tests {
         assert_eq!(format!("{x23}"), "(32'sh00000001 || 32'sh00000001)");
         assert_eq!(
             format!("{x24}"),
-            "(((32'sh00000001 ** 32'sh00000001) + 32'sh00000001) + (- ((32'sh00000001 / 32'sh00000001) % 32'sh00000001)))"
+            "(((32'sh00000001 ** 32'sh00000001) + 32'sh00000001) - ((32'sh00000001 / 32'sh00000001) % 32'sh00000001))"
         );
     }
 
