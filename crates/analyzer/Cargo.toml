@@ -14,9 +14,9 @@ edition.workspace     = true
 
 [dependencies]
 bimap            = "0.6.3"
-daggy            = "0.9.0"
+daggy            = {workspace = true}
 fxhash           = {workspace = true}
-indent           = "0.1.1"
+indent           = {workspace = true}
 itertools        = "0.14.0"
 log              = {workspace = true}
 malachite-bigint = "0.9.1"
