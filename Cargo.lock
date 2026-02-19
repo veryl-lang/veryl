@@ -3142,7 +3142,7 @@ dependencies = [
  "semver",
  "serde_json",
  "similar",
- "toml 1.0.2+spec-1.1.0",
+ "toml 1.0.3+spec-1.1.0",
  "veryl-analyzer",
  "veryl-formatter",
  "veryl-metadata",
@@ -5135,9 +5135,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.0.2+spec-1.1.0"
+version = "1.0.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1dfefef6a142e93f346b64c160934eb13b5594b84ab378133ac6815cb2bd57f"
+checksum = "c7614eaf19ad818347db24addfa201729cf2a9b6fdfd9eb0ab870fcacc606c0c"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -5561,7 +5561,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "thiserror 2.0.18",
- "toml 1.0.2+spec-1.1.0",
+ "toml 1.0.3+spec-1.1.0",
  "veryl-metadata",
  "veryl-parser",
 ]
@@ -5572,7 +5572,7 @@ version = "0.18.0"
 dependencies = [
  "serde",
  "strnum_bitwidth",
- "toml 1.0.2+spec-1.1.0",
+ "toml 1.0.3+spec-1.1.0",
  "veryl-aligner",
  "veryl-analyzer",
  "veryl-metadata",
@@ -5584,7 +5584,7 @@ dependencies = [
 name = "veryl-formatter"
 version = "0.18.0"
 dependencies = [
- "toml 1.0.2+spec-1.1.0",
+ "toml 1.0.3+spec-1.1.0",
  "veryl-aligner",
  "veryl-analyzer",
  "veryl-metadata",
@@ -5629,7 +5629,7 @@ dependencies = [
  "spdx",
  "tempfile",
  "thiserror 2.0.18",
- "toml 1.0.2+spec-1.1.0",
+ "toml 1.0.3+spec-1.1.0",
  "url",
  "uuid",
  "veryl-parser",
@@ -5689,7 +5689,7 @@ dependencies = [
 name = "veryl-simulator"
 version = "0.18.0"
 dependencies = [
- "toml 1.0.2+spec-1.1.0",
+ "toml 1.0.3+spec-1.1.0",
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
