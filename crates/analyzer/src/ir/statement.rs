@@ -221,7 +221,10 @@ pub struct AssignStatement {
 
 impl AssignStatement {
     pub fn eval_value(&self, context: &mut Context) {
-        if let Some(value) = self.expr.eval_value(context, self.width) {
+        if let Some(value) = self
+            .expr
+            .eval_value(context, self.width, self.expr.eval_signed())
+        {
             // TODO multiple dst
             if let Some(index) = self.dst[0].index.eval_value(context)
                 && let Some((beg, end)) =

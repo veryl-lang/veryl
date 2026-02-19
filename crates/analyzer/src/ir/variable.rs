@@ -231,7 +231,7 @@ impl VarIndex {
 
         for x in &self.0 {
             let mut expr = x.clone();
-            let comptime = expr.eval_comptime(context, None);
+            let comptime = expr.eval_comptime(context, None, false);
             ret &= comptime.is_const;
         }
 
@@ -241,7 +241,7 @@ impl VarIndex {
     pub fn eval_value(&self, context: &mut Context) -> Option<Vec<usize>> {
         let mut ret = vec![];
         for x in &self.0 {
-            if let Some(x) = x.eval_value(context, None) {
+            if let Some(x) = x.eval_value(context, None, x.eval_signed()) {
                 ret.push(x.to_usize().unwrap_or(0))
             } else {
                 return None;
@@ -390,7 +390,7 @@ impl VarSelect {
 
         for x in &self.0 {
             let mut expr = x.clone();
-            let comptime = expr.eval_comptime(context, None);
+            let comptime = expr.eval_comptime(context, None, false);
             ret &= comptime.is_const;
         }
 
@@ -440,7 +440,7 @@ impl VarSelect {
                 let dim = self.dimension();
                 let beg = self.0.last().unwrap();
                 let mut range = beg.token_range();
-                let beg = beg.eval_value(context, None);
+                let beg = beg.eval_value(context, None, beg.eval_signed());
 
                 let beg = if let Some(beg) = beg {
                     beg.to_usize().unwrap_or(0)
@@ -462,7 +462,10 @@ impl VarSelect {
 
                 let (beg, end) = if let Some((op, x)) = &self.1 {
                     range.set_end(x.token_range());
-                    let end = x.eval_value(context, None)?.to_usize().unwrap_or(0);
+                    let end = x
+                        .eval_value(context, None, x.eval_signed())?
+                        .to_usize()
+                        .unwrap_or(0);
                     op.eval_value(beg, end)
                 } else {
                     (beg, beg)
@@ -500,7 +503,7 @@ impl VarSelect {
                         && let Some(size) = size
                     {
                         let size = *size;
-                        let beg = beg.eval_value(context, None)?;
+                        let beg = beg.eval_value(context, None, beg.eval_signed())?;
 
                         if beg.is_xz() {
                             // skip out_of_range check
@@ -578,9 +581,16 @@ impl VarSelect {
         let dim = self.dimension();
         if r#type.dims() < dim {
             if dim == 1 && r#type.dims() == 0 && !is_array {
-                let x = self.0[0].eval_value(context, None)?.to_usize().unwrap_or(0);
+                let x = &self.0[0];
+                let x = x
+                    .eval_value(context, None, x.eval_signed())?
+                    .to_usize()
+                    .unwrap_or(0);
                 let (x, y) = if let Some((op, y)) = &self.1 {
-                    let y = y.eval_value(context, None)?.to_usize().unwrap_or(0);
+                    let y = y
+                        .eval_value(context, None, y.eval_signed())?
+                        .to_usize()
+                        .unwrap_or(0);
                     op.eval_value(x, y)
                 } else {
                     (x, x)
@@ -595,10 +605,16 @@ impl VarSelect {
             if let Some(w) = w {
                 if i == skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x.eval_value(context, None)?.to_usize().unwrap_or(0);
+                    let x = x
+                        .eval_value(context, None, x.eval_signed())?
+                        .to_usize()
+                        .unwrap_or(0);
 
                     let (x, y) = if let Some((op, y)) = &self.1 {
-                        let y = y.eval_value(context, None)?.to_usize().unwrap_or(0);
+                        let y = y
+                            .eval_value(context, None, y.eval_signed())?
+                            .to_usize()
+                            .unwrap_or(0);
                         op.eval_value(x, y)
                     } else {
                         (x, x)
@@ -613,7 +629,10 @@ impl VarSelect {
                     }
                 } else if i > skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x.eval_value(context, None)?.to_usize().unwrap_or(0);
+                    let x = x
+                        .eval_value(context, None, x.eval_signed())?
+                        .to_usize()
+                        .unwrap_or(0);
 
                     beg += x * base;
                     end += x * base;

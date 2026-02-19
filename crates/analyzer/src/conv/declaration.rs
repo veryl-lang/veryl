@@ -1097,7 +1097,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                                 }
 
                                 if !variables.is_empty() {
-                                    let expr_comptime = expr.eval_comptime(context, None);
+                                    let expr_comptime =
+                                        expr.eval_comptime(context, None, expr.eval_signed());
 
                                     if let Some(x) =
                                         clock_domain_table.get(&dst_comptime.clock_domain)

@@ -65,7 +65,7 @@ fn create_input(
     let (mut expr, _, token) = arg;
 
     if let Some(r#type) = r#type {
-        let comptime = expr.eval_comptime(context, None);
+        let comptime = expr.eval_comptime(context, None, expr.eval_signed());
         if !r#type.compatible(&comptime) {
             context.insert_error(AnalyzerError::mismatch_function_arg(
                 &name.to_string(),
@@ -92,7 +92,7 @@ fn create_output(
         .collect();
 
     if let Some(r#type) = r#type {
-        let comptime = expr.eval_comptime(context, None);
+        let comptime = expr.eval_comptime(context, None, expr.eval_signed());
         if !r#type.compatible(&comptime) {
             context.insert_error(AnalyzerError::mismatch_function_arg(
                 &name.to_string(),
@@ -187,7 +187,7 @@ impl SystemFunctionCall {
         match &self.kind {
             SystemFunctionKind::Bits(x) => {
                 let mut expr = x.0.clone();
-                let comptime = expr.eval_comptime(context, None);
+                let comptime = expr.eval_comptime(context, None, expr.eval_signed());
                 let value = match &comptime.value {
                     ValueVariant::Numeric(_) => comptime.r#type.total_width(),
                     ValueVariant::Type(x) => x.total_width(),
@@ -197,7 +197,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Size(x) => {
                 let mut expr = x.0.clone();
-                let comptime = expr.eval_comptime(context, None);
+                let comptime = expr.eval_comptime(context, None, expr.eval_signed());
                 let value = match &comptime.value {
                     ValueVariant::Numeric(_) => comptime.r#type.total_width(),
                     ValueVariant::Type(x) => x.total_width(),
@@ -206,7 +206,7 @@ impl SystemFunctionCall {
                 value.map(|x| Value::new(x as u64, 32, false))
             }
             SystemFunctionKind::Clog2(x) => {
-                let value = x.0.eval_value(context, None)?;
+                let value = x.0.eval_value(context, None, x.0.eval_signed())?;
                 let value = value.payload();
                 let ret = if value.as_ref() == &BigUint::from(0u32) {
                     BigUint::from(0u32)
@@ -216,7 +216,7 @@ impl SystemFunctionCall {
                 Some(Value::new(ret.bits(), 32, false))
             }
             SystemFunctionKind::Onehot(x) => {
-                let value = x.0.eval_value(context, None)?;
+                let value = x.0.eval_value(context, None, x.0.eval_signed())?;
                 let ret = value.payload().count_ones() == 1;
                 Some(Value::new(ret.into(), 1, false))
             }

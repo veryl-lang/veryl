@@ -46,7 +46,7 @@ impl Conv<&SelectOperator> for VarSelectOp {
 
 fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &Expression) {
     let token: TokenRange = value.into();
-    let comptime = expr.eval_comptime(context, None);
+    let comptime = expr.eval_comptime(context, None, expr.eval_signed());
     if comptime.r#type.is_type() {
         context.insert_error(AnalyzerError::invalid_factor(
             None,

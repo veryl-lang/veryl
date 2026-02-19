@@ -20,7 +20,7 @@ indent           = {workspace = true}
 itertools        = "0.14.0"
 log              = {workspace = true}
 malachite-bigint = "0.9.1"
-num-traits       = "0.2.19"
+num-traits       = {workspace = true}
 paste            = {workspace = true}
 similar          = {workspace = true}
 smallvec         = {workspace = true}
