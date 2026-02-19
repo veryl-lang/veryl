@@ -112,7 +112,7 @@ fn eval_enum_member_value(
             return EnumMemberValue::UnevaluableValue;
         };
 
-        let comptime = expr.eval_comptime(context, None);
+        let comptime = expr.eval_comptime(context, None, expr.eval_signed());
         let Ok(value) = comptime.get_value() else {
             return EnumMemberValue::UnevaluableValue;
         };

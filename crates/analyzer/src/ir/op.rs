@@ -102,6 +102,18 @@ impl Op {
         }
     }
 
+    pub fn unary_signed(&self, x: bool) -> bool {
+        matches!(self, Op::Add | Op::Sub) & x
+    }
+
+    pub fn binary_signed(&self, x: bool, y: bool) -> bool {
+        match self {
+            Op::Add | Op::Sub | Op::Mul | Op::Div | Op::Rem => x && y,
+            Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR | Op::Pow => x,
+            _ => false,
+        }
+    }
+
     pub fn unary_context_width(&self, context: Option<usize>) -> Option<usize> {
         match self {
             Op::BitAnd
@@ -361,17 +373,17 @@ impl Op {
         x: &Value,
         y: &Value,
         context: Option<usize>,
+        signed: bool,
         mask_cache: &mut MaskCache,
     ) -> Value {
         let width = self.eval_binary_width(x, y, context);
         match self {
             Op::Add => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() | y.is_xz() {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
@@ -381,7 +393,6 @@ impl Op {
                         }
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() | y.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else {
@@ -394,12 +405,11 @@ impl Op {
                 }
             }
             Op::Sub => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() | y.is_xz() {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
@@ -409,7 +419,6 @@ impl Op {
                         }
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() | y.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else {
@@ -425,12 +434,11 @@ impl Op {
                 }
             }
             Op::Mul => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() | y.is_xz() {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
@@ -440,7 +448,6 @@ impl Op {
                         }
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() | y.is_xz() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else {
@@ -453,12 +460,11 @@ impl Op {
                 }
             }
             Op::Div => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() || y.is_xz() || y.payload == 0 {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
@@ -475,7 +481,6 @@ impl Op {
                         }
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() || y.is_xz() || y.payload() == &b0() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else if signed {
@@ -493,12 +498,11 @@ impl Op {
                 }
             }
             Op::Rem => {
-                let x = x.expand(width, true);
-                let y = y.expand(width, true);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() || y.is_xz() || y.payload == 0 {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
@@ -515,7 +519,6 @@ impl Op {
                         }
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         if x.is_xz() || y.is_xz() || y.payload() == &b0() {
                             Value::BigUint(ValueBigUint::new_x(width, signed))
                         } else if signed {
@@ -747,12 +750,11 @@ impl Op {
             }
             Op::Greater => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, true);
-                let y = y.expand(xy_width, true);
+                let x = x.expand(xy_width, signed);
+                let y = y.expand(xy_width, signed);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_i64() > y.to_i64()
                         } else {
@@ -763,7 +765,6 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_bigint() > y.to_bigint()
                         } else {
@@ -782,12 +783,11 @@ impl Op {
             }
             Op::GreaterEq => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, true);
-                let y = y.expand(xy_width, true);
+                let x = x.expand(xy_width, signed);
+                let y = y.expand(xy_width, signed);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_i64() >= y.to_i64()
                         } else {
@@ -798,7 +798,6 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_bigint() >= y.to_bigint()
                         } else {
@@ -817,12 +816,11 @@ impl Op {
             }
             Op::Less => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, true);
-                let y = y.expand(xy_width, true);
+                let x = x.expand(xy_width, signed);
+                let y = y.expand(xy_width, signed);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_i64() < y.to_i64()
                         } else {
@@ -833,7 +831,6 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_bigint() < y.to_bigint()
                         } else {
@@ -852,12 +849,11 @@ impl Op {
             }
             Op::LessEq => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, true);
-                let y = y.expand(xy_width, true);
+                let x = x.expand(xy_width, signed);
+                let y = y.expand(xy_width, signed);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_i64() <= y.to_i64()
                         } else {
@@ -868,7 +864,6 @@ impl Op {
                         (is_one, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let signed = x.signed && y.signed;
                         let is_one = if signed {
                             x.to_bigint() <= y.to_bigint()
                         } else {
@@ -942,7 +937,7 @@ impl Op {
                 ret.expand(width, false).into_owned()
             }
             Op::LogicShiftR => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 let y = y.to_usize();
 
                 match x.as_ref() {
@@ -973,7 +968,7 @@ impl Op {
                 }
             }
             Op::LogicShiftL => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 let y = y.to_usize();
 
                 match x.as_ref() {
@@ -1010,7 +1005,7 @@ impl Op {
                 }
             }
             Op::ArithShiftR => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 let y = y.to_usize();
 
                 match x.as_ref() {
@@ -1071,7 +1066,7 @@ impl Op {
                 }
             }
             Op::ArithShiftL => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 let y = y.to_usize();
 
                 match x.as_ref() {
@@ -1106,7 +1101,7 @@ impl Op {
                 }
             }
             Op::Pow => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 let y = y.to_usize();
 
                 match x.as_ref() {

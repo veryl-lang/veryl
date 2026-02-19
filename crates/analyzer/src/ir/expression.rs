@@ -83,13 +83,31 @@ impl Expression {
         }
     }
 
-    pub fn eval_value(&self, context: &mut Context, context_width: Option<usize>) -> Option<Value> {
+    pub fn eval_signed(&self) -> bool {
+        match self {
+            Expression::Term(x) => x.eval_signed(),
+            Expression::Unary(op, x) => op.unary_signed(x.eval_signed()),
+            Expression::Binary(x, op, y) => op.binary_signed(x.eval_signed(), y.eval_signed()),
+            Expression::Ternary(_, y, z) => y.eval_signed() && z.eval_signed(),
+            Expression::Concatenation(_) => false,
+            Expression::StructConstructor(_, _) => false,
+            // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
+            Expression::ArrayLiteral(_) => false,
+        }
+    }
+
+    pub fn eval_value(
+        &self,
+        context: &mut Context,
+        context_width: Option<usize>,
+        signed: bool,
+    ) -> Option<Value> {
         match self {
             Expression::Term(x) => x.eval_value(context, context_width),
             Expression::Unary(op, x) => {
                 let x_context_width = op.unary_context_width(context_width);
 
-                let ret = x.eval_value(context, x_context_width)?;
+                let ret = x.eval_value(context, x_context_width, signed)?;
                 let ret = op.eval_unary(&ret, context_width, &mut context.mask_cache);
                 Some(ret)
             }
@@ -97,21 +115,21 @@ impl Expression {
                 let x_context_width = op.binary_x_context_width(context_width);
                 let y_context_width = op.binary_y_context_width(context_width);
 
-                let x = x.eval_value(context, x_context_width)?;
+                let x = x.eval_value(context, x_context_width, signed)?;
 
                 if op == &Op::As {
                     return Some(x);
                 }
 
-                let y = y.eval_value(context, y_context_width)?;
+                let y = y.eval_value(context, y_context_width, signed)?;
 
-                let ret = op.eval_binary(&x, &y, context_width, &mut context.mask_cache);
+                let ret = op.eval_binary(&x, &y, context_width, signed, &mut context.mask_cache);
                 Some(ret)
             }
             Expression::Ternary(x, y, z) => {
-                let x = x.eval_value(context, None)?;
-                let y = y.eval_value(context, context_width)?;
-                let z = z.eval_value(context, context_width)?;
+                let x = x.eval_value(context, None, signed)?;
+                let y = y.eval_value(context, context_width, signed)?;
+                let z = z.eval_value(context, context_width, signed)?;
 
                 let width = y.width().max(z.width());
 
@@ -122,11 +140,11 @@ impl Expression {
             Expression::Concatenation(x) => {
                 let mut ret = Value::new(0, 0, false);
                 for (exp, rep) in x.iter() {
-                    let exp = exp.eval_value(context, context_width)?;
+                    let exp = exp.eval_value(context, context_width, signed)?;
 
                     let rep = if let Some(rep) = rep {
                         let token = rep.token_range();
-                        let rep = rep.eval_value(context, context_width)?;
+                        let rep = rep.eval_value(context, context_width, signed)?;
                         let rep = rep.to_usize()?;
                         context.check_size(rep, token)?
                     } else {
@@ -144,7 +162,7 @@ impl Expression {
                 for (name, expr) in exprs {
                     let sub_type = r#type.get_member_type(*name)?;
                     let width = sub_type.total_width()?;
-                    let mut value = expr.eval_value(context, Some(width))?;
+                    let mut value = expr.eval_value(context, Some(width), signed)?;
                     value.trunc(width);
                     ret = ret.concat(&value);
                 }
@@ -159,9 +177,10 @@ impl Expression {
         &mut self,
         context: &mut Context,
         context_width: Option<usize>,
+        signed: bool,
     ) -> Comptime {
         let token = self.token_range();
-        let value = self.eval_value(context, context_width);
+        let value = self.eval_value(context, context_width, signed);
         let value = if let Some(x) = value {
             ValueVariant::Numeric(x)
         } else {
@@ -173,7 +192,7 @@ impl Expression {
             Expression::Unary(op, x) => {
                 let range = x.token_range();
                 let x_context_width = op.unary_context_width(context_width);
-                let x = x.eval_comptime(context, x_context_width);
+                let x = x.eval_comptime(context, x_context_width, signed);
                 let mut ret = x.clone();
                 ret.value = value;
 
@@ -232,8 +251,8 @@ impl Expression {
                 let x_context_width = op.binary_x_context_width(context_width);
                 let y_context_width = op.binary_y_context_width(context_width);
 
-                let x = x.eval_comptime(context, x_context_width);
-                let y = y.eval_comptime(context, y_context_width);
+                let x = x.eval_comptime(context, x_context_width, signed);
+                let y = y.eval_comptime(context, y_context_width, signed);
 
                 let mut ret = x.clone();
                 ret.value = value;
@@ -393,9 +412,9 @@ impl Expression {
                 let range_y = y.token_range();
                 let range_z = z.token_range();
 
-                let x = x.eval_comptime(context, None);
-                let y = y.eval_comptime(context, context_width);
-                let z = z.eval_comptime(context, context_width);
+                let x = x.eval_comptime(context, None, signed);
+                let y = y.eval_comptime(context, context_width, signed);
+                let z = z.eval_comptime(context, context_width, signed);
 
                 let mut ret = x.clone();
                 ret.value = value;
@@ -454,7 +473,7 @@ impl Expression {
                 let mut kind = TypeKind::Bit;
                 for (expr, repeat) in x {
                     let range = expr.token_range();
-                    let expr = expr.eval_comptime(context, context_width);
+                    let expr = expr.eval_comptime(context, context_width, signed);
 
                     // array / type can't be operated
                     if expr.r#type.is_array() | expr.r#type.is_type() {
@@ -507,7 +526,7 @@ impl Expression {
                 let mut is_const = true;
                 let mut is_global = true;
                 for (_, expr) in exprs {
-                    let comptime = expr.eval_comptime(context, None);
+                    let comptime = expr.eval_comptime(context, None, signed);
                     is_const &= comptime.is_const;
                     is_global &= comptime.is_global;
                 }
@@ -709,6 +728,30 @@ impl Factor {
             Factor::Value(x, _) => x.r#type.is_systemverilog(),
             Factor::FunctionCall(_, _) | Factor::SystemFunctionCall(_, _) => false,
             _ => true,
+        }
+    }
+
+    pub fn eval_signed(&self) -> bool {
+        match self {
+            Factor::Variable(_, _, select, comptime, _) => {
+                if select.is_empty() {
+                    comptime.r#type.signed
+                } else {
+                    false
+                }
+            }
+            Factor::Value(x, _) => x.r#type.signed,
+            Factor::SystemFunctionCall(_, _) => false,
+            Factor::FunctionCall(x, _) => {
+                if let Some(x) = &x.ret {
+                    x.r#type.signed
+                } else {
+                    false
+                }
+            }
+            Factor::Anonymous(_) => false,
+            Factor::Unresolved(_, _) => false,
+            Factor::Unknown(_) => false,
         }
     }
 
@@ -942,26 +985,26 @@ impl ArrayLiteralItem {
     pub fn is_const(&mut self, context: &mut Context) -> bool {
         match self {
             ArrayLiteralItem::Value(x, y) => {
-                let mut ret = x.eval_comptime(context, None).is_const;
+                let mut ret = x.eval_comptime(context, None, false).is_const;
                 if let Some(y) = y {
-                    ret &= y.eval_comptime(context, None).is_const;
+                    ret &= y.eval_comptime(context, None, false).is_const;
                 }
                 ret
             }
-            ArrayLiteralItem::Defaul(x) => x.eval_comptime(context, None).is_const,
+            ArrayLiteralItem::Defaul(x) => x.eval_comptime(context, None, false).is_const,
         }
     }
 
     pub fn is_global(&mut self, context: &mut Context) -> bool {
         match self {
             ArrayLiteralItem::Value(x, y) => {
-                let mut ret = x.eval_comptime(context, None).is_global;
+                let mut ret = x.eval_comptime(context, None, false).is_global;
                 if let Some(y) = y {
-                    ret &= y.eval_comptime(context, None).is_global;
+                    ret &= y.eval_comptime(context, None, false).is_global;
                 }
                 ret
             }
-            ArrayLiteralItem::Defaul(x) => x.eval_comptime(context, None).is_global,
+            ArrayLiteralItem::Defaul(x) => x.eval_comptime(context, None, false).is_global,
         }
     }
 }
@@ -996,7 +1039,8 @@ mod tests {
         let mut context = Context::default();
         let x = parse_expression(s);
         let x: Expression = Conv::conv(&mut context, &x).unwrap();
-        x.eval_value(&mut context, context_width).unwrap()
+        x.eval_value(&mut context, context_width, x.eval_signed())
+            .unwrap()
     }
 
     #[test]
@@ -1267,7 +1311,7 @@ mod tests {
 
     fn eval_comptime_unary(context: &mut Context, op: Op, x: Box<Expression>) -> Comptime {
         let mut ret = Expression::Unary(op, x);
-        ret.eval_comptime(context, None)
+        ret.eval_comptime(context, None, ret.eval_signed())
     }
 
     fn eval_comptime_binary(
@@ -1277,7 +1321,7 @@ mod tests {
         y: Box<Expression>,
     ) -> Comptime {
         let mut ret = Expression::Binary(x, op, y);
-        ret.eval_comptime(context, None)
+        ret.eval_comptime(context, None, ret.eval_signed())
     }
 
     fn eval_comptime_ternary(
@@ -1287,7 +1331,7 @@ mod tests {
         z: Box<Expression>,
     ) -> Comptime {
         let mut ret = Expression::Ternary(x, y, z);
-        ret.eval_comptime(context, None)
+        ret.eval_comptime(context, None, ret.eval_signed())
     }
 
     fn eval_comptime_concat(
@@ -1295,7 +1339,7 @@ mod tests {
         x: Vec<(Expression, Option<Expression>)>,
     ) -> Comptime {
         let mut ret = Expression::Concatenation(x);
-        ret.eval_comptime(context, None)
+        ret.eval_comptime(context, None, ret.eval_signed())
     }
 
     #[test]

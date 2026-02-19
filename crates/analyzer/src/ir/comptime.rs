@@ -155,8 +155,8 @@ impl PartSelectPath {
                 end = Expression::Binary(Box::new(end), Op::Add, Box::new(expr));
             }
 
-            beg.eval_comptime(context, None);
-            end.eval_comptime(context, None);
+            beg.eval_comptime(context, None, beg.eval_signed());
+            end.eval_comptime(context, None, end.eval_signed());
 
             if single {
                 Some(VarSelect(vec![beg], None))

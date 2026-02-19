@@ -34,14 +34,15 @@ pub fn eval_expr(
         check_anonymous(context, &expr, allow_anonymous, token);
 
         let comptime = if let Some(dst_type) = dst_type {
-            let mut comptime = expr.eval_comptime(context, dst_type.total_width());
+            let mut comptime =
+                expr.eval_comptime(context, dst_type.total_width(), expr.eval_signed());
 
             check_compatibility(context, &dst_type, &comptime, &token);
 
             comptime.r#type = dst_type;
             comptime
         } else {
-            expr.eval_comptime(context, None)
+            expr.eval_comptime(context, None, expr.eval_signed())
         };
 
         Ok((comptime, expr))
@@ -54,12 +55,12 @@ pub fn eval_expr(
 
 pub fn eval_range(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
-    let beg = beg.eval_comptime(context, None);
+    let beg = beg.eval_comptime(context, None, beg.eval_signed());
     let beg = beg.get_value()?.to_usize().unwrap_or(0);
 
     let end = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-        let end = end.eval_comptime(context, None);
+        let end = end.eval_comptime(context, None, end.eval_signed());
         let end = end.get_value()?.to_usize().unwrap_or(0);
 
         if matches!(x.range_operator.as_ref(), RangeOperator::DotDotEqu(_)) {
@@ -244,7 +245,7 @@ pub fn eval_array_literal(
 
 pub fn eval_repeat(context: &mut Context, expr: &mut ir::Expression) -> Option<Value> {
     let token = expr.token_range();
-    let repeat = expr.eval_comptime(context, None);
+    let repeat = expr.eval_comptime(context, None, expr.eval_signed());
 
     // array / type can't be operated
     if repeat.r#type.is_array() | repeat.r#type.is_type() {
@@ -379,9 +380,10 @@ fn eval_array_literal_expressions(
         part_type.width.drain(0..expr.select.len());
         let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
 
+        let signed = expr.expr.eval_signed();
         let mut part_value = expr
             .expr
-            .eval_value(context, Some(part_width))
+            .eval_value(context, Some(part_width), signed)
             .ok_or_else(|| ir_error!(token))?;
         part_value.trunc(part_width);
 
@@ -496,6 +498,7 @@ pub fn eval_variable(
     token: TokenRange,
 ) {
     let comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
+    let signed = comptime.r#type.signed;
     let id = context.insert_var_path(path.clone(), comptime);
 
     let values = if let Some(total_array) = r#type.total_array()
@@ -503,7 +506,7 @@ pub fn eval_variable(
     {
         let mut values = vec![];
         for _ in 0..total_array {
-            values.push(Value::new_x(total_width, false));
+            values.push(Value::new_x(total_width, signed));
         }
         values
     } else {
@@ -531,7 +534,7 @@ pub fn eval_variable(
 }
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
-    let comptime = expr.eval_comptime(context, None);
+    let comptime = expr.eval_comptime(context, None, expr.eval_signed());
     if context.in_if_reset && !comptime.is_const {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ResetValue,
@@ -562,7 +565,7 @@ pub fn eval_struct_member(
                     member_path.add_prelude(&path.0);
                     for x in r#type.expand_struct_union(&path, &[], None) {
                         if x.path == member_path {
-                            let comptime = expr.eval_comptime(context, None);
+                            let comptime = expr.eval_comptime(context, None, expr.eval_signed());
                             // TODO range select from PartSelect
                             return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
                                 comptime, token,
@@ -1003,7 +1006,7 @@ pub fn eval_for_range(
 
     if let Some((op, expr)) = step {
         let mut step: ir::Expression = Conv::conv(context, expr)?;
-        let step = step.eval_comptime(context, None);
+        let step = step.eval_comptime(context, None, step.eval_signed());
         let step = step.get_value()?.to_usize().unwrap_or(0);
         let op: ir::Op = Conv::conv(context, op)?;
 
@@ -1378,7 +1381,7 @@ fn range_item(
 ) -> IrResult<ir::Expression> {
     let mut exp: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
 
-    let comptime = exp.eval_comptime(context, None);
+    let comptime = exp.eval_comptime(context, None, exp.eval_signed());
     if !comptime.is_const {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
@@ -1389,7 +1392,7 @@ fn range_item(
     let ret = if let Some(x) = &range_item.range.range_opt {
         let mut exp0: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
 
-        let comptime = exp0.eval_comptime(context, None);
+        let comptime = exp0.eval_comptime(context, None, exp0.eval_signed());
         if !comptime.is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::CaseCondition,

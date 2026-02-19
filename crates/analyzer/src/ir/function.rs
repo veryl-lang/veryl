@@ -169,7 +169,7 @@ impl FunctionCall {
         // set inputs
         for (path, expr) in &self.inputs {
             let id = func.arg_map.get(path)?;
-            let value = expr.eval_value(context, None)?;
+            let value = expr.eval_value(context, None, expr.eval_signed())?;
             let var = context.variables.get_mut(id)?;
             var.set_value(&[], value, None);
         }
@@ -202,7 +202,7 @@ impl FunctionCall {
             .map(|func| func.constantable)
             .unwrap_or(true);
         for expr in self.inputs.values_mut() {
-            is_const &= expr.eval_comptime(context, None).is_const;
+            is_const &= expr.eval_comptime(context, None, false).is_const;
         }
 
         // function with side-effect through output ports is not const
@@ -434,7 +434,7 @@ impl Arguments {
                     _ => (),
                 }
             } else {
-                let expr_comptime = expr.eval_comptime(context, None);
+                let expr_comptime = expr.eval_comptime(context, None, expr.eval_signed());
                 let expr_token = expr_comptime.token;
                 let expr_members = expr_comptime
                     .r#type
