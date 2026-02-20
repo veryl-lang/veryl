@@ -15,13 +15,13 @@ module veryl_testcase_Module54;
     logic [20-1:0] _c; always_comb _c = __FuncA__20(1);
     logic [20-1:0] _d; always_comb _d = __FuncA__20(1);
 
-    function automatic logic [10 + 2-1:0] __FuncB__10__2(
-        input var logic [10 + 2-1:0] a
+    function automatic logic [(10 + 2)-1:0] __FuncB__10__2(
+        input var logic [(10 + 2)-1:0] a
     ) ;
         return a + 1;
     endfunction
-    function automatic logic [10 + 4-1:0] __FuncB__10__4(
-        input var logic [10 + 4-1:0] a
+    function automatic logic [(10 + 4)-1:0] __FuncB__10__4(
+        input var logic [(10 + 4)-1:0] a
     ) ;
         return a + 1;
     endfunction
