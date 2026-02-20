@@ -1394,7 +1394,7 @@ module prj___ModuleA__1__2 (
     input  var logic             __b_if_0_1_valid  ,
     input  var prj_PkgA::Command __b_if_0_1_command
 );
-    prj___InterfaceA__PkgA a_if [0:1-1][0:2-1] ();
+    prj___InterfaceA__PkgA a_if [1][2] ();
     always_comb begin
         a_if[0][0].ready   = __a_if_0_0_ready  ;
         __a_if_0_0_valid   = a_if[0][0].valid  ;
@@ -1405,7 +1405,7 @@ module prj___ModuleA__1__2 (
         __a_if_0_1_valid   = a_if[0][1].valid  ;
         __a_if_0_1_command = a_if[0][1].command;
     end
-    prj___InterfaceA__PkgA b_if [0:1-1][0:2-1] ();
+    prj___InterfaceA__PkgA b_if [1][2] ();
     always_comb begin
         __b_if_0_0_ready   = b_if[0][0].ready  ;
         b_if[0][0].valid   = __b_if_0_0_valid  ;
@@ -1427,8 +1427,8 @@ module prj___ModuleA__1__2 (
     end
 endmodule
 module prj_ModuleB;
-    prj___InterfaceA__PkgA a_if [0:1-1][0:2-1] ();
-    prj___InterfaceA__PkgA b_if [0:1-1][0:2-1] ();
+    prj___InterfaceA__PkgA a_if [1][2] ();
+    prj___InterfaceA__PkgA b_if [1][2] ();
 
     for (genvar i = 0; i < 1; i++) begin :g
         for (genvar j = 0; j < 2; j++) begin :g
@@ -1469,6 +1469,7 @@ endmodule
         emit(&metadata, code)
     };
 
+    println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
 
@@ -1862,10 +1863,10 @@ module prj_d_module;
 
     prj___a_if____b_pkg__32_b_struct aif ();
     prj___c_if____b_pkg__32          bif ();
-    prj___a_if____b_pkg__32_b_struct cif [0:1-1] ();
-    prj___c_if____b_pkg__32          dif [0:1-1] ();
-    prj___a_if____b_pkg__32_b_struct eif [0:1-1] ();
-    prj___c_if____b_pkg__32          fif [0:1-1] ();
+    prj___a_if____b_pkg__32_b_struct cif [1] ();
+    prj___c_if____b_pkg__32          dif [1] ();
+    prj___a_if____b_pkg__32_b_struct eif [1] ();
+    prj___c_if____b_pkg__32          fif [1] ();
 
     always_comb begin
         aif.valid     = '0;
@@ -1903,12 +1904,12 @@ module prj_d_module;
 endmodule
 
 module prj_e_module (
-    prj___a_if____b_pkg__32_b_struct.slave aif        ,
-    prj___c_if____b_pkg__32.master         bif        ,
-    prj___a_if____b_pkg__32_b_struct.slave cif [0:1-1],
-    prj___c_if____b_pkg__32.master         dif [0:1-1],
-    prj___a_if____b_pkg__32_b_struct.slave eif [0:1-1],
-    prj___c_if____b_pkg__32.master         fif [0:1-1]
+    prj___a_if____b_pkg__32_b_struct.slave aif    ,
+    prj___c_if____b_pkg__32.master         bif    ,
+    prj___a_if____b_pkg__32_b_struct.slave cif [1],
+    prj___c_if____b_pkg__32.master         dif [1],
+    prj___a_if____b_pkg__32_b_struct.slave eif [1],
+    prj___c_if____b_pkg__32.master         fif [1]
 );
     always_comb begin
         bif.connect_if(aif.ready, aif.valid, aif.payload);
@@ -2006,23 +2007,23 @@ module prj_ModuleA (
 );
 endmodule
 module prj_ModuleB (
-    prj_InterfaceA.mp if_a [0:4-1]
+    prj_InterfaceA.mp if_a [4]
 );
 endmodule
 module prj_ModuleC (
-    prj_InterfaceA.mp if_a [0:(3)*(4)-1]
+    prj_InterfaceA.mp if_a [3*4]
 );
 endmodule
 module prj_ModuleD (
-    prj_InterfaceA.mp if_a [0:(2)*(3)*(4)-1]
+    prj_InterfaceA.mp if_a [2*3*4]
 );
 endmodule
 module prj_ModuleE (
-    prj_InterfaceA.mp if_a [0:2-1]
+    prj_InterfaceA.mp if_a [2]
 );
 endmodule
 module prj_ModuleF;
-    prj_InterfaceA if_a [0:(2)*(3)*(4)-1] ();
+    prj_InterfaceA if_a [2*3*4] ();
 
     prj_ModuleA u_a (
         .if_a (if_a[(1)*(3)*(4)+(2)*(4)+(3)])
@@ -2842,6 +2843,35 @@ fn nested_concatenation() {
     int unsigned _g; always_comb _g = {{0{{1'b1}}}, {1'b1}};
     int unsigned _h; always_comb _h = {1'b1, {0{1'b1}}};
     int unsigned _i; always_comb _i = {1'b1, {0{{1'b1}}}};
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn array_notation() {
+    let code = r#"module ModuleA {
+    const W: u32 = 8;
+    var _a: logic<W>[W];
+    var _b: logic<W+1>[W+1];
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    localparam int unsigned               W          = 8;
+    logic        [W-1:0]       _a [W]    ;
+    logic        [(W + 1)-1:0] _b [W + 1];
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
