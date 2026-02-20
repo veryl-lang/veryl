@@ -90,7 +90,13 @@ impl ValueU64 {
     }
 
     pub fn gen_mask(width: usize) -> u64 {
-        if width >= 64 { 0 } else { (1u64 << width) - 1 }
+        if width == 64 {
+            u64::MAX
+        } else if width >= 64 {
+            0
+        } else {
+            (1u64 << width) - 1
+        }
     }
 
     pub fn gen_mask_range(beg: usize, end: usize) -> u64 {
@@ -959,6 +965,20 @@ impl Value {
         }
     }
 
+    pub fn to_vcd_value(&self, i: u64) -> vcd::Value {
+        if self.mask_xz().bit(i) {
+            if self.payload().bit(i) {
+                vcd::Value::Z
+            } else {
+                vcd::Value::X
+            }
+        } else if self.payload().bit(i) {
+            vcd::Value::V1
+        } else {
+            vcd::Value::V0
+        }
+    }
+
     pub fn as_u64_ptr(&mut self) -> Option<*mut ValueU64> {
         if let Value::U64(x) = self {
             Some(x)
@@ -1169,6 +1189,42 @@ impl From<&syntax_tree::Exponent> for Value {
     fn from(value: &syntax_tree::Exponent) -> Self {
         let text = value.exponent_token.to_string();
         from_exponent_str(&text)
+    }
+}
+
+impl From<&Value> for vcd::Value {
+    fn from(value: &Value) -> Self {
+        value.to_vcd_value(0)
+    }
+}
+
+impl IntoIterator for &Value {
+    type Item = vcd::Value;
+    type IntoIter = VcdValueIter;
+    fn into_iter(self) -> Self::IntoIter {
+        VcdValueIter {
+            pos: 0,
+            value: self.clone(),
+        }
+    }
+}
+
+pub struct VcdValueIter {
+    pos: u64,
+    value: Value,
+}
+
+impl Iterator for VcdValueIter {
+    type Item = vcd::Value;
+    fn next(&mut self) -> Option<Self::Item> {
+        let width = self.value.width() as u64;
+        if self.pos < width {
+            let value = self.value.to_vcd_value(width - self.pos - 1);
+            self.pos += 1;
+            Some(value)
+        } else {
+            None
+        }
     }
 }
 
@@ -1541,14 +1597,14 @@ mod tests {
         let x05 = Value::from_str("8'shf6").unwrap();
         let x06 = Value::from_str("8'shx7").unwrap();
         let x07 = Value::from_str("8'shz8").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), true, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), true, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), true, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), true, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000010001");
         assert_eq!(format!("{:b}", x01), "16'b0000000011110010");
         assert_eq!(format!("{:b}", x02), "16'b00000000xxxx0011");
@@ -1566,14 +1622,14 @@ mod tests {
         let x05 = Value::from_str("8'shf6").unwrap();
         let x06 = Value::from_str("8'shx7").unwrap();
         let x07 = Value::from_str("8'shz8").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), true, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), true, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), true, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), true, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000011");
         assert_eq!(format!("{:x}", x01), "68'h000000000000000f2");
         assert_eq!(format!("{:x}", x02), "68'h000000000000000x3");
@@ -1606,14 +1662,14 @@ mod tests {
         let x05 = Value::from_str("8'shf6").unwrap();
         let x06 = Value::from_str("8'shx7").unwrap();
         let x07 = Value::from_str("8'shz8").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), true, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), true, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), true, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), true, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b1111111111101111");
         assert_eq!(format!("{:b}", x01), "16'b1111111100001110");
         assert_eq!(format!("{:b}", x02), "16'bxxxxxxxxxxxxxxxx");
@@ -1631,14 +1687,14 @@ mod tests {
         let x05 = Value::from_str("8'shf6").unwrap();
         let x06 = Value::from_str("8'shx7").unwrap();
         let x07 = Value::from_str("8'shz8").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), true, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), true, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), true, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), true, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'hfffffffffffffffef");
         assert_eq!(format!("{:x}", x01), "68'hfffffffffffffff0e");
         assert_eq!(format!("{:x}", x02), "68'hxxxxxxxxxxxxxxxxx");
@@ -1671,14 +1727,14 @@ mod tests {
         let x05 = Value::from_str("8'shf6").unwrap();
         let x06 = Value::from_str("8'shx7").unwrap();
         let x07 = Value::from_str("8'shz8").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), true, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), true, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), true, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), true, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b1111111111101110");
         assert_eq!(format!("{:b}", x01), "16'b1111111100001101");
         assert_eq!(format!("{:b}", x02), "16'b11111111xxxx1100");
@@ -1696,14 +1752,14 @@ mod tests {
         let x05 = Value::from_str("8'shf6").unwrap();
         let x06 = Value::from_str("8'shx7").unwrap();
         let x07 = Value::from_str("8'shz8").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), true, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), true, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), true, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), true, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'hfffffffffffffffee");
         assert_eq!(format!("{:x}", x01), "68'hfffffffffffffff0d");
         assert_eq!(format!("{:x}", x02), "68'hfffffffffffffffxc");
@@ -1736,14 +1792,14 @@ mod tests {
         let x05 = Value::from_str("8'h1z").unwrap();
         let x06 = Value::from_str("8'hfx").unwrap();
         let x07 = Value::from_str("8'hxz").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -1761,14 +1817,14 @@ mod tests {
         let x05 = Value::from_str("68'h1111111111111111z").unwrap();
         let x06 = Value::from_str("68'hffffffffffffffffx").unwrap();
         let x07 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -1801,14 +1857,14 @@ mod tests {
         let x05 = Value::from_str("8'h1z").unwrap();
         let x06 = Value::from_str("8'hfx").unwrap();
         let x07 = Value::from_str("8'hxz").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -1826,14 +1882,14 @@ mod tests {
         let x05 = Value::from_str("68'h1111111111111111z").unwrap();
         let x06 = Value::from_str("68'hffffffffffffffffx").unwrap();
         let x07 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -1866,14 +1922,14 @@ mod tests {
         let x05 = Value::from_str("8'h0z").unwrap();
         let x06 = Value::from_str("8'h1x").unwrap();
         let x07 = Value::from_str("8'h1z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -1891,14 +1947,14 @@ mod tests {
         let x05 = Value::from_str("68'h0000000000000000z").unwrap();
         let x06 = Value::from_str("68'h1111111111111111x").unwrap();
         let x07 = Value::from_str("68'h1111111111111111z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -1931,14 +1987,14 @@ mod tests {
         let x05 = Value::from_str("8'h0z").unwrap();
         let x06 = Value::from_str("8'h1x").unwrap();
         let x07 = Value::from_str("8'h1z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -1956,14 +2012,14 @@ mod tests {
         let x05 = Value::from_str("68'h0000000000000000z").unwrap();
         let x06 = Value::from_str("68'h1111111111111111x").unwrap();
         let x07 = Value::from_str("68'h1111111111111111z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -1996,14 +2052,14 @@ mod tests {
         let x05 = Value::from_str("8'h0z").unwrap();
         let x06 = Value::from_str("8'h1x").unwrap();
         let x07 = Value::from_str("8'h1z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -2021,14 +2077,14 @@ mod tests {
         let x05 = Value::from_str("68'h0000000000000000z").unwrap();
         let x06 = Value::from_str("68'h1111111111111111x").unwrap();
         let x07 = Value::from_str("68'h1111111111111111z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -2061,14 +2117,14 @@ mod tests {
         let x05 = Value::from_str("8'h0z").unwrap();
         let x06 = Value::from_str("8'h1x").unwrap();
         let x07 = Value::from_str("8'h1z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -2086,14 +2142,14 @@ mod tests {
         let x05 = Value::from_str("68'h0000000000000000z").unwrap();
         let x06 = Value::from_str("68'h1111111111111111x").unwrap();
         let x07 = Value::from_str("68'h1111111111111111z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -2126,14 +2182,14 @@ mod tests {
         let x05 = Value::from_str("8'h0z").unwrap();
         let x06 = Value::from_str("8'h1x").unwrap();
         let x07 = Value::from_str("8'h1z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(16), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(16), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(16), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(16), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(16), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(16), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(16), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(16), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(16), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(16), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(16), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(16), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(16), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(16), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(16), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -2151,14 +2207,14 @@ mod tests {
         let x05 = Value::from_str("68'h0000000000000000z").unwrap();
         let x06 = Value::from_str("68'h1111111111111111x").unwrap();
         let x07 = Value::from_str("68'h1111111111111111z").unwrap();
-        let x00 = op.eval_unary(&x00, Some(68), &mut cache);
-        let x01 = op.eval_unary(&x01, Some(68), &mut cache);
-        let x02 = op.eval_unary(&x02, Some(68), &mut cache);
-        let x03 = op.eval_unary(&x03, Some(68), &mut cache);
-        let x04 = op.eval_unary(&x04, Some(68), &mut cache);
-        let x05 = op.eval_unary(&x05, Some(68), &mut cache);
-        let x06 = op.eval_unary(&x06, Some(68), &mut cache);
-        let x07 = op.eval_unary(&x07, Some(68), &mut cache);
+        let x00 = op.eval_unary(&x00, Some(68), false, &mut cache);
+        let x01 = op.eval_unary(&x01, Some(68), false, &mut cache);
+        let x02 = op.eval_unary(&x02, Some(68), false, &mut cache);
+        let x03 = op.eval_unary(&x03, Some(68), false, &mut cache);
+        let x04 = op.eval_unary(&x04, Some(68), false, &mut cache);
+        let x05 = op.eval_unary(&x05, Some(68), false, &mut cache);
+        let x06 = op.eval_unary(&x06, Some(68), false, &mut cache);
+        let x07 = op.eval_unary(&x07, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");

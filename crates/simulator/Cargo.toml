@@ -11,8 +11,27 @@ description.workspace = true
 edition.workspace     = true
 
 [dependencies]
+clap           = {workspace = true}
+cranelift      = "0.128.1"
+daggy          = {workspace = true}
+fxhash         = {workspace = true}
+indent         = {workspace = true}
+memmap2        = "0.9.9"
+num-traits     = {workspace = true}
+target-lexicon = "0.13.4"
 toml           = {workspace = true}
+vcd            = {workspace = true}
 veryl-analyzer = {version = "0.18.0", path = "../analyzer"}
 veryl-metadata = {version = "0.18.0", path = "../metadata"}
 veryl-parser   = {version = "0.18.0", path = "../parser"}
 veryl-path     = {version = "0.18.0", path = "../path"}
+
+[dev-dependencies]
+criterion = {workspace = true}
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+pprof = {workspace = true}
+
+[[bench]]
+name = "benchmark"
+harness = false

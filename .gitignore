@@ -22,3 +22,13 @@ veryl_testcase.*
 /crates/std/veryl/*.f
 /crates/std/veryl/target/
 .build/
+/crates/simulator/compare/csrc/
+/crates/simulator/compare/obj_dir/
+/crates/simulator/compare/simv.daidir/
+/crates/simulator/compare/*.log
+/crates/simulator/compare/simv
+/crates/simulator/compare/a.out
+/crates/simulator/compare/ucli.key
+/crates/simulator/compare/xvlog.*
+/crates/simulator/compare/xelab.*
+/crates/simulator/compare/xsim*

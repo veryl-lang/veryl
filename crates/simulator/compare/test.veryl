@@ -1,0 +1,17 @@
+module Top #(
+    param N: u32 = 1000,
+) (
+    clk: input  clock        ,
+    rst: input  reset        ,
+    cnt: output logic<32> [N],
+) {
+    for i in 0..N :g {
+        always_ff {
+            if_reset {
+                cnt[i] = 0;
+            } else {
+                cnt[i] += 1;
+            }
+        }
+    }
+}
