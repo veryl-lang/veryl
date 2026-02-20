@@ -67,26 +67,7 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 x.assign_declaration.as_ref(),
             )?)),
             GenerateItem::FunctionDeclaration(x) => {
-                // ignore IrError of generic function
-                let use_ir = context.config.use_ir;
-                if x.function_declaration.function_declaration_opt.is_some() {
-                    context.config.use_ir = false;
-                    context.ignore_var_func = true;
-                }
-
-                let ret = context.block(|c| {
-                    let ret: () = Conv::conv(c, x.function_declaration.as_ref())?;
-                    Ok(ret)
-                });
-
-                if x.function_declaration.function_declaration_opt.is_some() {
-                    context.config.use_ir = use_ir;
-                    context.ignore_var_func = false;
-                } else {
-                    // check IrError for non-generic function
-                    ret?;
-                }
-
+                let _: () = Conv::conv(context, x.function_declaration.as_ref())?;
                 Ok(ir::DeclarationBlock::default())
             }
             GenerateItem::StructUnionDeclaration(x) => {
@@ -788,17 +769,19 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
     }
 }
 
-impl Conv<&FunctionDeclaration> for () {
-    fn conv(context: &mut Context, value: &FunctionDeclaration) -> IrResult<Self> {
-        let name = value.identifier.text();
+impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
+    fn conv(
+        context: &mut Context,
+        value: (&FunctionDeclaration, Option<&FuncPath>),
+    ) -> IrResult<Self> {
+        let (func_def, path) = value;
+        let token: TokenRange = (&func_def.identifier.identifier_token).into();
 
-        let token: TokenRange = (&value.identifier.identifier_token).into();
-
-        if let Some(x) = &value.function_declaration_opt {
+        if let Some(x) = &func_def.function_declaration_opt {
             check_generic_bound(context, &x.with_generic_parameter);
         }
 
-        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
             && let SymbolKind::Function(x) = symbol.found.kind
         {
             let constantable = x.constantable.unwrap();
@@ -818,25 +801,32 @@ impl Conv<&FunctionDeclaration> for () {
                 None
             };
 
-            let arg_items: Vec<_> = if let Some(x) = &value.function_declaration_opt0
+            // insert VarPath for function before statement_block conv
+            // because it may be refered by recursive function
+            let (path, name) = if let Some(path) = path {
+                let name = resource_table::insert_str(&path.sig.to_string());
+                (path.clone(), name)
+            } else {
+                let name = func_def.identifier.text();
+                let path = FuncPath::new(symbol.found.id);
+                (path, name)
+            };
+            let token: TokenRange = symbol.found.token.into();
+            let id = context.insert_func_path(path.clone());
+
+            context.push_affiliation(Affiliation::Function);
+            context.push_hierarchy(name);
+
+            let arg_items: Vec<_> = if let Some(x) = &func_def.function_declaration_opt0
                 && let Some(x) = &x.port_declaration.port_declaration_opt
             {
                 x.port_declaration_list.as_ref().into()
             } else {
                 vec![]
             };
-
-            // insert VarPath for function before statement_block conv
-            // because it may be refered by recursive function
-            let path = FuncPath::new(symbol.found.id);
             let arity = arg_items.len();
-            let args = vec![]; // args are collected later
-            let token: TokenRange = symbol.found.token.into();
-            let id =
-                context.insert_func_path(name, path.clone(), ret_type.clone(), arity, args, token);
-
-            context.push_affiliation(Affiliation::Function);
-            context.push_hierarchy(name);
+            let mut arg_map = HashMap::default();
+            let mut args = vec![];
 
             let body = context.block(|c| {
                 // insert return value as variable
@@ -873,9 +863,6 @@ impl Conv<&FunctionDeclaration> for () {
                 } else {
                     None
                 };
-
-                let mut arg_map = HashMap::default();
-                let mut args = vec![];
 
                 for item in arg_items {
                     let ret: IrResult<()> = Conv::conv(c, item);
@@ -923,10 +910,8 @@ impl Conv<&FunctionDeclaration> for () {
                     }
                 }
 
-                c.insert_func_args(&path, args);
-
-                let statements: ir::StatementBlock = Conv::conv(c, value.statement_block.as_ref())?;
-
+                let statements: ir::StatementBlock =
+                    Conv::conv(c, func_def.statement_block.as_ref())?;
                 Ok(ir::FunctionBody {
                     ret: ret_id,
                     arg_map,
@@ -937,14 +922,18 @@ impl Conv<&FunctionDeclaration> for () {
             context.pop_affiliation();
             context.pop_hierarchy();
 
-            let r#type = ret_type.as_ref().map(|x| x.r#type.clone());
+            let r#type = ret_type.as_ref().cloned();
             let function = ir::Function {
+                name,
                 id,
                 path,
                 r#type,
                 array: Shape::default(),
+                arity,
+                args,
                 constantable,
                 functions: vec![body?],
+                token,
             };
 
             // function should be inserted outside the function scope
@@ -952,6 +941,27 @@ impl Conv<&FunctionDeclaration> for () {
             Ok(())
         } else {
             Err(ir_error!(token))
+        }
+    }
+}
+
+impl Conv<&FunctionDeclaration> for () {
+    fn conv(context: &mut Context, value: &FunctionDeclaration) -> IrResult<Self> {
+        // ignore IrError of generic function
+        let use_ir = context.config.use_ir;
+        if value.function_declaration_opt.is_some() {
+            context.config.use_ir = false;
+            context.ignore_var_func = true;
+        }
+
+        let ret = Conv::conv(context, (value, None));
+
+        if value.function_declaration_opt.is_some() {
+            context.config.use_ir = use_ir;
+            context.ignore_var_func = false;
+            Ok(())
+        } else {
+            ret
         }
     }
 }

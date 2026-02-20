@@ -1,5 +1,5 @@
 use crate::HashMap;
-use crate::ir::{Comptime, FuncPath, FuncProto, Function, VarId, VarPath, Variable};
+use crate::ir::{Comptime, FuncPath, Function, VarId, VarPath, Variable};
 use crate::symbol::Direction;
 use indent::indent_all_by;
 use std::fmt;
@@ -9,7 +9,7 @@ use veryl_parser::resource_table::StrId;
 pub struct Interface {
     pub name: StrId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
-    pub func_paths: HashMap<FuncPath, FuncProto>,
+    pub func_paths: HashMap<FuncPath, VarId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub modports: HashMap<StrId, Vec<(StrId, Direction)>>,
