@@ -57,7 +57,7 @@ module veryl_testcase_Module81A (
     input  var veryl_testcase___BasePkg81__8__32::Address __s_if_0_1_address,
     input  var veryl_testcase___BasePkg81__8__32::Data    __s_if_0_1_data   
 );
-    veryl_testcase___Interface81____BasePkg81__8__32 m_if [0:1-1][0:2-1] ();
+    veryl_testcase___Interface81____BasePkg81__8__32 m_if [1][2] ();
     always_comb begin
         m_if[0][0].ready   = __m_if_0_0_ready  ;
         __m_if_0_0_valid   = m_if[0][0].valid  ;
@@ -72,7 +72,7 @@ module veryl_testcase_Module81A (
         __m_if_0_1_address = m_if[0][1].address;
         __m_if_0_1_data    = m_if[0][1].data   ;
     end
-    veryl_testcase___Interface81____BasePkg81__8__32 s_if [0:1-1][0:2-1] ();
+    veryl_testcase___Interface81____BasePkg81__8__32 s_if [1][2] ();
     always_comb begin
         __s_if_0_0_ready   = s_if[0][0].ready  ;
         s_if[0][0].valid   = __s_if_0_0_valid  ;
@@ -101,8 +101,8 @@ module veryl_testcase_Module81A (
 endmodule
 
 module veryl_testcase_Module81B;
-    veryl_testcase___Interface81____BasePkg81__8__32 a_if [0:1-1][0:2-1] ();
-    veryl_testcase___Interface81____BasePkg81__8__32 b_if [0:1-1][0:2-1] ();
+    veryl_testcase___Interface81____BasePkg81__8__32 a_if [1][2] ();
+    veryl_testcase___Interface81____BasePkg81__8__32 b_if [1][2] ();
 
     for (genvar i = 0; i < 1; i++) begin :g
         for (genvar j = 0; j < 2; j++) begin :g

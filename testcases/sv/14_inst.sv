@@ -27,7 +27,7 @@ module veryl_testcase_Module14;
     veryl_testcase_InterfaceA #( .A (A), .B (10) ) xxx ();
 
     // interface array
-    veryl_testcase_InterfaceA yyy [0:10-1] ();
+    veryl_testcase_InterfaceA yyy [10] ();
 endmodule
 
 module veryl_testcase_Module14B;
