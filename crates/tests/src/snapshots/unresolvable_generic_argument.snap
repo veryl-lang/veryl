@@ -4,7 +4,7 @@ expression: out
 ---
 unresolvable_generic_argument (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_argument)
 
-  × "X " can't be resolved from the definition of generics
+  × "X" can't be resolved from the definition of generics
    ╭─[../../testcases/error/unresolvable_generic_argument.veryl:3:46]
  2 │     const X: u32 = 1;
  3 │     inst u: unresolvable_generic_argument2::<X>;

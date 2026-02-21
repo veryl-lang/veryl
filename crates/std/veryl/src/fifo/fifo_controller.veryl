@@ -71,6 +71,25 @@ pub module fifo_controller #(
     //--------------------------------------------------------------
     //  word counter
     //--------------------------------------------------------------
+    function get_word_counter_next (
+        push        : input logic     ,
+        pop         : input logic     ,
+        clear       : input logic  <2>,
+        word_counter: input COUNTER   ,
+    ) -> COUNTER {
+        var up  : logic;
+        var down: logic;
+        up   = push && (!pop);
+        down = (!push) && pop;
+        switch {
+            clear[0]: return 0 as COUNTER;
+            clear[1]: return 1 as COUNTER;
+            up      : return word_counter + 1 as COUNTER;
+            down    : return word_counter - 1 as COUNTER;
+            default : return word_counter;
+        }
+    }
+
     always_comb {
         o_word_count = word_counter;
     }
@@ -93,28 +112,19 @@ pub module fifo_controller #(
         }
     }
 
-    function get_word_counter_next (
-        push        : input logic     ,
-        pop         : input logic     ,
-        clear       : input logic  <2>,
-        word_counter: input COUNTER   ,
-    ) -> COUNTER {
-        var up  : logic;
-        var down: logic;
-        up   = push && (!pop);
-        down = (!push) && pop;
-        switch {
-            clear[0]: return 0 as COUNTER;
-            clear[1]: return 1 as COUNTER;
-            up      : return word_counter + 1 as COUNTER;
-            down    : return word_counter - 1 as COUNTER;
-            default : return word_counter;
-        }
-    }
-
     //--------------------------------------------------------------
     //  status flag
     //--------------------------------------------------------------
+    function get_status_flag (
+        word_count: input COUNTER,
+    ) -> s_status_flag {
+        var flag            : s_status_flag;
+        flag.empty       = word_count == 0;
+        flag.almost_full = word_count >= THRESHOLD;
+        flag.full        = word_count >= DEPTH;
+        return flag;
+    }
+
     always_comb {
         o_empty       = status_flag.empty;
         o_almost_full = status_flag.almost_full;
@@ -135,16 +145,6 @@ pub module fifo_controller #(
         always_comb {
             status_flag = get_status_flag(word_counter);
         }
-    }
-
-    function get_status_flag (
-        word_count: input COUNTER,
-    ) -> s_status_flag {
-        var flag            : s_status_flag;
-        flag.empty       = word_count == 0;
-        flag.almost_full = word_count >= THRESHOLD;
-        flag.full        = word_count >= DEPTH;
-        return flag;
     }
 
     //--------------------------------------------------------------

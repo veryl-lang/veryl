@@ -2,7 +2,7 @@ use crate::conv::Context;
 use crate::conv::utils::check_compatibility;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement, Type,
+    AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
     ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
 };
 use crate::symbol::{ClockDomain, Direction, Symbol, SymbolId, SymbolKind};
@@ -53,16 +53,6 @@ impl fmt::Display for FuncPath {
 }
 
 #[derive(Clone)]
-pub struct FuncProto {
-    pub name: StrId,
-    pub id: VarId,
-    pub ret: Option<Comptime>,
-    pub arity: usize,
-    pub args: Vec<FuncArg>,
-    pub token: TokenRange,
-}
-
-#[derive(Clone)]
 pub struct FuncArg {
     pub name: StrId,
     pub comptime: Comptime,
@@ -71,12 +61,16 @@ pub struct FuncArg {
 
 #[derive(Clone)]
 pub struct Function {
+    pub name: StrId,
     pub id: VarId,
     pub path: FuncPath,
-    pub r#type: Option<Type>,
+    pub r#type: Option<Comptime>,
     pub array: Shape,
+    pub arity: usize,
+    pub args: Vec<FuncArg>,
     pub constantable: bool,
     pub functions: Vec<FunctionBody>,
+    pub token: TokenRange,
 }
 
 impl Function {
@@ -96,6 +90,27 @@ impl Function {
         let index = self.array.calc_index(index)?;
         self.functions.get(index).cloned()
     }
+
+    pub fn to_proto(&self) -> FuncProto {
+        FuncProto {
+            name: self.name,
+            id: self.id,
+            r#type: self.r#type.clone(),
+            arity: self.arity,
+            args: self.args.clone(),
+            token: self.token,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct FuncProto {
+    pub name: StrId,
+    pub id: VarId,
+    pub r#type: Option<Comptime>,
+    pub arity: usize,
+    pub args: Vec<FuncArg>,
+    pub token: TokenRange,
 }
 
 #[derive(Clone)]

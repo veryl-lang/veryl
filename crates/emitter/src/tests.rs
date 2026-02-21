@@ -2140,25 +2140,25 @@ module ModuleA {
 "#;
 
     let expect = r#"// __PkgA__0__1__2__3
-package prj___PkgA__3894375d1deadabb;
+package prj___PkgA__97b1a4fc9479185f;
     localparam int unsigned V = 0 + 1 + 2 + 3;
 endpackage
 // __PkgA__4__5__6__7
-package prj___PkgA__c10f54f86dbec958;
+package prj___PkgA__a23a9e5c80a698c2;
     localparam int unsigned V = 4 + 5 + 6 + 7;
 endpackage
 module prj_ModuleA;
     // __FuncA____PkgA__0__1__2__3_V
-    function automatic int unsigned __FuncA__830b4abf8aba07ce() ;
-        return prj___PkgA__3894375d1deadabb::V;
+    function automatic int unsigned __FuncA__1625729981fddf71() ;
+        return prj___PkgA__97b1a4fc9479185f::V;
     endfunction
     // __FuncA____PkgA__4__5__6__7_V
-    function automatic int unsigned __FuncA__e5a0d24d19f5a43d() ;
-        return prj___PkgA__c10f54f86dbec958::V;
+    function automatic int unsigned __FuncA__1c60de7541878b99() ;
+        return prj___PkgA__a23a9e5c80a698c2::V;
     endfunction
-    int unsigned _a; always_comb _a = __FuncA__830b4abf8aba07ce();
-    int unsigned _b; always_comb _b = __FuncA__830b4abf8aba07ce();
-    int unsigned _c; always_comb _c = __FuncA__e5a0d24d19f5a43d();
+    int unsigned _a; always_comb _a = __FuncA__1625729981fddf71();
+    int unsigned _b; always_comb _b = __FuncA__1625729981fddf71();
+    int unsigned _c; always_comb _c = __FuncA__1c60de7541878b99();
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -2196,17 +2196,17 @@ alias module mod = c_module::<pkg>;
     let expect = r#"
 // __a_pkg__32
 
-package prj___a_pkg__805a71dc85438e33;
+package prj___a_pkg__cd2bef6d30dada19;
     localparam int unsigned A = 32;
 endpackage
 // __b_module____a_pkg__32
-module prj___b_module__dc41fc063ac19318;
-    import prj___a_pkg__805a71dc85438e33::*;
+module prj___b_module__c0fb5ed5baf172ab;
+    import prj___a_pkg__cd2bef6d30dada19::*;
 
 endmodule
 // __c_module____a_pkg__32
-module prj___c_module__dc41fc063ac19318;
-    prj___b_module__dc41fc063ac19318 u ();
+module prj___c_module__c0fb5ed5baf172ab;
+    prj___b_module__c0fb5ed5baf172ab u ();
 endmodule
 
 
