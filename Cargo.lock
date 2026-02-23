@@ -3557,7 +3557,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "rustc-hash",
- "scnr2",
+ "scnr2 0.3.3",
  "serde",
  "serde_json",
  "syn 2.0.114",
@@ -3577,9 +3577,9 @@ checksum = "54ec451836679aaa55158b454b441e21446a111ea34aa1917eba29245bafe4b8"
 
 [[package]]
 name = "parol_runtime"
-version = "4.2.0"
+version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "730ad4d9a5de274892b65349e8c05fb651aa4d5d762ec475dcc0668e850c14a9"
+checksum = "8689670646840dc49dfa4c6f961d9a15947c1da4b278e4159601982a80cbf873"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -3589,7 +3589,7 @@ dependencies = [
  "once_cell",
  "parol-macros",
  "petgraph",
- "scnr2",
+ "scnr2 0.5.0",
  "serde_json",
  "syntree",
  "syntree_layout",
@@ -4400,7 +4400,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cefa787617d55b9ae024c5cb5d338ff0d6be6694cb465c2f6be77f9495ae8bd9"
 dependencies = [
  "log",
- "scnr2_macro",
+ "scnr2_macro 0.3.3",
+]
+
+[[package]]
+name = "scnr2"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4966feadc6f0a47d60296ffc30ea515cdeb5876c5c81ac2660f1040e349ec1ae"
+dependencies = [
+ "log",
+ "scnr2_macro 0.5.0",
 ]
 
 [[package]]
@@ -4418,12 +4428,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "scnr2_generate"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9f192b40e716209c169328fbc0d9eb353747948587b5e94afad972e3b5ef868"
+dependencies = [
+ "log",
+ "proc-macro2",
+ "quote",
+ "regex-syntax",
+ "rustc-hash",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "scnr2_macro"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31437e0936889d403e8119619469157237f67b4a2744d8a67367d1640db0a845"
 dependencies = [
- "scnr2_generate",
+ "scnr2_generate 0.3.3",
+]
+
+[[package]]
+name = "scnr2_macro"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94ab98ffcf4285d5b841d3c3a84d32da23e29804bf9ab5452fe5f62e07416540"
+dependencies = [
+ "scnr2_generate 0.5.0",
 ]
 
 [[package]]
@@ -5651,7 +5684,7 @@ dependencies = [
  "parol_runtime",
  "paste",
  "regex",
- "scnr2",
+ "scnr2 0.3.3",
  "thiserror 2.0.18",
  "veryl-metadata",
  "veryl-parser",
@@ -5669,7 +5702,7 @@ dependencies = [
  "parol_runtime",
  "paste",
  "regex",
- "scnr2",
+ "scnr2 0.3.3",
  "thiserror 2.0.18",
 ]
 
