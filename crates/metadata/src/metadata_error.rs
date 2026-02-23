@@ -88,6 +88,10 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::Path), help(""))]
     #[error("path error")]
     Path(#[from] PathError),
+
+    #[diagnostic(code(MetadataError::MissingVersion), help(""))]
+    #[error("Version field is required in Veryl.toml to publish")]
+    MissingVersion,
 }
 
 impl MetadataError {

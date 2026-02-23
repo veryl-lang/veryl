@@ -168,7 +168,10 @@ fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadat
 fn check_toml() {
     let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
     assert_eq!(metadata.project.name, "test");
-    assert_eq!(metadata.project.version, Version::parse("0.1.0").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("0.1.0").unwrap())
+    );
     assert_eq!(metadata.build.clock_type, ClockType::PosEdge);
     assert_eq!(metadata.build.reset_type, ResetType::AsyncLow);
     assert!(metadata.build.clock_posedge_prefix.is_none());
@@ -211,10 +214,9 @@ fn publish() {
     let (mut metadata, tempdir) = create_metadata_simple();
     metadata.publish().unwrap();
 
-    assert_eq!(
-        metadata.pubfile.releases[0].version,
-        metadata.project.version
-    );
+    let project_version = metadata.project.version.clone().unwrap();
+
+    assert_eq!(metadata.pubfile.releases[0].version, project_version);
     assert!(metadata.pubfile_path.exists());
     let git = Git::open(&tempdir.path().join("test")).unwrap();
     assert!(!git.is_clean().unwrap());
@@ -227,10 +229,9 @@ fn publish_with_commit() {
     metadata.publish.publish_commit_message = "chore: Publish".to_string();
     metadata.publish().unwrap();
 
-    assert_eq!(
-        metadata.pubfile.releases[0].version,
-        metadata.project.version
-    );
+    let project_version = metadata.project.version.clone().unwrap();
+
+    assert_eq!(metadata.pubfile.releases[0].version, project_version);
     assert!(metadata.pubfile_path.exists());
     let git = Git::open(&tempdir.path().join("test")).unwrap();
     assert!(git.is_clean().unwrap());
@@ -241,13 +242,22 @@ fn bump_version() {
     let (mut metadata, tempdir) = create_metadata_simple();
 
     metadata.bump_version(BumpKind::Major).unwrap();
-    assert_eq!(metadata.project.version, Version::parse("1.0.0").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("1.0.0").unwrap())
+    );
 
     metadata.bump_version(BumpKind::Minor).unwrap();
-    assert_eq!(metadata.project.version, Version::parse("1.1.0").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("1.1.0").unwrap())
+    );
 
     metadata.bump_version(BumpKind::Patch).unwrap();
-    assert_eq!(metadata.project.version, Version::parse("1.1.1").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("1.1.1").unwrap())
+    );
 
     let git = Git::open(&tempdir.path().join("test")).unwrap();
     assert!(!git.is_clean().unwrap());
@@ -260,13 +270,22 @@ fn bump_version_with_commit() {
     metadata.publish.bump_commit_message = "chore: Bump version".to_string();
 
     metadata.bump_version(BumpKind::Major).unwrap();
-    assert_eq!(metadata.project.version, Version::parse("1.0.0").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("1.0.0").unwrap())
+    );
 
     metadata.bump_version(BumpKind::Minor).unwrap();
-    assert_eq!(metadata.project.version, Version::parse("1.1.0").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("1.1.0").unwrap())
+    );
 
     metadata.bump_version(BumpKind::Patch).unwrap();
-    assert_eq!(metadata.project.version, Version::parse("1.1.1").unwrap());
+    assert_eq!(
+        metadata.project.version,
+        Some(Version::parse("1.1.1").unwrap())
+    );
 
     let git = Git::open(&tempdir.path().join("test")).unwrap();
     assert!(git.is_clean().unwrap());

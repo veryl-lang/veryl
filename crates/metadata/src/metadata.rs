@@ -160,15 +160,18 @@ impl Metadata {
             return Err(MetadataError::ModifiedProject(prj_path.to_path_buf()));
         }
 
+        let version = self
+            .project
+            .version
+            .clone()
+            .ok_or(MetadataError::MissingVersion)?;
+
         for release in &self.pubfile.releases {
-            if release.version == self.project.version {
-                return Err(MetadataError::PublishedVersion(
-                    self.project.version.clone(),
-                ));
+            if release.version == version {
+                return Err(MetadataError::PublishedVersion(version));
             }
         }
 
-        let version = self.project.version.clone();
         let revision = git.get_revision()?;
 
         info!("Publishing release ({version} @ {revision})");
@@ -206,7 +209,14 @@ impl Metadata {
         let prj_path = self.project_path();
         let git = Git::open(&prj_path)?;
 
-        let mut bumped_version = self.project.version.clone();
+        let current_version = self
+            .project
+            .version
+            .as_ref()
+            .ok_or(MetadataError::MissingVersion)?;
+
+        let mut bumped_version = current_version.clone();
+
         match kind {
             BumpKind::Major => {
                 bumped_version.major += 1;
@@ -221,10 +231,10 @@ impl Metadata {
         }
         info!(
             "Bumping version ({} -> {})",
-            self.project.version, bumped_version
+            current_version, bumped_version
         );
 
-        self.project.version = bumped_version.clone();
+        self.project.version = Some(bumped_version.clone());
 
         let toml = fs::read_to_string(&self.metadata_path)
             .map_err(|x| MetadataError::file_io(x, &self.metadata_path))?;
