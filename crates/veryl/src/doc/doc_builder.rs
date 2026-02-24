@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use veryl_analyzer::symbol::{ClockDomain, ParameterKind, Symbol, SymbolKind};
 use veryl_analyzer::symbol_table;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Metadata, MetadataError};
 use veryl_parser::veryl_token::Token;
 
 const SUMMARY_TMPL: &str = r###"
@@ -394,8 +394,8 @@ impl DocBuilder {
     pub fn build(&self) -> Result<()> {
         self.build_theme()?;
 
-        self.build_component("SUMMARY.md", self.build_summary())?;
-        self.build_component("index.md", self.build_index())?;
+        self.build_component("SUMMARY.md", self.build_summary()?)?;
+        self.build_component("index.md", self.build_index()?)?;
         self.build_component("modules.md", self.build_modules())?;
         self.build_component("proto_modules.md", self.build_proto_modules())?;
         self.build_component("interfaces.md", self.build_interfaces())?;
@@ -500,7 +500,7 @@ impl DocBuilder {
         Ok(())
     }
 
-    fn build_summary(&self) -> String {
+    fn build_summary(&self) -> Result<String> {
         let modules: Vec<_> = self
             .modules
             .iter()
@@ -527,7 +527,14 @@ impl DocBuilder {
             .collect();
         let data = SummaryData {
             name: self.metadata.project.name.clone(),
-            version: format!("{}", self.metadata.project.version),
+            version: format!(
+                "{}",
+                self.metadata
+                    .project
+                    .version
+                    .as_ref()
+                    .ok_or(MetadataError::MissingVersion)?
+            ),
             modules,
             proto_modules,
             interfaces,
@@ -536,13 +543,20 @@ impl DocBuilder {
 
         let mut handlebars = Handlebars::new();
         handlebars.register_escape_fn(handlebars::no_escape);
-        handlebars.render_template(SUMMARY_TMPL, &data).unwrap()
+        Ok(handlebars.render_template(SUMMARY_TMPL, &data).unwrap())
     }
 
-    fn build_index(&self) -> String {
+    fn build_index(&self) -> Result<String> {
         let data = IndexData {
             name: self.metadata.project.name.clone(),
-            version: format!("{}", self.metadata.project.version),
+            version: format!(
+                "{}",
+                self.metadata
+                    .project
+                    .version
+                    .as_ref()
+                    .ok_or(MetadataError::MissingVersion)?
+            ),
             description: self.metadata.project.description.clone(),
             repository: self.metadata.project.repository.clone(),
             license: self.metadata.project.license.clone(),
@@ -550,7 +564,7 @@ impl DocBuilder {
 
         let mut handlebars = Handlebars::new();
         handlebars.register_escape_fn(handlebars::no_escape);
-        handlebars.render_template(INDEX_TMPL, &data).unwrap()
+        Ok(handlebars.render_template(INDEX_TMPL, &data).unwrap())
     }
 
     fn build_modules(&self) -> String {
