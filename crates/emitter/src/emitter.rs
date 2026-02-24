@@ -1239,31 +1239,43 @@ impl Emitter {
         self.r_bracket(&last_select.r_bracket);
     }
 
+    fn emit_width(&mut self, exp: &Expression) {
+        if let Some(factor) = exp.unwrap_factor() {
+            self.factor(factor);
+            self.str("-1:0");
+        } else {
+            self.str("(");
+            self.expression(exp);
+            self.str(")-1:0");
+        }
+    }
+
     fn emit_array(&mut self, array: &Array, flatten: bool) {
         self.l_bracket(&array.l_bracket);
         if flatten && !array.array_list.is_empty() {
-            self.str("0:");
-            self.str("(");
-            self.expression(&array.expression);
-            self.str(")");
+            self.emit_array_expression(&array.expression);
             for x in &array.array_list {
-                self.token(&x.comma.comma_token.replace("*("));
-                self.expression(&x.expression);
-                self.str(")");
+                self.token(&x.comma.comma_token.replace("*"));
+                self.emit_array_expression(&x.expression)
             }
-            self.str("-1");
         } else {
-            self.str("0:");
             self.expression(&array.expression);
-            self.str("-1");
             for x in &array.array_list {
                 self.token(&x.comma.comma_token.replace("]["));
-                self.str("0:");
                 self.expression(&x.expression);
-                self.str("-1");
             }
         }
         self.r_bracket(&array.r_bracket);
+    }
+
+    fn emit_array_expression(&mut self, exp: &Expression) {
+        if let Some(factor) = exp.unwrap_factor() {
+            self.factor(factor);
+        } else {
+            self.str("(");
+            self.expression(exp);
+            self.str(")");
+        }
     }
 
     fn emit_expanded_modport_connections(&mut self) {
@@ -1283,7 +1295,7 @@ impl Emitter {
             if !entry.array_size.is_empty() {
                 self.space(1);
                 for size in entry.array_size {
-                    self.str(&format!("[0:{size}-1]"));
+                    self.str(&format!("[{size}]"));
                 }
             }
             self.space(1);
@@ -3266,14 +3278,13 @@ impl VerylWalker for Emitter {
         self.token(&arg.l_angle.l_angle_token.replace("["));
         if arg.width_list.is_empty() && arg.expression.is_anonymous_expression() {
             self.str(&self.scalar_width.to_string());
+            self.str("-1:0");
         } else {
-            self.expression(&arg.expression);
+            self.emit_width(&arg.expression);
         }
-        self.str("-1:0");
         for x in &arg.width_list {
             self.token(&x.comma.comma_token.replace("]["));
-            self.expression(&x.expression);
-            self.str("-1:0");
+            self.emit_width(&x.expression);
         }
         self.token(&arg.r_angle.r_angle_token.replace("]"));
     }

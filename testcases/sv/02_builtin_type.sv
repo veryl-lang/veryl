@@ -32,15 +32,15 @@ module veryl_testcase_Module02;
     bit [10-1:0][10-1:0] _fff; always_comb _fff = 1;
 
     // array
-    byte unsigned     _g          [0:2-1]; always_comb _g          = '{1, 1};
-    shortint unsigned _gg         [0:2-1]; always_comb _gg         = '{1, 1};
-    int unsigned      _ggg        [0:2-1]; always_comb _ggg        = '{1, 1};
-    longint unsigned  _gggg       [0:2-1]; always_comb _gggg       = '{1, 1};
-    byte signed       _ggggg      [0:2-1]; always_comb _ggggg      = '{1, 1};
-    shortint signed   _gggggg     [0:2-1]; always_comb _gggggg     = '{1, 1};
-    int signed        _ggggggg    [0:2-1]; always_comb _ggggggg    = '{1, 1};
-    longint signed    _gggggggg   [0:2-1]; always_comb _gggggggg   = '{1, 1};
-    shortreal         _ggggggggg  [0:2-1]; always_comb _ggggggggg  = '{1, 1};
-    real              _gggggggggg [0:2-1]; always_comb _gggggggggg = '{1, 1};
+    byte unsigned     _g          [2]; always_comb _g          = '{1, 1};
+    shortint unsigned _gg         [2]; always_comb _gg         = '{1, 1};
+    int unsigned      _ggg        [2]; always_comb _ggg        = '{1, 1};
+    longint unsigned  _gggg       [2]; always_comb _gggg       = '{1, 1};
+    byte signed       _ggggg      [2]; always_comb _ggggg      = '{1, 1};
+    shortint signed   _gggggg     [2]; always_comb _gggggg     = '{1, 1};
+    int signed        _ggggggg    [2]; always_comb _ggggggg    = '{1, 1};
+    longint signed    _gggggggg   [2]; always_comb _gggggggg   = '{1, 1};
+    shortreal         _ggggggggg  [2]; always_comb _ggggggggg  = '{1, 1};
+    real              _gggggggggg [2]; always_comb _gggggggggg = '{1, 1};
 endmodule
 //# sourceMappingURL=../map/02_builtin_type.sv.map
