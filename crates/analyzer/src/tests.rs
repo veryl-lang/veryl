@@ -1651,9 +1651,9 @@ fn mismatch_function_arity() {
         ) -> logic {
             return 0;
         }
-    
+
         inst u: $sv::IF;
-    
+
         always_comb {
             u.a = func(1'b1);
         }
@@ -5375,6 +5375,54 @@ fn referring_before_definition() {
 
     module ModuleB {
         inst u: ModuleA::<PackageA::<>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = func();
+        function func() -> u32 {
+            return 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const A: u32 = func();
+        function func() -> u32 {
+            return 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    package PkgA {
+        function func_a() -> u32 {
+            return 8;
+        }
+        function func_b() -> u32 {
+            return func_a();
+        }
+    }
+    module ModuleA {
+        import PkgA::*;
+        const A: u32 = func_b();
     }
     "#;
 

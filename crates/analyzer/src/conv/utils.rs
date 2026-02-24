@@ -16,7 +16,7 @@ use crate::symbol::{
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
-use crate::{HashMap, ir_error};
+use crate::{HashMap, ir_error, namespace_table};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -1929,10 +1929,24 @@ pub fn var_path_to_assign_destination(
         .collect()
 }
 
-fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> IrResult<FuncProto> {
-    if let Some(x) = context.func_paths.get(path) {
-        Ok(x.clone())
-    } else {
+fn get_function(
+    context: &mut Context,
+    path: &FuncPath,
+    is_local_function: bool,
+    token: TokenRange,
+) -> IrResult<FuncProto> {
+    if !context.func_paths.contains_key(path) {
+        if is_local_function
+            && context.func_call_depth == 0
+            && !context.func_paths.contains_key(&path.base())
+        {
+            context.insert_error(AnalyzerError::referring_before_definition(
+                &token.beg.text.to_string(),
+                &token,
+            ));
+            return Err(ir_error!(token));
+        }
+
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
         let definition = match &symbol.kind {
             SymbolKind::Function(x) => x.definition.unwrap(),
@@ -1962,20 +1976,25 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         local_context.inherit(context);
         local_context.extract_var_paths(context, &path.path, &array);
 
-        let ret: IrResult<()> = Conv::conv(&mut local_context, &definition);
+        local_context.func_call_depth += 1;
+        let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
+        local_context.func_call_depth -= 1;
 
         context.extract_function(&mut local_context, &path.path, &array);
         context.inherit(&mut local_context);
         context.var_id = local_context.var_id;
 
         ret?;
-
-        context
-            .func_paths
-            .get(&path.base())
-            .cloned()
-            .ok_or_else(|| ir_error!(token))
     }
+
+    let Some(id) = context.func_paths.get(path) else {
+        return Err(ir_error!(token));
+    };
+    context
+        .functions
+        .get(id)
+        .map(|func| func.to_proto())
+        .ok_or_else(|| ir_error!(token))
 }
 
 pub fn function_call(
@@ -1991,6 +2010,12 @@ pub fn function_call(
     let mut parent_path = generic_path.clone();
     parent_path.paths.pop();
     let sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+
+    let is_local_function = {
+        let namespace = namespace_table::get(path.identifier().token.id).unwrap();
+        let symbol = symbol_table::get(sig.symbol).unwrap();
+        namespace.included(&symbol.namespace)
+    };
 
     let path: VarPathSelect = Conv::conv(context, path)?;
     let (mut base_path, select, _) = path.into();
@@ -2030,12 +2055,12 @@ pub fn function_call(
     context.push_generic_map(map);
 
     let ret = context.block(|c| {
-        let proto = get_function(c, &path, token)?;
-        let (inputs, outputs) = args.to_function_args(c, &proto, token)?;
+        let func = get_function(c, &path, is_local_function, token)?;
+        let (inputs, outputs) = args.to_function_args(c, &func, token)?;
         Ok(ir::FunctionCall {
-            id: proto.id,
+            id: func.id,
             index,
-            ret: proto.ret,
+            ret: func.r#type,
             inputs,
             outputs,
             token,

@@ -334,23 +334,9 @@ impl Conv<&PackageDeclaration> for () {
                         context.insert_ir_error(&ret);
                     }
                     PackageItem::FunctionDeclaration(x) => {
-                        // ignore IrError of generic function
-                        let use_ir = context.config.use_ir;
-                        if x.function_declaration.function_declaration_opt.is_some() {
-                            context.config.use_ir = false;
-                            context.ignore_var_func = true;
-                        }
-
                         let ret: IrResult<()> =
                             Conv::conv(&mut context, x.function_declaration.as_ref());
-
-                        if x.function_declaration.function_declaration_opt.is_some() {
-                            context.config.use_ir = use_ir;
-                            context.ignore_var_func = false;
-                        } else {
-                            // check IrError for non-generic function
-                            context.insert_ir_error(&ret);
-                        }
+                        context.insert_ir_error(&ret);
                     }
                     _ => (),
                 }

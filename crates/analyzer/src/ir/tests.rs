@@ -38,6 +38,8 @@ fn check_ir(code: &str, exp: &str) {
         }
     }
 
+    println!("ir\n{}exp\n{}", ir, exp);
+
     assert!(ir.as_str() == exp);
     assert!(errors.is_empty());
 }
@@ -733,6 +735,72 @@ fn function() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    package Pkg {
+        const A: u32 = 8;
+        function func_a(a: input u32) -> u32 {
+            return a + A;
+        }
+        function func_b(b: input u32) -> u32 {
+            return func_a(b);
+        }
+    }
+    module ModuleA {
+        const A: u32 = Pkg::func_b(8);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var1(Pkg.func_b.return): bit<32> = 32'h00000010;
+  input var2(Pkg.func_b.b): bit<32> = 32'sh00000008;
+  var var4(Pkg.func_a.return): bit<32> = 32'h00000010;
+  input var5(Pkg.func_a.a): bit<32> = 32'sh00000008;
+  const var6(A): bit<32> = 32'h00000010;
+  func var0(Pkg.func_b) -> var1 {
+    var1 = var3(a: var2);
+  }
+  func var3(Pkg.func_a) -> var4 {
+    var4 = (var5 + 32'sh00000008);
+  }
+
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    package PkgA {
+        const A: u32 = 8;
+        function func_a() -> u32 {
+            return A;
+        }
+    }
+    package PkgB {
+        function func_b() -> u32 {
+            return PkgA::func_a();
+        }
+    }
+    module ModuleA {
+        const A: u32 = PkgB::func_b();
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var1(PkgB.func_b.return): bit<32> = 32'h00000008;
+  var var3(PkgB.PkgA.func_a.return): bit<32> = 32'h00000008;
+  const var4(A): bit<32> = 32'h00000008;
+  func var0(PkgB.func_b) -> var1 {
+    var1 = 32'h00000008;
+  }
+  func var2(PkgB.PkgA.func_a) -> var3 {
+    var3 = 32'sh00000008;
+  }
+
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
@@ -1207,9 +1275,9 @@ fn generic_function() {
     let exp = r#"module ModuleA {
   let var2(a): logic<10> = 10'hxxx;
   var var3(b): logic<10> = 10'hxxx;
-  var var5(FuncA.return): logic<10> = 10'hxxx;
-  input var6(FuncA.x): logic<10> = 10'hxxx;
-  func var4(FuncA) -> var5 {
+  var var5(FuncA::<10>.return): logic<10> = 10'hxxx;
+  input var6(FuncA::<10>.x): logic<10> = 10'hxxx;
+  func var4(FuncA::<10>) -> var5 {
     var5 = (var6 + 32'sh00000001);
   }
 
@@ -1219,6 +1287,58 @@ fn generic_function() {
   comb {
     var3 = var4(x: var2);
   }
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        function func_a::<W: u32>(a: input bit<W>) -> bit<W> {
+            return a;
+        }
+        function func_b(a: input bit<32>, b: input bit<32>) -> bit<32> {
+            return func_a::<32>(a) + b;
+        }
+        function func_c(a: input bit<32>, c: input bit<32>) -> bit<32> {
+            return func_a::<32>(a) + c;
+        }
+        function func_d(a: input bit<16>, d: input bit<16>) -> bit<16> {
+            return func_a::<16>(a) + d;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var3(func_b.return): bit<32> = 32'hxxxxxxxx;
+  input var4(func_b.a): bit<32> = 32'hxxxxxxxx;
+  input var5(func_b.b): bit<32> = 32'hxxxxxxxx;
+  var var7(func_a::<32>.return): bit<32> = 32'hxxxxxxxx;
+  input var8(func_a::<32>.a): bit<32> = 32'hxxxxxxxx;
+  var var10(func_c.return): bit<32> = 32'hxxxxxxxx;
+  input var11(func_c.a): bit<32> = 32'hxxxxxxxx;
+  input var12(func_c.c): bit<32> = 32'hxxxxxxxx;
+  var var14(func_d.return): bit<16> = 16'hxxxx;
+  input var15(func_d.a): bit<16> = 16'hxxxx;
+  input var16(func_d.d): bit<16> = 16'hxxxx;
+  var var18(func_a::<16>.return): bit<16> = 16'hxxxx;
+  input var19(func_a::<16>.a): bit<16> = 16'hxxxx;
+  func var2(func_b) -> var3 {
+    var3 = (var6(a: var4) + var5);
+  }
+  func var6(func_a::<32>) -> var7 {
+    var7 = var8;
+  }
+  func var9(func_c) -> var10 {
+    var10 = (var6(a: var11) + var12);
+  }
+  func var13(func_d) -> var14 {
+    var14 = (var17(a: var15) + var16);
+  }
+  func var17(func_a::<16>) -> var18 {
+    var18 = var19;
+  }
+
 }
 "#;
 

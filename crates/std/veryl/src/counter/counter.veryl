@@ -34,48 +34,10 @@ pub module counter #(
     /// Indicator for wrap around
     o_wrap_around: output logic,
 ) {
-    var count     : COUNT;
-    var count_next: COUNT;
-
-    assign o_count      = count;
-    assign o_count_next = count_next;
-
-    assign count_next = get_count_next(i_clear, i_set, i_set_value, i_up, i_down, count);
-    always_ff (i_clk, i_rst) {
-        if_reset {
-            count = INITIAL_COUNT;
-        } else {
-            count = count_next;
-        }
-    }
-
-    if (WRAP_AROUND) :g {
-        assign o_wrap_around = get_wrap_around_flag(i_clear, i_set, i_up, i_down, count);
-    } else {
-        assign o_wrap_around = '0;
-    }
-
-    function get_count_next (
-        clear        : input logic,
-        set          : input logic,
-        set_value    : input COUNT,
-        up           : input logic,
-        down         : input logic,
-        current_count: input COUNT,
-    ) -> COUNT {
-        switch {
-            clear          : return INITIAL_COUNT;
-            set            : return set_value;
-            (up && (!down)): return count_up(current_count);
-            (down && (!up)): return count_down(current_count);
-            default        : return current_count;
-        }
-    }
-
     function count_up (
         current_count: input COUNT,
     ) -> COUNT {
-        if count == MAX_COUNT {
+        if current_count == MAX_COUNT {
             if WRAP_AROUND {
                 return MIN_COUNT;
             } else {
@@ -89,7 +51,7 @@ pub module counter #(
     function count_down (
         current_count: input COUNT,
     ) -> COUNT {
-        if count == MIN_COUNT {
+        if current_count == MIN_COUNT {
             if WRAP_AROUND {
                 return MAX_COUNT;
             } else {
@@ -118,5 +80,43 @@ pub module counter #(
         } else {
             return '0;
         }
+    }
+
+    function get_count_next (
+        clear        : input logic,
+        set          : input logic,
+        set_value    : input COUNT,
+        up           : input logic,
+        down         : input logic,
+        current_count: input COUNT,
+    ) -> COUNT {
+        switch {
+            clear          : return INITIAL_COUNT;
+            set            : return set_value;
+            (up && (!down)): return count_up(current_count);
+            (down && (!up)): return count_down(current_count);
+            default        : return current_count;
+        }
+    }
+
+    var count     : COUNT;
+    var count_next: COUNT;
+
+    assign o_count      = count;
+    assign o_count_next = count_next;
+
+    assign count_next = get_count_next(i_clear, i_set, i_set_value, i_up, i_down, count);
+    always_ff (i_clk, i_rst) {
+        if_reset {
+            count = INITIAL_COUNT;
+        } else {
+            count = count_next;
+        }
+    }
+
+    if (WRAP_AROUND) :g {
+        assign o_wrap_around = get_wrap_around_flag(i_clear, i_set, i_up, i_down, count);
+    } else {
+        assign o_wrap_around = '0;
     }
 }
