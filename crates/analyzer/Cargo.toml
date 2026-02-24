@@ -25,7 +25,7 @@ paste            = {workspace = true}
 similar          = {workspace = true}
 smallvec         = {workspace = true}
 strnum_bitwidth  = {workspace = true}
-strum            = "0.27.2"
+strum            = "0.28.0"
 strum_macros     = "0.27.2"
 thiserror        = {workspace = true}
 veryl-metadata   = {version = "0.18.0", path = "../metadata"}
