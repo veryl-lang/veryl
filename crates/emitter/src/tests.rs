@@ -2887,3 +2887,30 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn no_vertical_align() {
+    let code = r#"module ModuleA {
+    let _a: u32 = if true ? if true ? 1 : 2 : 3;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    int unsigned _a; always_comb _a = ((1'b1) ? ( ((1'b1) ? ( 1 ) : ( 2 )) ) : ( 3 ));
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.format.vertical_align = false;
+    metadata.format.max_width = 20;
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

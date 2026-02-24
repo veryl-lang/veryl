@@ -2570,14 +2570,18 @@ impl VerylWalker for Emitter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
-            let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.first()).unwrap();
-                (width < self.format_opt.max_width as u32) || compact
-            } else {
+            let single_line = if self.mode == Mode::Align {
                 // calc line width as single_line in Align mode
                 true
+            } else if let Some(width) = self.measure_get(&arg.first()) {
+                let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
+                (width < self.format_opt.max_width as u32) || compact
+            } else {
+                // vertical align mode is off.
+                // Use single line mode forcely.
+                true
             };
+
             if single_line {
                 self.single_line_start();
             }
