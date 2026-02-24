@@ -90,7 +90,11 @@ impl ValueU64 {
     }
 
     pub fn gen_mask(width: usize) -> u64 {
-        if width >= 64 { 0 } else { (1u64 << width) - 1 }
+        if width >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << width) - 1
+        }
     }
 
     pub fn gen_mask_range(beg: usize, end: usize) -> u64 {
