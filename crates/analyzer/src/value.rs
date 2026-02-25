@@ -963,6 +963,20 @@ impl Value {
         }
     }
 
+    pub fn to_vcd_value(&self, i: u64) -> vcd::Value {
+        if self.mask_xz().bit(i) {
+            if self.payload().bit(i) {
+                vcd::Value::Z
+            } else {
+                vcd::Value::X
+            }
+        } else if self.payload().bit(i) {
+            vcd::Value::V1
+        } else {
+            vcd::Value::V0
+        }
+    }
+
     pub fn as_u64_ptr(&mut self) -> Option<*mut ValueU64> {
         if let Value::U64(x) = self {
             Some(x)
@@ -1173,6 +1187,135 @@ impl From<&syntax_tree::Exponent> for Value {
     fn from(value: &syntax_tree::Exponent) -> Self {
         let text = value.exponent_token.to_string();
         from_exponent_str(&text)
+    }
+}
+
+impl From<&Value> for vcd::Value {
+    fn from(value: &Value) -> Self {
+        value.to_vcd_value(0)
+    }
+}
+
+impl IntoIterator for &Value {
+    type Item = vcd::Value;
+    type IntoIter = VcdValueIter;
+    fn into_iter(self) -> Self::IntoIter {
+        VcdValueIter {
+            pos: 0,
+            value: self.clone(),
+        }
+    }
+}
+
+pub struct VcdValueIter {
+    pos: u64,
+    value: Value,
+}
+
+impl Iterator for VcdValueIter {
+    type Item = vcd::Value;
+    fn next(&mut self) -> Option<Self::Item> {
+        let width = self.value.width() as u64;
+        if self.pos < width {
+            let value = self.value.to_vcd_value(width - self.pos - 1);
+            self.pos += 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+/// Type for packed logic array defined by IEEE 1800-2023 H.10.1.2
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SvLogicVecVal {
+    pub aval: u32,
+    pub bval: u32,
+}
+
+impl From<&[SvLogicVecVal]> for Value {
+    fn from(value: &[SvLogicVecVal]) -> Self {
+        let width = (value.len() * 32) as u32;
+
+        if width > 64 {
+            let mut payload = BigUint::zero();
+            let mut mask_xz = BigUint::zero();
+
+            for val in value.iter().rev() {
+                payload <<= 32;
+                mask_xz <<= 32;
+                payload |= BigUint::from(val.aval ^ val.bval);
+                mask_xz |= BigUint::from(val.bval);
+            }
+
+            Value::BigUint(ValueBigUint {
+                payload: Box::new(payload),
+                mask_xz: Box::new(mask_xz),
+                width,
+                signed: false,
+            })
+        } else {
+            let mut payload = 0u64;
+            let mut mask_xz = 0u64;
+
+            for val in value.iter().rev() {
+                payload <<= 32;
+                mask_xz <<= 32;
+                payload |= (val.aval ^ val.bval) as u64;
+                mask_xz |= val.bval as u64;
+            }
+
+            Value::U64(ValueU64 {
+                payload,
+                mask_xz,
+                width,
+                signed: false,
+            })
+        }
+    }
+}
+
+impl From<&Value> for Vec<SvLogicVecVal> {
+    fn from(value: &Value) -> Self {
+        let mut ret = vec![];
+        let len = if value.width().is_multiple_of(32) {
+            value.width() / 32
+        } else {
+            value.width() / 32 + 1
+        };
+
+        match value {
+            Value::U64(x) => {
+                let mut payload = x.payload;
+                let mut mask_xz = x.mask_xz;
+
+                for _ in 0..len {
+                    let payload_u32 = (payload & 0xffffffff) as u32;
+                    let mask_xz_u32 = (mask_xz & 0xffffffff) as u32;
+                    let aval = payload_u32 ^ mask_xz_u32;
+                    let bval = mask_xz_u32;
+                    ret.push(SvLogicVecVal { aval, bval });
+
+                    payload >>= 32;
+                    mask_xz >>= 32;
+                }
+            }
+            Value::BigUint(x) => {
+                let payload = x.payload.to_u32_digits();
+                let mask_xz = x.mask_xz.to_u32_digits();
+
+                for i in 0..len {
+                    let payload_u32 = *payload.get(i).unwrap_or(&0);
+                    let mask_xz_u32 = *mask_xz.get(i).unwrap_or(&0);
+                    let aval = payload_u32 ^ mask_xz_u32;
+                    let bval = mask_xz_u32;
+                    ret.push(SvLogicVecVal { aval, bval });
+                }
+            }
+        }
+
+        ret
     }
 }
 
@@ -1521,6 +1664,70 @@ mod tests {
         );
         assert_eq!(format!("{:b}", x10), "16'b0000000111100100");
         assert_eq!(format!("{:b}", x11), "16'b0000001011010110");
+    }
+
+    #[test]
+    fn sv_logic_vec_val() {
+        let x00 = Value::from_str("8'h11").unwrap();
+        let x01 = Value::from_str("8'hf2").unwrap();
+        let x02 = Value::from_str("8'hx3").unwrap();
+        let x03 = Value::from_str("8'hz4").unwrap();
+        let x04 = Value::from_str("68'h11").unwrap();
+        let x05 = Value::from_str("68'hf2").unwrap();
+        let x06 = Value::from_str("68'hx3").unwrap();
+        let x07 = Value::from_str("68'hz4").unwrap();
+
+        let x00: Vec<SvLogicVecVal> = (&x00).into();
+        let x01: Vec<SvLogicVecVal> = (&x01).into();
+        let x02: Vec<SvLogicVecVal> = (&x02).into();
+        let x03: Vec<SvLogicVecVal> = (&x03).into();
+        let x04: Vec<SvLogicVecVal> = (&x04).into();
+        let x05: Vec<SvLogicVecVal> = (&x05).into();
+        let x06: Vec<SvLogicVecVal> = (&x06).into();
+        let x07: Vec<SvLogicVecVal> = (&x07).into();
+
+        assert_eq!(x00[0].aval, 0x11);
+        assert_eq!(x00[0].bval, 0);
+        assert_eq!(x01[0].aval, 0xf2);
+        assert_eq!(x01[0].bval, 0);
+        assert_eq!(x02[0].aval, 0xf3);
+        assert_eq!(x02[0].bval, 0xf0);
+        assert_eq!(x03[0].aval, 0x4);
+        assert_eq!(x03[0].bval, 0xf0);
+        assert_eq!(x04[0].aval, 0x11);
+        assert_eq!(x04[0].bval, 0);
+        assert_eq!(x04[1].aval, 0);
+        assert_eq!(x04[1].bval, 0);
+        assert_eq!(x05[0].aval, 0xf2);
+        assert_eq!(x05[0].bval, 0);
+        assert_eq!(x05[1].aval, 0);
+        assert_eq!(x05[1].bval, 0);
+        assert_eq!(x06[0].aval, 0xfffffff3);
+        assert_eq!(x06[0].bval, 0xfffffff0);
+        assert_eq!(x06[1].aval, 0xffffffff);
+        assert_eq!(x06[1].bval, 0xffffffff);
+        assert_eq!(x07[0].aval, 0x4);
+        assert_eq!(x07[0].bval, 0xfffffff0);
+        assert_eq!(x07[1].aval, 0);
+        assert_eq!(x07[1].bval, 0xffffffff);
+
+        let x00: Value = x00.as_slice().into();
+        let x01: Value = x01.as_slice().into();
+        let x02: Value = x02.as_slice().into();
+        let x03: Value = x03.as_slice().into();
+        let x04: Value = x04.as_slice().into();
+        let x05: Value = x05.as_slice().into();
+        let x06: Value = x06.as_slice().into();
+        let x07: Value = x07.as_slice().into();
+
+        assert_eq!(format!("{:x}", x00), "32'h00000011");
+        assert_eq!(format!("{:x}", x01), "32'h000000f2");
+        assert_eq!(format!("{:x}", x02), "32'h000000x3");
+        assert_eq!(format!("{:x}", x03), "32'h000000z4");
+        assert_eq!(format!("{:x}", x04), "96'h000000000000000000000011");
+        assert_eq!(format!("{:x}", x05), "96'h0000000000000000000000f2");
+        assert_eq!(format!("{:x}", x06), "96'h0000000xxxxxxxxxxxxxxxx3");
+        assert_eq!(format!("{:x}", x07), "96'h0000000zzzzzzzzzzzzzzzz4");
     }
 
     #[test]

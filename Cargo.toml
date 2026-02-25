@@ -64,6 +64,7 @@ thiserror       = "2.0"
 tokio           = {version = "1.48.0", features = ["full"]}
 toml            = "1.0.3"
 url             = {version = "2.5", features = ["serde"]}
+vcd             = "0.7.0"
 walkdir         = "2.5.0"
 
 [workspace.metadata.release]
