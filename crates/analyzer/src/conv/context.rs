@@ -52,6 +52,7 @@ pub struct Context {
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
+    pub in_generic: bool,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
     pub mask_cache: MaskCache,
@@ -72,6 +73,7 @@ impl Context {
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         self.func_call_depth = tgt.func_call_depth;
+        self.in_generic = tgt.in_generic;
         self.config = tgt.config.clone();
     }
 

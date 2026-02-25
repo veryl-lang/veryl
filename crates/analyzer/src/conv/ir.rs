@@ -20,8 +20,10 @@ impl Conv<&Veryl> for ir::Ir {
             for item in &items {
                 // ignore IrError of generic top-level components
                 let use_ir = context.config.use_ir;
+                let in_generic = context.in_generic;
                 if item.is_generic() {
                     context.config.use_ir = false;
+                    context.in_generic = true;
                 }
 
                 match item {
@@ -103,6 +105,7 @@ impl Conv<&Veryl> for ir::Ir {
 
                 if item.is_generic() {
                     context.config.use_ir = use_ir;
+                    context.in_generic = in_generic;
                 }
             }
         }
@@ -336,6 +339,11 @@ impl Conv<&PackageDeclaration> for () {
                     PackageItem::FunctionDeclaration(x) => {
                         let ret: IrResult<()> =
                             Conv::conv(&mut context, x.function_declaration.as_ref());
+                        context.insert_ir_error(&ret);
+                    }
+                    PackageItem::StructUnionDeclaration(x) => {
+                        let ret: IrResult<()> =
+                            Conv::conv(&mut context, x.struct_union_declaration.as_ref());
                         context.insert_ir_error(&ret);
                     }
                     _ => (),
