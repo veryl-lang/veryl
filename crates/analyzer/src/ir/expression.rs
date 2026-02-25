@@ -140,11 +140,11 @@ impl Expression {
             Expression::Concatenation(x) => {
                 let mut ret = Value::new(0, 0, false);
                 for (exp, rep) in x.iter() {
-                    let exp = exp.eval_value(context, context_width, signed)?;
+                    let exp = exp.eval_value(context, None, signed)?;
 
                     let rep = if let Some(rep) = rep {
                         let token = rep.token_range();
-                        let rep = rep.eval_value(context, context_width, signed)?;
+                        let rep = rep.eval_value(context, None, signed)?;
                         let rep = rep.to_usize()?;
                         context.check_size(rep, token)?
                     } else {
@@ -473,7 +473,7 @@ impl Expression {
                 let mut kind = TypeKind::Bit;
                 for (expr, repeat) in x {
                     let range = expr.token_range();
-                    let expr = expr.eval_comptime(context, context_width, signed);
+                    let expr = expr.eval_comptime(context, None, signed);
 
                     // array / type can't be operated
                     if expr.r#type.is_array() | expr.r#type.is_type() {
