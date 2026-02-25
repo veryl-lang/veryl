@@ -1,8 +1,8 @@
 module veryl_testcase_Module09;
     // struct declaration
     typedef struct packed {
-        logic        [10-1:0] a  ;
-        logic        [10-1:0] aa ;
+        bit          [10-1:0] a  ;
+        bit          [10-1:0] aa ;
         int unsigned          aaa;
     } A;
 

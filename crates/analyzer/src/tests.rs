@@ -9632,6 +9632,123 @@ fn mixed_function_argument() {
 }
 
 #[test]
+fn mixed_struct_union_member() {
+    let code = r#"
+    package Pkg {
+        struct StructA {
+            a: logic,
+            b: bit  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedStructUnionMember { .. }
+    ));
+
+    let code = r#"
+    package Pkg {
+        union UnionA {
+            a: logic,
+            b: bit  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedStructUnionMember { .. }
+    ));
+
+    let code = r#"
+    package Pkg {
+        enum EnumA {
+            A
+        }
+        struct StructA {
+            a: EnumA,
+            b: bit  ,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedStructUnionMember { .. }
+    ));
+
+    let code = r#"
+    package Pkg {
+        enum EnumA: bit<_> {
+            A
+        }
+        struct StructA {
+            a: EnumA,
+            b: logic,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedStructUnionMember { .. }
+    ));
+
+    let code = r#"
+    package Pkg::<T: type> {
+        struct StructA {
+            a: logic,
+            b: T   ,
+        }
+    }
+    module ModuleA {
+        import Pkg::<u32>::StructA;
+        let _a: StructA = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedStructUnionMember { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct StructA::<T: type> {
+            a: logic,
+            b: T    ,
+        }
+        const A: StructA::<u32> = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MixedStructUnionMember { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct StructA::<T: type> {
+            a: bit,
+            b: T  ,
+        }
+        const A: StructA::<u32> = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn ambiguous_elsif() {
     let code = r#"
     module ModuleA {

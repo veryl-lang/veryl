@@ -894,6 +894,21 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Warning),
+        code(mixed_struct_union_member),
+        help("unify struct/union members to either 2-state member or 4-state member"),
+        url("")
+    )]
+    #[error("2-state member and 4-state member are mixed in the same struct/union")]
+    MixedStructUnionMember {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Error),
         code(multiple_assignment),
         help(""),
@@ -1534,6 +1549,7 @@ impl AnalyzerError {
             AnalyzerError::MissingResetStatement { token_source, .. } => *token_source,
             AnalyzerError::MissingTri { token_source, .. } => *token_source,
             AnalyzerError::MixedFunctionArgument { token_source, .. } => *token_source,
+            AnalyzerError::MixedStructUnionMember { token_source, .. } => *token_source,
             AnalyzerError::MultipleAssignment { token_source, .. } => *token_source,
             AnalyzerError::MultipleDefault { token_source, .. } => *token_source,
             AnalyzerError::PrivateMember { token_source, .. } => *token_source,
@@ -2062,6 +2078,13 @@ impl AnalyzerError {
     }
     pub fn mixed_function_argument(token: &TokenRange) -> Self {
         AnalyzerError::MixedFunctionArgument {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn mixed_struct_union_member(token: &TokenRange) -> Self {
+        AnalyzerError::MixedStructUnionMember {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

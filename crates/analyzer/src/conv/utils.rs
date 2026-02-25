@@ -10,10 +10,10 @@ use crate::ir::{
     Signature, ValueVariant, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::symbol::{
-    self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, SymbolKind,
-    TypeKind,
+    self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, Symbol,
+    SymbolKind, TypeKind,
 };
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
 use crate::{HashMap, ir_error, namespace_table};
@@ -699,6 +699,8 @@ pub fn eval_type(
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
+
+                        check_struct_union_members(c, &members, &symbol.found);
                         Ok(members)
                     });
 
@@ -727,6 +729,8 @@ pub fn eval_type(
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
+
+                        check_struct_union_members(c, &members, &symbol.found);
                         Ok(members)
                     });
 
@@ -861,6 +865,53 @@ pub fn eval_type(
                     return Err(ir_error!(token));
                 }
             }
+        } else if matches!(path.kind, GenericSymbolPathKind::TypeLiteral)
+            && path.paths.len() == 1
+            && path.paths[0].arguments.is_empty()
+        {
+            // Fixed type given as generic arg
+            match path.paths[0].base.to_string().as_str() {
+                "u8" => {
+                    width.push(Some(8));
+                    ir::TypeKind::Bit
+                }
+                "u16" => {
+                    width.push(Some(16));
+                    ir::TypeKind::Bit
+                }
+                "u32" => {
+                    width.push(Some(32));
+                    ir::TypeKind::Bit
+                }
+                "u64" => {
+                    width.push(Some(64));
+                    ir::TypeKind::Bit
+                }
+                "i8" => {
+                    width.push(Some(8));
+                    signed = true;
+                    ir::TypeKind::Bit
+                }
+                "i16" => {
+                    width.push(Some(16));
+                    signed = true;
+                    ir::TypeKind::Bit
+                }
+                "i32" | "f32" => {
+                    width.push(Some(32));
+                    signed = true;
+                    ir::TypeKind::Bit
+                }
+                "i64" | "f64" => {
+                    width.push(Some(64));
+                    signed = true;
+                    ir::TypeKind::Bit
+                }
+                "bbool" => ir::TypeKind::Bit,
+                "lbool" => ir::TypeKind::Logic,
+                "string" => ir::TypeKind::String,
+                _ => ir::TypeKind::Unknown,
+            }
         } else {
             ir::TypeKind::Unknown
         }
@@ -872,6 +923,23 @@ pub fn eval_type(
         width,
         array,
     })
+}
+
+fn check_struct_union_members(
+    context: &mut Context,
+    members: &[ir::TypeKindMember],
+    symbol: &Symbol,
+) {
+    if context.in_generic {
+        return;
+    }
+
+    if !(members.iter().all(|x| x.r#type.is_4state())
+        || members.iter().all(|x| x.r#type.is_2state()))
+    {
+        let token: TokenRange = symbol.token.into();
+        context.insert_error(AnalyzerError::mixed_struct_union_member(&token));
+    }
 }
 
 pub fn eval_clock(context: &mut Context, value: &AlwaysFfDeclaration) -> IrResult<ir::FfClock> {

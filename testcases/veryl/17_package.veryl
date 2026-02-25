@@ -4,9 +4,9 @@ package Package17 {
 
     // struct declaration
     struct A {
-        a  : logic<10>,
-        aa : logic<10>,
-        aaa: u32      ,
+        a  : bit<10>,
+        aa : bit<10>,
+        aaa: u32    ,
     }
 
     // enum declaration

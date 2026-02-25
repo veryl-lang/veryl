@@ -67,11 +67,45 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 x.assign_declaration.as_ref(),
             )?)),
             GenerateItem::FunctionDeclaration(x) => {
-                let _: () = Conv::conv(context, x.function_declaration.as_ref())?;
+                let use_ir = context.config.use_ir;
+                let in_generic = context.in_generic;
+                if x.function_declaration.function_declaration_opt.is_some() {
+                    context.config.use_ir = false;
+                    context.in_generic = true;
+                }
+
+                let ret: IrResult<()> = Conv::conv(context, x.function_declaration.as_ref());
+
+                if x.function_declaration.function_declaration_opt.is_some() {
+                    context.config.use_ir = use_ir;
+                    context.in_generic = in_generic;
+                }
+
+                ret?;
                 Ok(ir::DeclarationBlock::default())
             }
             GenerateItem::StructUnionDeclaration(x) => {
-                let _: () = Conv::conv(context, x.struct_union_declaration.as_ref())?;
+                let use_ir = context.config.use_ir;
+                let in_generic = context.in_generic;
+                if x.struct_union_declaration
+                    .struct_union_declaration_opt
+                    .is_some()
+                {
+                    context.config.use_ir = false;
+                    context.in_generic = true;
+                }
+
+                let ret: IrResult<()> = Conv::conv(context, x.struct_union_declaration.as_ref());
+
+                if x.struct_union_declaration
+                    .struct_union_declaration_opt
+                    .is_some()
+                {
+                    context.config.use_ir = use_ir;
+                    context.in_generic = in_generic;
+                }
+
+                ret?;
                 Ok(ir::DeclarationBlock::default())
             }
             GenerateItem::EnumDeclaration(x) => {
