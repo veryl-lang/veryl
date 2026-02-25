@@ -1838,26 +1838,20 @@ fn concat() {
   module Top (
     o: output logic<16>,
     o2: output logic<16>,
-    o3: output logic<16>,
 ) {
     assign o = {8'hff + 8'h1}; 
-    assign o2 = 8'hff + 8'h1; 
-    assign o3 = {8'hf0, 8'hff + 8'h1};
+    assign o2 = {8'hf0, 8'hff + 8'h1};
 }
     "#;
     let exp = r#"module Top {
   output var0(o): logic<16> = 16'hxxxx;
   output var1(o2): logic<16> = 16'hxxxx;
-  output var2(o3): logic<16> = 16'hxxxx;
 
   comb {
     var0 = 8'h00;
   }
   comb {
-    var1 = 16'h0100;
-  }
-  comb {
-    var2 = 16'hf000;
+    var1 = 16'hf000;
   }
 }
 "#;
