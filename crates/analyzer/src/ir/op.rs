@@ -103,12 +103,20 @@ impl Op {
     }
 
     pub fn unary_signed(&self, x: bool) -> bool {
-        matches!(self, Op::Add | Op::Sub) & x
+        matches!(self, Op::Add | Op::Sub | Op::BitNot) & x
     }
 
     pub fn binary_signed(&self, x: bool, y: bool) -> bool {
         match self {
-            Op::Add | Op::Sub | Op::Mul | Op::Div | Op::Rem => x && y,
+            Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::Rem
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq => x && y,
             Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR | Op::Pow => x,
             _ => false,
         }
@@ -201,17 +209,18 @@ impl Op {
         &self,
         x: &Value,
         context: Option<usize>,
+        signed: bool,
         mask_cache: &mut MaskCache,
     ) -> Value {
         let width = self.eval_unary_width(x, context);
 
         match self {
             Op::Add => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 x.into_owned()
             }
             Op::Sub => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 match x.as_ref() {
                     Value::U64(x) => {
                         let mut ret = x.clone();
@@ -240,7 +249,7 @@ impl Op {
                 }
             }
             Op::BitNot => {
-                let x = x.expand(width, true);
+                let x = x.expand(width, signed);
                 match x.as_ref() {
                     Value::U64(x) => {
                         let mut ret = x.clone();

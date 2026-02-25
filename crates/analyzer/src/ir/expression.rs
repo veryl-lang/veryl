@@ -108,7 +108,7 @@ impl Expression {
                 let x_context_width = op.unary_context_width(context_width);
 
                 let ret = x.eval_value(context, x_context_width, signed)?;
-                let ret = op.eval_unary(&ret, context_width, &mut context.mask_cache);
+                let ret = op.eval_unary(&ret, context_width, signed, &mut context.mask_cache);
                 Some(ret)
             }
             Expression::Binary(x, op, y) => {
