@@ -2,8 +2,10 @@ use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::utils::eval_width_select;
-use crate::ir::{AssignDestination, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind};
-use crate::symbol::Affiliation;
+use crate::ir::{
+    AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
+};
+use crate::symbol::{Affiliation, ClockDomain};
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
@@ -106,7 +108,8 @@ impl VarPathSelect {
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             comptime.r#type.array.drain(0..array_select.dimension());
 
-            let src = Factor::Variable(id, array_select.to_index(), width_select, comptime, token);
+            comptime.token = token;
+            let src = Factor::Variable(id, array_select.to_index(), width_select, comptime);
             Some(Expression::Term(Box::new(src)))
         } else {
             None
@@ -286,24 +289,39 @@ impl fmt::Display for VarSelectOp {
 
 impl VarSelectOp {
     pub fn eval_expr(&self, beg: &Expression, end: &Expression) -> (Expression, Expression) {
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            TokenRange::default(),
+        ));
         match self {
             VarSelectOp::Colon => (beg.clone(), end.clone()),
             VarSelectOp::PlusColon => {
-                let expr =
-                    Expression::Binary(Box::new(beg.clone()), Op::Add, Box::new(end.clone()));
+                let expr = Expression::Binary(
+                    Box::new(beg.clone()),
+                    Op::Add,
+                    Box::new(end.clone()),
+                    comptime.clone(),
+                );
                 let minus_one = Expression::Unary(
                     Op::Sub,
                     Box::new(Expression::create_value(
                         Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
+                    comptime.clone(),
                 );
-                let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one));
+                let expr =
+                    Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one), comptime);
                 (expr, beg.clone())
             }
             VarSelectOp::MinusColon => {
-                let expr = Expression::Unary(Op::Sub, Box::new(end.clone()));
-                let expr = Expression::Binary(Box::new(beg.clone()), Op::Add, Box::new(expr));
+                let expr = Expression::Unary(Op::Sub, Box::new(end.clone()), comptime.clone());
+                let expr = Expression::Binary(
+                    Box::new(beg.clone()),
+                    Op::Add,
+                    Box::new(expr),
+                    comptime.clone(),
+                );
                 let expr = Expression::Binary(
                     Box::new(expr),
                     Op::Add,
@@ -311,21 +329,33 @@ impl VarSelectOp {
                         Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
+                    comptime,
                 );
                 (beg.clone(), expr)
             }
             VarSelectOp::Step => {
-                let mul = Expression::Binary(Box::new(beg.clone()), Op::Mul, Box::new(end.clone()));
-                let expr =
-                    Expression::Binary(Box::new(mul.clone()), Op::Add, Box::new(end.clone()));
+                let mul = Expression::Binary(
+                    Box::new(beg.clone()),
+                    Op::Mul,
+                    Box::new(end.clone()),
+                    comptime.clone(),
+                );
+                let expr = Expression::Binary(
+                    Box::new(mul.clone()),
+                    Op::Add,
+                    Box::new(end.clone()),
+                    comptime.clone(),
+                );
                 let minus_one = Expression::Unary(
                     Op::Sub,
                     Box::new(Expression::create_value(
                         Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
+                    comptime.clone(),
                 );
-                let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one));
+                let expr =
+                    Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one), comptime);
                 (expr, mul)
             }
         }
