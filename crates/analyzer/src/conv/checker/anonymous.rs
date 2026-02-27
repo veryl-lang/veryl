@@ -32,10 +32,10 @@ fn is_anonymous(expr: &Expression) -> bool {
 fn has_anonymous(expr: &Expression) -> bool {
     match expr {
         Expression::Term(x) => matches!(x.as_ref(), Factor::Anonymous(_)),
-        Expression::Unary(_, x) => has_anonymous(x),
-        Expression::Binary(x, _, y) => has_anonymous(x) | has_anonymous(y),
-        Expression::Ternary(x, y, z) => has_anonymous(x) | has_anonymous(y) | has_anonymous(z),
-        Expression::Concatenation(x) => {
+        Expression::Unary(_, x, _) => has_anonymous(x),
+        Expression::Binary(x, _, y, _) => has_anonymous(x) | has_anonymous(y),
+        Expression::Ternary(x, y, z, _) => has_anonymous(x) | has_anonymous(y) | has_anonymous(z),
+        Expression::Concatenation(x, _) => {
             let mut ret = false;
             for x in x {
                 ret |= has_anonymous(&x.0);
@@ -46,7 +46,7 @@ fn has_anonymous(expr: &Expression) -> bool {
             }
             ret
         }
-        Expression::ArrayLiteral(x) => {
+        Expression::ArrayLiteral(x, _) => {
             let mut ret = false;
             for x in x {
                 match x {
@@ -64,7 +64,7 @@ fn has_anonymous(expr: &Expression) -> bool {
             }
             ret
         }
-        Expression::StructConstructor(_, x) => {
+        Expression::StructConstructor(_, x, _) => {
             let mut ret = false;
             for (_, x) in x {
                 ret |= has_anonymous(x);

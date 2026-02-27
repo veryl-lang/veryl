@@ -1,5 +1,9 @@
-use crate::BigUint;
+use crate::conv::Context;
+use crate::conv::checker::clock_domain::check_clock_domain;
+use crate::conv::utils::eval_repeat;
+use crate::ir::{Comptime, Expression, ExpressionContext, Shape, Type, TypeKind, ValueVariant};
 use crate::value::{MaskCache, Value, ValueBigUint, ValueU64};
+use crate::{AnalyzerError, BigUint};
 use num_traits::{One, Zero};
 use std::fmt;
 
@@ -102,60 +106,30 @@ impl Op {
         }
     }
 
-    pub fn unary_signed(&self, x: bool) -> bool {
-        matches!(self, Op::Add | Op::Sub | Op::BitNot) & x
-    }
-
-    pub fn binary_signed(&self, x: bool, y: bool) -> bool {
+    pub fn eval_context_unary(&self, x: ExpressionContext) -> ExpressionContext {
         match self {
-            Op::Add
-            | Op::Sub
-            | Op::Mul
-            | Op::Div
-            | Op::Rem
-            | Op::Greater
-            | Op::GreaterEq
-            | Op::Less
-            | Op::LessEq => x && y,
-            Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR | Op::Pow => x,
-            _ => false,
-        }
-    }
-
-    pub fn unary_context_width(&self, context: Option<usize>) -> Option<usize> {
-        match self {
+            Op::Add | Op::Sub | Op::BitNot => x,
             Op::BitAnd
             | Op::BitNand
             | Op::BitOr
             | Op::BitNor
             | Op::BitXor
             | Op::BitXnor
-            | Op::LogicNot => None,
-            _ => context,
+            | Op::LogicNot => ExpressionContext {
+                width: 1,
+                signed: false,
+                is_const: x.is_const,
+                is_global: x.is_global,
+            },
+            _ => unreachable!(),
         }
     }
 
-    pub fn binary_x_context_width(&self, context: Option<usize>) -> Option<usize> {
-        match self {
-            Op::LogicAnd | Op::LogicOr => None,
-            _ => context,
-        }
-    }
-
-    pub fn binary_y_context_width(&self, context: Option<usize>) -> Option<usize> {
-        match self {
-            Op::LogicAnd
-            | Op::LogicOr
-            | Op::LogicShiftL
-            | Op::LogicShiftR
-            | Op::ArithShiftL
-            | Op::ArithShiftR
-            | Op::Pow => None,
-            _ => context,
-        }
-    }
-
-    pub fn eval_binary_width_usize(&self, x: usize, y: usize, context: Option<usize>) -> usize {
+    pub fn eval_context_binary(
+        &self,
+        x: ExpressionContext,
+        y: ExpressionContext,
+    ) -> ExpressionContext {
         match self {
             Op::Add
             | Op::Sub
@@ -165,7 +139,400 @@ impl Op {
             | Op::BitAnd
             | Op::BitOr
             | Op::BitXor
-            | Op::BitXnor => x.max(y).max(context.unwrap_or(0)),
+            | Op::BitXnor => ExpressionContext {
+                width: x.width.max(y.width),
+                signed: x.signed & y.signed,
+                is_const: x.is_const & y.is_const,
+                is_global: x.is_global & y.is_global,
+            },
+            Op::Eq
+            | Op::EqWildcard
+            | Op::Ne
+            | Op::NeWildcard
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq
+            | Op::LogicAnd
+            | Op::LogicOr => ExpressionContext {
+                width: 1,
+                signed: false,
+                is_const: x.is_const & y.is_const,
+                is_global: x.is_global & y.is_global,
+            },
+            Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR | Op::Pow => {
+                ExpressionContext {
+                    width: x.width,
+                    signed: x.signed,
+                    is_const: x.is_const & y.is_const,
+                    is_global: x.is_global & y.is_global,
+                }
+            }
+            Op::As => ExpressionContext {
+                is_const: x.is_const & y.is_const,
+                is_global: x.is_global & y.is_global,
+                ..Default::default()
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn invalid_operand(&self, context: &mut Context, x: &Comptime) -> Type {
+        context.insert_error(AnalyzerError::invalid_operand(
+            &x.r#type.to_string(),
+            &self.to_string(),
+            &x.token,
+        ));
+        Type {
+            kind: TypeKind::Unknown,
+            ..Default::default()
+        }
+    }
+
+    fn invalid_logical_operand(&self, context: &mut Context, x: &Comptime) -> Type {
+        context.insert_error(AnalyzerError::invalid_logical_operand(true, &x.token));
+        Type {
+            kind: TypeKind::Unknown,
+            ..Default::default()
+        }
+    }
+
+    pub fn eval_type_unary(&self, context: &mut Context, x: &Comptime, dst: &mut Comptime) {
+        dst.r#type = x.r#type.clone();
+
+        // array / type can't be operated
+        if x.r#type.is_array() || x.r#type.is_type() {
+            dst.r#type = self.invalid_operand(context, x);
+            return;
+        }
+
+        // clock / reset can't be operated except ~ and !
+        if (x.r#type.is_clock() || x.r#type.is_reset())
+            && !matches!(self, Op::BitNot | Op::LogicNot)
+        {
+            dst.r#type = self.invalid_operand(context, x);
+            return;
+        }
+
+        // logical operand should be 1-bit
+        if (self == &Op::LogicNot) && !x.r#type.is_binary() {
+            dst.r#type = self.invalid_logical_operand(context, x);
+            return;
+        }
+
+        match self {
+            Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor | Op::BitNand | Op::BitNor => {
+                dst.r#type.signed = false;
+                dst.r#type.width = Shape::new(vec![Some(1)]);
+            }
+            Op::BitNot | Op::LogicNot => {
+                dst.r#type.signed = false;
+            }
+            Op::Add | Op::Sub => (),
+            _ => unreachable!(),
+        }
+
+        if x.r#type.is_2state() {
+            dst.r#type.kind = TypeKind::Bit;
+        } else {
+            dst.r#type.kind = TypeKind::Logic;
+        };
+    }
+
+    pub fn eval_type_binary(
+        &self,
+        context: &mut Context,
+        x: &Comptime,
+        y: &Comptime,
+        dst: &mut Comptime,
+    ) {
+        dst.r#type = x.r#type.clone();
+
+        // array / type can't be operated
+        if x.r#type.is_array() | x.r#type.is_type() {
+            dst.r#type = self.invalid_operand(context, x);
+            return;
+        }
+        if y.r#type.is_array() | (y.r#type.is_type() && self != &Op::As) {
+            dst.r#type = self.invalid_operand(context, y);
+            return;
+        }
+
+        // string and non-string can't be operated
+        if x.r#type.is_string() ^ y.r#type.is_string() {
+            if !x.r#type.is_string() {
+                dst.r#type = self.invalid_operand(context, x);
+                return;
+            } else {
+                dst.r#type = self.invalid_operand(context, y);
+                return;
+            }
+        }
+        if x.r#type.is_string() && !matches!(self, Op::Eq | Op::Ne) {
+            dst.r#type = self.invalid_operand(context, x);
+            return;
+        }
+
+        // logical operand should be 1-bit
+        if matches!(self, Op::LogicAnd | Op::LogicOr) {
+            if !x.r#type.is_binary() {
+                dst.r#type = self.invalid_logical_operand(context, x);
+                return;
+            }
+            if !y.r#type.is_binary() {
+                dst.r#type = self.invalid_logical_operand(context, y);
+                return;
+            }
+        }
+
+        check_clock_domain(context, x, y, &dst.token.beg);
+
+        let x_width = x.r#type.total_width();
+        let y_width = y.r#type.total_width();
+
+        let width = self.eval_binary_width_usize(x_width, y_width, None);
+        dst.r#type.width = Shape::new(vec![width]);
+
+        match self {
+            Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                #[allow(clippy::if_same_then_else)]
+                if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
+                    dst.r#type.kind = y.r#type.kind.clone();
+                } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
+                    dst.r#type.kind = x.r#type.kind.clone();
+                } else if x.r#type.is_clock() || x.r#type.is_reset() {
+                    dst.r#type.kind = x.r#type.kind.clone();
+                } else if y.r#type.is_clock() || y.r#type.is_reset() {
+                    dst.r#type.kind = y.r#type.kind.clone();
+                } else if x.r#type.is_2state() && y.r#type.is_2state() {
+                    dst.r#type.kind = TypeKind::Bit;
+                } else {
+                    dst.r#type.kind = TypeKind::Logic;
+                }
+            }
+            Op::Pow
+            | Op::Div
+            | Op::Rem
+            | Op::Mul
+            | Op::Add
+            | Op::Sub
+            | Op::LessEq
+            | Op::GreaterEq
+            | Op::Less
+            | Op::Greater
+            | Op::Eq
+            | Op::EqWildcard
+            | Op::Ne
+            | Op::NeWildcard
+            | Op::LogicAnd
+            | Op::LogicOr => {
+                if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
+                    dst.r#type.kind = y.r#type.kind.clone();
+                } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
+                    dst.r#type.kind = x.r#type.kind.clone();
+                } else if x.r#type.is_2state() && y.r#type.is_2state() {
+                    dst.r#type.kind = TypeKind::Bit;
+                } else {
+                    dst.r#type.kind = TypeKind::Logic;
+                }
+            }
+            Op::ArithShiftL | Op::ArithShiftR | Op::LogicShiftL | Op::LogicShiftR => {
+                if x.r#type.is_2state() {
+                    dst.r#type.kind = TypeKind::Bit;
+                } else {
+                    dst.r#type.kind = TypeKind::Logic;
+                }
+            }
+            Op::As => {
+                if let ValueVariant::Numeric(y) = &y.value
+                    && let Some(_width) = y.to_usize()
+                {
+                    // TODO
+                    // Check width range
+                } else if let ValueVariant::Type(y_value) = &y.value {
+                    let invalid_clock_cast = y_value.is_clock() && !x.r#type.is_clock();
+                    let invalid_reset_cast = y_value.is_reset() && x.r#type.is_clock();
+
+                    if invalid_clock_cast || invalid_reset_cast {
+                        context.insert_error(AnalyzerError::invalid_cast(
+                            &x.r#type.to_string(),
+                            &y_value.to_string(),
+                            &y.token,
+                        ));
+                    }
+
+                    dst.r#type = y_value.clone();
+                } else {
+                    dst.r#type = self.invalid_operand(context, y);
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn eval_type_ternary(
+        &self,
+        context: &mut Context,
+        x: &Comptime,
+        y: &Comptime,
+        z: &Comptime,
+        dst: &mut Comptime,
+    ) {
+        dst.r#type = x.r#type.clone();
+
+        // array / type can't be operated
+        if x.r#type.is_array() | x.r#type.is_type() {
+            dst.r#type = self.invalid_operand(context, x);
+            return;
+        }
+        if y.r#type.is_array() | y.r#type.is_type() {
+            dst.r#type = self.invalid_operand(context, y);
+            return;
+        }
+        if z.r#type.is_array() | z.r#type.is_type() {
+            dst.r#type = self.invalid_operand(context, z);
+            return;
+        }
+
+        // condition should be 1-bit
+        if !x.r#type.is_binary() {
+            dst.r#type = self.invalid_logical_operand(context, x);
+            return;
+        }
+
+        check_clock_domain(context, x, y, &dst.token.beg);
+        check_clock_domain(context, x, z, &dst.token.beg);
+
+        let y_width = y.r#type.total_width();
+        let z_width = z.r#type.total_width();
+        let width = y_width.max(z_width);
+
+        dst.r#type.width = Shape::new(vec![width]);
+
+        if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
+            dst.r#type.kind = z.r#type.kind.clone();
+        } else if z.r#type.is_unknown() | z.r#type.is_systemverilog() {
+            dst.r#type.kind = y.r#type.kind.clone();
+        } else if y.r#type.is_2state() && z.r#type.is_2state() {
+            dst.r#type.kind = TypeKind::Bit;
+        } else {
+            dst.r#type.kind = TypeKind::Logic;
+        }
+    }
+
+    pub fn eval_type_concatenation(
+        &self,
+        context: &mut Context,
+        x: &mut [(Expression, Option<Expression>)],
+        dst: &mut Comptime,
+    ) {
+        let mut width = Some(0);
+        let mut is_const = true;
+        let mut is_global = true;
+        let mut kind = TypeKind::Bit;
+        for (expr, repeat) in x {
+            let expr_context = expr.gather_context(context);
+            expr.apply_context(context, expr_context);
+            let expr = expr.comptime();
+
+            // array / type can't be operated
+            if expr.r#type.is_array() | expr.r#type.is_type() {
+                dst.r#type = self.invalid_operand(context, expr);
+                return;
+            }
+
+            check_clock_domain(context, dst, expr, &dst.token.beg);
+            dst.clock_domain = expr.clock_domain;
+
+            if expr.r#type.is_4state() {
+                kind = TypeKind::Logic;
+            }
+
+            is_const &= expr.is_const;
+            is_global &= expr.is_global;
+
+            if let Some(repeat) = repeat {
+                if let Some(repeat) = eval_repeat(context, repeat) {
+                    if let Some(total_width) = expr.r#type.total_width()
+                        && let Some(width) = &mut width
+                    {
+                        *width += total_width * repeat.to_usize().unwrap_or(0);
+                    } else {
+                        width = None;
+                    }
+                } else {
+                    width = None;
+                }
+            } else if let Some(total_width) = expr.r#type.total_width()
+                && let Some(width) = &mut width
+            {
+                *width += total_width;
+            } else {
+                width = None;
+            }
+        }
+
+        dst.r#type.kind = kind;
+        dst.r#type.width = Shape::new(vec![width]);
+        dst.is_const = is_const;
+        dst.is_global = is_global;
+    }
+
+    pub fn binary_x_self_determined(&self) -> bool {
+        matches!(self, Op::LogicAnd | Op::LogicOr)
+    }
+
+    pub fn binary_y_self_determined(&self) -> bool {
+        matches!(
+            self,
+            Op::LogicAnd
+                | Op::LogicOr
+                | Op::LogicShiftL
+                | Op::LogicShiftR
+                | Op::ArithShiftL
+                | Op::ArithShiftR
+                | Op::Pow
+        )
+    }
+
+    pub fn binary_op_self_determined(&self) -> bool {
+        matches!(
+            self,
+            Op::Eq
+                | Op::EqWildcard
+                | Op::Ne
+                | Op::NeWildcard
+                | Op::Greater
+                | Op::GreaterEq
+                | Op::Less
+                | Op::LessEq
+        )
+    }
+
+    fn eval_binary_width_usize(
+        &self,
+        x: Option<usize>,
+        y: Option<usize>,
+        context: Option<usize>,
+    ) -> Option<usize> {
+        match self {
+            Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::Rem
+            | Op::BitAnd
+            | Op::BitOr
+            | Op::BitXor
+            | Op::BitXnor => {
+                if let Some(x) = x
+                    && let Some(y) = y
+                {
+                    Some(x.max(y).max(context.unwrap_or(0)))
+                } else {
+                    None
+                }
+            }
             Op::Eq
             | Op::EqWildcard
             | Op::Ne
@@ -175,45 +542,23 @@ impl Op {
             | Op::Greater
             | Op::GreaterEq
             | Op::LogicAnd
-            | Op::LogicOr => 1.max(context.unwrap_or(0)),
+            | Op::LogicOr => Some(1.max(context.unwrap_or(0))),
             Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR | Op::Pow => {
-                x.max(context.unwrap_or(0))
+                x.map(|x| x.max(context.unwrap_or(0)))
             }
+            // actual casted width is evaluated in eval_type_binary
+            Op::As => x,
             _ => unimplemented!(),
         }
     }
 
-    pub fn eval_binary_width(&self, x: &Value, y: &Value, context: Option<usize>) -> usize {
-        self.eval_binary_width_usize(x.width(), y.width(), context)
-    }
-
-    pub fn eval_unary_width_usize(&self, x: usize, context: Option<usize>) -> usize {
-        match self {
-            Op::Add | Op::Sub | Op::BitNot => x.max(context.unwrap_or(0)),
-            Op::BitAnd
-            | Op::BitNand
-            | Op::BitOr
-            | Op::BitNor
-            | Op::BitXor
-            | Op::BitXnor
-            | Op::LogicNot => 1.max(context.unwrap_or(0)),
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn eval_unary_width(&self, x: &Value, context: Option<usize>) -> usize {
-        self.eval_unary_width_usize(x.width(), context)
-    }
-
-    pub fn eval_unary(
+    pub fn eval_value_unary(
         &self,
         x: &Value,
-        context: Option<usize>,
+        width: usize,
         signed: bool,
         mask_cache: &mut MaskCache,
     ) -> Value {
-        let width = self.eval_unary_width(x, context);
-
         match self {
             Op::Add => {
                 let x = x.expand(width, signed);
@@ -377,15 +722,14 @@ impl Op {
         }
     }
 
-    pub fn eval_binary(
+    pub fn eval_value_binary(
         &self,
         x: &Value,
         y: &Value,
-        context: Option<usize>,
+        width: usize,
         signed: bool,
         mask_cache: &mut MaskCache,
     ) -> Value {
-        let width = self.eval_binary_width(x, y, context);
         match self {
             Op::Add => {
                 let x = x.expand(width, signed);

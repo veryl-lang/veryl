@@ -17,6 +17,13 @@ impl TokenRange {
         }
     }
 
+    pub fn from_range(beg: &TokenRange, end: &TokenRange) -> Self {
+        Self {
+            beg: beg.beg,
+            end: end.end,
+        }
+    }
+
     pub fn include(&self, path: PathId, line: u32, column: u32) -> bool {
         if self.beg.source == path {
             if self.beg.line == line {

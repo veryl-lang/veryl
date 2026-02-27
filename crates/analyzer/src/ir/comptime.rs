@@ -4,11 +4,11 @@ use crate::ir::{
     Component, Expression, IrResult, Op, Shape, ShapeRef, Signature, VarIndex, VarPath, VarSelect,
     VarSelectOp,
 };
+use crate::ir_error;
 use crate::literal::TypeLiteral;
 use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
-use crate::{AnalyzerError, ir_error};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -49,6 +49,7 @@ impl PartSelectPath {
         }
 
         let token = TokenRange::default();
+        let comptime = Box::new(Comptime::create_unknown(token));
 
         let base_select = [PartSelect {
             pos: 0,
@@ -111,15 +112,17 @@ impl PartSelectPath {
 
             let expr = if remaining_dims != 0 {
                 // If remaining_dims exists, width is already considered by index
-                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(index))
+                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(index), comptime.clone())
             } else {
                 let expr = Expression::create_value(Value::new(width as u64, 32, false), token);
-                let expr = Expression::Binary(Box::new(expr), Op::Mul, Box::new(index));
-                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(expr))
+                let expr =
+                    Expression::Binary(Box::new(expr), Op::Mul, Box::new(index), comptime.clone());
+                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(expr), comptime.clone())
             };
 
             if let Some((pos, _, _)) = pos_width {
-                let expr = Expression::Binary(Box::new(pos), Op::Add, Box::new(expr));
+                let expr =
+                    Expression::Binary(Box::new(pos), Op::Add, Box::new(expr), comptime.clone());
                 pos_width = Some((expr, width, range_width));
             } else {
                 pos_width = Some((expr, width, range_width));
@@ -133,9 +136,19 @@ impl PartSelectPath {
             // beg = pos + width - 1
             // end = pos
             let one = Expression::create_value(Value::new(1, 32, false), token);
-            let minus_one = Expression::Unary(Op::Sub, Box::new(one.clone()));
-            let expr = Expression::Binary(Box::new(pos.clone()), Op::Add, Box::new(width.clone()));
-            let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one.clone()));
+            let minus_one = Expression::Unary(Op::Sub, Box::new(one.clone()), comptime.clone());
+            let expr = Expression::Binary(
+                Box::new(pos.clone()),
+                Op::Add,
+                Box::new(width.clone()),
+                comptime.clone(),
+            );
+            let expr = Expression::Binary(
+                Box::new(expr),
+                Op::Add,
+                Box::new(minus_one.clone()),
+                comptime.clone(),
+            );
             let mut beg = expr;
             let mut end = pos;
 
@@ -145,18 +158,42 @@ impl PartSelectPath {
                 let range_width =
                     Expression::create_value(Value::new(range_width? as u64, 32, false), token);
 
-                let expr = Expression::Binary(Box::new(range_beg), Op::Add, Box::new(one.clone()));
-                let expr =
-                    Expression::Binary(Box::new(expr), Op::Mul, Box::new(range_width.clone()));
-                let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one));
-                beg = Expression::Binary(Box::new(end.clone()), Op::Add, Box::new(expr));
+                let expr = Expression::Binary(
+                    Box::new(range_beg),
+                    Op::Add,
+                    Box::new(one.clone()),
+                    comptime.clone(),
+                );
+                let expr = Expression::Binary(
+                    Box::new(expr),
+                    Op::Mul,
+                    Box::new(range_width.clone()),
+                    comptime.clone(),
+                );
+                let expr = Expression::Binary(
+                    Box::new(expr),
+                    Op::Add,
+                    Box::new(minus_one),
+                    comptime.clone(),
+                );
+                beg = Expression::Binary(
+                    Box::new(end.clone()),
+                    Op::Add,
+                    Box::new(expr),
+                    comptime.clone(),
+                );
 
-                let expr = Expression::Binary(Box::new(range_end), Op::Mul, Box::new(range_width));
-                end = Expression::Binary(Box::new(end), Op::Add, Box::new(expr));
+                let expr = Expression::Binary(
+                    Box::new(range_end),
+                    Op::Mul,
+                    Box::new(range_width),
+                    comptime.clone(),
+                );
+                end = Expression::Binary(Box::new(end), Op::Add, Box::new(expr), comptime);
             }
 
-            beg.eval_comptime(context, None, beg.eval_signed());
-            end.eval_comptime(context, None, end.eval_signed());
+            beg.eval_comptime(context, None);
+            end.eval_comptime(context, None);
 
             if single {
                 Some(VarSelect(vec![beg], None))
@@ -181,6 +218,25 @@ impl fmt::Display for PartSelectPath {
     }
 }
 
+#[derive(Copy, Clone, Default, Debug)]
+pub struct ExpressionContext {
+    pub width: usize,
+    pub signed: bool,
+    pub is_const: bool,
+    pub is_global: bool,
+}
+
+impl ExpressionContext {
+    pub fn merge(&self, other: ExpressionContext) -> ExpressionContext {
+        ExpressionContext {
+            width: self.width.max(other.width),
+            signed: self.signed & other.signed,
+            is_const: self.is_const & other.is_const,
+            is_global: self.is_global & other.is_global,
+        }
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct Comptime {
     pub value: ValueVariant,
@@ -189,18 +245,19 @@ pub struct Comptime {
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
     pub clock_domain: ClockDomain,
+    pub expr_context: ExpressionContext,
+    pub evaluated: bool,
     pub token: TokenRange,
 }
 
 impl Comptime {
-    pub fn create_unknown(clock_domain: ClockDomain, token: TokenRange) -> Self {
+    pub fn create_unknown(token: TokenRange) -> Self {
         Self {
             value: ValueVariant::Unknown,
             r#type: Type {
                 kind: TypeKind::Unknown,
                 ..Default::default()
             },
-            clock_domain,
             token,
             ..Default::default()
         }
@@ -238,50 +295,6 @@ impl Comptime {
             Err(ir_error!(self.token))
         }
     }
-
-    pub fn invalid_operand(&mut self, context: &mut Context, op: Op, x: &Type, range: &TokenRange) {
-        context.insert_error(AnalyzerError::invalid_operand(
-            &x.to_string(),
-            &op.to_string(),
-            range,
-        ));
-        self.value = ValueVariant::Unknown;
-        self.r#type = Type {
-            kind: TypeKind::Unknown,
-            ..Default::default()
-        };
-        self.is_const = false;
-    }
-
-    pub fn invalid_logical_operand(&mut self, context: &mut Context, range: &TokenRange) {
-        context.insert_error(AnalyzerError::invalid_logical_operand(true, range));
-        self.value = ValueVariant::Unknown;
-        self.r#type = Type {
-            kind: TypeKind::Unknown,
-            ..Default::default()
-        };
-        self.is_const = false;
-    }
-
-    pub fn invalid_cast(
-        &mut self,
-        context: &mut Context,
-        dst: &Type,
-        src: &Type,
-        range: &TokenRange,
-    ) {
-        context.insert_error(AnalyzerError::invalid_cast(
-            &src.to_string(),
-            &dst.to_string(),
-            range,
-        ));
-        self.value = ValueVariant::Unknown;
-        self.r#type = Type {
-            kind: TypeKind::Unknown,
-            ..Default::default()
-        };
-        self.is_const = false;
-    }
 }
 
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -298,6 +311,10 @@ impl ValueVariant {
         if let ValueVariant::Numeric(x) = self {
             x.expand(width, false);
         }
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, ValueVariant::Unknown)
     }
 }
 
@@ -726,6 +743,7 @@ pub enum TypeKind {
     Type,
     String,
     SystemVerilog,
+    Void,
     #[default]
     Unknown,
 }
@@ -753,6 +771,7 @@ impl TypeKind {
             TypeKind::Union(x) => x.width(),
             TypeKind::Struct(x) => x.width(),
             TypeKind::Enum(x) => x.width(),
+            TypeKind::Void => None,
         }
     }
 
@@ -794,6 +813,7 @@ impl fmt::Display for TypeKind {
             TypeKind::String => "string".fmt(f),
             TypeKind::SystemVerilog => "systemverilog".fmt(f),
             TypeKind::Unknown => "unknown".fmt(f),
+            TypeKind::Void => "void".fmt(f),
         }
     }
 }

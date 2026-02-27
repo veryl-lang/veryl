@@ -225,7 +225,9 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             )?;
 
                             let width = dst.total_width(context);
-                            let expr = ir::Expression::Binary(Box::new(src), op, Box::new(expr));
+                            let comptime = Box::new(Comptime::create_unknown(token));
+                            let expr =
+                                ir::Expression::Binary(Box::new(src), op, Box::new(expr), comptime);
 
                             let statement = ir::AssignStatement {
                                 dst: vec![dst],
@@ -283,7 +285,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         let args = args.to_system_function_args(context, &symbol.found);
                         let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                         Ok(ir::StatementBlock(vec![ir::Statement::SystemFunctionCall(
-                            ret,
+                            Box::new(ret),
                         )]))
                     }
                     SymbolKind::Function(x) => {
