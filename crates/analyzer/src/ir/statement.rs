@@ -20,7 +20,7 @@ pub enum Statement {
     Assign(AssignStatement),
     If(IfStatement),
     IfReset(IfResetStatement),
-    SystemFunctionCall(SystemFunctionCall),
+    SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     Null,
 }

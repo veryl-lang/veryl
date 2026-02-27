@@ -1,7 +1,8 @@
 // This implementation refers the following book
 // https://lo48576.gitlab.io/rust-custom-slice-book/
 
-use crate::ir::{Expression, Op};
+use crate::ir::{Comptime, Expression, Op};
+use crate::symbol::ClockDomain;
 use crate::value::Value;
 use std::borrow::{Borrow, BorrowMut, Cow, ToOwned};
 use std::fmt;
@@ -142,13 +143,23 @@ impl ShapeRef {
                 if let Some(x) = x {
                     let index_expr = index[i].clone();
                     let token = index_expr.token_range();
+                    let comptime = Box::new(Comptime::create_unknown(ClockDomain::None, token));
                     let base_expr =
                         Expression::create_value(Value::new(base as u64, 32, false), token);
-                    let expr =
-                        Expression::Binary(Box::new(index_expr), Op::Mul, Box::new(base_expr));
+                    let expr = Expression::Binary(
+                        Box::new(index_expr),
+                        Op::Mul,
+                        Box::new(base_expr),
+                        comptime.clone(),
+                    );
 
                     if let Some(x) = ret {
-                        ret = Some(Expression::Binary(Box::new(x), Op::Add, Box::new(expr)));
+                        ret = Some(Expression::Binary(
+                            Box::new(x),
+                            Op::Add,
+                            Box::new(expr),
+                            comptime,
+                        ));
                     } else {
                         ret = Some(expr);
                     }

@@ -374,7 +374,7 @@ impl Conv<&WithParameterItem> for () {
             // parameter default value
             let expr = if context.is_affiliated(Affiliation::ProtoModule) {
                 let comptime = Comptime::create_unknown(ClockDomain::None, token);
-                let expr = ir::Expression::Term(Box::new(ir::Factor::Unknown(token)));
+                let expr = ir::Expression::Term(Box::new(ir::Factor::Unknown(comptime.clone())));
                 (comptime, expr)
             } else {
                 let Some(expr) = &x.value else {
@@ -829,10 +829,13 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                         TypeKind::Logic
                     };
                 }
-                let comptime = Comptime::from_type(r#type, ClockDomain::None, token);
-                Some(comptime)
+                Comptime::from_type(r#type, ClockDomain::None, token)
             } else {
-                None
+                let r#type = ir::Type {
+                    kind: TypeKind::Void,
+                    ..Default::default()
+                };
+                Comptime::from_type(r#type, ClockDomain::None, token)
             };
 
             // insert VarPath for function before statement_block conv
@@ -864,7 +867,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
 
             let body = context.block(|c| {
                 // insert return value as variable
-                let ret_id = if let Some(ret_type) = ret_type.clone() {
+                let ret_id = if ret_type.r#type.kind != TypeKind::Void {
                     let path = VarPath::new(get_return_str());
                     let kind = VarKind::Variable;
                     let r#type = ret_type.r#type.clone();
@@ -879,7 +882,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                             values.push(Value::new_x(total_width, false));
                         }
 
-                        let ret_id = c.insert_var_path(path.clone(), ret_type);
+                        let ret_id = c.insert_var_path(path.clone(), ret_type.clone());
                         let variable = Variable::new(
                             ret_id,
                             path,
@@ -956,12 +959,11 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
             context.pop_affiliation();
             context.pop_hierarchy();
 
-            let r#type = ret_type.as_ref().cloned();
             let function = ir::Function {
                 name,
                 id,
                 path,
-                r#type,
+                r#type: ret_type,
                 array: Shape::default(),
                 arity,
                 args,

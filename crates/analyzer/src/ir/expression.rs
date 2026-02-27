@@ -3,25 +3,29 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_repeat;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::{
-    Comptime, FfTable, FunctionCall, Op, Shape, SystemFunctionCall, Type, TypeKind, ValueVariant,
-    VarId, VarIndex, VarSelect,
+    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Shape, SystemFunctionCall, Type,
+    TypeKind, ValueVariant, VarId, VarIndex, VarSelect,
 };
 use crate::symbol::ClockDomain;
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
-use veryl_parser::veryl_grammar_trait::ExpressionIdentifier;
 
 #[derive(Clone, Debug)]
 pub enum Expression {
     Term(Box<Factor>),
-    Unary(Op, Box<Expression>),
-    Binary(Box<Expression>, Op, Box<Expression>),
-    Ternary(Box<Expression>, Box<Expression>, Box<Expression>),
-    Concatenation(Vec<(Expression, Option<Expression>)>),
-    ArrayLiteral(Vec<ArrayLiteralItem>),
-    StructConstructor(Type, Vec<(StrId, Expression)>),
+    Unary(Op, Box<Expression>, Box<Comptime>),
+    Binary(Box<Expression>, Op, Box<Expression>, Box<Comptime>),
+    Ternary(
+        Box<Expression>,
+        Box<Expression>,
+        Box<Expression>,
+        Box<Comptime>,
+    ),
+    Concatenation(Vec<(Expression, Option<Expression>)>, Box<Comptime>),
+    ArrayLiteral(Vec<ArrayLiteralItem>, Box<Comptime>),
+    StructConstructor(Type, Vec<(StrId, Expression)>, Box<Comptime>),
 }
 
 impl Expression {
@@ -34,16 +38,16 @@ impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ret = match self {
             Expression::Term(x) => x.to_string(),
-            Expression::Unary(x, y) => {
+            Expression::Unary(x, y, _) => {
                 format!("({x} {y})")
             }
-            Expression::Binary(x, y, z) => {
+            Expression::Binary(x, y, z, _) => {
                 format!("({x} {y} {z})")
             }
-            Expression::Ternary(x, y, z) => {
+            Expression::Ternary(x, y, z, _) => {
                 format!("({x} ? {y} : {z})")
             }
-            Expression::Concatenation(x) => {
+            Expression::Concatenation(x, _) => {
                 let mut ret = String::new();
                 for (x, y) in x {
                     if let Some(y) = y {
@@ -54,14 +58,14 @@ impl fmt::Display for Expression {
                 }
                 format!("{{{}}}", &ret[2..])
             }
-            Expression::ArrayLiteral(x) => {
+            Expression::ArrayLiteral(x, _) => {
                 let mut ret = String::new();
                 for x in x {
                     ret = format!("{ret}, {x}")
                 }
                 format!("'{{{}}}", &ret[2..])
             }
-            Expression::StructConstructor(_, x) => {
+            Expression::StructConstructor(_, x, _) => {
                 let mut ret = String::new();
                 for x in x {
                     ret = format!("{ret}, {}: {}", x.0, x.1)
@@ -78,7 +82,9 @@ impl Expression {
     pub fn is_assignable(&self) -> bool {
         match self {
             Expression::Term(x) => x.is_assignable(),
-            Expression::Concatenation(x) => x.iter().all(|x| x.0.is_assignable() && x.1.is_none()),
+            Expression::Concatenation(x, _) => {
+                x.iter().all(|x| x.0.is_assignable() && x.1.is_none())
+            }
             _ => false,
         }
     }
@@ -86,13 +92,169 @@ impl Expression {
     pub fn eval_signed(&self) -> bool {
         match self {
             Expression::Term(x) => x.eval_signed(),
-            Expression::Unary(op, x) => op.unary_signed(x.eval_signed()),
-            Expression::Binary(x, op, y) => op.binary_signed(x.eval_signed(), y.eval_signed()),
-            Expression::Ternary(_, y, z) => y.eval_signed() && z.eval_signed(),
-            Expression::Concatenation(_) => false,
-            Expression::StructConstructor(_, _) => false,
+            Expression::Unary(op, x, _) => op.unary_signed(x.eval_signed()),
+            Expression::Binary(x, op, y, _) => op.binary_signed(x.eval_signed(), y.eval_signed()),
+            Expression::Ternary(_, y, z, _) => y.eval_signed() && z.eval_signed(),
+            Expression::Concatenation(_, _) => false,
+            Expression::StructConstructor(_, _, _) => false,
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
-            Expression::ArrayLiteral(_) => false,
+            Expression::ArrayLiteral(_, _) => false,
+        }
+    }
+
+    pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
+        match self {
+            Expression::Term(x) => x.gather_context(context),
+            Expression::Unary(op, x, comptime) => {
+                let x = x.gather_context(context);
+
+                comptime.is_const = x.is_const;
+                comptime.is_global = x.is_global;
+
+                op.eval_context_unary(x)
+            }
+            Expression::Binary(x, op, y, comptime) => {
+                let (x, y) = if op.binary_op_self_determined() {
+                    let expr_context = x.gather_context(context).merge(y.gather_context(context));
+                    x.apply_context(context, expr_context);
+                    y.apply_context(context, expr_context);
+                    (expr_context, expr_context)
+                } else {
+                    let x = if op.binary_x_self_determined() {
+                        let expr_context = x.gather_context(context);
+                        x.apply_context(context, expr_context);
+                        x.comptime().expr_context
+                    } else {
+                        x.gather_context(context)
+                    };
+
+                    let y = if op.binary_y_self_determined() {
+                        let expr_context = y.gather_context(context);
+                        y.apply_context(context, expr_context);
+                        y.comptime().expr_context
+                    } else {
+                        y.gather_context(context)
+                    };
+
+                    (x, y)
+                };
+
+                comptime.is_const = x.is_const & y.is_const;
+                comptime.is_global = x.is_global & y.is_global;
+
+                op.eval_context_binary(x, y)
+            }
+            Expression::Ternary(x, y, z, comptime) => {
+                // x is self-determined
+                let expr_context = x.gather_context(context);
+                x.apply_context(context, expr_context);
+                let x = x.comptime();
+
+                let y = y.gather_context(context);
+                let z = z.gather_context(context);
+
+                let is_const = x.is_const & y.is_const & z.is_const;
+                let is_global = x.is_global & y.is_global & z.is_global;
+
+                comptime.is_const = is_const;
+                comptime.is_global = is_global;
+
+                ExpressionContext {
+                    width: y.width.max(z.width),
+                    signed: y.signed & z.signed,
+                    is_const,
+                    is_global,
+                }
+            }
+            Expression::Concatenation(x, comptime) => {
+                let op = Op::Concatenation;
+                op.eval_type_concatenation(context, x, comptime);
+
+                ExpressionContext {
+                    width: comptime.r#type.total_width().unwrap_or(0),
+                    signed: comptime.r#type.signed,
+                    is_const: comptime.is_const,
+                    is_global: comptime.is_global,
+                }
+            }
+            Expression::StructConstructor(r#type, exprs, comptime) => {
+                let mut is_const = true;
+                let mut is_global = true;
+                for (_, expr) in exprs {
+                    let expr_context = expr.gather_context(context);
+                    is_const &= expr_context.is_const;
+                    is_global &= expr_context.is_global;
+
+                    let expr = expr.comptime();
+                    check_clock_domain(context, comptime, expr, &comptime.token.beg);
+                    comptime.clock_domain = expr.clock_domain;
+                }
+
+                comptime.r#type = r#type.clone();
+                comptime.is_const = is_const;
+                comptime.is_global = is_global;
+
+                ExpressionContext {
+                    width: r#type.total_width().unwrap_or(0),
+                    signed: false,
+                    is_const,
+                    is_global,
+                }
+            }
+            Expression::ArrayLiteral(items, comptime) => {
+                let mut is_const = true;
+                let mut is_global = true;
+                for item in items {
+                    is_const &= item.is_const(context);
+                    is_global &= item.is_global(context);
+                }
+
+                comptime.is_const = is_const;
+                comptime.is_global = is_global;
+
+                // ArrayLiteral doesn't affect context width
+                ExpressionContext {
+                    width: 0,
+                    signed: false,
+                    is_const,
+                    is_global,
+                }
+            }
+        }
+    }
+
+    pub fn apply_context(&mut self, context: &mut Context, expr_context: ExpressionContext) {
+        match self {
+            Expression::Term(x) => x.apply_context(expr_context),
+            Expression::Unary(op, x, comptime) => {
+                x.apply_context(context, expr_context);
+                comptime.expr_context = expr_context;
+                op.eval_type_unary(context, x.comptime(), comptime);
+            }
+            Expression::Binary(x, op, y, comptime) => {
+                if !op.binary_op_self_determined() {
+                    if !op.binary_x_self_determined() {
+                        x.apply_context(context, expr_context);
+                    }
+                    if !op.binary_y_self_determined() {
+                        y.apply_context(context, expr_context);
+                    }
+                }
+
+                comptime.expr_context = expr_context;
+                op.eval_type_binary(context, x.comptime(), y.comptime(), comptime);
+            }
+            Expression::Ternary(x, y, z, comptime) => {
+                y.apply_context(context, expr_context);
+                z.apply_context(context, expr_context);
+
+                comptime.expr_context = expr_context;
+                let op = Op::Ternary;
+                op.eval_type_ternary(context, x.comptime(), y.comptime(), z.comptime(), comptime);
+            }
+            Expression::Concatenation(_, _) => (),
+            Expression::StructConstructor(_, _, _) => (),
+            Expression::ArrayLiteral(_, _) => (),
         }
     }
 
@@ -104,14 +266,14 @@ impl Expression {
     ) -> Option<Value> {
         match self {
             Expression::Term(x) => x.eval_value(context, context_width),
-            Expression::Unary(op, x) => {
+            Expression::Unary(op, x, _) => {
                 let x_context_width = op.unary_context_width(context_width);
 
                 let ret = x.eval_value(context, x_context_width, signed)?;
-                let ret = op.eval_unary(&ret, context_width, signed, &mut context.mask_cache);
+                let ret = op.eval_value_unary(&ret, context_width, signed, &mut context.mask_cache);
                 Some(ret)
             }
-            Expression::Binary(x, op, y) => {
+            Expression::Binary(x, op, y, _) => {
                 let x_context_width = op.binary_x_context_width(context_width);
                 let y_context_width = op.binary_y_context_width(context_width);
 
@@ -123,10 +285,11 @@ impl Expression {
 
                 let y = y.eval_value(context, y_context_width, signed)?;
 
-                let ret = op.eval_binary(&x, &y, context_width, signed, &mut context.mask_cache);
+                let ret =
+                    op.eval_value_binary(&x, &y, context_width, signed, &mut context.mask_cache);
                 Some(ret)
             }
-            Expression::Ternary(x, y, z) => {
+            Expression::Ternary(x, y, z, _) => {
                 let x = x.eval_value(context, None, signed)?;
                 let y = y.eval_value(context, context_width, signed)?;
                 let z = z.eval_value(context, context_width, signed)?;
@@ -137,7 +300,7 @@ impl Expression {
                 let ret = ret.expand(width, false).into_owned();
                 Some(ret)
             }
-            Expression::Concatenation(x) => {
+            Expression::Concatenation(x, _) => {
                 let mut ret = Value::new(0, 0, false);
                 for (exp, rep) in x.iter() {
                     let exp = exp.eval_value(context, None, signed)?;
@@ -157,7 +320,7 @@ impl Expression {
                 }
                 Some(ret)
             }
-            Expression::StructConstructor(r#type, exprs) => {
+            Expression::StructConstructor(r#type, exprs, _) => {
                 let mut ret = Value::new(0u32.into(), 0, false);
                 for (name, expr) in exprs {
                     let sub_type = r#type.get_member_type(*name)?;
@@ -169,7 +332,7 @@ impl Expression {
                 Some(ret)
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
-            Expression::ArrayLiteral(_) => None,
+            Expression::ArrayLiteral(_, _) => None,
         }
     }
 
@@ -189,7 +352,7 @@ impl Expression {
 
         let ret = match self {
             Expression::Term(x) => x.eval_comptime(context, context_width),
-            Expression::Unary(op, x) => {
+            Expression::Unary(op, x, _) => {
                 let range = x.token_range();
                 let x_context_width = op.unary_context_width(context_width);
                 let x = x.eval_comptime(context, x_context_width, signed);
@@ -244,7 +407,7 @@ impl Expression {
                 };
                 ret
             }
-            Expression::Binary(x, op, y) => {
+            Expression::Binary(x, op, y, _) => {
                 let range_x = x.token_range();
                 let range_y = y.token_range();
 
@@ -407,7 +570,7 @@ impl Expression {
                 ret.is_global = x.is_global & y.is_global;
                 ret
             }
-            Expression::Ternary(x, y, z) => {
+            Expression::Ternary(x, y, z, _) => {
                 let range_x = x.token_range();
                 let range_y = y.token_range();
                 let range_z = z.token_range();
@@ -463,7 +626,7 @@ impl Expression {
 
                 ret
             }
-            Expression::Concatenation(x) => {
+            Expression::Concatenation(x, _) => {
                 let mut ret = Comptime::create_unknown(ClockDomain::None, token);
                 ret.value = value;
 
@@ -522,7 +685,7 @@ impl Expression {
 
                 ret
             }
-            Expression::StructConstructor(r#type, exprs) => {
+            Expression::StructConstructor(r#type, exprs, _) => {
                 let mut is_const = true;
                 let mut is_global = true;
                 for (_, expr) in exprs {
@@ -538,7 +701,7 @@ impl Expression {
                 ret
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
-            Expression::ArrayLiteral(items) => {
+            Expression::ArrayLiteral(items, _) => {
                 let mut is_const = true;
                 let mut is_global = true;
                 for item in items {
@@ -572,17 +735,17 @@ impl Expression {
     ) {
         match self {
             Expression::Term(x) => x.eval_assign(context, assign_table, assign_context),
-            Expression::Unary(_, x) => x.eval_assign(context, assign_table, assign_context),
-            Expression::Binary(x, _, y) => {
+            Expression::Unary(_, x, _) => x.eval_assign(context, assign_table, assign_context),
+            Expression::Binary(x, _, y, _) => {
                 x.eval_assign(context, assign_table, assign_context);
                 y.eval_assign(context, assign_table, assign_context);
             }
-            Expression::Ternary(x, y, z) => {
+            Expression::Ternary(x, y, z, _) => {
                 x.eval_assign(context, assign_table, assign_context);
                 y.eval_assign(context, assign_table, assign_context);
                 z.eval_assign(context, assign_table, assign_context);
             }
-            Expression::Concatenation(x) => {
+            Expression::Concatenation(x, _) => {
                 for (x, y) in x {
                     x.eval_assign(context, assign_table, assign_context);
                     if let Some(y) = y {
@@ -590,30 +753,30 @@ impl Expression {
                     }
                 }
             }
-            Expression::StructConstructor(_, exprs) => {
+            Expression::StructConstructor(_, exprs, _) => {
                 for (_, expr) in exprs {
                     expr.eval_assign(context, assign_table, assign_context);
                 }
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
-            Expression::ArrayLiteral(_) => (),
+            Expression::ArrayLiteral(_, _) => (),
         }
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         match self {
             Expression::Term(x) => x.gather_ff(context, table, decl),
-            Expression::Unary(_, x) => x.gather_ff(context, table, decl),
-            Expression::Binary(x, _, y) => {
+            Expression::Unary(_, x, _) => x.gather_ff(context, table, decl),
+            Expression::Binary(x, _, y, _) => {
                 x.gather_ff(context, table, decl);
                 y.gather_ff(context, table, decl);
             }
-            Expression::Ternary(x, y, z) => {
+            Expression::Ternary(x, y, z, _) => {
                 x.gather_ff(context, table, decl);
                 y.gather_ff(context, table, decl);
                 z.gather_ff(context, table, decl);
             }
-            Expression::Concatenation(x) => {
+            Expression::Concatenation(x, _) => {
                 for (x, y) in x {
                     x.gather_ff(context, table, decl);
                     if let Some(y) = y {
@@ -621,30 +784,30 @@ impl Expression {
                     }
                 }
             }
-            Expression::StructConstructor(_, exprs) => {
+            Expression::StructConstructor(_, exprs, _) => {
                 for (_, expr) in exprs {
                     expr.gather_ff(context, table, decl);
                 }
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
-            Expression::ArrayLiteral(_) => (),
+            Expression::ArrayLiteral(_, _) => (),
         }
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
             Expression::Term(x) => x.set_index(index),
-            Expression::Unary(_, x) => x.set_index(index),
-            Expression::Binary(x, _, y) => {
+            Expression::Unary(_, x, _) => x.set_index(index),
+            Expression::Binary(x, _, y, _) => {
                 x.set_index(index);
                 y.set_index(index);
             }
-            Expression::Ternary(x, y, z) => {
+            Expression::Ternary(x, y, z, _) => {
                 x.set_index(index);
                 y.set_index(index);
                 z.set_index(index);
             }
-            Expression::Concatenation(x) => {
+            Expression::Concatenation(x, _) => {
                 for (x, y) in x {
                     x.set_index(index);
                     if let Some(y) = y {
@@ -652,106 +815,133 @@ impl Expression {
                     }
                 }
             }
-            Expression::StructConstructor(_, exprs) => {
+            Expression::StructConstructor(_, exprs, _) => {
                 for (_, expr) in exprs {
                     expr.set_index(index);
                 }
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
-            Expression::ArrayLiteral(_) => (),
+            Expression::ArrayLiteral(_, _) => (),
+        }
+    }
+
+    pub fn comptime(&self) -> &Comptime {
+        match self {
+            Expression::Term(x) => x.comptime(),
+            Expression::Unary(_, _, x) => x,
+            Expression::Binary(_, _, _, x) => x,
+            Expression::Ternary(_, _, _, x) => x,
+            Expression::Concatenation(_, x) => x,
+            Expression::ArrayLiteral(_, x) => x,
+            Expression::StructConstructor(_, _, x) => x,
         }
     }
 
     pub fn token_range(&self) -> TokenRange {
         match self {
             Expression::Term(x) => x.token_range(),
-            Expression::Unary(_, x) => x.token_range(),
-            Expression::Binary(x, _, y) => {
-                let beg = x.token_range();
-                let mut end = y.token_range();
-                end.set_beg(beg);
-                end
-            }
-            Expression::Ternary(x, _, y) => {
-                let beg = x.token_range();
-                let mut end = y.token_range();
-                end.set_beg(beg);
-                end
-            }
-            Expression::Concatenation(x) => {
-                let beg = x.first().unwrap().0.token_range();
-                let last = x.last().unwrap();
-                let mut end = if let Some(x) = &last.1 {
-                    x.token_range()
-                } else {
-                    last.0.token_range()
-                };
-                end.set_beg(beg);
-                end
-            }
-            Expression::ArrayLiteral(x) => {
-                let beg = x.first().unwrap().token_range();
-                let mut end = x.last().unwrap().token_range();
-                end.set_beg(beg);
-                end
-            }
-            Expression::StructConstructor(_, x) => {
-                let beg = x.first().unwrap().1.token_range();
-                let mut end = x.last().unwrap().1.token_range();
-                end.set_beg(beg);
-                end
-            }
+            Expression::Unary(_, _, x) => x.token,
+            Expression::Binary(_, _, _, x) => x.token,
+            Expression::Ternary(_, _, _, x) => x.token,
+            Expression::Concatenation(_, x) => x.token,
+            Expression::ArrayLiteral(_, x) => x.token,
+            Expression::StructConstructor(_, _, x) => x.token,
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum Factor {
-    Variable(VarId, VarIndex, VarSelect, Comptime, TokenRange),
-    Value(Comptime, TokenRange),
-    SystemFunctionCall(SystemFunctionCall, TokenRange),
-    FunctionCall(FunctionCall, TokenRange),
-    Anonymous(TokenRange),
-    Unresolved(ExpressionIdentifier, TokenRange),
-    Unknown(TokenRange),
+    Variable(VarId, VarIndex, VarSelect, Comptime),
+    Value(Comptime),
+    SystemFunctionCall(SystemFunctionCall),
+    FunctionCall(FunctionCall),
+    Anonymous(Comptime),
+    Unknown(Comptime),
 }
 
 impl Factor {
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         let comptime = Comptime::create_value(value, token);
-        Factor::Value(comptime, token)
+        Factor::Value(comptime)
     }
 
     pub fn is_assignable(&self) -> bool {
         match self {
             // SystemVerilog member is interpreted as Factor::Value, but it may be assignable.
-            Factor::Value(x, _) => x.r#type.is_systemverilog(),
-            Factor::FunctionCall(_, _) | Factor::SystemFunctionCall(_, _) => false,
+            Factor::Value(x) => x.r#type.is_systemverilog(),
+            Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => false,
             _ => true,
         }
     }
 
     pub fn eval_signed(&self) -> bool {
         match self {
-            Factor::Variable(_, _, select, comptime, _) => {
+            Factor::Variable(_, _, select, comptime) => {
                 if select.is_empty() {
                     comptime.r#type.signed
                 } else {
                     false
                 }
             }
-            Factor::Value(x, _) => x.r#type.signed,
-            Factor::SystemFunctionCall(_, _) => false,
-            Factor::FunctionCall(x, _) => {
-                if let Some(x) = &x.ret {
-                    x.r#type.signed
-                } else {
-                    false
+            Factor::Value(x) => x.r#type.signed,
+            Factor::SystemFunctionCall(_) => false,
+            Factor::FunctionCall(x) => x.comptime.r#type.signed,
+            Factor::Anonymous(_) => false,
+            Factor::Unknown(_) => false,
+        }
+    }
+
+    pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
+        match self {
+            Factor::Variable(_, index, select, comptime) => {
+                comptime.r#type.array.drain(0..index.dimension());
+
+                // Struct/Union/Enum should be treated as flatten bit/logic when it is bit-selected
+                if !select.is_empty() {
+                    comptime.r#type.flatten_struct_union_enum()
+                }
+
+                if let Some(width) = select.eval_comptime(context, &comptime.r#type, false) {
+                    comptime.r#type.width = width;
+                }
+
+                ExpressionContext {
+                    width: comptime.r#type.total_width().unwrap_or(0),
+                    signed: comptime.r#type.signed,
+                    is_const: comptime.is_const,
+                    is_global: comptime.is_global,
                 }
             }
-            Factor::Anonymous(_) => false,
-            Factor::Unresolved(_, _) => false,
-            Factor::Unknown(_) => false,
+            Factor::Value(x) => ExpressionContext {
+                width: x.r#type.total_width().unwrap_or(0),
+                signed: x.r#type.signed,
+                is_const: x.is_const,
+                is_global: x.is_global,
+            },
+            Factor::FunctionCall(x) => {
+                x.eval_type(context);
+                ExpressionContext {
+                    width: x.comptime.r#type.total_width().unwrap_or(0),
+                    signed: x.comptime.r#type.signed,
+                    is_const: x.comptime.is_const,
+                    is_global: x.comptime.is_global,
+                }
+            }
+            Factor::SystemFunctionCall(_) | Factor::Anonymous(_) | Factor::Unknown(_) => {
+                ExpressionContext::default()
+            }
+        }
+    }
+
+    pub fn apply_context(&mut self, expr_context: ExpressionContext) {
+        match self {
+            Factor::Variable(_, _, _, x) => x.expr_context = expr_context,
+            Factor::Value(x) => x.expr_context = expr_context,
+            Factor::SystemFunctionCall(x) => x.comptime.expr_context = expr_context,
+            Factor::FunctionCall(x) => x.comptime.expr_context = expr_context,
+            Factor::Anonymous(x) => x.expr_context = expr_context,
+            Factor::Unknown(x) => x.expr_context = expr_context,
         }
     }
 
@@ -761,7 +951,7 @@ impl Factor {
         _context_width: Option<usize>,
     ) -> Option<Value> {
         match self {
-            Factor::Variable(id, index, select, comptime, _) => {
+            Factor::Variable(id, index, select, comptime) => {
                 let index = index.eval_value(context)?;
                 let value = context.variables.get(id)?.get_value(&index)?.clone();
 
@@ -772,11 +962,10 @@ impl Factor {
                     Some(value)
                 }
             }
-            Factor::Value(x, _) => x.get_value().ok().cloned(),
-            Factor::SystemFunctionCall(x, _) => x.eval_value(context),
-            Factor::FunctionCall(x, _) => x.eval_value(context),
+            Factor::Value(x) => x.get_value().ok().cloned(),
+            Factor::SystemFunctionCall(x) => x.eval_value(context),
+            Factor::FunctionCall(x) => x.eval_value(context),
             Factor::Anonymous(_) => None,
-            Factor::Unresolved(_, _) => None,
             Factor::Unknown(_) => None,
         }
     }
@@ -788,7 +977,7 @@ impl Factor {
     ) -> Comptime {
         let value = self.eval_value(context, context_width);
         match self {
-            Factor::Variable(_, index, select, comptime, _) => {
+            Factor::Variable(_, index, select, comptime) => {
                 let mut ret = comptime.clone();
 
                 let value = if let Some(x) = value {
@@ -811,54 +1000,11 @@ impl Factor {
                 ret.value = value;
                 ret
             }
-            Factor::Value(x, _) => x.clone(),
-            Factor::SystemFunctionCall(x, _) => x.eval_comptime(context),
-            Factor::FunctionCall(x, _) => x.eval_comptime(context),
-            Factor::Anonymous(token) => {
-                let value = ValueVariant::Unknown;
-                let r#type = Type {
-                    kind: TypeKind::Unknown,
-                    ..Default::default()
-                };
-                Comptime {
-                    value,
-                    r#type,
-                    is_const: true,
-                    is_global: true,
-                    token: *token,
-                    ..Default::default()
-                }
-            }
-            Factor::Unresolved(_, token) => {
-                let value = ValueVariant::Unknown;
-                let r#type = Type {
-                    kind: TypeKind::Unknown,
-                    ..Default::default()
-                };
-                Comptime {
-                    value,
-                    r#type,
-                    is_const: true,
-                    is_global: false,
-                    token: *token,
-                    ..Default::default()
-                }
-            }
-            Factor::Unknown(token) => {
-                let value = ValueVariant::Unknown;
-                let r#type = Type {
-                    kind: TypeKind::Unknown,
-                    ..Default::default()
-                };
-                Comptime {
-                    value,
-                    r#type,
-                    is_const: false,
-                    is_global: false,
-                    token: *token,
-                    ..Default::default()
-                }
-            }
+            Factor::Value(x) => x.clone(),
+            Factor::SystemFunctionCall(x) => x.eval_comptime(context),
+            Factor::FunctionCall(x) => x.eval_comptime(context),
+            Factor::Anonymous(x) => x.clone(),
+            Factor::Unknown(x) => x.clone(),
         }
     }
 
@@ -869,7 +1015,7 @@ impl Factor {
         assign_context: AssignContext,
     ) {
         match self {
-            Factor::Variable(id, index, select, _, _) => {
+            Factor::Variable(id, index, select, _) => {
                 if let Some(index) = index.eval_value(context)
                     && let Some(variable) = context.variables.get(id).cloned()
                     && let Some((beg, end)) = select.eval_value(context, &variable.r#type, false)
@@ -878,10 +1024,10 @@ impl Factor {
                     assign_table.insert_reference(&variable, index, mask);
                 }
             }
-            Factor::FunctionCall(x, _) => {
+            Factor::FunctionCall(x) => {
                 x.eval_assign(context, assign_table, assign_context);
             }
-            Factor::SystemFunctionCall(x, _) => {
+            Factor::SystemFunctionCall(x) => {
                 x.eval_assign(context, assign_table, assign_context);
             }
             _ => (),
@@ -890,7 +1036,7 @@ impl Factor {
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         match self {
-            Factor::Variable(id, index, _, _, _) => {
+            Factor::Variable(id, index, _, _) => {
                 if let Some(variable) = context.get_variable_info(*id) {
                     if let Some(index) = index.eval_value(context) {
                         if let Some(index) = variable.r#type.array.calc_index(&index) {
@@ -903,7 +1049,7 @@ impl Factor {
                     }
                 }
             }
-            Factor::FunctionCall(x, _) => {
+            Factor::FunctionCall(x) => {
                 x.gather_ff(context, table, decl);
             }
             _ => (),
@@ -912,25 +1058,35 @@ impl Factor {
 
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
-            Factor::Variable(_, i, _, _, _) => {
+            Factor::Variable(_, i, _, _) => {
                 *i = index.clone();
             }
-            Factor::FunctionCall(x, _) => {
+            Factor::FunctionCall(x) => {
                 x.set_index(index);
             }
             _ => (),
         }
     }
 
+    pub fn comptime(&self) -> &Comptime {
+        match self {
+            Factor::Variable(_, _, _, x) => x,
+            Factor::Value(x) => x,
+            Factor::SystemFunctionCall(x) => &x.comptime,
+            Factor::FunctionCall(x) => &x.comptime,
+            Factor::Anonymous(x) => x,
+            Factor::Unknown(x) => x,
+        }
+    }
+
     pub fn token_range(&self) -> TokenRange {
         match self {
-            Factor::Variable(_, _, _, _, x) => *x,
-            Factor::Value(_, x) => *x,
-            Factor::SystemFunctionCall(_, x) => *x,
-            Factor::FunctionCall(_, x) => *x,
-            Factor::Anonymous(x) => *x,
-            Factor::Unresolved(_, x) => *x,
-            Factor::Unknown(x) => *x,
+            Factor::Variable(_, _, _, x) => x.token,
+            Factor::Value(x) => x.token,
+            Factor::SystemFunctionCall(x) => x.comptime.token,
+            Factor::FunctionCall(x) => x.comptime.token,
+            Factor::Anonymous(x) => x.token,
+            Factor::Unknown(x) => x.token,
         }
     }
 }
@@ -938,20 +1094,19 @@ impl Factor {
 impl fmt::Display for Factor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ret = match self {
-            Factor::Variable(id, index, select, _, _) => {
+            Factor::Variable(id, index, select, _) => {
                 format!("{id}{index}{select}")
             }
-            Factor::Value(x, _) => {
+            Factor::Value(x) => {
                 if let Ok(x) = x.get_value() {
                     format!("{:x}", x)
                 } else {
                     String::from("unknown")
                 }
             }
-            Factor::SystemFunctionCall(x, _) => x.to_string(),
-            Factor::FunctionCall(x, _) => x.to_string(),
+            Factor::SystemFunctionCall(x) => x.to_string(),
+            Factor::FunctionCall(x) => x.to_string(),
             Factor::Anonymous(_) => String::from("_"),
-            Factor::Unresolved(_, _) => String::from("unresolved"),
             Factor::Unknown(_) => String::from("unknown"),
         };
 
@@ -1033,7 +1188,6 @@ mod tests {
     use super::*;
     use crate::conv::utils::parse_expression;
     use crate::conv::{Context, Conv};
-    use veryl_parser::veryl_token::{Token, TokenSource};
 
     fn calc_expression(s: &str, context_width: Option<usize>) -> Value {
         let mut context = Context::default();
@@ -1253,12 +1407,6 @@ mod tests {
         assert_eq!(format!("{:x}", x7), "1'h1");
     }
 
-    fn token_range() -> TokenRange {
-        let beg = Token::new("", 0, 0, 0, 0, TokenSource::External);
-        let end = beg;
-        TokenRange { beg, end }
-    }
-
     fn bit(width: usize) -> Box<Expression> {
         let ret = Comptime {
             value: ValueVariant::Unknown,
@@ -1269,10 +1417,7 @@ mod tests {
             },
             ..Default::default()
         };
-        Box::new(Expression::Term(Box::new(Factor::Value(
-            ret,
-            token_range(),
-        ))))
+        Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn logic(width: usize) -> Box<Expression> {
@@ -1285,10 +1430,7 @@ mod tests {
             },
             ..Default::default()
         };
-        Box::new(Expression::Term(Box::new(Factor::Value(
-            ret,
-            token_range(),
-        ))))
+        Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn value(value: usize) -> Box<Expression> {
@@ -1303,14 +1445,15 @@ mod tests {
             is_global: true,
             ..Default::default()
         };
-        Box::new(Expression::Term(Box::new(Factor::Value(
-            ret,
-            token_range(),
-        ))))
+        Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn eval_comptime_unary(context: &mut Context, op: Op, x: Box<Expression>) -> Comptime {
-        let mut ret = Expression::Unary(op, x);
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            TokenRange::default(),
+        ));
+        let mut ret = Expression::Unary(op, x, comptime);
         ret.eval_comptime(context, None, ret.eval_signed())
     }
 
@@ -1320,7 +1463,11 @@ mod tests {
         op: Op,
         y: Box<Expression>,
     ) -> Comptime {
-        let mut ret = Expression::Binary(x, op, y);
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            TokenRange::default(),
+        ));
+        let mut ret = Expression::Binary(x, op, y, comptime);
         ret.eval_comptime(context, None, ret.eval_signed())
     }
 
@@ -1330,7 +1477,11 @@ mod tests {
         y: Box<Expression>,
         z: Box<Expression>,
     ) -> Comptime {
-        let mut ret = Expression::Ternary(x, y, z);
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            TokenRange::default(),
+        ));
+        let mut ret = Expression::Ternary(x, y, z, comptime);
         ret.eval_comptime(context, None, ret.eval_signed())
     }
 
@@ -1338,7 +1489,11 @@ mod tests {
         context: &mut Context,
         x: Vec<(Expression, Option<Expression>)>,
     ) -> Comptime {
-        let mut ret = Expression::Concatenation(x);
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            TokenRange::default(),
+        ));
+        let mut ret = Expression::Concatenation(x, comptime);
         ret.eval_comptime(context, None, ret.eval_signed())
     }
 

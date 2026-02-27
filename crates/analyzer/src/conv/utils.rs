@@ -48,7 +48,7 @@ pub fn eval_expr(
         Ok((comptime, expr))
     } else {
         let comptime = Comptime::create_unknown(ClockDomain::None, token);
-        let expr = ir::Expression::Term(Box::new(ir::Factor::Unknown(token)));
+        let expr = ir::Expression::Term(Box::new(ir::Factor::Unknown(comptime.clone())));
         Ok((comptime, expr))
     }
 }
@@ -116,7 +116,7 @@ pub fn eval_array_literal(
 ) -> IrResult<Option<Vec<ArrayLiteralExpression>>> {
     let token = expr.token_range();
 
-    let ir::Expression::ArrayLiteral(items) = expr else {
+    let ir::Expression::ArrayLiteral(items, _) = expr else {
         return Ok(None);
     };
 
@@ -416,7 +416,7 @@ pub fn eval_const_assign(
     let token = expr.token_range();
 
     match expr {
-        ir::Expression::ArrayLiteral(_) => {
+        ir::Expression::ArrayLiteral(_, _) => {
             let exprs =
                 eval_array_literal(context, Some(&r#type.array), Some(&r#type.width), expr)?;
             if let Some(exprs) = exprs {
@@ -565,11 +565,11 @@ pub fn eval_struct_member(
                     member_path.add_prelude(&path.0);
                     for x in r#type.expand_struct_union(&path, &[], None) {
                         if x.path == member_path {
-                            let comptime = expr.eval_comptime(context, None, expr.eval_signed());
+                            let mut comptime =
+                                expr.eval_comptime(context, None, expr.eval_signed());
+                            comptime.token = token;
                             // TODO range select from PartSelect
-                            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                                comptime, token,
-                            ))));
+                            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))));
                         }
                     }
                 }
@@ -583,9 +583,7 @@ pub fn eval_struct_member(
                     if x.path == member_path {
                         let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
                         comptime.is_const = true;
-                        return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                            comptime, token,
-                        ))));
+                        return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))));
                     }
                 }
                 Err(ir_error!(token))
@@ -594,17 +592,13 @@ pub fn eval_struct_member(
                 GenericBoundKind::Type => {
                     let mut comptime = Comptime::create_unknown(ClockDomain::None, token);
                     comptime.is_const = true;
-                    Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                        comptime, token,
-                    ))))
+                    Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))))
                 }
                 GenericBoundKind::Proto(x) => {
                     let r#type = x.to_ir_type(context, TypePosition::Variable)?;
                     let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
                     comptime.is_const = true;
-                    Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                        comptime, token,
-                    ))))
+                    Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))))
                 }
                 _ => Err(ir_error!(token)),
             },
@@ -1124,7 +1118,7 @@ pub fn eval_function_call(
                 let args = args.to_system_function_args(context, &symbol.found);
                 let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                 Ok(ir::Expression::Term(Box::new(
-                    ir::Factor::SystemFunctionCall(ret, token),
+                    ir::Factor::SystemFunctionCall(ret),
                 )))
             }
             SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
@@ -1132,14 +1126,14 @@ pub fn eval_function_call(
                     function_call(context, value.expression_identifier.as_ref(), args, token)?;
 
                 Ok(ir::Expression::Term(Box::new(ir::Factor::FunctionCall(
-                    ret, token,
+                    ret,
                 ))))
             }
             SymbolKind::SystemVerilog => {
                 let mut x = Comptime::create_unknown(ClockDomain::None, token);
                 x.is_const = true;
                 context.insert_ir_error::<()>(&Err(ir_error!(token)));
-                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))))
+                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             SymbolKind::ProtoFunction(_) => Err(ir_error!(token)),
             _ => {
@@ -1206,7 +1200,9 @@ pub fn eval_struct_constructor(
 
             ret.push((x.name, expr));
         }
-        Ok(ir::Expression::StructConstructor(r#type, ret))
+
+        let comptime = Box::new(Comptime::create_unknown(ClockDomain::None, token));
+        Ok(ir::Expression::StructConstructor(r#type, ret, comptime))
     } else {
         unreachable!();
     }
@@ -1229,9 +1225,8 @@ pub fn eval_external_symbol(
                     comptime.value.expand_value(width);
                 }
 
-                return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    comptime, token,
-                ))));
+                comptime.token = token;
+                return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))));
             }
         }
         SymbolKind::GenericParameter(x) => {
@@ -1265,7 +1260,7 @@ pub fn eval_external_symbol(
                     x.is_global = true;
                     x.r#type = r#type;
 
-                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
                 }
             } else if matches!(x.bound, GenericBoundKind::Type) {
                 let mut x = Comptime::create_unknown(ClockDomain::None, token);
@@ -1279,7 +1274,7 @@ pub fn eval_external_symbol(
                 x.is_global = true;
                 x.r#type.kind = ir::TypeKind::Type;
 
-                return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
             } else {
                 context.insert_error(AnalyzerError::invalid_factor(
                     Some(&symbol.found.token.to_string()),
@@ -1296,7 +1291,7 @@ pub fn eval_external_symbol(
             x.is_const = true;
             x.is_global = true;
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
         }
         SymbolKind::ProtoTypeDef(_) => {
             let mut x = Comptime::create_unknown(ClockDomain::None, token);
@@ -1304,7 +1299,7 @@ pub fn eval_external_symbol(
             x.is_const = true;
             x.is_global = true;
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
         }
         SymbolKind::EnumMember(x) => {
             let enum_symbol = symbol.found.get_parent().unwrap();
@@ -1320,8 +1315,9 @@ pub fn eval_external_symbol(
                     ));
                 }
                 EnumMemberValue::ExplicitValue(x, _) => {
-                    let (x, _) = eval_expr(context, None, x, false)?;
-                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                    let (mut x, _) = eval_expr(context, None, x, false)?;
+                    x.token = token;
+                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
                 }
                 EnumMemberValue::UnevaluableValue => (),
             }
@@ -1355,7 +1351,7 @@ pub fn eval_external_symbol(
             x.is_const = true;
             x.is_global = true;
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
         }
         SymbolKind::Function(_) | SymbolKind::Module(_) | SymbolKind::SystemFunction(_) => {
             context.insert_error(AnalyzerError::invalid_factor(
@@ -1384,7 +1380,7 @@ pub fn eval_external_symbol(
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
             let x = Comptime::from_type(r#type, x.clock_domain, token);
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
         }
         SymbolKind::Enum(_) | SymbolKind::Struct(_) | SymbolKind::Union(_) => {
             let r#type = symbol::Type {
@@ -1409,7 +1405,7 @@ pub fn eval_external_symbol(
                 ..Default::default()
             };
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))));
         }
         _ => (),
     }
@@ -1424,7 +1420,11 @@ pub fn case_condition(
     let mut ret = range_item(context, tgt, &cond.range_item)?;
     for x in &cond.case_condition_list {
         let item = range_item(context, tgt, &x.range_item)?;
-        ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item));
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            item.token_range(),
+        ));
+        ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item), comptime);
     }
     Ok(ret)
 }
@@ -1437,7 +1437,11 @@ pub fn range_list(
     let mut ret = range_item(context, tgt, &list.range_item)?;
     for x in &list.range_list_list {
         let item = range_item(context, tgt, &x.range_item)?;
-        ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item));
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            item.token_range(),
+        ));
+        ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item), comptime);
     }
     Ok(ret)
 }
@@ -1460,13 +1464,16 @@ fn range_item(
     let ret = if let Some(x) = &range_item.range.range_opt {
         let mut exp0: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
 
+        let token: TokenRange = range_item.into();
         let comptime = exp0.eval_comptime(context, None, exp0.eval_signed());
         if !comptime.is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::CaseCondition,
-                &range_item.into(),
+                &token,
             ));
         }
+
+        let comptime = Box::new(Comptime::create_unknown(ClockDomain::None, token));
 
         match x.range_operator.as_ref() {
             RangeOperator::DotDot(_) => {
@@ -1474,27 +1481,41 @@ fn range_item(
                     Box::new(exp.clone()),
                     Op::LessEq,
                     Box::new(tgt.clone()),
+                    comptime.clone(),
                 );
-                let cond1 =
-                    ir::Expression::Binary(Box::new(tgt.clone()), Op::Less, Box::new(exp0.clone()));
-                ir::Expression::Binary(Box::new(cond0), Op::LogicAnd, Box::new(cond1))
+                let cond1 = ir::Expression::Binary(
+                    Box::new(tgt.clone()),
+                    Op::Less,
+                    Box::new(exp0.clone()),
+                    comptime.clone(),
+                );
+                ir::Expression::Binary(Box::new(cond0), Op::LogicAnd, Box::new(cond1), comptime)
             }
             RangeOperator::DotDotEqu(_) => {
                 let cond0 = ir::Expression::Binary(
                     Box::new(exp.clone()),
                     Op::LessEq,
                     Box::new(tgt.clone()),
+                    comptime.clone(),
                 );
                 let cond1 = ir::Expression::Binary(
                     Box::new(tgt.clone()),
                     Op::LessEq,
                     Box::new(exp0.clone()),
+                    comptime.clone(),
                 );
-                ir::Expression::Binary(Box::new(cond0), Op::LogicAnd, Box::new(cond1))
+                ir::Expression::Binary(Box::new(cond0), Op::LogicAnd, Box::new(cond1), comptime)
             }
         }
     } else {
-        ir::Expression::Binary(Box::new(tgt.clone()), Op::EqWildcard, Box::new(exp))
+        let token: TokenRange = range_item.into();
+        let comptime = Box::new(Comptime::create_unknown(ClockDomain::None, token));
+        ir::Expression::Binary(
+            Box::new(tgt.clone()),
+            Op::EqWildcard,
+            Box::new(exp),
+            comptime,
+        )
     };
     Ok(ret)
 }
@@ -1503,7 +1524,11 @@ pub fn switch_condition(context: &mut Context, cond: &SwitchCondition) -> IrResu
     let mut ret: ir::Expression = Conv::conv(context, cond.expression.as_ref())?;
     for x in &cond.switch_condition_list {
         let exp: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-        ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(exp));
+        let comptime = Box::new(Comptime::create_unknown(
+            ClockDomain::None,
+            exp.token_range(),
+        ));
+        ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(exp), comptime);
     }
     Ok(ret)
 }
@@ -1759,16 +1784,17 @@ pub fn get_port_connects(
         for member in members {
             if member.1.is_input() | member.1.is_output() {
                 let member_path = member.0.clone();
-                let expr = if let Some((var_id, comptime)) = context.find_path(&member_path) {
+                let expr = if let Some((var_id, mut comptime)) = context.find_path(&member_path) {
+                    comptime.token = token;
                     ir::Expression::Term(Box::new(ir::Factor::Variable(
                         var_id,
                         VarIndex::default(),
                         VarSelect::default(),
                         comptime,
-                        token,
                     )))
                 } else {
-                    ir::Expression::Term(Box::new(ir::Factor::Unknown(token)))
+                    let comptime = Comptime::create_unknown(ClockDomain::None, token);
+                    ir::Expression::Term(Box::new(ir::Factor::Unknown(comptime)))
                 };
                 let dst = vec![VarPathSelect(
                     member_path.clone(),
@@ -1807,15 +1833,15 @@ pub fn get_port_connects(
         let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
 
         ret.push((port_path.clone(), dst, expr));
-    } else if let Some((var_id, comptime)) = context.find_path(port_path) {
+    } else if let Some((var_id, mut comptime)) = context.find_path(port_path) {
         check_compatibility(context, port_type, &comptime, &token);
 
+        comptime.token = token;
         let expr = ir::Expression::Term(Box::new(ir::Factor::Variable(
             var_id,
             VarIndex::default(),
             VarSelect::default(),
             comptime,
-            token,
         )));
         let dst = vec![VarPathSelect(
             port_path.clone(),
@@ -1958,7 +1984,9 @@ pub fn expand_connect_const(
         for lhs in lhs_members {
             if lhs.1.is_output() {
                 let dst = VarPathSelect(lhs.0, lhs_select.clone(), lhs_token);
-                let src = ir::Factor::Value(comptime.clone(), token);
+                let mut comptime = comptime.clone();
+                comptime.token = token;
+                let src = ir::Factor::Value(comptime);
                 let src = ir::Expression::Term(Box::new(src));
 
                 if let Some(dst) = dst.to_assign_destination(context, false) {
@@ -2125,13 +2153,16 @@ pub fn function_call(
     let ret = context.block(|c| {
         let func = get_function(c, &path, is_local_function, token)?;
         let (inputs, outputs) = args.to_function_args(c, &func, token)?;
+
+        let mut comptime = func.r#type.clone();
+        comptime.token = token;
+
         Ok(ir::FunctionCall {
             id: func.id,
             index,
-            ret: func.r#type,
+            comptime,
             inputs,
             outputs,
-            token,
         })
     });
 

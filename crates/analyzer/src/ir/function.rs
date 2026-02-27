@@ -5,7 +5,7 @@ use crate::ir::{
     AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
     ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
 };
-use crate::symbol::{ClockDomain, Direction, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
 use crate::{AnalyzerError, HashMap, ir_error};
 use indent::indent_all_by;
@@ -64,7 +64,7 @@ pub struct Function {
     pub name: StrId,
     pub id: VarId,
     pub path: FuncPath,
-    pub r#type: Option<Comptime>,
+    pub r#type: Comptime,
     pub array: Shape,
     pub arity: usize,
     pub args: Vec<FuncArg>,
@@ -107,7 +107,7 @@ impl Function {
 pub struct FuncProto {
     pub name: StrId,
     pub id: VarId,
-    pub r#type: Option<Comptime>,
+    pub r#type: Comptime,
     pub arity: usize,
     pub args: Vec<FuncArg>,
     pub token: TokenRange,
@@ -166,13 +166,30 @@ impl fmt::Display for Function {
 pub struct FunctionCall {
     pub id: VarId,
     pub index: Option<Vec<usize>>,
-    pub ret: Option<Comptime>,
+    pub comptime: Comptime,
     pub inputs: HashMap<VarPath, Expression>,
     pub outputs: HashMap<VarPath, Vec<AssignDestination>>,
-    pub token: TokenRange,
 }
 
 impl FunctionCall {
+    pub fn eval_type(&mut self, context: &mut Context) {
+        let mut is_const = context
+            .functions
+            .get(&self.id)
+            .map(|func| func.constantable)
+            .unwrap_or(true);
+        for expr in self.inputs.values_mut() {
+            is_const &= expr.eval_comptime(context, None, false).is_const;
+        }
+
+        // function with side-effect through output ports is not const
+        if !self.outputs.is_empty() {
+            is_const = false;
+        }
+
+        self.comptime.is_const = is_const;
+    }
+
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
         let func = context.functions.get(&self.id)?;
         let func = if let Some(x) = &self.index {
@@ -225,13 +242,8 @@ impl FunctionCall {
             is_const = false;
         }
 
-        let mut ret = if let Some(x) = &self.ret {
-            let mut ret = x.clone();
-            ret.value = value;
-            ret
-        } else {
-            Comptime::create_unknown(ClockDomain::None, self.token)
-        };
+        let mut ret = self.comptime.clone();
+        ret.value = value;
 
         ret.is_const = is_const;
         ret
@@ -251,12 +263,17 @@ impl FunctionCall {
                         dst.select.eval_value(context, &variable.r#type, false)
                     {
                         let mask = ValueBigUint::gen_mask_range(beg, end);
-                        let (success, tokens) =
-                            assign_table.insert_assign(&variable, index, mask, false, self.token);
+                        let (success, tokens) = assign_table.insert_assign(
+                            &variable,
+                            index,
+                            mask,
+                            false,
+                            self.comptime.token,
+                        );
                         if !success & assign_context.is_ff() {
                             context.insert_error(AnalyzerError::multiple_assignment(
                                 &variable.path.to_string(),
-                                &self.token,
+                                &self.comptime.token,
                                 &tokens,
                             ));
                         }

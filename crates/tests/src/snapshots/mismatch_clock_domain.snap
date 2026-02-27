@@ -5,14 +5,15 @@ expression: out
 mismatch_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain)
 
   × Clock domain crossing is detected
-   ╭─[../../testcases/error/mismatch_clock_domain.veryl:2:9]
- 1 │ module mismatch_clock_domain {
+   ╭─[../../testcases/error/mismatch_clock_domain.veryl:3:9]
  2 │     let a: 'v logic = 0;
-   ·         ┬
-   ·         ╰── clock domain 'v
  3 │     var b: 'w logic;
    ·         ┬
    ·         ╰── clock domain 'w
  4 │ 
+ 5 │     assign b = a;
+   ·                ┬
+   ·                ╰── clock domain 'v
+ 6 │ }
    ╰────
   help:
