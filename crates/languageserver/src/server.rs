@@ -536,10 +536,8 @@ impl Server {
                         tokens.push((symbol.token, token_type));
                     }
                     for reference in &symbol.references {
-                        if reference.source == path {
-                            if !is_keyword_token(*reference) {
-                                tokens.push((*reference, token_type));
-                            }
+                        if reference.source == path && !is_keyword_token(*reference) {
+                            tokens.push((*reference, token_type));
                         }
                     }
                 }
