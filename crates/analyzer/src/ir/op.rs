@@ -708,25 +708,29 @@ impl Op {
                 let x = x.expand(xy_width, false);
                 let y = y.expand(xy_width, false);
 
-                let (is_zero, is_x) = match (x.as_ref(), y.as_ref()) {
+                let (is_mismatch, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let wildcard = !y.mask_xz;
-                        let is_zero = x.payload & wildcard != y.payload & wildcard;
-                        let is_x = x.mask_xz & wildcard != 0;
-                        (is_zero, is_x)
+                        let compare_mask = !y.mask_xz;
+                        let val_diff = (x.payload ^ y.payload) & compare_mask;
+                        let definite_diff = val_diff & !x.mask_xz;
+                        let is_mismatch = definite_diff != 0;
+                        let is_x = x.mask_xz & compare_mask != 0;
+                        (is_mismatch, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let wildcard = mask_cache.get(y.width as usize);
-                        let wildcard = y.mask_xz() ^ wildcard;
+                        let full_mask = mask_cache.get(y.width as usize);
+                        let compare_mask = y.mask_xz() ^ full_mask;
 
-                        let is_zero = x.payload() & &wildcard != y.payload() & &wildcard;
-                        let is_x = x.mask_xz() & &wildcard != b0();
-                        (is_zero, is_x)
+                        let val_diff = (x.payload() ^ y.payload()) & &compare_mask;
+                        let definite_diff = val_diff & (x.mask_xz() ^ full_mask);
+                        let is_mismatch = definite_diff != b0();
+                        let is_x = x.mask_xz() & &compare_mask != b0();
+                        (is_mismatch, is_x)
                     }
                     _ => unreachable!(),
                 };
 
-                let ret = ValueU64::new_bit_x0(is_x, is_zero);
+                let ret = ValueU64::new_bit_0x(is_mismatch, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
@@ -735,25 +739,29 @@ impl Op {
                 let x = x.expand(xy_width, false);
                 let y = y.expand(xy_width, false);
 
-                let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
+                let (is_mismatch, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        let wildcard = !y.mask_xz;
-                        let is_one = x.payload & wildcard != y.payload & wildcard;
-                        let is_x = x.mask_xz & wildcard != 0;
-                        (is_one, is_x)
+                        let compare_mask = !y.mask_xz;
+                        let val_diff = (x.payload ^ y.payload) & compare_mask;
+                        let definite_diff = val_diff & !x.mask_xz;
+                        let is_mismatch = definite_diff != 0;
+                        let is_x = x.mask_xz & compare_mask != 0;
+                        (is_mismatch, is_x)
                     }
                     (Value::BigUint(x), Value::BigUint(y)) => {
-                        let wildcard = mask_cache.get(y.width as usize);
-                        let wildcard = y.mask_xz() ^ wildcard;
+                        let full_mask = mask_cache.get(y.width as usize);
+                        let compare_mask = y.mask_xz() ^ full_mask;
 
-                        let is_one = x.payload() & &wildcard != y.payload() & &wildcard;
-                        let is_x = x.mask_xz() & &wildcard != b0();
-                        (is_one, is_x)
+                        let val_diff = (x.payload() ^ y.payload()) & &compare_mask;
+                        let definite_diff = val_diff & (x.mask_xz() ^ full_mask);
+                        let is_mismatch = definite_diff != b0();
+                        let is_x = x.mask_xz() & &compare_mask != b0();
+                        (is_mismatch, is_x)
                     }
                     _ => unreachable!(),
                 };
 
-                let ret = ValueU64::new_bit_x1(is_x, is_one);
+                let ret = ValueU64::new_bit_1x(is_mismatch, is_x);
                 let ret = Value::U64(ret);
                 ret.expand(width, false).into_owned()
             }
