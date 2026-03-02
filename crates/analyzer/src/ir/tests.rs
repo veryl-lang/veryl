@@ -1857,3 +1857,73 @@ fn concat() {
 "#;
     check_ir(code, exp);
 }
+
+#[test]
+fn proto_function() {
+    let code = r#"
+    proto package Element {
+        type data;
+        function gt(a: input data, b: input data) -> logic;
+    }
+    package IntElement for Element {
+        type data = logic<8>;
+        function gt(a: input data, b: input data) -> logic {
+            return a >: b;
+        }
+    }
+    module ModuleA::<E: Element> (
+        a: input  E::data,
+        b: input  E::data,
+        r: output logic,
+    ) {
+        always_comb {
+            r = E::gt(a, b);
+        }
+    }
+    module Top (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        r: output logic,
+    ) {
+        inst inner: ModuleA::<IntElement> (a, b, r);
+    }
+    "#;
+    let exp = r#"module ModuleA {
+  input var0(a): unknown = 1'hx;
+  input var1(b): unknown = 1'hx;
+  output var2(r): logic = 1'hx;
+
+  comb {
+    var2 = unknown;
+  }
+}
+module Top {
+  input var0(a): logic<8> = 8'hxx;
+  input var1(b): logic<8> = 8'hxx;
+  output var2(r): logic = 1'hx;
+
+  inst inner (
+    var0 <- var0;
+    var1 <- var1;
+    var2 -> var2;
+  ) {
+    module ModuleA {
+      input var0(a): logic<8> = 8'hxx;
+      input var1(b): logic<8> = 8'hxx;
+      output var2(r): logic = 1'hx;
+      var var4(E.gt.return): logic = 1'hx;
+      input var5(E.gt.a): logic<8> = 8'hxx;
+      input var6(E.gt.b): logic<8> = 8'hxx;
+      func var3(E.gt) -> var4 {
+        var4 = (var5 >: var6);
+      }
+
+      comb {
+        var2 = var3(a: var0, b: var1);
+      }
+    }
+  }
+}
+"#;
+    check_ir(code, exp);
+}
