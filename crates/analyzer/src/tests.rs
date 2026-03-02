@@ -4595,6 +4595,26 @@ fn missing_reset_statement() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module jtag_tap2 (
+        i_tck : input clock,
+        i_trst: input reset,
+    ) {
+        var data_shift_reg: logic<40>;
+    
+        always_ff {
+            if_reset {
+                data_shift_reg = '0;
+            } else {
+                {data_shift_reg[31:0]} = {data_shift_reg[31:0]};
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
