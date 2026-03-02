@@ -11,6 +11,10 @@ on:
 
 jobs:
   benchmarks:
+    strategy:
+      matrix:
+        package: [veryl-tests, veryl-simulator]
+
     name: Run benchmarks
     runs-on: ubuntu-latest
     steps:
@@ -24,11 +28,11 @@ jobs:
           bins: cargo-codspeed
 
       - name: Build the benchmark target(s)
-        run: cargo codspeed build -p veryl-tests --bench benchmark
+        run: cargo codspeed build -p ${{ matrix.package }} --bench benchmark
 
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          run: cargo codspeed run -p veryl-tests
+          run: cargo codspeed run -p ${{ matrix.package }}
           mode: "instrumentation"
           token: ${{ secrets.CODSPEED_TOKEN }}
