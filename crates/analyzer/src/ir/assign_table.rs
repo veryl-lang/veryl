@@ -394,7 +394,13 @@ impl AssignTable {
             if let Some(src_val) = self.table.get(key) {
                 if let Some(array) = src_val.array.total() {
                     for i in 0..array {
-                        if &src_val.mask[i] ^ &tgt_val.mask[i] != 0u32.into() {
+                        // If reset bit covers used bit, it passes the check.
+                        //
+                        // reset used
+                        // 0b011 0b011 -> OK
+                        // 0b111 0b011 -> OK
+                        // 0b011 0b111 -> NG
+                        if &src_val.mask[i] ^ (&src_val.mask[i] | &tgt_val.mask[i]) != 0u32.into() {
                             let mut tokens = src_val.tokens.clone();
                             tokens.sort();
                             tokens.dedup();
