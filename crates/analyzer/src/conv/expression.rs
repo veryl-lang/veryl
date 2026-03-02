@@ -1,7 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::conv::utils::{
-    TypePosition, case_condition, eval_expr, eval_external_symbol, eval_function_call, eval_size,
-    eval_struct_constructor, eval_type, eval_width_select, range_list, switch_condition,
+    TypePosition, case_condition, eval_expr, eval_factor_path, eval_function_call, eval_size,
+    eval_struct_constructor, eval_type, range_list, switch_condition,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -313,8 +313,16 @@ impl Conv<&CastingType> for ir::Factor {
     fn conv(context: &mut Context, value: &CastingType) -> IrResult<Self> {
         let token = value.into();
         let value = if let CastingType::UserDefinedType(x) = value {
-            let path: GenericSymbolPath = x.user_defined_type.scoped_identifier.as_ref().into();
-            eval_type(context, &path, TypePosition::Cast)?
+            let identifier = x.user_defined_type.scoped_identifier.as_ref();
+            let symbol_path: GenericSymbolPath = identifier.into();
+
+            let r#type = eval_type(context, &symbol_path, TypePosition::Cast);
+            if r#type.is_ok() {
+                r#type?
+            } else {
+                let var_path: VarPathSelect = Conv::conv(context, identifier)?;
+                return eval_factor_path(context, symbol_path, var_path, false, token);
+            }
         } else {
             let (kind, width, signed) = match value {
                 CastingType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
@@ -350,16 +358,28 @@ impl Conv<&CastingType> for ir::Factor {
                     (TypeKind::ResetSyncLow, Shape::new(vec![Some(1)]), false)
                 }
                 CastingType::Based(x) => {
-                    let value: Comptime = Conv::conv(context, x.based.as_ref())?;
-                    let value = value.get_value().unwrap().to_usize().unwrap_or(0);
-                    let value = context.check_size(value, x.based.based_token.token.into());
-                    (TypeKind::Bit, Shape::new(vec![value]), false)
+                    let token: TokenRange = x.based.based_token.token.into();
+                    let comptime: Comptime = Conv::conv(context, x.based.as_ref())?;
+
+                    if let Ok(value) = comptime.get_value()
+                        && let Some(value) = value.to_usize()
+                    {
+                        let _ = context.check_size(value, token);
+                    }
+
+                    return Ok(ir::Factor::Value(comptime, token));
                 }
                 CastingType::BaseLess(x) => {
-                    let value: Comptime = Conv::conv(context, x.base_less.as_ref())?;
-                    let value = value.get_value().unwrap().to_usize().unwrap_or(0);
-                    let value = context.check_size(value, x.base_less.base_less_token.token.into());
-                    (TypeKind::Bit, Shape::new(vec![value]), false)
+                    let token: TokenRange = x.base_less.base_less_token.token.into();
+                    let comptime: Comptime = Conv::conv(context, x.base_less.as_ref())?;
+
+                    if let Ok(value) = comptime.get_value()
+                        && let Some(value) = value.to_usize()
+                    {
+                        let _ = context.check_size(value, token);
+                    }
+
+                    return Ok(ir::Factor::Value(comptime, token));
                 }
                 CastingType::UserDefinedType(_) => unreachable!(),
             };
@@ -708,76 +728,11 @@ impl Conv<&IdentifierFactor> for ir::Expression {
                 }
             }
         } else {
-            let x = value.expression_identifier.as_ref();
-            let path: VarPathSelect = Conv::conv(context, x)?;
-            let (path, select, _) = path.into();
+            let var_path: VarPathSelect =
+                Conv::conv(context, value.expression_identifier.as_ref())?;
+            let symbol_path: GenericSymbolPath = value.expression_identifier.as_ref().into();
 
-            let generic_path = context.resolve_path(x.into());
-
-            let found = if let Some(path) = generic_path.to_var_path()
-                && let Some((var_id, comptime)) = context.find_path(&path)
-            {
-                Some((var_id, comptime))
-            } else {
-                context.find_path(&path)
-            };
-
-            let factor = if let Some((var_id, mut comptime)) = found {
-                if let Some(part_select) = &comptime.part_select {
-                    comptime.r#type = part_select.base.clone();
-                }
-
-                let (array_select, width_select) = select.split(comptime.r#type.array.dims());
-
-                // Array select type check
-                let _ = array_select.eval_comptime(context, &comptime.r#type, true);
-
-                let width_select = if let Some(part_select) = &comptime.part_select {
-                    part_select.to_base_select(context, &width_select)
-                } else {
-                    eval_width_select(context, &path, &comptime.r#type, width_select)
-                };
-                let width_select = width_select.ok_or_else(|| ir_error!(token))?;
-
-                comptime.is_global = false;
-
-                if array_select.is_range() {
-                    // TODO
-                    return Err(ir_error!(token));
-                } else {
-                    let index = array_select.to_index();
-
-                    if comptime.r#type.is_type() {
-                        ir::Factor::Value(comptime, token)
-                    } else {
-                        ir::Factor::Variable(var_id, index, width_select, comptime, token)
-                    }
-                }
-            } else {
-                let path = generic_path;
-                if let Some(x) = path.to_literal() {
-                    let x = x.eval_comptime(token);
-                    ir::Factor::Value(x, token)
-                } else if let Ok(symbol) = symbol_table::resolve(&path) {
-                    // To resolve external symbol reference,
-                    // use an independent context to avoid name conflict
-                    let mut external_context = Context::default();
-                    external_context.inherit(context);
-
-                    external_context.push_generic_map(path.to_generic_maps());
-                    let ret =
-                        external_context.block(|c| eval_external_symbol(c, path, symbol, token));
-
-                    external_context.pop_generic_map();
-                    context.inherit(&mut external_context);
-
-                    return ret;
-                } else if path.is_anonymous() {
-                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Anonymous(token))));
-                } else {
-                    return Err(ir_error!(token));
-                }
-            };
+            let factor = eval_factor_path(context, symbol_path, var_path, true, token)?;
             Ok(ir::Expression::Term(Box::new(factor)))
         }
     }

@@ -3281,6 +3281,8 @@ mod tests {
         //x = 8'h11 ==? 8'h1z; $display("%b", x); // 0000000000000001
         //x = 8'hxz ==? 8'hxz; $display("%b", x); // 0000000000000001
         //x = 8'hzx ==? 8'hxz; $display("%b", x); // 0000000000000001
+        //x = 8'hx3 ==? 8'h30; $display("%b", x); // 0000000000000000
+        //x = 8'hx5 ==? 8'h36; $display("%b", x); // 0000000000000000
 
         let op = Op::EqWildcard;
         let mut cache = MaskCache::default();
@@ -3293,6 +3295,8 @@ mod tests {
         let x05 = Value::from_str("8'h11").unwrap();
         let x06 = Value::from_str("8'hxz").unwrap();
         let x07 = Value::from_str("8'hzx").unwrap();
+        let x08 = Value::from_str("8'hx3").unwrap();
+        let x09 = Value::from_str("8'hx5").unwrap();
         let x10 = Value::from_str("8'h00").unwrap();
         let x11 = Value::from_str("8'he2").unwrap();
         let x12 = Value::from_str("8'h30").unwrap();
@@ -3301,6 +3305,8 @@ mod tests {
         let x15 = Value::from_str("8'h1z").unwrap();
         let x16 = Value::from_str("8'hxz").unwrap();
         let x17 = Value::from_str("8'hxz").unwrap();
+        let x18 = Value::from_str("8'h30").unwrap();
+        let x19 = Value::from_str("8'h36").unwrap();
         let x00 = op.eval_binary(&x00, &x10, Some(16), false, &mut cache);
         let x01 = op.eval_binary(&x01, &x11, Some(16), false, &mut cache);
         let x02 = op.eval_binary(&x02, &x12, Some(16), false, &mut cache);
@@ -3309,6 +3315,8 @@ mod tests {
         let x05 = op.eval_binary(&x05, &x15, Some(16), false, &mut cache);
         let x06 = op.eval_binary(&x06, &x16, Some(16), false, &mut cache);
         let x07 = op.eval_binary(&x07, &x17, Some(16), false, &mut cache);
+        let x08 = op.eval_binary(&x08, &x18, Some(16), false, &mut cache);
+        let x09 = op.eval_binary(&x09, &x19, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -3317,6 +3325,8 @@ mod tests {
         assert_eq!(format!("{:b}", x05), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x06), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x07), "16'b0000000000000001");
+        assert_eq!(format!("{:b}", x08), "16'b0000000000000000");
+        assert_eq!(format!("{:b}", x09), "16'b0000000000000000");
 
         let x00 = Value::from_str("68'h00000000000000000").unwrap();
         let x01 = Value::from_str("68'hffffffffffffffff1").unwrap();
@@ -3326,6 +3336,7 @@ mod tests {
         let x05 = Value::from_str("68'h11111111111111111").unwrap();
         let x06 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
         let x07 = Value::from_str("68'hzzzzzzzzzzzzzzzzx").unwrap();
+        let x08 = Value::from_str("68'hxxxxxxxxxxxxxxxx3").unwrap();
         let x10 = Value::from_str("68'h00000000000000000").unwrap();
         let x11 = Value::from_str("68'heeeeeeeeeeeeeeee2").unwrap();
         let x12 = Value::from_str("68'h33333333333333330").unwrap();
@@ -3334,6 +3345,7 @@ mod tests {
         let x15 = Value::from_str("68'h1111111111111111z").unwrap();
         let x16 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
         let x17 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
+        let x18 = Value::from_str("68'h33333333333333330").unwrap();
         let x00 = op.eval_binary(&x00, &x10, Some(68), false, &mut cache);
         let x01 = op.eval_binary(&x01, &x11, Some(68), false, &mut cache);
         let x02 = op.eval_binary(&x02, &x12, Some(68), false, &mut cache);
@@ -3342,6 +3354,7 @@ mod tests {
         let x05 = op.eval_binary(&x05, &x15, Some(68), false, &mut cache);
         let x06 = op.eval_binary(&x06, &x16, Some(68), false, &mut cache);
         let x07 = op.eval_binary(&x07, &x17, Some(68), false, &mut cache);
+        let x08 = op.eval_binary(&x08, &x18, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -3350,6 +3363,7 @@ mod tests {
         assert_eq!(format!("{:x}", x05), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x06), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x07), "68'h00000000000000001");
+        assert_eq!(format!("{:x}", x08), "68'h00000000000000000");
     }
 
     #[test]
@@ -3362,6 +3376,8 @@ mod tests {
         //x = 8'h11 !=? 8'h1z; $display("%b", x); // 0000000000000000
         //x = 8'hxz !=? 8'hxz; $display("%b", x); // 0000000000000000
         //x = 8'hzx !=? 8'hxz; $display("%b", x); // 0000000000000000
+        //x = 8'hx3 !=? 8'h30; $display("%b", x); // 0000000000000001
+        //x = 8'hx5 !=? 8'h36; $display("%b", x); // 0000000000000001
 
         let op = Op::NeWildcard;
         let mut cache = MaskCache::default();
@@ -3374,6 +3390,8 @@ mod tests {
         let x05 = Value::from_str("8'h11").unwrap();
         let x06 = Value::from_str("8'hxz").unwrap();
         let x07 = Value::from_str("8'hzx").unwrap();
+        let x08 = Value::from_str("8'hx3").unwrap();
+        let x09 = Value::from_str("8'hx5").unwrap();
         let x10 = Value::from_str("8'h00").unwrap();
         let x11 = Value::from_str("8'he2").unwrap();
         let x12 = Value::from_str("8'h30").unwrap();
@@ -3382,6 +3400,8 @@ mod tests {
         let x15 = Value::from_str("8'h1z").unwrap();
         let x16 = Value::from_str("8'hxz").unwrap();
         let x17 = Value::from_str("8'hxz").unwrap();
+        let x18 = Value::from_str("8'h30").unwrap();
+        let x19 = Value::from_str("8'h36").unwrap();
         let x00 = op.eval_binary(&x00, &x10, Some(16), false, &mut cache);
         let x01 = op.eval_binary(&x01, &x11, Some(16), false, &mut cache);
         let x02 = op.eval_binary(&x02, &x12, Some(16), false, &mut cache);
@@ -3390,6 +3410,8 @@ mod tests {
         let x05 = op.eval_binary(&x05, &x15, Some(16), false, &mut cache);
         let x06 = op.eval_binary(&x06, &x16, Some(16), false, &mut cache);
         let x07 = op.eval_binary(&x07, &x17, Some(16), false, &mut cache);
+        let x08 = op.eval_binary(&x08, &x18, Some(16), false, &mut cache);
+        let x09 = op.eval_binary(&x09, &x19, Some(16), false, &mut cache);
         assert_eq!(format!("{:b}", x00), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x01), "16'b0000000000000001");
         assert_eq!(format!("{:b}", x02), "16'b000000000000000x");
@@ -3398,6 +3420,8 @@ mod tests {
         assert_eq!(format!("{:b}", x05), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x06), "16'b0000000000000000");
         assert_eq!(format!("{:b}", x07), "16'b0000000000000000");
+        assert_eq!(format!("{:b}", x08), "16'b0000000000000001");
+        assert_eq!(format!("{:b}", x09), "16'b0000000000000001");
 
         let x00 = Value::from_str("68'h00000000000000000").unwrap();
         let x01 = Value::from_str("68'hffffffffffffffff1").unwrap();
@@ -3407,6 +3431,8 @@ mod tests {
         let x05 = Value::from_str("68'h11111111111111111").unwrap();
         let x06 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
         let x07 = Value::from_str("68'hzzzzzzzzzzzzzzzzx").unwrap();
+        let x08 = Value::from_str("68'hxxxxxxxxxxxxxxxx3").unwrap();
+        let x09 = Value::from_str("68'hxxxxxxxxxxxxxxxx5").unwrap();
         let x10 = Value::from_str("68'h00000000000000000").unwrap();
         let x11 = Value::from_str("68'heeeeeeeeeeeeeeee2").unwrap();
         let x12 = Value::from_str("68'h33333333333333330").unwrap();
@@ -3415,6 +3441,8 @@ mod tests {
         let x15 = Value::from_str("68'h1111111111111111z").unwrap();
         let x16 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
         let x17 = Value::from_str("68'hxxxxxxxxxxxxxxxxz").unwrap();
+        let x18 = Value::from_str("68'h33333333333333330").unwrap();
+        let x19 = Value::from_str("68'h33333333333333336").unwrap();
         let x00 = op.eval_binary(&x00, &x10, Some(68), false, &mut cache);
         let x01 = op.eval_binary(&x01, &x11, Some(68), false, &mut cache);
         let x02 = op.eval_binary(&x02, &x12, Some(68), false, &mut cache);
@@ -3423,6 +3451,8 @@ mod tests {
         let x05 = op.eval_binary(&x05, &x15, Some(68), false, &mut cache);
         let x06 = op.eval_binary(&x06, &x16, Some(68), false, &mut cache);
         let x07 = op.eval_binary(&x07, &x17, Some(68), false, &mut cache);
+        let x08 = op.eval_binary(&x08, &x18, Some(68), false, &mut cache);
+        let x09 = op.eval_binary(&x09, &x19, Some(68), false, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x01), "68'h00000000000000001");
         assert_eq!(format!("{:x}", x02), "68'h0000000000000000X");
@@ -3431,6 +3461,8 @@ mod tests {
         assert_eq!(format!("{:x}", x05), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x06), "68'h00000000000000000");
         assert_eq!(format!("{:x}", x07), "68'h00000000000000000");
+        assert_eq!(format!("{:x}", x08), "68'h00000000000000001");
+        assert_eq!(format!("{:x}", x09), "68'h00000000000000001");
     }
 
     #[test]

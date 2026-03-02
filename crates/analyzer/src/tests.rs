@@ -4595,6 +4595,26 @@ fn missing_reset_statement() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module jtag_tap2 (
+        i_tck : input clock,
+        i_trst: input reset,
+    ) {
+        var data_shift_reg: logic<40>;
+    
+        always_ff {
+            if_reset {
+                data_shift_reg = '0;
+            } else {
+                {data_shift_reg[31:0]} = {data_shift_reg[31:0]};
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7852,6 +7872,29 @@ fn unevaluable_value_reset_value() {
         always_ff {
             if_reset {
                 _a = 0 as B;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package Pkg {
+        const W: u32 = 8;
+    }
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        import Pkg::*;
+        var _d: logic<W>;
+        always_ff {
+            if_reset {
+                _d = 0 as W;
+            } else {
+                _d = 1 as W;
             }
         }
     }

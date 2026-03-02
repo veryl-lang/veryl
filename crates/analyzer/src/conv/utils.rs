@@ -548,7 +548,7 @@ pub fn eval_struct_member(
     path: &GenericSymbolPath,
     mut member_path: VarPath,
     token: TokenRange,
-) -> IrResult<ir::Expression> {
+) -> IrResult<ir::Factor> {
     let mut parent_path = path.clone();
     if let Some(x) = parent_path.paths.pop() {
         member_path.add_prelude(&[x.base.text]);
@@ -567,9 +567,7 @@ pub fn eval_struct_member(
                         if x.path == member_path {
                             let comptime = expr.eval_comptime(context, None, expr.eval_signed());
                             // TODO range select from PartSelect
-                            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                                comptime, token,
-                            ))));
+                            return Ok(ir::Factor::Value(comptime, token));
                         }
                     }
                 }
@@ -583,9 +581,7 @@ pub fn eval_struct_member(
                     if x.path == member_path {
                         let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
                         comptime.is_const = true;
-                        return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                            comptime, token,
-                        ))));
+                        return Ok(ir::Factor::Value(comptime, token));
                     }
                 }
                 Err(ir_error!(token))
@@ -594,17 +590,13 @@ pub fn eval_struct_member(
                 GenericBoundKind::Type => {
                     let mut comptime = Comptime::create_unknown(ClockDomain::None, token);
                     comptime.is_const = true;
-                    Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                        comptime, token,
-                    ))))
+                    Ok(ir::Factor::Value(comptime, token))
                 }
                 GenericBoundKind::Proto(x) => {
                     let r#type = x.to_ir_type(context, TypePosition::Variable)?;
                     let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
                     comptime.is_const = true;
-                    Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                        comptime, token,
-                    ))))
+                    Ok(ir::Factor::Value(comptime, token))
                 }
                 _ => Err(ir_error!(token)),
             },
@@ -1212,12 +1204,92 @@ pub fn eval_struct_constructor(
     }
 }
 
+pub fn eval_factor_path(
+    context: &mut Context,
+    symbol_path: GenericSymbolPath,
+    var_path: VarPathSelect,
+    allow_unknown_value: bool,
+    token: TokenRange,
+) -> IrResult<ir::Factor> {
+    let (path, select, _) = var_path.into();
+    let generic_path = context.resolve_path(symbol_path);
+
+    let found = if let Some(path) = generic_path.to_var_path()
+        && let Some((var_id, comptime)) = context.find_path(&path)
+    {
+        Some((var_id, comptime))
+    } else {
+        context.find_path(&path)
+    };
+
+    if let Some((var_id, mut comptime)) = found {
+        if let Some(part_select) = &comptime.part_select {
+            comptime.r#type = part_select.base.clone();
+        }
+
+        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+
+        // Array select type check
+        let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+
+        let width_select = if let Some(part_select) = &comptime.part_select {
+            part_select.to_base_select(context, &width_select)
+        } else {
+            eval_width_select(context, &path, &comptime.r#type, width_select)
+        };
+        let width_select = width_select.ok_or_else(|| ir_error!(token))?;
+
+        comptime.is_global = false;
+
+        if array_select.is_range() {
+            // TODO
+            Err(ir_error!(token))
+        } else {
+            let index = array_select.to_index();
+
+            if comptime.r#type.is_type() {
+                Ok(ir::Factor::Value(comptime, token))
+            } else {
+                Ok(ir::Factor::Variable(
+                    var_id,
+                    index,
+                    width_select,
+                    comptime,
+                    token,
+                ))
+            }
+        }
+    } else if let Some(x) = generic_path.to_literal() {
+        let x = x.eval_comptime(token);
+        Ok(ir::Factor::Value(x, token))
+    } else if generic_path.is_anonymous() {
+        Ok(ir::Factor::Anonymous(token))
+    } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
+        // To resolve external symbol reference,
+        // use an independent context to avoid name conflict
+        let mut external_context = Context::default();
+        external_context.inherit(context);
+
+        external_context.push_generic_map(generic_path.to_generic_maps());
+        let ret = external_context
+            .block(|c| eval_external_symbol(c, generic_path, symbol, allow_unknown_value, token));
+
+        external_context.pop_generic_map();
+        context.inherit(&mut external_context);
+
+        ret
+    } else {
+        Err(ir_error!(token))
+    }
+}
+
 pub fn eval_external_symbol(
     context: &mut Context,
     path: GenericSymbolPath,
     symbol: ResolveResult,
+    allow_unknown_value: bool,
     token: TokenRange,
-) -> IrResult<ir::Expression> {
+) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) => {
             if let Some(expr) = &x.value {
@@ -1229,9 +1301,7 @@ pub fn eval_external_symbol(
                     comptime.value.expand_value(width);
                 }
 
-                return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    comptime, token,
-                ))));
+                return Ok(ir::Factor::Value(comptime, token));
             }
         }
         SymbolKind::GenericParameter(x) => {
@@ -1240,8 +1310,10 @@ pub fn eval_external_symbol(
             {
                 let x = x.eval_comptime(token);
                 Some(x)
-            } else {
+            } else if allow_unknown_value {
                 None
+            } else {
+                return Err(ir_error!(token));
             };
 
             if let Some(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace) {
@@ -1265,7 +1337,7 @@ pub fn eval_external_symbol(
                     x.is_global = true;
                     x.r#type = r#type;
 
-                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                    return Ok(ir::Factor::Value(x, token));
                 }
             } else if matches!(x.bound, GenericBoundKind::Type) {
                 let mut x = Comptime::create_unknown(ClockDomain::None, token);
@@ -1279,7 +1351,7 @@ pub fn eval_external_symbol(
                 x.is_global = true;
                 x.r#type.kind = ir::TypeKind::Type;
 
-                return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                return Ok(ir::Factor::Value(x, token));
             } else {
                 context.insert_error(AnalyzerError::invalid_factor(
                     Some(&symbol.found.token.to_string()),
@@ -1289,22 +1361,22 @@ pub fn eval_external_symbol(
                 ));
             }
         }
-        SymbolKind::ProtoConst(x) => {
+        SymbolKind::ProtoConst(x) if allow_unknown_value => {
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
             let mut x = Comptime::from_type(r#type, ClockDomain::None, token);
 
             x.is_const = true;
             x.is_global = true;
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Factor::Value(x, token));
         }
-        SymbolKind::ProtoTypeDef(_) => {
+        SymbolKind::ProtoTypeDef(_) if allow_unknown_value => {
             let mut x = Comptime::create_unknown(ClockDomain::None, token);
 
             x.is_const = true;
             x.is_global = true;
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Factor::Value(x, token));
         }
         SymbolKind::EnumMember(x) => {
             let enum_symbol = symbol.found.get_parent().unwrap();
@@ -1314,14 +1386,12 @@ pub fn eval_external_symbol(
 
             match &x.value {
                 EnumMemberValue::ImplicitValue(x) => {
-                    return Ok(ir::Expression::create_value(
-                        Value::new(*x as u64, r#enum.width, false),
-                        token,
-                    ));
+                    let value = Value::new(*x as u64, r#enum.width, false);
+                    return Ok(ir::Factor::create_value(value, token));
                 }
                 EnumMemberValue::ExplicitValue(x, _) => {
                     let (x, _) = eval_expr(context, None, x, false)?;
-                    return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+                    return Ok(ir::Factor::Value(x, token));
                 }
                 EnumMemberValue::UnevaluableValue => (),
             }
@@ -1355,7 +1425,7 @@ pub fn eval_external_symbol(
             x.is_const = true;
             x.is_global = true;
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Factor::Value(x, token));
         }
         SymbolKind::Function(_) | SymbolKind::Module(_) | SymbolKind::SystemFunction(_) => {
             context.insert_error(AnalyzerError::invalid_factor(
@@ -1384,7 +1454,7 @@ pub fn eval_external_symbol(
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
             let x = Comptime::from_type(r#type, x.clock_domain, token);
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Factor::Value(x, token));
         }
         SymbolKind::Enum(_) | SymbolKind::Struct(_) | SymbolKind::Union(_) => {
             let r#type = symbol::Type {
@@ -1409,7 +1479,7 @@ pub fn eval_external_symbol(
                 ..Default::default()
             };
 
-            return Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))));
+            return Ok(ir::Factor::Value(x, token));
         }
         _ => (),
     }

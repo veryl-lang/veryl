@@ -57,6 +57,14 @@ fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &E
     }
 }
 
+impl Conv<&ScopedIdentifier> for VarPathSelect {
+    fn conv(context: &mut Context, value: &ScopedIdentifier) -> IrResult<Self> {
+        let var_path: VarPath = Conv::conv(context, value)?;
+        let token: TokenRange = value.into();
+        Ok(VarPathSelect(var_path, VarSelect::default(), token))
+    }
+}
+
 impl Conv<&ExpressionIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &ExpressionIdentifier) -> IrResult<Self> {
         check_separator(context, value);

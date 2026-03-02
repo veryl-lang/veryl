@@ -330,7 +330,15 @@ impl Expression {
                     | Op::NeWildcard
                     | Op::LogicAnd
                     | Op::LogicOr => Some(1),
-                    Op::As => Some(0),
+                    Op::As => {
+                        if let ValueVariant::Numeric(y) = &y.value
+                            && let Some(y) = y.to_usize()
+                        {
+                            Some(y)
+                        } else {
+                            Some(0)
+                        }
+                    }
                     _ => unreachable!(),
                 };
                 ret.r#type.width = Shape::new(vec![width]);
@@ -386,7 +394,12 @@ impl Expression {
                         }
                     }
                     Op::As => {
-                        if let ValueVariant::Type(y) = y.value {
+                        if let ValueVariant::Numeric(y) = &y.value
+                            && let Some(_width) = y.to_usize()
+                        {
+                            // TODO
+                            // Check width range
+                        } else if let ValueVariant::Type(y) = y.value {
                             let invalid_clock_cast = y.is_clock() && !x.r#type.is_clock();
                             let invalid_reset_cast = y.is_reset() && x.r#type.is_clock();
 
