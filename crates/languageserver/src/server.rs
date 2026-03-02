@@ -532,9 +532,11 @@ impl Server {
                     && let VerylSymbolKind::Port(_) = symbol.kind
                 {
                     let token_type = semantic_legend::PROPERTY;
-                    tokens.push((symbol.token, token_type));
+                    if !is_keyword_token(symbol.token) {
+                        tokens.push((symbol.token, token_type));
+                    }
                     for reference in &symbol.references {
-                        if reference.source == path {
+                        if reference.source == path && !is_keyword_token(*reference) {
                             tokens.push((*reference, token_type));
                         }
                     }
@@ -1217,6 +1219,11 @@ fn completion_keyword() -> Vec<CompletionItem> {
     }
 
     items
+}
+
+fn is_keyword_token(token: Token) -> bool {
+    let token_text = token.text.to_string();
+    KEYWORDS.contains(&token_text.as_str())
 }
 
 pub mod semantic_legend {
