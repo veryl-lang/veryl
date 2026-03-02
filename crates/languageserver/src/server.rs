@@ -532,9 +532,7 @@ impl Server {
                     && let VerylSymbolKind::Port(_) = symbol.kind
                 {
                     let token_type = semantic_legend::PROPERTY;
-                    if !is_keyword_token(symbol.token) {
-                        tokens.push((symbol.token, token_type));
-                    }
+                    tokens.push((symbol.token, token_type));
                     for reference in &symbol.references {
                         if reference.source == path && !is_keyword_token(*reference) {
                             tokens.push((*reference, token_type));
