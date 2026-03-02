@@ -521,12 +521,15 @@ impl VerylWalker for Formatter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
-            let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.first()).unwrap();
+            let single_line = if self.mode == Mode::Align {
+                // calc line width as single_line in Align mode (the same as in emitter)
+                true
+            } else if let Some(width) = self.measure_get(&arg.first()) {
+                let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
                 (width < self.format_opt.max_width as u32) || compact
             } else {
-                // calc line width as single_line in Align mode
+                // vertical align mode is off.
+                // Use single line mode forcely.
                 true
             };
             if single_line {
