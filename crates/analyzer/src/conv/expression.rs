@@ -41,7 +41,10 @@ impl Conv<&IfExpression> for ir::Expression {
                 context.insert_error(AnalyzerError::unenclosed_inner_if_expression(&token));
             }
 
-            ret = ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret));
+            let token = TokenRange::from_range(&y.token_range(), &ret.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime);
         }
         Ok(ret)
     }
@@ -52,7 +55,11 @@ impl Conv<&Expression01> for ir::Expression {
         let mut ret: ir::Expression = Conv::conv(context, value.expression02.as_ref())?;
         for x in &value.expression01_list {
             let right: ir::Expression = Conv::conv(context, x.expression02.as_ref())?;
-            ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -63,7 +70,11 @@ impl Conv<&Expression02> for ir::Expression {
         let mut ret: ir::Expression = Conv::conv(context, value.expression03.as_ref())?;
         for x in &value.expression02_list {
             let right: ir::Expression = Conv::conv(context, x.expression03.as_ref())?;
-            ret = ir::Expression::Binary(Box::new(ret), Op::LogicAnd, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), Op::LogicAnd, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -74,7 +85,11 @@ impl Conv<&Expression03> for ir::Expression {
         let mut ret: ir::Expression = Conv::conv(context, value.expression04.as_ref())?;
         for x in &value.expression03_list {
             let right: ir::Expression = Conv::conv(context, x.expression04.as_ref())?;
-            ret = ir::Expression::Binary(Box::new(ret), Op::BitOr, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), Op::BitOr, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -91,7 +106,11 @@ impl Conv<&Expression04> for ir::Expression {
                 "~^" => Op::BitXnor,
                 _ => unreachable!(),
             };
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -102,7 +121,11 @@ impl Conv<&Expression05> for ir::Expression {
         let mut ret: ir::Expression = Conv::conv(context, value.expression06.as_ref())?;
         for x in &value.expression05_list {
             let right: ir::Expression = Conv::conv(context, x.expression06.as_ref())?;
-            ret = ir::Expression::Binary(Box::new(ret), Op::BitAnd, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), Op::BitAnd, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -121,7 +144,11 @@ impl Conv<&Expression06> for ir::Expression {
                 "!=?" => Op::NeWildcard,
                 _ => unreachable!(),
             };
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -140,7 +167,11 @@ impl Conv<&Expression07> for ir::Expression {
                 ">:" => Op::Greater,
                 _ => unreachable!(),
             };
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -159,7 +190,11 @@ impl Conv<&Expression08> for ir::Expression {
                 ">>" => Op::LogicShiftR,
                 _ => unreachable!(),
             };
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -176,7 +211,11 @@ impl Conv<&Expression09> for ir::Expression {
                 "-" => Op::Sub,
                 _ => unreachable!(),
             };
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -198,7 +237,11 @@ impl Conv<&Expression10> for ir::Expression {
                 }
                 Expression10ListGroup::Star(_) => Op::Mul,
             };
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -209,7 +252,11 @@ impl Conv<&Expression11> for ir::Expression {
         let mut ret: ir::Expression = Conv::conv(context, value.expression12.as_ref())?;
         for x in &value.expression11_list {
             let right: ir::Expression = Conv::conv(context, x.expression12.as_ref())?;
-            ret = ir::Expression::Binary(Box::new(ret), Op::Pow, Box::new(right));
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(Box::new(ret), Op::Pow, Box::new(right), comptime);
         }
         Ok(ret)
     }
@@ -217,13 +264,18 @@ impl Conv<&Expression11> for ir::Expression {
 
 impl Conv<&Expression12> for ir::Expression {
     fn conv(context: &mut Context, value: &Expression12) -> IrResult<Self> {
-        let ret = Conv::conv(context, value.expression13.as_ref())?;
+        let ret: ir::Expression = Conv::conv(context, value.expression13.as_ref())?;
         if let Some(x) = &value.expression12_opt {
             let right: ir::Factor = Conv::conv(context, x.casting_type.as_ref())?;
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
             Ok(ir::Expression::Binary(
                 Box::new(ret),
                 Op::As,
                 Box::new(ir::Expression::Term(Box::new(right))),
+                comptime,
             ))
         } else {
             Ok(ret)
@@ -305,7 +357,7 @@ impl Conv<&FactorType> for ir::Factor {
             token,
             ..Default::default()
         };
-        Ok(ir::Factor::Value(ret, token))
+        Ok(ir::Factor::Value(ret))
     }
 }
 
@@ -367,7 +419,7 @@ impl Conv<&CastingType> for ir::Factor {
                         let _ = context.check_size(value, token);
                     }
 
-                    return Ok(ir::Factor::Value(comptime, token));
+                    return Ok(ir::Factor::Value(comptime));
                 }
                 CastingType::BaseLess(x) => {
                     let token: TokenRange = x.base_less.base_less_token.token.into();
@@ -379,7 +431,7 @@ impl Conv<&CastingType> for ir::Factor {
                         let _ = context.check_size(value, token);
                     }
 
-                    return Ok(ir::Factor::Value(comptime, token));
+                    return Ok(ir::Factor::Value(comptime));
                 }
                 CastingType::UserDefinedType(_) => unreachable!(),
             };
@@ -403,7 +455,7 @@ impl Conv<&CastingType> for ir::Factor {
             token,
             ..Default::default()
         };
-        Ok(ir::Factor::Value(ret, token))
+        Ok(ir::Factor::Value(ret))
     }
 }
 
@@ -442,7 +494,9 @@ impl Conv<&Expression13> for ir::Expression {
                 }
             };
 
-            ret = ir::Expression::Unary(op, Box::new(ret));
+            let token: TokenRange = value.into();
+            let comptime = Box::new(Comptime::create_unknown(token));
+            ret = ir::Expression::Unary(op, Box::new(ret), comptime);
         }
         Ok(ret)
     }
@@ -454,7 +508,7 @@ impl Conv<&Factor> for ir::Expression {
         match value {
             Factor::Number(x) => {
                 let x: Comptime = Conv::conv(context, x.number.as_ref())?;
-                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x, token))))
+                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             Factor::BooleanLiteral(x) => {
                 let x = match x.boolean_literal.as_ref() {
@@ -475,9 +529,7 @@ impl Conv<&Factor> for ir::Expression {
                     token,
                     ..Default::default()
                 };
-                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    ret, token,
-                ))))
+                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
             }
             Factor::IdentifierFactor(x) => Conv::conv(context, x.identifier_factor.as_ref()),
             Factor::LParenExpressionRParen(x) => Conv::conv(context, x.expression.as_ref()),
@@ -505,7 +557,9 @@ impl Conv<&Factor> for ir::Expression {
                     ret.push((exp, rep));
                 }
 
-                Ok(ir::Expression::Concatenation(ret))
+                let comptime = Box::new(Comptime::create_unknown(token));
+
+                Ok(ir::Expression::Concatenation(ret, comptime))
             }
             Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
                 let items: Vec<_> = x.array_literal_list.as_ref().into();
@@ -531,7 +585,9 @@ impl Conv<&Factor> for ir::Expression {
                     ret.push(item);
                 }
 
-                Ok(ir::Expression::ArrayLiteral(ret))
+                let comptime = Box::new(Comptime::create_unknown(token));
+
+                Ok(ir::Expression::ArrayLiteral(ret, comptime))
             }
             Factor::CaseExpression(x) => {
                 let tgt: ir::Expression =
@@ -543,16 +599,27 @@ impl Conv<&Factor> for ir::Expression {
                 let cond =
                     case_condition(context, &tgt, x.case_expression.case_condition.as_ref())?;
 
-                let mut ret =
-                    ir::Expression::Ternary(Box::new(cond), Box::new(exp), Box::new(defaul));
+                let comptime = Box::new(Comptime::create_unknown(token));
+
+                let mut ret = ir::Expression::Ternary(
+                    Box::new(cond),
+                    Box::new(exp),
+                    Box::new(defaul),
+                    comptime,
+                );
 
                 for x in &x.case_expression.case_expression_list {
                     let cond = case_condition(context, &tgt, x.case_condition.as_ref())?;
                     let exp: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
 
-                    if let ir::Expression::Ternary(x, y, z) = ret {
-                        let arm = ir::Expression::Ternary(Box::new(cond), Box::new(exp), z);
-                        ret = ir::Expression::Ternary(x, y, Box::new(arm));
+                    if let ir::Expression::Ternary(x, y, z, comptime) = ret {
+                        let arm = ir::Expression::Ternary(
+                            Box::new(cond),
+                            Box::new(exp),
+                            z,
+                            comptime.clone(),
+                        );
+                        ret = ir::Expression::Ternary(x, y, Box::new(arm), comptime);
                     } else {
                         unreachable!()
                     }
@@ -567,16 +634,27 @@ impl Conv<&Factor> for ir::Expression {
                 let cond =
                     switch_condition(context, x.switch_expression.switch_condition.as_ref())?;
 
-                let mut ret =
-                    ir::Expression::Ternary(Box::new(cond), Box::new(exp), Box::new(defaul));
+                let comptime = Box::new(Comptime::create_unknown(token));
+
+                let mut ret = ir::Expression::Ternary(
+                    Box::new(cond),
+                    Box::new(exp),
+                    Box::new(defaul),
+                    comptime,
+                );
 
                 for x in &x.switch_expression.switch_expression_list {
                     let cond = switch_condition(context, x.switch_condition.as_ref())?;
                     let exp: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
 
-                    if let ir::Expression::Ternary(x, y, z) = ret {
-                        let arm = ir::Expression::Ternary(Box::new(cond), Box::new(exp), z);
-                        ret = ir::Expression::Ternary(x, y, Box::new(arm));
+                    if let ir::Expression::Ternary(x, y, z, comptime) = ret {
+                        let arm = ir::Expression::Ternary(
+                            Box::new(cond),
+                            Box::new(exp),
+                            z,
+                            comptime.clone(),
+                        );
+                        ret = ir::Expression::Ternary(x, y, Box::new(arm), comptime);
                     } else {
                         unreachable!()
                     }
@@ -598,9 +676,7 @@ impl Conv<&Factor> for ir::Expression {
                     token,
                     ..Default::default()
                 };
-                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    ret, token,
-                ))))
+                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
             }
             Factor::FactorGroup(x) => {
                 let Some((path, generic_path)) = context.select_paths.last().cloned() else {
@@ -640,9 +716,7 @@ impl Conv<&Factor> for ir::Expression {
                                 ret.value = ValueVariant::Unknown;
                                 ret
                             };
-                            Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                                comptime, token,
-                            ))))
+                            Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))))
                         } else if let Ok(symbol) = symbol_table::resolve(&generic_path)
                             && let SymbolKind::Parameter(x) = symbol.found.kind
                         {
@@ -686,7 +760,8 @@ impl Conv<&Factor> for ir::Expression {
                 let exp: ir::Expression =
                     Conv::conv(context, x.outside_expression.expression.as_ref())?;
                 let ret = range_list(context, &exp, x.outside_expression.range_list.as_ref())?;
-                Ok(ir::Expression::Unary(Op::LogicNot, Box::new(ret)))
+                let comptime = Box::new(Comptime::create_unknown(token));
+                Ok(ir::Expression::Unary(Op::LogicNot, Box::new(ret), comptime))
             }
             Factor::TypeExpression(x) => {
                 let (comptime, _) = eval_expr(context, None, &x.type_expression.expression, false)?;
@@ -702,9 +777,7 @@ impl Conv<&Factor> for ir::Expression {
                     token,
                     ..Default::default()
                 };
-                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(
-                    ret, token,
-                ))))
+                Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
             }
             Factor::FactorTypeFactor(x) => {
                 let ret = Conv::conv(context, x.factor_type_factor.factor_type.as_ref())?;

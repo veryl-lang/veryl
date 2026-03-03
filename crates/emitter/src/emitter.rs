@@ -2802,8 +2802,8 @@ impl VerylWalker for Emitter {
                     let expr: IrResult<ir::Expression> =
                         Conv::conv(&mut context, arg.expression13.as_ref());
                     let src_kind = if let Ok(mut expr) = expr {
-                        let comptime = expr.eval_comptime(&mut context, None, expr.eval_signed());
-                        Some(comptime.r#type.kind)
+                        let comptime = expr.eval_comptime(&mut context, None);
+                        Some(comptime.r#type.kind.clone())
                     } else {
                         None
                     };

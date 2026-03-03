@@ -16,8 +16,8 @@ mod system_function;
 mod utils;
 mod variable;
 pub use comptime::{
-    Comptime, PartSelectPath, Type, TypeKind, TypeKindEnum, TypeKindMember, TypeKindStruct,
-    TypeKindUnion, ValueVariant,
+    Comptime, ExpressionContext, PartSelectPath, Type, TypeKind, TypeKindEnum, TypeKindMember,
+    TypeKindStruct, TypeKindUnion, ValueVariant,
 };
 pub use declaration::{
     CombDeclaration, Declaration, DeclarationBlock, FfClock, FfDeclaration, FfReset,

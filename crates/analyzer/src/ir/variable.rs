@@ -2,7 +2,9 @@ use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::utils::eval_width_select;
-use crate::ir::{AssignDestination, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind};
+use crate::ir::{
+    AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
+};
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
@@ -106,7 +108,8 @@ impl VarPathSelect {
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             comptime.r#type.array.drain(0..array_select.dimension());
 
-            let src = Factor::Variable(id, array_select.to_index(), width_select, comptime, token);
+            comptime.token = token;
+            let src = Factor::Variable(id, array_select.to_index(), width_select, comptime);
             Some(Expression::Term(Box::new(src)))
         } else {
             None
@@ -226,13 +229,11 @@ impl VarIndex {
         }
     }
 
-    pub fn is_const(&self, context: &mut Context) -> bool {
+    pub fn is_const(&self) -> bool {
         let mut ret = true;
 
         for x in &self.0 {
-            let mut expr = x.clone();
-            let comptime = expr.eval_comptime(context, None, false);
-            ret &= comptime.is_const;
+            ret &= x.comptime().is_const;
         }
 
         ret
@@ -241,7 +242,7 @@ impl VarIndex {
     pub fn eval_value(&self, context: &mut Context) -> Option<Vec<usize>> {
         let mut ret = vec![];
         for x in &self.0 {
-            if let Some(x) = x.eval_value(context, None, x.eval_signed()) {
+            if let Some(x) = x.eval_value(context) {
                 ret.push(x.to_usize().unwrap_or(0))
             } else {
                 return None;
@@ -286,24 +287,36 @@ impl fmt::Display for VarSelectOp {
 
 impl VarSelectOp {
     pub fn eval_expr(&self, beg: &Expression, end: &Expression) -> (Expression, Expression) {
+        let comptime = Box::new(Comptime::create_unknown(TokenRange::default()));
         match self {
             VarSelectOp::Colon => (beg.clone(), end.clone()),
             VarSelectOp::PlusColon => {
-                let expr =
-                    Expression::Binary(Box::new(beg.clone()), Op::Add, Box::new(end.clone()));
+                let expr = Expression::Binary(
+                    Box::new(beg.clone()),
+                    Op::Add,
+                    Box::new(end.clone()),
+                    comptime.clone(),
+                );
                 let minus_one = Expression::Unary(
                     Op::Sub,
                     Box::new(Expression::create_value(
                         Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
+                    comptime.clone(),
                 );
-                let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one));
+                let expr =
+                    Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one), comptime);
                 (expr, beg.clone())
             }
             VarSelectOp::MinusColon => {
-                let expr = Expression::Unary(Op::Sub, Box::new(end.clone()));
-                let expr = Expression::Binary(Box::new(beg.clone()), Op::Add, Box::new(expr));
+                let expr = Expression::Unary(Op::Sub, Box::new(end.clone()), comptime.clone());
+                let expr = Expression::Binary(
+                    Box::new(beg.clone()),
+                    Op::Add,
+                    Box::new(expr),
+                    comptime.clone(),
+                );
                 let expr = Expression::Binary(
                     Box::new(expr),
                     Op::Add,
@@ -311,21 +324,33 @@ impl VarSelectOp {
                         Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
+                    comptime,
                 );
                 (beg.clone(), expr)
             }
             VarSelectOp::Step => {
-                let mul = Expression::Binary(Box::new(beg.clone()), Op::Mul, Box::new(end.clone()));
-                let expr =
-                    Expression::Binary(Box::new(mul.clone()), Op::Add, Box::new(end.clone()));
+                let mul = Expression::Binary(
+                    Box::new(beg.clone()),
+                    Op::Mul,
+                    Box::new(end.clone()),
+                    comptime.clone(),
+                );
+                let expr = Expression::Binary(
+                    Box::new(mul.clone()),
+                    Op::Add,
+                    Box::new(end.clone()),
+                    comptime.clone(),
+                );
                 let minus_one = Expression::Unary(
                     Op::Sub,
                     Box::new(Expression::create_value(
                         Value::new(1, 32, false),
                         TokenRange::default(),
                     )),
+                    comptime.clone(),
                 );
-                let expr = Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one));
+                let expr =
+                    Expression::Binary(Box::new(expr), Op::Add, Box::new(minus_one), comptime);
                 (expr, mul)
             }
         }
@@ -385,13 +410,11 @@ impl VarSelect {
         self.0.is_empty()
     }
 
-    pub fn is_const(&self, context: &mut Context) -> bool {
+    pub fn is_const(&self) -> bool {
         let mut ret = true;
 
         for x in &self.0 {
-            let mut expr = x.clone();
-            let comptime = expr.eval_comptime(context, None, false);
-            ret &= comptime.is_const;
+            ret &= x.comptime().is_const;
         }
 
         ret
@@ -440,7 +463,7 @@ impl VarSelect {
                 let dim = self.dimension();
                 let beg = self.0.last().unwrap();
                 let mut range = beg.token_range();
-                let beg = beg.eval_value(context, None, beg.eval_signed());
+                let beg = beg.eval_value(context);
 
                 let beg = if let Some(beg) = beg {
                     beg.to_usize().unwrap_or(0)
@@ -462,10 +485,7 @@ impl VarSelect {
 
                 let (beg, end) = if let Some((op, x)) = &self.1 {
                     range.set_end(x.token_range());
-                    let end = x
-                        .eval_value(context, None, x.eval_signed())?
-                        .to_usize()
-                        .unwrap_or(0);
+                    let end = x.eval_value(context)?.to_usize().unwrap_or(0);
                     op.eval_value(beg, end)
                 } else {
                     (beg, beg)
@@ -503,7 +523,7 @@ impl VarSelect {
                         && let Some(size) = size
                     {
                         let size = *size;
-                        let beg = beg.eval_value(context, None, beg.eval_signed())?;
+                        let beg = beg.eval_value(context)?;
 
                         if beg.is_xz() {
                             // skip out_of_range check
@@ -582,15 +602,9 @@ impl VarSelect {
         if r#type.dims() < dim {
             if dim == 1 && r#type.dims() == 0 && !is_array {
                 let x = &self.0[0];
-                let x = x
-                    .eval_value(context, None, x.eval_signed())?
-                    .to_usize()
-                    .unwrap_or(0);
+                let x = x.eval_value(context)?.to_usize().unwrap_or(0);
                 let (x, y) = if let Some((op, y)) = &self.1 {
-                    let y = y
-                        .eval_value(context, None, y.eval_signed())?
-                        .to_usize()
-                        .unwrap_or(0);
+                    let y = y.eval_value(context)?.to_usize().unwrap_or(0);
                     op.eval_value(x, y)
                 } else {
                     (x, x)
@@ -605,16 +619,10 @@ impl VarSelect {
             if let Some(w) = w {
                 if i == skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x
-                        .eval_value(context, None, x.eval_signed())?
-                        .to_usize()
-                        .unwrap_or(0);
+                    let x = x.eval_value(context)?.to_usize().unwrap_or(0);
 
                     let (x, y) = if let Some((op, y)) = &self.1 {
-                        let y = y
-                            .eval_value(context, None, y.eval_signed())?
-                            .to_usize()
-                            .unwrap_or(0);
+                        let y = y.eval_value(context)?.to_usize().unwrap_or(0);
                         op.eval_value(x, y)
                     } else {
                         (x, x)
@@ -629,10 +637,7 @@ impl VarSelect {
                     }
                 } else if i > skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x
-                        .eval_value(context, None, x.eval_signed())?
-                        .to_usize()
-                        .unwrap_or(0);
+                    let x = x.eval_value(context)?.to_usize().unwrap_or(0);
 
                     beg += x * base;
                     end += x * base;

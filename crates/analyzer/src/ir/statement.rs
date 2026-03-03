@@ -20,7 +20,7 @@ pub enum Statement {
     Assign(AssignStatement),
     If(IfStatement),
     IfReset(IfResetStatement),
-    SystemFunctionCall(SystemFunctionCall),
+    SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     Null,
 }
@@ -123,8 +123,8 @@ impl AssignDestination {
         assign_context: AssignContext,
     ) {
         if let Some(variable) = context.get_variable_info(self.id) {
-            let is_index_const = self.index.is_const(context);
-            let is_select_const = self.select.is_const(context);
+            let is_index_const = self.index.is_const();
+            let is_select_const = self.select.is_const();
             let is_const = is_index_const & is_select_const;
 
             // If index is not const, assign to the whole array
@@ -221,10 +221,7 @@ pub struct AssignStatement {
 
 impl AssignStatement {
     pub fn eval_value(&self, context: &mut Context) {
-        if let Some(value) = self
-            .expr
-            .eval_value(context, self.width, self.expr.eval_signed())
-        {
+        if let Some(value) = self.expr.eval_value(context) {
             // TODO multiple dst
             if let Some(index) = self.dst[0].index.eval_value(context)
                 && let Some((beg, end)) =

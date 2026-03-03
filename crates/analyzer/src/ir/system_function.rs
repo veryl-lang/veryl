@@ -4,7 +4,6 @@ use crate::ir::{
     AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
     VarPathSelect,
 };
-use crate::symbol::ClockDomain;
 use crate::value::Value;
 use crate::{AnalyzerError, BigUint, ir_error};
 use std::fmt;
@@ -43,8 +42,8 @@ impl fmt::Display for Output {
 
 #[derive(Clone, Debug)]
 pub struct SystemFunctionCall {
-    kind: SystemFunctionKind,
-    token: TokenRange,
+    pub kind: SystemFunctionKind,
+    pub comptime: Comptime,
 }
 
 #[derive(Clone, Debug)]
@@ -65,8 +64,8 @@ fn create_input(
     let (mut expr, _, token) = arg;
 
     if let Some(r#type) = r#type {
-        let comptime = expr.eval_comptime(context, None, expr.eval_signed());
-        if !r#type.compatible(&comptime) {
+        let comptime = expr.eval_comptime(context, None);
+        if !r#type.compatible(comptime) {
             context.insert_error(AnalyzerError::mismatch_function_arg(
                 &name.to_string(),
                 &comptime.r#type.to_string(),
@@ -92,8 +91,8 @@ fn create_output(
         .collect();
 
     if let Some(r#type) = r#type {
-        let comptime = expr.eval_comptime(context, None, expr.eval_signed());
-        if !r#type.compatible(&comptime) {
+        let comptime = expr.eval_comptime(context, None);
+        if !r#type.compatible(comptime) {
             context.insert_error(AnalyzerError::mismatch_function_arg(
                 &name.to_string(),
                 &comptime.r#type.to_string(),
@@ -112,6 +111,9 @@ impl SystemFunctionCall {
         mut args: Vec<(Expression, Vec<VarPathSelect>, TokenRange)>,
         token: TokenRange,
     ) -> IrResult<Self> {
+        let mut comptime = Comptime::create_unknown(token);
+        comptime.is_const = true;
+
         match name.to_string().as_str() {
             "$bits" => {
                 if args.len() != 1 {
@@ -121,7 +123,7 @@ impl SystemFunctionCall {
                 let arg0 = create_input(context, name, None, args.remove(0));
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Bits(arg0),
-                    token,
+                    comptime,
                 })
             }
             "$size" => {
@@ -132,7 +134,7 @@ impl SystemFunctionCall {
                 let arg0 = create_input(context, name, None, args.remove(0));
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Size(arg0),
-                    token,
+                    comptime,
                 })
             }
             "$clog2" => {
@@ -148,7 +150,7 @@ impl SystemFunctionCall {
                 let arg0 = create_input(context, name, Some(arg0_type), args.remove(0));
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Clog2(arg0),
-                    token,
+                    comptime,
                 })
             }
             "$onehot" => {
@@ -164,7 +166,7 @@ impl SystemFunctionCall {
                 let arg0 = create_input(context, name, Some(arg0_type), args.remove(0));
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Onehot(arg0),
-                    token,
+                    comptime,
                 })
             }
             "$readmemh" => {
@@ -176,7 +178,7 @@ impl SystemFunctionCall {
                 let arg1 = create_output(context, name, None, args.remove(0));
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Readmemh(arg0, arg1),
-                    token,
+                    comptime,
                 })
             }
             _ => Err(ir_error!(token)),
@@ -187,7 +189,7 @@ impl SystemFunctionCall {
         match &self.kind {
             SystemFunctionKind::Bits(x) => {
                 let mut expr = x.0.clone();
-                let comptime = expr.eval_comptime(context, None, expr.eval_signed());
+                let comptime = expr.eval_comptime(context, None);
                 let value = match &comptime.value {
                     ValueVariant::Numeric(_) => comptime.r#type.total_width(),
                     ValueVariant::Type(x) => x.total_width(),
@@ -197,7 +199,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Size(x) => {
                 let mut expr = x.0.clone();
-                let comptime = expr.eval_comptime(context, None, expr.eval_signed());
+                let comptime = expr.eval_comptime(context, None);
                 let value = match &comptime.value {
                     ValueVariant::Numeric(_) => comptime.r#type.total_width(),
                     ValueVariant::Type(x) => x.total_width(),
@@ -206,7 +208,7 @@ impl SystemFunctionCall {
                 value.map(|x| Value::new(x as u64, 32, false))
             }
             SystemFunctionKind::Clog2(x) => {
-                let value = x.0.eval_value(context, None, x.0.eval_signed())?;
+                let value = x.0.eval_value(context)?;
                 let value = value.payload();
                 let ret = if value.as_ref() == &BigUint::from(0u32) {
                     BigUint::from(0u32)
@@ -216,7 +218,7 @@ impl SystemFunctionCall {
                 Some(Value::new(ret.bits(), 32, false))
             }
             SystemFunctionKind::Onehot(x) => {
-                let value = x.0.eval_value(context, None, x.0.eval_signed())?;
+                let value = x.0.eval_value(context)?;
                 let ret = value.payload().count_ones() == 1;
                 Some(Value::new(ret.into(), 1, false))
             }
@@ -227,45 +229,17 @@ impl SystemFunctionCall {
     pub fn eval_comptime(&self, context: &mut Context) -> Comptime {
         let value = self.eval_value(context);
         match &self.kind {
-            SystemFunctionKind::Bits(_) => {
+            SystemFunctionKind::Bits(_)
+            | SystemFunctionKind::Size(_)
+            | SystemFunctionKind::Clog2(_)
+            | SystemFunctionKind::Onehot(_) => {
+                let mut ret = self.comptime.clone();
                 if let Some(x) = value {
-                    Comptime::create_value(x, self.token)
-                } else {
-                    let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
-                    ret.is_const = true;
-                    ret
+                    ret.value = ValueVariant::Numeric(x);
                 }
+                ret
             }
-            SystemFunctionKind::Size(_) => {
-                if let Some(x) = value {
-                    Comptime::create_value(x, self.token)
-                } else {
-                    let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
-                    ret.is_const = true;
-                    ret
-                }
-            }
-            SystemFunctionKind::Clog2(_) => {
-                if let Some(x) = value {
-                    Comptime::create_value(x, self.token)
-                } else {
-                    let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
-                    ret.is_const = true;
-                    ret
-                }
-            }
-            SystemFunctionKind::Onehot(_) => {
-                if let Some(x) = value {
-                    Comptime::create_value(x, self.token)
-                } else {
-                    let mut ret = Comptime::create_unknown(ClockDomain::None, self.token);
-                    ret.is_const = true;
-                    ret
-                }
-            }
-            SystemFunctionKind::Readmemh(_, _) => {
-                Comptime::create_unknown(ClockDomain::None, self.token)
-            }
+            SystemFunctionKind::Readmemh(_, _) => self.comptime.clone(),
         }
     }
 
