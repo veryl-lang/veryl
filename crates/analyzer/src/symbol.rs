@@ -1269,6 +1269,11 @@ impl Type {
             }
         };
 
+        let is_positive = matches!(
+            &self.kind,
+            TypeKind::P8 | TypeKind::P16 | TypeKind::P32 | TypeKind::P64
+        );
+
         let kind = match &self.kind {
             TypeKind::Clock => ir::TypeKind::Clock,
             TypeKind::ClockPosedge => ir::TypeKind::ClockPosedge,
@@ -1313,6 +1318,7 @@ impl Type {
         Ok(ir::Type {
             kind,
             signed,
+            is_positive,
             width,
             array,
         })

@@ -401,6 +401,26 @@ fn eval_array_literal_expressions(
     Ok(ret)
 }
 
+fn is_positive_type(r#type: &ir::Type) -> bool {
+    r#type.is_positive
+}
+
+fn format_positive_type_name(r#type: &ir::Type) -> String {
+    if r#type.is_positive
+        && let Some(width) = r#type.width.first()
+        && let Some(w) = width
+    {
+        return match *w {
+            8 => "p8".to_string(),
+            16 => "p16".to_string(),
+            32 => "p32".to_string(),
+            64 => "p64".to_string(),
+            _ => r#type.to_string(),
+        };
+    }
+    r#type.to_string()
+}
+
 pub fn eval_const_assign(
     context: &mut Context,
     kind: VarKind,
@@ -412,6 +432,21 @@ pub fn eval_const_assign(
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
+
+    if is_positive_type(r#type)
+        && let Ok(value) = comptime.get_value()
+        && !value.is_positive()
+    {
+        let type_str = format_positive_type_name(r#type);
+        let value_str = if value.is_xz() {
+            format!("{:x}", value)
+        } else {
+            value.payload().to_string()
+        };
+        context.insert_error(AnalyzerError::non_positive_value(
+            &value_str, &type_str, &token,
+        ));
+    }
 
     match expr {
         ir::Expression::ArrayLiteral(_, _) => {
@@ -627,6 +662,7 @@ pub fn eval_type(
     let mut width = Shape::default();
     let mut array = Shape::default();
     let mut signed = false;
+    let mut is_positive = false;
 
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
@@ -865,6 +901,26 @@ pub fn eval_type(
         {
             // Fixed type given as generic arg
             match path.paths[0].base.to_string().as_str() {
+                "p8" => {
+                    width.push(Some(8));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
+                "p16" => {
+                    width.push(Some(16));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
+                "p32" => {
+                    width.push(Some(32));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
+                "p64" => {
+                    width.push(Some(64));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
                 "u8" => {
                     width.push(Some(8));
                     ir::TypeKind::Bit
@@ -914,6 +970,7 @@ pub fn eval_type(
     Ok(ir::Type {
         kind,
         signed,
+        is_positive,
         width,
         array,
     })

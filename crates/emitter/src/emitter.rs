@@ -2368,6 +2368,26 @@ impl VerylWalker for Emitter {
         self.veryl_token(&arg.u64_token.replace(&literal.to_sv_string()));
     }
 
+    /// Semantic action for non-terminal 'P8'
+    fn p8(&mut self, arg: &P8) {
+        self.veryl_token(&arg.p8_token.replace("byte unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'P16'
+    fn p16(&mut self, arg: &P16) {
+        self.veryl_token(&arg.p16_token.replace("shortint unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'P32'
+    fn p32(&mut self, arg: &P32) {
+        self.veryl_token(&arg.p32_token.replace("int unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'P64'
+    fn p64(&mut self, arg: &P64) {
+        self.veryl_token(&arg.p64_token.replace("longint unsigned"));
+    }
+
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
         let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
