@@ -1107,8 +1107,8 @@ pub fn eval_function_call(
             ir::Arguments::Null
         };
 
-        let symbol = symbol_table::resolve(value.expression_identifier.as_ref())
-            .map_err(|_| ir_error!(token))?;
+        let resolved_path = context.resolve_path(value.expression_identifier.as_ref().into());
+        let symbol = symbol_table::resolve(&resolved_path).map_err(|_| ir_error!(token))?;
 
         match &symbol.found.kind {
             SymbolKind::SystemFunction(_) => {
