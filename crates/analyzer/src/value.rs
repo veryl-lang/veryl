@@ -752,7 +752,7 @@ impl Value {
     }
 
     pub fn expand(&self, width: usize, use_sign: bool) -> Cow<'_, Self> {
-        if (self.width() == 0 && width <= 64) || self.width() >= width {
+        if self.width() == 0 || self.width() >= width {
             Cow::Borrowed(self)
         } else if width > 64 {
             let ret = match self {

@@ -195,8 +195,8 @@ impl Formatter {
     fn newline_list_post(&mut self, is_empty: bool, start_token: &VerylToken) {
         if !is_empty {
             self.newline_pop();
-        } else if let Some(last_comment) = start_token.comments.last()
-            && resource_table::get_str_value(last_comment.text)
+        } else if let Some(last_commant) = start_token.comments.last()
+            && resource_table::get_str_value(last_commant.text)
                 .map(|x| !x.ends_with("\n"))
                 .unwrap()
         {
@@ -444,8 +444,8 @@ impl Formatter {
                 let last_line = last_token.end_line();
                 if token.line == last_line {
                     let last_column = last_token.end_column();
-                    let delta_column = token.column - last_column - 1;
-                    (0, delta_column)
+                    let delat_column = token.column - last_column - 1;
+                    (0, delat_column)
                 } else {
                     let delta_line = token.line - last_line;
                     (delta_line, token.column - 1)
@@ -521,12 +521,15 @@ impl VerylWalker for Formatter {
         } else {
             self.measure_start();
 
-            let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
-            let single_line = if self.mode == Mode::Emit {
-                let width = self.measure_get(&arg.first()).unwrap();
+            let single_line = if self.mode == Mode::Align {
+                // calc line width as single_line in Align mode (the same as in emitter)
+                true
+            } else if let Some(width) = self.measure_get(&arg.first()) {
+                let compact = attribute_table::is_format(&arg.first(), FormatItem::Compact);
                 (width < self.format_opt.max_width as u32) || compact
             } else {
-                // calc line width as single_line in Align mode
+                // vertical align mode is off.
+                // Use single line mode forcely.
                 true
             };
             if single_line {

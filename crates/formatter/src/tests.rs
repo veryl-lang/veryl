@@ -180,3 +180,18 @@ module ModuleB () {
     println!("ret\n{}\nexp\n{}", ret, code);
     assert_eq!(ret, code);
 }
+
+#[test]
+fn no_panic_if_expression_when_vertical_align_off() {
+    let code = r#"module ModuleA {
+    let a: logic = 1;
+    let _b: logic = if a == 1 ? 1 : if a == 2 ? 0 : 1;
+}
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.format.vertical_align = false;
+
+    let ret = format(&metadata, code);
+    assert!(!ret.is_empty());
+}

@@ -1,5 +1,5 @@
 pub mod emitter;
-mod expanded_modport;
+mod expaneded_modport;
 pub use emitter::Emitter;
 #[cfg(test)]
 mod tests;

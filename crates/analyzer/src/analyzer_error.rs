@@ -2413,7 +2413,7 @@ pub enum IncompatProtoKind {
     IncompatibleType,
     IncompatibleTypedef(StrId),
     IncompatibleVar(StrId),
-    MissingMember(StrId),
+    MissignMember(StrId),
     MissingAlias(StrId),
     MissingFunction(StrId),
     MissingGenericParam(StrId),
@@ -2461,7 +2461,7 @@ impl fmt::Display for IncompatProtoKind {
             IncompatProtoKind::IncompatibleVar(x) => {
                 format!("variable \"{x}\" is incompatible").fmt(f)
             }
-            IncompatProtoKind::MissingMember(x) => format!("member \"{x}\" is missing").fmt(f),
+            IncompatProtoKind::MissignMember(x) => format!("member \"{x}\" is missing").fmt(f),
             IncompatProtoKind::MissingAlias(x) => format!("alias \"{x}\" is missing").fmt(f),
             IncompatProtoKind::MissingFunction(x) => format!("function \"{x}\" is missing").fmt(f),
             IncompatProtoKind::MissingGenericParam(x) => {
