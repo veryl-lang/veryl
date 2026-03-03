@@ -1839,7 +1839,7 @@ fn concat() {
     o: output logic<16>,
     o2: output logic<16>,
 ) {
-    assign o = {8'hff + 8'h1}; 
+    assign o = {8'hff + 8'h1};
     assign o2 = {8'hf0, 8'hff + 8'h1};
 }
     "#;
@@ -1925,5 +1925,31 @@ module Top {
   }
 }
 "#;
+    check_ir(code, exp);
+}
+
+#[test]
+fn binary_operation_with_large_width_variable() {
+    let code = r#"
+module Top (
+  a: input  logic<65>,
+  b: output logic    ,
+) {
+  always_comb {
+    b = a == '0;
+  }
+}
+"#;
+
+    let exp = r#"module Top {
+  input var0(a): logic<65> = 65'hxxxxxxxxxxxxxxxxx;
+  output var1(b): logic = 1'hx;
+
+  comb {
+    var1 = (var0 == '0);
+  }
+}
+"#;
+
     check_ir(code, exp);
 }
