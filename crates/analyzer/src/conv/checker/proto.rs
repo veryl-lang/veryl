@@ -556,7 +556,7 @@ fn check_modport_comat(
     }
 
     for (name, _) in proto_members {
-        ret.push(IncompatProtoKind::MissignMember(name));
+        ret.push(IncompatProtoKind::MissingMember(name));
     }
 
     ret
@@ -624,7 +624,7 @@ fn check_members_compat(actual: &[SymbolId], proto: &[SymbolId]) -> Vec<Incompat
     }
 
     for (name, _) in proto_members {
-        ret.push(IncompatProtoKind::MissignMember(name));
+        ret.push(IncompatProtoKind::MissingMember(name));
     }
 
     ret

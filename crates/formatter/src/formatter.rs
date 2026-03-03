@@ -195,8 +195,8 @@ impl Formatter {
     fn newline_list_post(&mut self, is_empty: bool, start_token: &VerylToken) {
         if !is_empty {
             self.newline_pop();
-        } else if let Some(last_commant) = start_token.comments.last()
-            && resource_table::get_str_value(last_commant.text)
+        } else if let Some(last_comment) = start_token.comments.last()
+            && resource_table::get_str_value(last_comment.text)
                 .map(|x| !x.ends_with("\n"))
                 .unwrap()
         {
@@ -444,8 +444,8 @@ impl Formatter {
                 let last_line = last_token.end_line();
                 if token.line == last_line {
                     let last_column = last_token.end_column();
-                    let delat_column = token.column - last_column - 1;
-                    (0, delat_column)
+                    let delta_column = token.column - last_column - 1;
+                    (0, delta_column)
                 } else {
                     let delta_line = token.line - last_line;
                     (delta_line, token.column - 1)

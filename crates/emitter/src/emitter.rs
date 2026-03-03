@@ -1,4 +1,4 @@
-use crate::expaneded_modport::{ExpandModportConnectionsTable, ExpandedModportPortTable};
+use crate::expanded_modport::{ExpandModportConnectionsTable, ExpandedModportPortTable};
 use std::fs;
 use std::path::Path;
 use veryl_aligner::{Aligner, Location, Measure, align_kind};
@@ -81,7 +81,7 @@ pub struct Emitter {
     default_block: Option<VerylToken>,
     enum_width: usize,
     enum_type: Option<ScalarType>,
-    emit_enum_implicit_valiant: bool,
+    emit_enum_implicit_variant: bool,
     file_scope_import: Vec<ImportDeclaration>,
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
@@ -135,7 +135,7 @@ impl Default for Emitter {
             default_block: None,
             enum_width: 0,
             enum_type: None,
-            emit_enum_implicit_valiant: false,
+            emit_enum_implicit_variant: false,
             file_scope_import: Vec::new(),
             attribute: Vec::new(),
             assignment_lefthand_side: None,
@@ -631,7 +631,7 @@ impl Emitter {
         }
     }
 
-    fn case_expaneded_statement(&mut self, arg: &CaseStatement) {
+    fn case_expanded_statement(&mut self, arg: &CaseStatement) {
         let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.case.case_token.token);
         self.token(&arg.case.case_token.append(&prefix, &None));
         self.space(1);
@@ -3678,7 +3678,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'CaseStatement'
     fn case_statement(&mut self, arg: &CaseStatement) {
         if self.build_opt.expand_inside_operation {
-            self.case_expaneded_statement(arg);
+            self.case_expanded_statement(arg);
         } else {
             self.case_inside_statement(arg);
         }
@@ -4340,7 +4340,7 @@ impl VerylWalker for Emitter {
             unreachable!();
         };
         self.enum_width = r#enum.width;
-        self.emit_enum_implicit_valiant = matches!(
+        self.emit_enum_implicit_variant = matches!(
             r#enum.encoding,
             EnumEncodingItem::OneHot | EnumEncodingItem::Gray
         );
@@ -4432,7 +4432,7 @@ impl VerylWalker for Emitter {
             self.str("'(");
             self.expression(&x.expression);
             self.str(")");
-        } else if self.emit_enum_implicit_valiant {
+        } else if self.emit_enum_implicit_variant {
             self.str(&format!(
                 " = {}'d{}",
                 self.enum_width,
