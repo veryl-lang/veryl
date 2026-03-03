@@ -323,6 +323,10 @@ impl Conv<&FactorType> for ir::Factor {
             }
             FactorTypeGroup::FixedType(x) => {
                 let (kind, width, signed) = match x.fixed_type.as_ref() {
+                    FixedType::P8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
+                    FixedType::P16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false),
+                    FixedType::P32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
+                    FixedType::P64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
                     FixedType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
                     FixedType::U16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false),
                     FixedType::U32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
@@ -377,6 +381,10 @@ impl Conv<&CastingType> for ir::Factor {
             }
         } else {
             let (kind, width, signed) = match value {
+                CastingType::P8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
+                CastingType::P16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false),
+                CastingType::P32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
+                CastingType::P64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
                 CastingType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
                 CastingType::U16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false),
                 CastingType::U32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
