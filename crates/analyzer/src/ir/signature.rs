@@ -66,14 +66,6 @@ impl Signature {
                 }
                 symbol.found
             }
-            SymbolKind::ProtoFunction(_) => {
-                let resolved = context.resolve_path(path.clone());
-                let symbol = symbol_table::resolve(&resolved).ok()?;
-                match &symbol.found.kind {
-                    SymbolKind::Function(_) => symbol.found,
-                    _ => return None,
-                }
-            }
             SymbolKind::ProtoAliasModule(x) => {
                 let symbol = symbol_table::resolve(&x.target).ok()?;
                 return Some(Signature::new(symbol.found.id));
