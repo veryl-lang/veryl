@@ -2760,10 +2760,10 @@ impl VerylWalker for Emitter {
     fn expression12(&mut self, arg: &Expression12) {
         if let Some(x) = &arg.expression12_opt {
             match x.casting_type.as_ref() {
-                CastingType::U8(_) => self.str("unsigned'(byte'("),
-                CastingType::U16(_) => self.str("unsigned'(shortint'("),
-                CastingType::U32(_) => self.str("unsigned'(int'("),
-                CastingType::U64(_) => self.str("unsigned'(longint'("),
+                CastingType::U8(_) | CastingType::P8(_) => self.str("unsigned'(byte'("),
+                CastingType::U16(_) | CastingType::P16(_) => self.str("unsigned'(shortint'("),
+                CastingType::U32(_) | CastingType::P32(_) => self.str("unsigned'(int'("),
+                CastingType::U64(_) | CastingType::P64(_) => self.str("unsigned'(longint'("),
                 CastingType::I8(_) => self.str("signed'(byte'("),
                 CastingType::I16(_) => self.str("signed'(shortint'("),
                 CastingType::I32(_) => self.str("signed'(int'("),
