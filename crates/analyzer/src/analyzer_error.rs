@@ -647,6 +647,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(non_positive_value),
+        help("positive types (p8/p16/p32/p64) can only accept values > 0"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("Value {value} cannot be assigned to positive type \"{typ}\"")]
+    NonPositiveValue {
+        value: String,
+        typ: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(mismatch_attribute_args),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1534,6 +1551,7 @@ impl AnalyzerError {
             AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
             AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
+            AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
             AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
             AnalyzerError::MismatchFunctionArg { token_source, .. } => *token_source,
@@ -1940,6 +1958,15 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+            token_source: token.source(),
+        }
+    }
+    pub fn non_positive_value(value: &str, typ: &str, token: &TokenRange) -> Self {
+        AnalyzerError::NonPositiveValue {
+            value: value.to_string(),
+            typ: typ.to_string(),
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }
