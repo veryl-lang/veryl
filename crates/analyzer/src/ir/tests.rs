@@ -1976,3 +1976,98 @@ module Top (
 
     check_ir(code, exp);
 }
+
+#[test]
+fn assignment_operator_with_array_index() {
+    let code = r#"
+    module Top #(
+        param N: u32 = 4,
+    ) (
+        a: input  logic [N],
+        b: output logic<32> [N],
+    ) {
+        var score: logic<32> [N];
+        always_comb {
+            for i: u32 in 0..N {
+                score[i] = 0;
+                for j: u32 in 0..N {
+                    score[i] += a[j];
+                }
+            }
+            for i: u32 in 0..N {
+                b[i] = score[i];
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module Top {
+  param var0(N): bit<32> = 32'sh00000004;
+  input var1[0](a): logic = 1'hx;
+  input var1[1](a): logic = 1'hx;
+  input var1[2](a): logic = 1'hx;
+  input var1[3](a): logic = 1'hx;
+  output var2[0](b): logic<32> = 32'hxxxxxxxx;
+  output var2[1](b): logic<32> = 32'hxxxxxxxx;
+  output var2[2](b): logic<32> = 32'hxxxxxxxx;
+  output var2[3](b): logic<32> = 32'hxxxxxxxx;
+  var var3[0](score): logic<32> = 32'hxxxxxxxx;
+  var var3[1](score): logic<32> = 32'hxxxxxxxx;
+  var var3[2](score): logic<32> = 32'hxxxxxxxx;
+  var var3[3](score): logic<32> = 32'hxxxxxxxx;
+  const var4([0].i): bit<32> = 32'h00000000;
+  const var5([0].[0].j): bit<32> = 32'h00000000;
+  const var6([0].[1].j): bit<32> = 32'h00000001;
+  const var7([0].[2].j): bit<32> = 32'h00000002;
+  const var8([0].[3].j): bit<32> = 32'h00000003;
+  const var9([1].i): bit<32> = 32'h00000001;
+  const var10([1].[0].j): bit<32> = 32'h00000000;
+  const var11([1].[1].j): bit<32> = 32'h00000001;
+  const var12([1].[2].j): bit<32> = 32'h00000002;
+  const var13([1].[3].j): bit<32> = 32'h00000003;
+  const var14([2].i): bit<32> = 32'h00000002;
+  const var15([2].[0].j): bit<32> = 32'h00000000;
+  const var16([2].[1].j): bit<32> = 32'h00000001;
+  const var17([2].[2].j): bit<32> = 32'h00000002;
+  const var18([2].[3].j): bit<32> = 32'h00000003;
+  const var19([3].i): bit<32> = 32'h00000003;
+  const var20([3].[0].j): bit<32> = 32'h00000000;
+  const var21([3].[1].j): bit<32> = 32'h00000001;
+  const var22([3].[2].j): bit<32> = 32'h00000002;
+  const var23([3].[3].j): bit<32> = 32'h00000003;
+  const var24([0].i): bit<32> = 32'h00000000;
+  const var25([1].i): bit<32> = 32'h00000001;
+  const var26([2].i): bit<32> = 32'h00000002;
+  const var27([3].i): bit<32> = 32'h00000003;
+
+  comb {
+    var3[32'h00000000] = 32'sh00000000;
+    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000000]);
+    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000001]);
+    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000002]);
+    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000003]);
+    var3[32'h00000001] = 32'sh00000000;
+    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000000]);
+    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000001]);
+    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000002]);
+    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000003]);
+    var3[32'h00000002] = 32'sh00000000;
+    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000000]);
+    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000001]);
+    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000002]);
+    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000003]);
+    var3[32'h00000003] = 32'sh00000000;
+    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000000]);
+    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000001]);
+    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000002]);
+    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000003]);
+    var2[32'h00000000] = var3[32'h00000000];
+    var2[32'h00000001] = var3[32'h00000001];
+    var2[32'h00000002] = var3[32'h00000002];
+    var2[32'h00000003] = var3[32'h00000003];
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
