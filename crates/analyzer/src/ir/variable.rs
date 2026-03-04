@@ -106,7 +106,6 @@ impl VarPathSelect {
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
-            comptime.r#type.array.drain(0..array_select.dimension());
 
             comptime.token = token;
             let src = Factor::Variable(id, array_select.to_index(), width_select, comptime);
