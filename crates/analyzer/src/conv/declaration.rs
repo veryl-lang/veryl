@@ -816,7 +816,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
         }
 
         if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
-            && let SymbolKind::Function(x) = symbol.found.kind
+            && let SymbolKind::Function(x) = &symbol.found.kind
         {
             let constantable = x.constantable.unwrap();
             let ret_type = if let Some(x) = &x.ret {
@@ -848,11 +848,18 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                 let path = FuncPath::new(symbol.found.id);
                 (path, name)
             };
+
+            if context.func_paths.contains_key(&path) {
+                // The given function has already been added through function reference before definition.
+                return Ok(());
+            }
+
             let token: TokenRange = symbol.found.token.into();
             let id = context.insert_func_path(path.clone());
 
             context.push_affiliation(Affiliation::Function);
             context.push_hierarchy(name);
+            context.push_namespace(symbol.found.inner_namespace());
 
             let arg_items: Vec<_> = if let Some(x) = &func_def.function_declaration_opt0
                 && let Some(x) = &x.port_declaration.port_declaration_opt
@@ -958,6 +965,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
 
             context.pop_affiliation();
             context.pop_hierarchy();
+            context.pop_namespace();
 
             let function = ir::Function {
                 name,

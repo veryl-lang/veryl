@@ -801,6 +801,29 @@ fn function() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        const A: u32 = 8;
+        const B: u32 = func();
+        function func() -> u32 {
+            return A;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0(A): bit<32> = 32'sh00000008;
+  var var2(func.return): bit<32> = 32'h00000008;
+  const var3(B): bit<32> = 32'h00000008;
+  func var1(func) -> var2 {
+    var2 = var0;
+  }
+
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]

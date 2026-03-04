@@ -5,6 +5,7 @@ use crate::ir::{
     IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath, VarSelect, Variable,
     VariableInfo,
 };
+use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
@@ -52,6 +53,7 @@ pub struct Context {
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
+    pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
@@ -72,6 +74,7 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
+        std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
         self.func_call_depth = tgt.func_call_depth;
         self.in_generic = tgt.in_generic;
         self.config = tgt.config.clone();
@@ -480,6 +483,18 @@ impl Context {
 
     pub fn get_affiliation(&self) -> Affiliation {
         self.affiliation.last().copied().unwrap()
+    }
+
+    pub fn push_namespace(&mut self, namespace: Namespace) {
+        self.namespaces.push(namespace);
+    }
+
+    pub fn pop_namespace(&mut self) {
+        self.namespaces.pop();
+    }
+
+    pub fn currnet_namespace(&self) -> Option<Namespace> {
+        self.namespaces.last().cloned()
     }
 
     pub fn find_path(&self, path: &VarPath) -> Option<(VarId, Comptime)> {
