@@ -5387,6 +5387,22 @@ fn referring_before_definition() {
     ));
 
     let code = r#"
+    package A {
+        const A: u32  = 1;
+        const X: type = logic<A>;
+
+        struct Y {
+            x: X,
+        }
+
+        const Z: type = Y;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     module ModuleA #(
         param A: u32    = 16,
         param B: bit<A> = 0 ,

@@ -1264,19 +1264,28 @@ pub fn eval_factor_path(
         comptime.is_global = true;
         Ok(ir::Factor::Anonymous(comptime))
     } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
-        // To resolve external symbol reference,
-        // use an independent context to avoid name conflict
-        let mut external_context = Context::default();
-        external_context.inherit(context);
+        let is_inernal = context
+            .currnet_namespace()
+            .map(|x| symbol.found.namespace.included(&x))
+            .unwrap_or(false);
+        if is_inernal {
+            eval_external_symbol(context, generic_path, symbol, allow_unknown_value, token)
+        } else {
+            // To resolve external symbol reference,
+            // use an independent context to avoid name conflict
+            let mut external_context = Context::default();
+            external_context.inherit(context);
 
-        external_context.push_generic_map(generic_path.to_generic_maps());
-        let ret = external_context
-            .block(|c| eval_external_symbol(c, generic_path, symbol, allow_unknown_value, token));
+            external_context.push_generic_map(generic_path.to_generic_maps());
+            let ret = external_context.block(|c| {
+                eval_external_symbol(c, generic_path, symbol, allow_unknown_value, token)
+            });
 
-        external_context.pop_generic_map();
-        context.inherit(&mut external_context);
+            external_context.pop_generic_map();
+            context.inherit(&mut external_context);
 
-        ret
+            ret
+        }
     } else {
         Err(ir_error!(token))
     }
