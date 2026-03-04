@@ -4602,7 +4602,7 @@ fn missing_reset_statement() {
         i_trst: input reset,
     ) {
         var data_shift_reg: logic<40>;
-    
+
         always_ff {
             if_reset {
                 data_shift_reg = '0;
@@ -5374,6 +5374,35 @@ fn referring_before_definition() {
     ));
 
     let code = r#"
+    module ModuleA #(
+        param A: bit<B> = 0,
+        param B: u32    = 8
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    module ModuleA #(
+        param A: u32    = 16,
+        param B: bit<A> = 0 ,
+    ) {}
+    module ModuleB {
+        inst u: ModuleA #(
+            A: 32,
+            B: 1 ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     proto package ProtoPkg {
         const INFO     : bbool;
         const INFO_TYPE: type ;
@@ -5402,10 +5431,54 @@ fn referring_before_definition() {
     assert!(errors.is_empty());
 
     let code = r#"
+    package PkgA {
+        function func_a() -> u32 {
+            return 8;
+        }
+        function func_b() -> u32 {
+            return func_a();
+        }
+    }
+    module ModuleA {
+        import PkgA::*;
+        const A: u32 = func_b();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     module ModuleA {
         let _a: u32 = func();
         function func() -> u32 {
             return 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let a : u32 = 8;
+        let _b: u32 = func();
+        function func() -> u32 {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = func();
+        let b : u32 = 0;
+        function func() -> u32 {
+            return b;
         }
     }
     "#;
@@ -5426,28 +5499,55 @@ fn referring_before_definition() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::ReferringBeforeDefinition { .. }
-    ));
+    assert!(errors.is_empty());
 
     let code = r#"
-    package PkgA {
-        function func_a() -> u32 {
-            return 8;
+    module ModuleA #(
+        param N: u32 = 4,
+    ) {
+        let _a: u32 = func();
+        function func() -> u32 {
+            var a: u32;
+            for _i: u32 in 0..N {
+                a = 0;
+            }
+            return a;
         }
-        function func_b() -> u32 {
-            return func_a();
-        }
-    }
-    module ModuleA {
-        import PkgA::*;
-        const A: u32 = func_b();
     }
     "#;
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = func();
+        function func() -> u32 {
+            const A: u32 = 0;
+            return A;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = func();
+
+        const W: u32 = 32;
+        function func() -> bit<W> {
+            return 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
 }
 
 #[test]
