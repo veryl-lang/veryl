@@ -226,8 +226,9 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
 
                             let width = dst.total_width(context);
                             let comptime = Box::new(Comptime::create_unknown(token));
-                            let expr =
+                            let mut expr =
                                 ir::Expression::Binary(Box::new(src), op, Box::new(expr), comptime);
+                            let _ = expr.eval_comptime(context, width);
 
                             let statement = ir::AssignStatement {
                                 dst: vec![dst],
