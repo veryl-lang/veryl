@@ -838,8 +838,11 @@ pub fn eval_type(
                             context.pop_generic_map();
 
                             let (comptime, _) = expr?;
-                            if let ValueVariant::Type(x) = &comptime.value {
-                                x.kind.clone()
+                            if let ValueVariant::Type(mut r#type) = comptime.value {
+                                width.append(&mut r#type.width);
+                                array.append(&mut r#type.array);
+                                signed = r#type.signed;
+                                r#type.kind
                             } else {
                                 ir::TypeKind::Unknown
                             }
