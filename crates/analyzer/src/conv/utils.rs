@@ -16,7 +16,7 @@ use crate::symbol::{
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
-use crate::{HashMap, ir_error, namespace_table};
+use crate::{HashMap, ir_error};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -1106,8 +1106,8 @@ pub fn eval_function_call(
             ir::Arguments::Null
         };
 
-        let symbol = symbol_table::resolve(value.expression_identifier.as_ref())
-            .map_err(|_| ir_error!(token))?;
+        let resolved_path = context.resolve_path(value.expression_identifier.as_ref().into());
+        let symbol = symbol_table::resolve(&resolved_path).map_err(|_| ir_error!(token))?;
 
         match &symbol.found.kind {
             SymbolKind::SystemFunction(_) => {
@@ -1291,6 +1291,16 @@ pub fn eval_external_symbol(
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) => {
+            // Parameter should be found through context.find_path from the defined namespace
+            if let Some(namespace) = context.currnet_namespace()
+                && symbol.found.namespace.included(&namespace)
+            {
+                context.insert_error(AnalyzerError::referring_before_definition(
+                    &symbol.found.token.to_string(),
+                    &token,
+                ));
+            }
+
             if let Some(expr) = &x.value {
                 let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
                 let (mut comptime, _) =
@@ -2091,24 +2101,8 @@ pub fn var_path_to_assign_destination(
         .collect()
 }
 
-fn get_function(
-    context: &mut Context,
-    path: &FuncPath,
-    is_local_function: bool,
-    token: TokenRange,
-) -> IrResult<FuncProto> {
+fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> IrResult<FuncProto> {
     if !context.func_paths.contains_key(path) {
-        if is_local_function
-            && context.func_call_depth == 0
-            && !context.func_paths.contains_key(&path.base())
-        {
-            context.insert_error(AnalyzerError::referring_before_definition(
-                &token.beg.text.to_string(),
-                &token,
-            ));
-            return Err(ir_error!(token));
-        }
-
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
         let definition = match &symbol.kind {
             SymbolKind::Function(x) => x.definition.unwrap(),
@@ -2173,12 +2167,6 @@ pub fn function_call(
     parent_path.paths.pop();
     let sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
 
-    let is_local_function = {
-        let namespace = namespace_table::get(path.identifier().token.id).unwrap();
-        let symbol = symbol_table::get(sig.symbol).unwrap();
-        namespace.included(&symbol.namespace)
-    };
-
     let path: VarPathSelect = Conv::conv(context, path)?;
     let (mut base_path, select, _) = path.into();
     let index = select.to_index();
@@ -2217,7 +2205,7 @@ pub fn function_call(
     context.push_generic_map(map);
 
     let ret = context.block(|c| {
-        let func = get_function(c, &path, is_local_function, token)?;
+        let func = get_function(c, &path, token)?;
         let (inputs, outputs) = args.to_function_args(c, &func, token)?;
 
         let mut comptime = func.r#type.clone();

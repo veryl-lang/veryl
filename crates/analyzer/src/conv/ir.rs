@@ -127,8 +127,9 @@ impl Conv<&ModuleDeclaration> for ir::Module {
         context.push_affiliation(Affiliation::Module);
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::Module(x) = symbol.found.kind
+            && let SymbolKind::Module(x) = &symbol.found.kind
         {
+            context.push_namespace(symbol.found.inner_namespace());
             if let Some(x) = x.default_clock {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_clock(path, x);
@@ -217,6 +218,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             }
         }
 
+        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         Ok(ir::Module {
@@ -240,6 +242,15 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
 
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Interface);
+
+        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+            && matches!(symbol.found.kind, SymbolKind::Interface(_))
+        {
+            context.push_namespace(symbol.found.inner_namespace());
+        } else {
+            let token: TokenRange = value.identifier.as_ref().into();
+            return Err(ir_error!(token));
+        }
 
         if let Some(x) = &value.interface_declaration_opt {
             check_generic_bound(&mut context, &x.with_generic_parameter);
@@ -296,6 +307,7 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
             .extract_if(|_, v| v.affiliation != Affiliation::Function)
             .collect();
 
+        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         Ok(ir::Interface {
@@ -318,6 +330,15 @@ impl Conv<&PackageDeclaration> for () {
 
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Package);
+
+        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+            && matches!(symbol.found.kind, SymbolKind::Package(_))
+        {
+            context.push_namespace(symbol.found.inner_namespace());
+        } else {
+            let token: TokenRange = value.identifier.as_ref().into();
+            return Err(ir_error!(token));
+        }
 
         if let Some(x) = &value.package_declaration_opt {
             check_generic_bound(&mut context, &x.with_generic_parameter);
@@ -351,6 +372,7 @@ impl Conv<&PackageDeclaration> for () {
             }
         }
 
+        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         Ok(())
@@ -366,6 +388,15 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
 
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::ProtoModule);
+
+        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+            && matches!(symbol.found.kind, SymbolKind::ProtoModule(_))
+        {
+            context.push_namespace(symbol.found.inner_namespace());
+        } else {
+            let token: TokenRange = value.identifier.as_ref().into();
+            return Err(ir_error!(token));
+        }
 
         if let Some(x) = &value.proto_module_declaration_opt
             && let Some(x) = &x.with_parameter.with_parameter_opt
@@ -398,6 +429,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             }
         }
 
+        context.pop_namespace();
         upper_context.inherit(&mut context);
 
         Ok(ir::Module {
@@ -415,6 +447,15 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
 impl Conv<&ProtoInterfaceDeclaration> for () {
     fn conv(context: &mut Context, value: &ProtoInterfaceDeclaration) -> IrResult<Self> {
         context.push_affiliation(Affiliation::ProtoInterface);
+
+        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+            && matches!(symbol.found.kind, SymbolKind::ProtoInterface(_))
+        {
+            context.push_namespace(symbol.found.inner_namespace());
+        } else {
+            let token: TokenRange = value.identifier.as_ref().into();
+            return Err(ir_error!(token));
+        }
 
         for x in &value.proto_interface_declaration_list {
             if let ProtoInterfaceItem::ProtoAliasDeclaration(x) = x.proto_interface_item.as_ref() {
@@ -436,6 +477,7 @@ impl Conv<&ProtoInterfaceDeclaration> for () {
         }
 
         context.pop_affiliation();
+        context.pop_namespace();
         Ok(())
     }
 }
@@ -443,6 +485,15 @@ impl Conv<&ProtoInterfaceDeclaration> for () {
 impl Conv<&ProtoPackageDeclaration> for () {
     fn conv(context: &mut Context, value: &ProtoPackageDeclaration) -> IrResult<Self> {
         context.push_affiliation(Affiliation::ProtoPackage);
+
+        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+            && matches!(symbol.found.kind, SymbolKind::ProtoPackage(_))
+        {
+            context.push_namespace(symbol.found.inner_namespace());
+        } else {
+            let token: TokenRange = value.identifier.as_ref().into();
+            return Err(ir_error!(token));
+        }
 
         for x in &value.proto_package_declaration_list {
             if let ProtoPacakgeItem::ProtoAliasDeclaration(x) = x.proto_pacakge_item.as_ref() {
@@ -464,6 +515,7 @@ impl Conv<&ProtoPackageDeclaration> for () {
         }
 
         context.pop_affiliation();
+        context.pop_namespace();
         Ok(())
     }
 }

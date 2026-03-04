@@ -801,6 +801,29 @@ fn function() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        const A: u32 = 8;
+        const B: u32 = func();
+        function func() -> u32 {
+            return A;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0(A): bit<32> = 32'sh00000008;
+  var var2(func.return): bit<32> = 32'h00000008;
+  const var3(B): bit<32> = 32'h00000008;
+  func var1(func) -> var2 {
+    var2 = var0;
+  }
+
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
@@ -1839,7 +1862,7 @@ fn concat() {
     o: output logic<16>,
     o2: output logic<16>,
 ) {
-    assign o = {8'hff + 8'h1}; 
+    assign o = {8'hff + 8'h1};
     assign o2 = {8'hf0, 8'hff + 8'h1};
 }
     "#;
@@ -1855,5 +1878,101 @@ fn concat() {
   }
 }
 "#;
+    check_ir(code, exp);
+}
+
+#[test]
+fn proto_function() {
+    let code = r#"
+    proto package Element {
+        type data;
+        function gt(a: input data, b: input data) -> logic;
+    }
+    package IntElement for Element {
+        type data = logic<8>;
+        function gt(a: input data, b: input data) -> logic {
+            return a >: b;
+        }
+    }
+    module ModuleA::<E: Element> (
+        a: input  E::data,
+        b: input  E::data,
+        r: output logic,
+    ) {
+        always_comb {
+            r = E::gt(a, b);
+        }
+    }
+    module Top (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        r: output logic,
+    ) {
+        inst inner: ModuleA::<IntElement> (a, b, r);
+    }
+    "#;
+    let exp = r#"module ModuleA {
+  input var0(a): unknown = 1'hx;
+  input var1(b): unknown = 1'hx;
+  output var2(r): logic = 1'hx;
+
+  comb {
+    var2 = unknown;
+  }
+}
+module Top {
+  input var0(a): logic<8> = 8'hxx;
+  input var1(b): logic<8> = 8'hxx;
+  output var2(r): logic = 1'hx;
+
+  inst inner (
+    var0 <- var0;
+    var1 <- var1;
+    var2 -> var2;
+  ) {
+    module ModuleA {
+      input var0(a): logic<8> = 8'hxx;
+      input var1(b): logic<8> = 8'hxx;
+      output var2(r): logic = 1'hx;
+      var var4(E.gt.return): logic = 1'hx;
+      input var5(E.gt.a): logic<8> = 8'hxx;
+      input var6(E.gt.b): logic<8> = 8'hxx;
+      func var3(E.gt) -> var4 {
+        var4 = (var5 >: var6);
+      }
+
+      comb {
+        var2 = var3(a: var0, b: var1);
+      }
+    }
+  }
+}
+"#;
+    check_ir(code, exp);
+}
+
+#[test]
+fn binary_operation_with_large_width_variable() {
+    let code = r#"
+module Top (
+  a: input  logic<65>,
+  b: output logic    ,
+) {
+  always_comb {
+    b = a == '0;
+  }
+}
+"#;
+
+    let exp = r#"module Top {
+  input var0(a): logic<65> = 65'hxxxxxxxxxxxxxxxxx;
+  output var1(b): logic = 1'hx;
+
+  comb {
+    var1 = (var0 == '0);
+  }
+}
+"#;
+
     check_ir(code, exp);
 }
