@@ -48,13 +48,8 @@ pub fn validate_positive_type_value(
         && !value.is_positive()
     {
         let type_str = format_positive_type_name(r#type);
-        let value_str = if value.is_xz() {
-            format!("{:x}", value)
-        } else {
-            value.payload().to_string()
-        };
         context.insert_error(AnalyzerError::non_positive_value(
-            &value_str, &type_str, token,
+            "negative", &type_str, token,
         ));
     }
 }
@@ -382,13 +377,8 @@ pub fn eval_assign_statement(
                 && !elem_value.is_positive()
             {
                 let type_str = format_positive_type_name(&elem_type);
-                let value_str = if elem_value.is_xz() {
-                    format!("{:x}", elem_value)
-                } else {
-                    elem_value.payload().to_string()
-                };
                 context.insert_error(AnalyzerError::non_positive_value(
-                    &value_str,
+                    "negative",
                     &type_str,
                     &value_token,
                 ));
@@ -456,13 +446,9 @@ fn eval_array_literal_expressions(
         if part_type.is_positive && !part_value.is_positive() {
             let type_str = format_positive_type_name(&part_type);
             let value_token = expr.expr.token_range();
-            let value_str = if part_value.is_xz() {
-                format!("{:x}", part_value)
-            } else {
-                part_value.payload().to_string()
-            };
+
             context.insert_error(AnalyzerError::non_positive_value(
-                &value_str,
+                "negative",
                 &type_str,
                 &value_token,
             ));
