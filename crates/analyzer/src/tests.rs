@@ -10500,6 +10500,32 @@ fn positive_type_validation() {
     assert_eq!(non_pos_errors.len(), 1);
 
     let code = r#"
+    module ModuleL {
+        let a: p8 = 'x;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 1);
+
+    let code = r#"
+    module ModuleL {
+        let a: p8 = 'z;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 1);
+
+    let code = r#"
     module ModuleM {
         let b: p16 = -1;
         let c: p32 = -100;
@@ -10526,18 +10552,18 @@ fn positive_type_validation() {
         .collect();
     assert_eq!(non_pos_errors.len(), 1);
 
-    // let code = r#"
-    // module ModuleO {
-    //     let a: p8 = 1;
-    //     let b: p16 = 100;
-    //     let c: p32[2] = '{1, 255};
-    // }
-    // "#;
+    let code = r#"
+    module ModuleO {
+        let a: p8 = 1;
+        let b: p16 = 100;
+        let c: p32[2] = '{1, 255};
+    }
+    "#;
 
-    // let errors = analyze(code);
-    // let non_pos_errors: Vec<_> = errors
-    //     .iter()
-    //     .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
-    //     .collect();
-    // assert_eq!(non_pos_errors.len(), 0);
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 0);
 }

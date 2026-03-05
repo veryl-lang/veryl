@@ -21,6 +21,43 @@ use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
+fn format_positive_type_name(r#type: &ir::Type) -> String {
+    if r#type.is_positive
+        && let Some(width) = r#type.width.first()
+        && let Some(w) = width
+    {
+        return match *w {
+            8 => "p8".to_string(),
+            16 => "p16".to_string(),
+            32 => "p32".to_string(),
+            64 => "p64".to_string(),
+            _ => r#type.to_string(),
+        };
+    }
+    r#type.to_string()
+}
+
+pub fn validate_positive_type_value(
+    context: &mut Context,
+    comptime: &Comptime,
+    r#type: &ir::Type,
+    token: &TokenRange,
+) {
+    if let Ok(value) = comptime.get_value() {
+        if r#type.is_positive && !value.is_positive() {
+            let type_str = format_positive_type_name(r#type);
+            let value_str = if value.is_xz() {
+                format!("{:x}", value)
+            } else {
+                value.payload().to_string()
+            };
+            context.insert_error(AnalyzerError::non_positive_value(
+                &value_str, &type_str, token,
+            ));
+        }
+    }
+}
+
 pub fn eval_expr(
     context: &mut Context,
     dst_type: Option<ir::Type>,
@@ -35,17 +72,17 @@ pub fn eval_expr(
 
         let comptime = if let Some(dst_type) = dst_type {
             let is_unary_negative = matches!(expr, ir::Expression::Unary(Op::Sub, _, _));
-            let mut comptime = expr.eval_comptime(context, dst_type.total_width()).clone();
-
-            if is_unary_negative && is_positive_type(&dst_type) {
+            if is_unary_negative && dst_type.is_positive {
                 let type_str = format_positive_type_name(&dst_type);
                 context.insert_error(AnalyzerError::non_positive_value(
                     "negative", &type_str, &token,
                 ));
             }
 
-            validate_positive_type_value(context, &comptime, &dst_type, &token);
+            let mut comptime = expr.eval_comptime(context, dst_type.total_width()).clone();
+
             check_compatibility(context, &dst_type, &comptime, &token);
+            validate_positive_type_value(context, &comptime, &dst_type, &token);
 
             comptime.r#type = dst_type;
             comptime
@@ -314,7 +351,7 @@ pub fn eval_assign_statement(
     token: TokenRange,
 ) -> IrResult<Vec<ir::Statement>> {
     let (comptime, expr) = expr;
-    let r#type = &dst.comptime.r#type;
+
     check_clock_domain(context, &dst.comptime, comptime, &token.beg);
 
     if context.is_affiliated(Affiliation::AlwaysFf)
@@ -326,43 +363,39 @@ pub fn eval_assign_statement(
     let width = dst.total_width(context);
     let mut ret = vec![];
 
-    let array_exprs = eval_array_literal(context, Some(&r#type.array), Some(&r#type.width), expr)?;
+    let array_exprs = eval_array_literal(
+        context,
+        Some(&dst.comptime.r#type.array),
+        Some(&dst.comptime.r#type.width),
+        expr,
+    )?;
     if let Some(exprs) = array_exprs {
-        for mut expr in exprs {
-            let mut part_type = r#type.clone();
-            part_type.width.drain(0..expr.select.len());
+        for mut array_expr in exprs {
+            let value_token = array_expr.expr.token_range();
 
-            let is_negative = matches!(expr.expr, ir::Expression::Unary(Op::Sub, _, _));
-            if is_positive_type(&part_type) && is_negative {
-                let type_str = format_positive_type_name(&part_type);
-                let value_token = expr.expr.token_range();
-                context.insert_error(AnalyzerError::non_positive_value(
-                    "negative",
-                    &type_str,
-                    &value_token,
-                ));
-            } else if is_positive_type(&part_type)
-                && let Some(value) = expr.expr.eval_value(context)
-                && !value.is_positive()
-            {
-                let type_str = format_positive_type_name(&part_type);
-                let value_token = expr.expr.token_range();
-                let value_str = if value.is_xz() {
-                    format!("{:x}", value)
-                } else {
-                    value.payload().to_string()
-                };
-                context.insert_error(AnalyzerError::non_positive_value(
-                    &value_str,
-                    &type_str,
-                    &value_token,
-                ));
+            let mut elem_type = dst.comptime.r#type.clone();
+            elem_type.width.drain(0..array_expr.select.len());
+
+            if let Ok(elem_value) = array_expr.expr.eval_comptime(context, None).get_value() {
+                if elem_type.is_positive && !elem_value.is_positive() {
+                    let type_str = format_positive_type_name(&elem_type);
+                    let value_str = if elem_value.is_xz() {
+                        format!("{:x}", elem_value)
+                    } else {
+                        elem_value.payload().to_string()
+                    };
+                    context.insert_error(AnalyzerError::non_positive_value(
+                        &value_str,
+                        &type_str,
+                        &value_token,
+                    ));
+                }
             }
 
-            check_reset_non_elaborative(context, &mut expr.expr);
+            check_reset_non_elaborative(context, &mut array_expr.expr);
 
-            let index = expr.to_var_index();
-            let select = expr.to_var_select();
+            let index = array_expr.to_var_index();
+            let select = array_expr.to_var_select();
 
             let mut dst = dst.clone();
             dst.index.append(&index);
@@ -371,7 +404,7 @@ pub fn eval_assign_statement(
             let statement = ir::Statement::Assign(ir::AssignStatement {
                 dst: vec![dst],
                 width,
-                expr: expr.expr,
+                expr: array_expr.expr,
                 token,
             });
             ret.push(statement);
@@ -413,25 +446,12 @@ fn eval_array_literal_expressions(
         part_type.width.drain(0..expr.select.len());
         let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
 
-        let is_negative = matches!(expr.expr, ir::Expression::Unary(Op::Sub, _, _));
-        if is_positive_type(&part_type) && is_negative {
-            let type_str = format_positive_type_name(&part_type);
-            let value_token = expr.expr.token_range();
-            context.insert_error(AnalyzerError::non_positive_value(
-                "negative",
-                &type_str,
-                &value_token,
-            ));
-            continue;
-        }
-
         let mut part_value = expr
             .expr
             .eval_value(context)
             .ok_or_else(|| ir_error!(token))?;
         part_value.trunc(part_width);
-
-        if is_positive_type(&part_type) && !part_value.is_positive() {
+        if part_type.is_positive && !part_value.is_positive() {
             let type_str = format_positive_type_name(&part_type);
             let value_token = expr.expr.token_range();
             let value_str = if part_value.is_xz() {
@@ -462,26 +482,6 @@ fn eval_array_literal_expressions(
     Ok(ret)
 }
 
-fn is_positive_type(r#type: &ir::Type) -> bool {
-    r#type.is_positive
-}
-
-fn format_positive_type_name(r#type: &ir::Type) -> String {
-    if r#type.is_positive
-        && let Some(width) = r#type.width.first()
-        && let Some(w) = width
-    {
-        return match *w {
-            8 => "p8".to_string(),
-            16 => "p16".to_string(),
-            32 => "p32".to_string(),
-            64 => "p64".to_string(),
-            _ => r#type.to_string(),
-        };
-    }
-    r#type.to_string()
-}
-
 pub fn eval_const_assign(
     context: &mut Context,
     kind: VarKind,
@@ -493,6 +493,7 @@ pub fn eval_const_assign(
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
+    validate_positive_type_value(context, &comptime, r#type, &token);
 
     match expr {
         ir::Expression::ArrayLiteral(_, _) => {
@@ -566,30 +567,6 @@ pub fn eval_const_assign(
     }
 
     Ok(())
-}
-
-pub fn validate_positive_type_value(
-    context: &mut Context,
-    comptime: &Comptime,
-    r#type: &ir::Type,
-    token: &TokenRange,
-) {
-    if is_positive_type(r#type) {
-        let type_str = format_positive_type_name(r#type);
-
-        if let Ok(value) = comptime.get_value()
-            && !value.is_positive()
-        {
-            let value_str = if value.is_xz() {
-                format!("{:x}", value)
-            } else {
-                value.payload().to_string()
-            };
-            context.insert_error(AnalyzerError::non_positive_value(
-                &value_str, &type_str, token,
-            ));
-        }
-    }
 }
 
 pub fn eval_variable(
