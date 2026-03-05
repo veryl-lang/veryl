@@ -1856,6 +1856,69 @@ module ModuleB {
 }
 
 #[test]
+fn type_param_preserves_width() {
+    let code = r#"
+    module Inner::<T: type> () {
+        var a: T;
+        assign a = '0;
+    }
+
+    module Outer #(
+        param T: type = logic<8>,
+    ) () {
+        inst u: Inner::<T>;
+    }
+
+    module Top {
+        inst u: Outer;
+    }
+    "#;
+
+    let exp = r#"module Inner {
+  var var0(a): unknown = 1'hx;
+
+  comb {
+    var0 = '0;
+  }
+}
+module Outer {
+
+  inst u (
+  ) {
+    module Inner {
+      var var0(a): logic<8> = 8'hxx;
+
+      comb {
+        var0 = '0;
+      }
+    }
+  }
+}
+module Top {
+
+  inst u (
+  ) {
+    module Outer {
+
+      inst u (
+      ) {
+        module Inner {
+          var var0(a): logic<8> = 8'hxx;
+
+          comb {
+            var0 = '0;
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn concat() {
     let code = r#"
   module Top (
