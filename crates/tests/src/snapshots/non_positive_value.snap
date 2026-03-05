@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 292
+expression: out
+---
+non_positive_value (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#non_positive_value)
+
+  × Value 0 cannot be assigned to positive type "p8"
+   ╭─[../../testcases/error/non_positive_value.veryl:2:19]
+ 1 │ module Module84 {
+ 2 │     let _a: p8  = 0;
+   ·                   ┬
+   ·                   ╰── Error location
+ 3 │     let _b: p16 = -1;
+   ╰────
+  help: positive types (p8/p16/p32/p64) can only accept values > 0
