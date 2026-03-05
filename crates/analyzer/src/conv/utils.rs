@@ -43,18 +43,19 @@ pub fn validate_positive_type_value(
     r#type: &ir::Type,
     token: &TokenRange,
 ) {
-    if let Ok(value) = comptime.get_value() {
-        if r#type.is_positive && !value.is_positive() {
-            let type_str = format_positive_type_name(r#type);
-            let value_str = if value.is_xz() {
-                format!("{:x}", value)
-            } else {
-                value.payload().to_string()
-            };
-            context.insert_error(AnalyzerError::non_positive_value(
-                &value_str, &type_str, token,
-            ));
-        }
+    if let Ok(value) = comptime.get_value()
+        && r#type.is_positive
+        && !value.is_positive()
+    {
+        let type_str = format_positive_type_name(r#type);
+        let value_str = if value.is_xz() {
+            format!("{:x}", value)
+        } else {
+            value.payload().to_string()
+        };
+        context.insert_error(AnalyzerError::non_positive_value(
+            &value_str, &type_str, token,
+        ));
     }
 }
 
@@ -376,20 +377,21 @@ pub fn eval_assign_statement(
             let mut elem_type = dst.comptime.r#type.clone();
             elem_type.width.drain(0..array_expr.select.len());
 
-            if let Ok(elem_value) = array_expr.expr.eval_comptime(context, None).get_value() {
-                if elem_type.is_positive && !elem_value.is_positive() {
-                    let type_str = format_positive_type_name(&elem_type);
-                    let value_str = if elem_value.is_xz() {
-                        format!("{:x}", elem_value)
-                    } else {
-                        elem_value.payload().to_string()
-                    };
-                    context.insert_error(AnalyzerError::non_positive_value(
-                        &value_str,
-                        &type_str,
-                        &value_token,
-                    ));
-                }
+            if let Ok(elem_value) = array_expr.expr.eval_comptime(context, None).get_value()
+                && elem_type.is_positive
+                && !elem_value.is_positive()
+            {
+                let type_str = format_positive_type_name(&elem_type);
+                let value_str = if elem_value.is_xz() {
+                    format!("{:x}", elem_value)
+                } else {
+                    elem_value.payload().to_string()
+                };
+                context.insert_error(AnalyzerError::non_positive_value(
+                    &value_str,
+                    &type_str,
+                    &value_token,
+                ));
             }
 
             check_reset_non_elaborative(context, &mut array_expr.expr);
