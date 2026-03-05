@@ -521,8 +521,9 @@ impl Factor {
 
     pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
         match self {
-            Factor::Variable(_, index, select, comptime) => {
-                comptime.r#type.array.drain(0..index.dimension());
+            Factor::Variable(_, _index, select, comptime) => {
+                // Array dimensions are already drained at Factor construction time
+                // (in VarPathSelect::to_expression and eval_factor).
 
                 // Struct/Union/Enum should be treated as flatten bit/logic when it is bit-selected
                 if !select.is_empty() {

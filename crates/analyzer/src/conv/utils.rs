@@ -1247,6 +1247,7 @@ pub fn eval_factor_path(
             Err(ir_error!(token))
         } else {
             let index = array_select.to_index();
+            comptime.r#type.array.drain(0..index.dimension());
 
             comptime.token = token;
             if comptime.r#type.is_type() {
