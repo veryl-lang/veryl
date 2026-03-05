@@ -1,0 +1,6 @@
+module Module84 {
+    let _a: p8  = 0;
+    let _b: p16 = -1;
+    let _c: p32 = 0;
+    let _d: p64 = -100;
+}
