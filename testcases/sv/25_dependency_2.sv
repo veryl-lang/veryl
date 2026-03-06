@@ -71,5 +71,7 @@ module veryl_testcase_Module25D;
         .if4 (qux_if)
     );
     veryl_testcase___Module25C____Package25__1_C u7 ();
+
+    logic _a; always_comb _a = qux_if.qux.s;
 endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map

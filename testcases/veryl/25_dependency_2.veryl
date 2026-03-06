@@ -67,4 +67,6 @@ module Module25D {
         if4: qux_if,
     );
     inst u7: Module25C::<package_25::C>;
+
+    let _a: logic = qux_if.qux.s;
 }
