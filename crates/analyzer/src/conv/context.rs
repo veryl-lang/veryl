@@ -43,7 +43,6 @@ pub struct Context {
     pub func_paths: HashMap<FuncPath, VarId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
-    pub func_call_depth: u32,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
     pub modports: HashMap<StrId, Vec<(StrId, Direction)>>,
     pub declarations: Vec<Declaration>,
@@ -75,7 +74,6 @@ impl Context {
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
-        self.func_call_depth = tgt.func_call_depth;
         self.in_generic = tgt.in_generic;
         self.config = tgt.config.clone();
     }
