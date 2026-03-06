@@ -7233,6 +7233,26 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param N: u32 = 4
+    ) {
+        initial {
+            func();
+        }
+        function func() {
+            const D: u32 = $clog2(N);
+            var a: u32;
+            for i: u32 in 0..D {
+                a = i;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

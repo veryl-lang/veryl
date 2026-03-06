@@ -2140,20 +2140,27 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             Shape::default()
         };
 
-        let mut local_context = Context::default();
-        local_context.var_id = context.var_id;
-        local_context.inherit(context);
-        local_context.extract_var_paths(context, &path.path, &array);
+        let is_local_func = context
+            .currnet_namespace()
+            .map(|namespace| symbol.namespace.included(&namespace))
+            .unwrap_or(false);
+        if is_local_func {
+            let ret: IrResult<()> = Conv::conv(context, (&definition, Some(path)));
+            ret?;
+        } else {
+            let mut local_context = Context::default();
+            local_context.var_id = context.var_id;
+            local_context.inherit(context);
+            local_context.extract_var_paths(context, &path.path, &array);
 
-        local_context.func_call_depth += 1;
-        let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
-        local_context.func_call_depth -= 1;
+            let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
 
-        context.extract_function(&mut local_context, &path.path, &array);
-        context.inherit(&mut local_context);
-        context.var_id = local_context.var_id;
+            context.extract_function(&mut local_context, &path.path, &array);
+            context.inherit(&mut local_context);
+            context.var_id = local_context.var_id;
 
-        ret?;
+            ret?;
+        }
     }
 
     let Some(id) = context.func_paths.get(path) else {
