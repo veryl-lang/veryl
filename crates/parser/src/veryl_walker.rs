@@ -923,6 +923,34 @@ pub trait VerylWalker {
         after!(self, r#type, arg);
     }
 
+    /// Semantic action for non-terminal 'P8'
+    fn p8(&mut self, arg: &P8) {
+        before!(self, p8, arg);
+        self.veryl_token(&arg.p8_token);
+        after!(self, p8, arg);
+    }
+
+    /// Semantic action for non-terminal 'P16'
+    fn p16(&mut self, arg: &P16) {
+        before!(self, p16, arg);
+        self.veryl_token(&arg.p16_token);
+        after!(self, p16, arg);
+    }
+
+    /// Semantic action for non-terminal 'P32'
+    fn p32(&mut self, arg: &P32) {
+        before!(self, p32, arg);
+        self.veryl_token(&arg.p32_token);
+        after!(self, p32, arg);
+    }
+
+    /// Semantic action for non-terminal 'P64'
+    fn p64(&mut self, arg: &P64) {
+        before!(self, p64, arg);
+        self.veryl_token(&arg.p64_token);
+        after!(self, p64, arg);
+    }
+
     /// Semantic action for non-terminal 'U8'
     fn u8(&mut self, arg: &U8) {
         before!(self, u8, arg);
@@ -1663,6 +1691,10 @@ pub trait VerylWalker {
     fn fixed_type(&mut self, arg: &FixedType) {
         before!(self, fixed_type, arg);
         match arg {
+            FixedType::P8(x) => self.p8(&x.p8),
+            FixedType::P16(x) => self.p16(&x.p16),
+            FixedType::P32(x) => self.p32(&x.p32),
+            FixedType::P64(x) => self.p64(&x.p64),
             FixedType::U8(x) => self.u8(&x.u8),
             FixedType::U16(x) => self.u16(&x.u16),
             FixedType::U32(x) => self.u32(&x.u32),
@@ -1765,6 +1797,10 @@ pub trait VerylWalker {
     fn casting_type(&mut self, arg: &CastingType) {
         before!(self, casting_type, arg);
         match arg {
+            CastingType::P8(x) => self.p8(&x.p8),
+            CastingType::P16(x) => self.p16(&x.p16),
+            CastingType::P32(x) => self.p32(&x.p32),
+            CastingType::P64(x) => self.p64(&x.p64),
             CastingType::U8(x) => self.u8(&x.u8),
             CastingType::U16(x) => self.u16(&x.u16),
             CastingType::U32(x) => self.u32(&x.u32),

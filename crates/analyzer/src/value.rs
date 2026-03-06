@@ -984,6 +984,17 @@ impl Value {
             None
         }
     }
+
+    pub fn is_positive(&self) -> bool {
+        if self.is_xz() {
+            return false;
+        }
+
+        match self {
+            Value::U64(x) => x.payload > 0,
+            Value::BigUint(x) => !x.payload.is_zero(),
+        }
+    }
 }
 
 impl fmt::LowerHex for Value {

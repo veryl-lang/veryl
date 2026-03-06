@@ -1,0 +1,37 @@
+module Module83 {
+    // p8 type - unsigned positive 8-bit integer
+    let _a: p8 = 1;
+    let _b: p8 = 255;
+
+
+    // p16 type - unsigned positive 16-bit integer
+    let _d: p16 = 1;
+    let _e: p16 = 65535;
+
+
+    // p32 type - unsigned positive 32-bit integer
+    let _g: p32 = 1;
+    let _h: p32 = 4294967295;
+
+
+    // p64 type - unsigned positive 64-bit integer
+    let _j: p64 = 1;
+    let _k: p64 = 18446744073709551615;
+
+
+    // p* with expressions
+    let _m: p8  = 1 + 1;
+    let _n: p16 = 10 * 5;
+    let _o: p32 = 100 + 50;
+
+    // arrays of p* types
+    let _p: p8  [2] = '{1, 255};
+    let _q: p16 [3] = '{1, 100, 65535};
+    let _r: p32 [2] = '{1, 4294967295};
+
+    // in always block
+    always_comb {
+        var x: p8;
+        x = 42;
+    }
+}
