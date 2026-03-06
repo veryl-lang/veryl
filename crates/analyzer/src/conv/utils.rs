@@ -49,7 +49,9 @@ pub fn validate_positive_type_value(
     {
         let type_str = format_positive_type_name(r#type);
         context.insert_error(AnalyzerError::non_positive_value(
-            "negative", &type_str, token,
+            "non-positive",
+            &type_str,
+            token,
         ));
     }
 }
@@ -71,7 +73,9 @@ pub fn eval_expr(
             if is_unary_negative && dst_type.is_positive {
                 let type_str = format_positive_type_name(&dst_type);
                 context.insert_error(AnalyzerError::non_positive_value(
-                    "negative", &type_str, &token,
+                    "non-positive",
+                    &type_str,
+                    &token,
                 ));
             }
 
@@ -378,7 +382,7 @@ pub fn eval_assign_statement(
             {
                 let type_str = format_positive_type_name(&elem_type);
                 context.insert_error(AnalyzerError::non_positive_value(
-                    "negative",
+                    "non-positive",
                     &type_str,
                     &value_token,
                 ));
@@ -448,7 +452,7 @@ fn eval_array_literal_expressions(
             let value_token = expr.expr.token_range();
 
             context.insert_error(AnalyzerError::non_positive_value(
-                "negative",
+                "non-positive",
                 &type_str,
                 &value_token,
             ));

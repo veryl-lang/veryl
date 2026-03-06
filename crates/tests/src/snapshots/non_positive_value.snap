@@ -1,11 +1,10 @@
 ---
 source: crates/tests/src/lib.rs
-assertion_line: 292
 expression: out
 ---
 non_positive_value (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#non_positive_value)
 
-  × Value negative cannot be assigned to positive type "p8"
+  × Value non-positive cannot be assigned to positive type "p8"
    ╭─[../../testcases/error/non_positive_value.veryl:2:19]
  1 │ module Module84 {
  2 │     let _a: p8  = -1;
