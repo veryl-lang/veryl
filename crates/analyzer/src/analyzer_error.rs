@@ -651,7 +651,7 @@ pub enum AnalyzerError {
         help("positive types (p8/p16/p32/p64) can only accept values > 0"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("Value {value} cannot be assigned to positive type \"{typ}\"")]
+    #[error("Non-positive value {value} cannot be assigned to positive type \"{typ}\"")]
     NonPositiveValue {
         value: String,
         typ: String,
