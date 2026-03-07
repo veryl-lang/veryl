@@ -196,7 +196,6 @@ fn no_panic_if_expression_when_vertical_align_off() {
     assert!(!ret.is_empty());
 }
 
-
 #[test]
 fn const_above_let_alignment() {
     let code = r#"module TopModule {
