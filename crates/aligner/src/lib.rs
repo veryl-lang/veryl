@@ -108,6 +108,12 @@ impl Align {
         }
     }
 
+    pub fn add_width(&mut self, width: u32) {
+        if self.enable {
+            self.width += width;
+        }
+    }
+
     fn space(&mut self, x: usize) {
         if self.enable {
             self.width += x as u32;

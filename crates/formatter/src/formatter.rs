@@ -1608,6 +1608,9 @@ impl VerylWalker for Formatter {
         self.r#const(&arg.r#const);
         self.space(1);
         self.align_start(align_kind::IDENTIFIER);
+        if self.mode == Mode::Align {
+            self.aligner.aligns[align_kind::IDENTIFIER].add_width(2);
+        }
         self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
         self.colon(&arg.colon);
