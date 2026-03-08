@@ -838,8 +838,11 @@ pub fn eval_type(
                             context.pop_generic_map();
 
                             let (comptime, _) = expr?;
-                            if let ValueVariant::Type(x) = &comptime.value {
-                                x.kind.clone()
+                            if let ValueVariant::Type(mut r#type) = comptime.value {
+                                width.append(&mut r#type.width);
+                                array.append(&mut r#type.array);
+                                signed = r#type.signed;
+                                r#type.kind
                             } else {
                                 ir::TypeKind::Unknown
                             }
@@ -1247,6 +1250,7 @@ pub fn eval_factor_path(
             Err(ir_error!(token))
         } else {
             let index = array_select.to_index();
+            comptime.r#type.array.drain(0..index.dimension());
 
             comptime.token = token;
             if comptime.r#type.is_type() {
@@ -1264,19 +1268,28 @@ pub fn eval_factor_path(
         comptime.is_global = true;
         Ok(ir::Factor::Anonymous(comptime))
     } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
-        // To resolve external symbol reference,
-        // use an independent context to avoid name conflict
-        let mut external_context = Context::default();
-        external_context.inherit(context);
+        let is_inernal = context
+            .currnet_namespace()
+            .map(|x| symbol.found.namespace.included(&x))
+            .unwrap_or(false);
+        if is_inernal {
+            eval_external_symbol(context, generic_path, symbol, allow_unknown_value, token)
+        } else {
+            // To resolve external symbol reference,
+            // use an independent context to avoid name conflict
+            let mut external_context = Context::default();
+            external_context.inherit(context);
 
-        external_context.push_generic_map(generic_path.to_generic_maps());
-        let ret = external_context
-            .block(|c| eval_external_symbol(c, generic_path, symbol, allow_unknown_value, token));
+            external_context.push_generic_map(generic_path.to_generic_maps());
+            let ret = external_context.block(|c| {
+                eval_external_symbol(c, generic_path, symbol, allow_unknown_value, token)
+            });
 
-        external_context.pop_generic_map();
-        context.inherit(&mut external_context);
+            external_context.pop_generic_map();
+            context.inherit(&mut external_context);
 
-        ret
+            ret
+        }
     } else {
         Err(ir_error!(token))
     }
@@ -2127,20 +2140,27 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             Shape::default()
         };
 
-        let mut local_context = Context::default();
-        local_context.var_id = context.var_id;
-        local_context.inherit(context);
-        local_context.extract_var_paths(context, &path.path, &array);
+        let is_local_func = context
+            .currnet_namespace()
+            .map(|namespace| symbol.namespace.included(&namespace))
+            .unwrap_or(false);
+        if is_local_func {
+            let ret: IrResult<()> = Conv::conv(context, (&definition, Some(path)));
+            ret?;
+        } else {
+            let mut local_context = Context::default();
+            local_context.var_id = context.var_id;
+            local_context.inherit(context);
+            local_context.extract_var_paths(context, &path.path, &array);
 
-        local_context.func_call_depth += 1;
-        let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
-        local_context.func_call_depth -= 1;
+            let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
 
-        context.extract_function(&mut local_context, &path.path, &array);
-        context.inherit(&mut local_context);
-        context.var_id = local_context.var_id;
+            context.extract_function(&mut local_context, &path.path, &array);
+            context.inherit(&mut local_context);
+            context.var_id = local_context.var_id;
 
-        ret?;
+            ret?;
+        }
     }
 
     let Some(id) = context.func_paths.get(path) else {

@@ -5387,6 +5387,22 @@ fn referring_before_definition() {
     ));
 
     let code = r#"
+    package A {
+        const A: u32  = 1;
+        const X: type = logic<A>;
+
+        struct Y {
+            x: X,
+        }
+
+        const Z: type = Y;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     module ModuleA #(
         param A: u32    = 16,
         param B: bit<A> = 0 ,
@@ -7210,6 +7226,26 @@ fn unassign_variable() {
         always_ff {
             if if_a.get_a() {
                 d = '1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param N: u32 = 4
+    ) {
+        initial {
+            func();
+        }
+        function func() {
+            const D: u32 = $clog2(N);
+            var a: u32;
+            for i: u32 in 0..D {
+                a = i;
             }
         }
     }

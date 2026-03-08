@@ -510,10 +510,11 @@ impl SymbolTable {
         generic_arguments: &[Vec<GenericSymbolPath>],
         mut context: ResolveContext<'a>,
     ) -> Result<ResolveResult, ResolveError> {
+        let project_namespace = context.namespace.clone();
         let mut path = path.clone();
 
         // replace project local name
-        let prj = context.namespace.paths[0];
+        let prj = project_namespace.paths[0];
         let path_head = path.0[0];
         if let Some(map) = self.project_local_table.get(&prj) {
             context.root_prj = false;
@@ -524,30 +525,29 @@ impl SymbolTable {
 
         trace!("symbol_table: {}resolve   '{}'", context.indent(), path);
 
-        let namespace_generic_map = self.get_namespace_generic_map(&context.namespace);
+        let namespace_generic_map = self.get_namespace_generic_map(&project_namespace);
         for (i, name) in path.as_slice().iter().enumerate() {
             let mut max_depth = 0;
             context.found = None;
 
-            let generic_argument = if let (Some(args), Some(map)) =
-                (generic_arguments.get(i), &namespace_generic_map)
-            {
-                // Generic argumetns will be resolved in the namespace of base component.
-                // Therefore, generic parameters given as generic arguments should be replaced
-                // with thier types.
-                // See: https://github.com/veryl-lang/veryl/issues/1714#issuecomment-2967149726
-                let args: Vec<_> = args
-                    .iter()
-                    .map(|arg| {
-                        let mut arg = arg.clone();
+            let mut generic_argument = generic_arguments.get(i).cloned();
+            if let Some(args) = &mut generic_argument {
+                for arg in args {
+                    // Generic argumetns will be resolved in the namespace of base component.
+                    // Therefore, generic parameters given as generic arguments should be replaced
+                    // with thier types.
+                    // See: https://github.com/veryl-lang/veryl/issues/1714#issuecomment-2967149726
+                    if let Some(map) = &namespace_generic_map {
                         arg.apply_map(map);
-                        arg
-                    })
-                    .collect();
-                Some(args)
-            } else {
-                generic_arguments.get(i).cloned()
-            };
+                    }
+
+                    // Path to generic arg should have its project prefix to make it visiable from
+                    // the namespace of base component.
+                    if project_namespace.paths[0] != context.namespace.paths[0] {
+                        self.append_project_path(arg, &project_namespace);
+                    }
+                }
+            }
 
             if context.sv_member {
                 let token = Token::new(&name.to_string(), 0, 0, 0, 0, TokenSource::External);
@@ -795,13 +795,7 @@ impl SymbolTable {
                     let TypeKind::UserDefined(x) = x.kind else {
                         continue;
                     };
-                    if let Some(path) =
-                        self.append_project_prefix_to_generic_bound(&x.path, &namespace)
-                    {
-                        map.insert(key, path);
-                    } else {
-                        map.insert(key, x.path);
-                    }
+                    map.insert(key, x.path);
                 }
             }
 
@@ -874,32 +868,36 @@ impl SymbolTable {
         }
     }
 
-    fn append_project_prefix_to_generic_bound(
-        &self,
-        path: &GenericSymbolPath,
-        namespace: &Namespace,
-    ) -> Option<GenericSymbolPath> {
+    fn append_project_path(&self, path: &mut GenericSymbolPath, namespace: &Namespace) {
         let context = ResolveContext::new(namespace);
-        let symbol = self.resolve(&path.generic_path(), &[], context).ok()?;
+        let Ok(symbol) = self.resolve(&path.base_path(0), &[], context) else {
+            return;
+        };
         if !matches!(
             symbol.found.kind,
-            SymbolKind::ProtoModule(_)
+            SymbolKind::Module(_)
+                | SymbolKind::AliasModule(_)
+                | SymbolKind::ProtoModule(_)
+                | SymbolKind::ProtoAliasModule(_)
+                | SymbolKind::Interface(_)
+                | SymbolKind::AliasInterface(_)
                 | SymbolKind::ProtoInterface(_)
+                | SymbolKind::ProtoAliasInterface(_)
+                | SymbolKind::Package(_)
+                | SymbolKind::AliasPackage(_)
                 | SymbolKind::ProtoPackage(_)
+                | SymbolKind::ProtoAliasPackage(_)
         ) {
-            return None;
+            return;
         }
 
-        let project_symbol = self.find_project_symbol(namespace.paths[0])?;
-        let project_path = GenericSymbol {
-            base: project_symbol.token,
-            arguments: vec![],
-        };
-
-        let mut path = path.clone();
-        path.paths.insert(0, project_path);
-
-        Some(path)
+        if let Some(project_symbol) = self.find_project_symbol(namespace.paths[0]) {
+            let project_path = GenericSymbol {
+                base: project_symbol.token,
+                arguments: vec![],
+            };
+            path.paths.insert(0, project_path);
+        }
     }
 
     pub fn get_all(&self) -> Vec<Symbol> {

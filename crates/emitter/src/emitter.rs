@@ -4422,6 +4422,7 @@ impl VerylWalker for Emitter {
             self.space(1);
             if let Some(enum_type) = self.enum_type.as_ref().cloned() {
                 self.str("$bits(");
+                self.scalar_width = self.enum_width;
                 self.force_duplicated = true;
                 self.emit_scalar_type(&enum_type, false);
                 self.force_duplicated = false;
