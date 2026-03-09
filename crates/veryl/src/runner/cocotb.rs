@@ -47,28 +47,28 @@ impl Cocotb {
     }
 
     fn parse_line(&mut self, line: &str, force_error: bool) {
-        self.debug(line);   // Show all lines in debug mode by default
+        self.debug(line); // Show all lines in debug mode by default
 
         // Check for keyword presence to set line's state
         if force_error {
             self.state = State::Error;
         } else {
-            if line.contains("DEBUG") {     
+            if line.contains("DEBUG") {
                 self.state = State::Debug;
             } else if line.contains("INFO") {
                 self.state = State::Info;
             } else if line.contains("WARNING") {
                 self.state = State::Warning;
-            } else if line.contains("ERROR"){
+            } else if line.contains("ERROR") {
                 self.state = State::Error;
             } else if line.contains("CRTITICAL") {
                 self.state = State::Fatal;
-            } 
+            }
         }
 
-        // Display the line 
+        // Display the line
         match self.state {
-            State::Debug => self.debug(line), 
+            State::Debug => self.debug(line),
             State::Idle => self.info(line),
             State::Info => self.info(line),
             State::Warning => self.warning(line),
