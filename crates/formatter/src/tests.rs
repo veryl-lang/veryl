@@ -206,9 +206,9 @@ fn const_above_let_alignment() {
 "#;
 
     let expect = r#"module TopModule {
-    const _c : u32   = 0;
-    let _a   : logic = 0;
-    let _abcd: logic = 0;
+    const _c   : u32   = 0;
+    let   _a   : logic = 0;
+    let   _abcd: logic = 0;
 }
 "#;
 

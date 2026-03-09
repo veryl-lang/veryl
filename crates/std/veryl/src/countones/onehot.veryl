@@ -31,16 +31,16 @@ module _onehot #(
         assign o_onehot = i_data;
         assign o_zero   = ~i_data;
     } else :gen_rec_case {
-        const WBOT    : u32         = W / 2;
-        const WTOP    : u32         = W - WBOT;
-        let data_bot  : logic<WBOT> = i_data[WBOT - 1:0];
-        let data_top  : logic<WTOP> = i_data[W - 1:WBOT];
-        var onehot_top: logic      ;
-        var onehot_bot: logic      ;
-        var zero_top  : logic      ;
-        var zero_bot  : logic      ;
-        var gt_one_top: logic      ;
-        var gt_one_bot: logic      ;
+        const WBOT      : u32         = W / 2;
+        const WTOP      : u32         = W - WBOT;
+        let   data_bot  : logic<WBOT> = i_data[WBOT - 1:0];
+        let   data_top  : logic<WTOP> = i_data[W - 1:WBOT];
+        var   onehot_top: logic      ;
+        var   onehot_bot: logic      ;
+        var   zero_top  : logic      ;
+        var   zero_bot  : logic      ;
+        var   gt_one_top: logic      ;
+        var   gt_one_bot: logic      ;
 
         inst u_bot: _onehot #(
             W: WBOT,

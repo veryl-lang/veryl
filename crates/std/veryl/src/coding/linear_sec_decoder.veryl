@@ -22,8 +22,8 @@ module linear_sec_decoder #(
     // Generate word from corrected codeword
     for idx in 1..(K + 2) :g_create_word {
         if !$onehot(idx) :g_data_bit {
-            const CEIL          : u32 = $clog2(idx);
-            const WORD_IDX      : u32 = idx - 1 - CEIL;
+            const CEIL            : u32 = $clog2(idx);
+            const WORD_IDX        : u32 = idx - 1 - CEIL;
             assign o_word[WORD_IDX] = codeword_corrected[idx];
         }
     }
@@ -49,8 +49,8 @@ module linear_sec_decoder #(
     // }
     for pbit in 1..P + 1 :g_check_parities {
         const ONE_IDX_SET_BIT: u32          = pbit - 1;
-        var masked_bits      : logic<K + 1>;
-        assign masked_bits[0]    = 1'b0;
+        var   masked_bits    : logic<K + 1>;
+        assign masked_bits[0]  = 1'b0;
         for idx in 1..K + 1 :g_check_bits {
             if idx[ONE_IDX_SET_BIT] :g_take_parity {
                 assign masked_bits[idx] = codeword[idx];

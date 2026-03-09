@@ -8,15 +8,15 @@ pub module countones #(
     if (W == 1) :gen_base_case {
         assign o_ones = i_data;
     } else :gen_rec_case {
-        const WBOT  : u32         = W / 2;
-        const WTOP  : u32         = W - WBOT;
-        let data_bot: logic<WBOT> = i_data[WBOT - 1:0];
-        let data_top: logic<WTOP> = i_data[W - 1:WBOT];
+        const WBOT    : u32         = W / 2;
+        const WTOP    : u32         = W - WBOT;
+        let   data_bot: logic<WBOT> = i_data[WBOT - 1:0];
+        let   data_top: logic<WTOP> = i_data[W - 1:WBOT];
 
         const CLOGWBOT: u32             = if WBOT >: 1 ? $clog2(WBOT) + 1 : 1;
         const CLOGWTOP: u32             = if WTOP >: 1 ? $clog2(WTOP) + 1 : 1;
-        var ones_bot  : logic<CLOGWBOT>;
-        var ones_top  : logic<CLOGWTOP>;
+        var   ones_bot: logic<CLOGWBOT>;
+        var   ones_top: logic<CLOGWTOP>;
 
         inst u_bot: countones #(
             W: WBOT,
