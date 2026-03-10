@@ -108,6 +108,12 @@ impl Align {
         }
     }
 
+    pub fn add_width(&mut self, width: u32) {
+        if self.enable {
+            self.width += width;
+        }
+    }
+
     fn space(&mut self, x: usize) {
         if self.enable {
             self.width += x as u32;
@@ -126,12 +132,13 @@ pub mod align_kind {
     pub const DIRECTION: usize = 7;
     pub const CLOCK_DOMAIN: usize = 8;
     pub const NUMBER: usize = 9;
+    pub const VAR_KEYWORD: usize = 10;
 }
 
 #[derive(Default)]
 pub struct Aligner {
     pub additions: HashMap<Location, u32>,
-    pub aligns: [Align; 10],
+    pub aligns: [Align; 11],
 }
 
 impl Aligner {

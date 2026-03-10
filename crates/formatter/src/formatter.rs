@@ -1223,7 +1223,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'LetStatement'
     fn let_statement(&mut self, arg: &LetStatement) {
+        self.align_start(align_kind::VAR_KEYWORD);
         self.r#let(&arg.r#let);
+        self.align_finish(align_kind::VAR_KEYWORD);
         self.space(1);
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
@@ -1555,7 +1557,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'LetDeclaration'
     fn let_declaration(&mut self, arg: &LetDeclaration) {
+        self.align_start(align_kind::VAR_KEYWORD);
         self.r#let(&arg.r#let);
+        self.align_finish(align_kind::VAR_KEYWORD);
         self.space(1);
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
@@ -1582,7 +1586,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
+        self.align_start(align_kind::VAR_KEYWORD);
         self.var(&arg.var);
+        self.align_finish(align_kind::VAR_KEYWORD);
         self.space(1);
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
@@ -1605,7 +1611,9 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'ConstDeclaration'
     fn const_declaration(&mut self, arg: &ConstDeclaration) {
+        self.align_start(align_kind::VAR_KEYWORD);
         self.r#const(&arg.r#const);
+        self.align_finish(align_kind::VAR_KEYWORD);
         self.space(1);
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
