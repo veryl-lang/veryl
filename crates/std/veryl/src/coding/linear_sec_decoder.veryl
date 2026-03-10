@@ -49,7 +49,7 @@ module linear_sec_decoder #(
     // }
     for pbit in 1..P + 1 :g_check_parities {
         const ONE_IDX_SET_BIT: u32          = pbit - 1;
-        var masked_bits    : logic<K + 1>;
+        var   masked_bits    : logic<K + 1>;
         assign masked_bits[0]  = 1'b0;
         for idx in 1..K + 1 :g_check_bits {
             if idx[ONE_IDX_SET_BIT] :g_take_parity {

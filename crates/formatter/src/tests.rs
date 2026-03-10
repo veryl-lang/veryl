@@ -195,3 +195,25 @@ fn no_panic_if_expression_when_vertical_align_off() {
     let ret = format(&metadata, code);
     assert!(!ret.is_empty());
 }
+
+#[test]
+fn const_above_let_alignment() {
+    let code = r#"module TopModule {
+    const _c: u32 = 0;
+    let _a: logic = 0;
+    let _abcd: logic = 0;
+}
+"#;
+
+    let expect = r#"module TopModule {
+    const _c   : u32   = 0;
+    let   _a   : logic = 0;
+    let   _abcd: logic = 0;
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+}
