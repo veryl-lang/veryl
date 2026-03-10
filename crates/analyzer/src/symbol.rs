@@ -2282,8 +2282,8 @@ pub struct ModportProperty {
 pub enum ModportDefault {
     Input,
     Output,
-    Same(Token),
-    Converse(Token),
+    Same(Vec<Token>),
+    Converse(Vec<Token>),
 }
 
 #[derive(Debug, Clone)]

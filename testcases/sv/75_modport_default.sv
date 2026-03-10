@@ -10,11 +10,31 @@ interface veryl_testcase_Interface75;
         return e;
     endfunction
 
+    modport master_ac (
+        input  a,
+        output c
+    );
+
+    modport master_bd (
+        input  b,
+        output d
+    );
+
     modport master (
         input  a,
         input  b,
         output c,
         output d
+    );
+
+    modport slave_ac (
+        output a,
+        input  c
+    );
+
+    modport slave_db (
+        output b,
+        input  d
     );
 
     modport slave (
@@ -49,20 +69,6 @@ interface veryl_testcase_Interface75;
         output c,
         input  a,
         input  b,
-        input  d
-    );
-
-    modport master2 (
-        input  a,
-        input  b,
-        output c,
-        output d
-    );
-
-    modport slave2 (
-        output a,
-        output b,
-        input  c,
         input  d
     );
 

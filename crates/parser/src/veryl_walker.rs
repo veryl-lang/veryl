@@ -2379,20 +2379,34 @@ pub trait VerylWalker {
         match arg {
             ModportDefault::Input(x) => self.input(&x.input),
             ModportDefault::Output(x) => self.output(&x.output),
-            ModportDefault::SameLParenIdentifierRParen(x) => {
+            ModportDefault::SameLParenModportDefaultListRParen(x) => {
                 self.same(&x.same);
                 self.l_paren(&x.l_paren);
-                self.identifier(&x.identifier);
+                self.modport_default_list(&x.modport_default_list);
                 self.r_paren(&x.r_paren);
             }
-            ModportDefault::ConverseLParenIdentifierRParen(x) => {
+            ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
                 self.converse(&x.converse);
                 self.l_paren(&x.l_paren);
-                self.identifier(&x.identifier);
+                self.modport_default_list(&x.modport_default_list);
                 self.r_paren(&x.r_paren);
             }
         }
         after!(self, modport_default, arg);
+    }
+
+    /// Semantic action for non-terminal 'ModportDefaultList'
+    fn modport_default_list(&mut self, arg: &ModportDefaultList) {
+        before!(self, modport_default_list, arg);
+        self.identifier(&arg.identifier);
+        for x in &arg.modport_default_list_list {
+            self.comma(&x.comma);
+            self.identifier(&x.identifier);
+        }
+        if let Some(ref x) = arg.modport_default_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, modport_default_list, arg);
     }
 
     /// Semantic action for non-terminal 'EnumDeclaration'

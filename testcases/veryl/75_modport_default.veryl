@@ -10,15 +10,30 @@ interface Interface75 {
         return e;
     }
 
-    modport master {
+    modport master_ac {
         a: input ,
-        b: input ,
         c: output,
+    }
+
+    modport master_bd {
+        b: input ,
         d: output,
     }
 
+    modport master {
+        ..same(master_ac, master_bd)
+    }
+
+    modport slave_ac {
+        ..converse(master_ac)
+    }
+
+    modport slave_db {
+        ..converse(master_bd)
+    }
+
     modport slave {
-        ..converse(master)
+        ..converse(master_ac, master_bd)
     }
 
     modport all_input {
@@ -37,14 +52,6 @@ interface Interface75 {
     modport partial_input {
         c: output,
         ..input
-    }
-
-    modport master2 {
-        ..same(master)
-    }
-
-    modport slave2 {
-        ..converse(master2)
     }
 
     modport partial_same {

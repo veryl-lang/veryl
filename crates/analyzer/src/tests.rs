@@ -6264,6 +6264,56 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
+    interface InterfaceA {
+        var a: u32;
+        var b: u32;
+        modport mp_a {
+            a: input,
+        }
+        modport mp_b {
+            b: input,
+        }
+        modport mp_ab {
+            ..same(mp_a, mp_b)
+        }
+    }
+    module ModuleA (
+        ab_if: modport InterfaceA::mp_ab,
+    ){
+        let _a: u32 = ab_if.a;
+        let _b: u32 = ab_if.b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: u32;
+        var b: u32;
+        modport mp_a {
+            a: output,
+        }
+        modport mp_b {
+            b: output,
+        }
+        modport mp_ab {
+            ..converse(mp_a, mp_b)
+        }
+    }
+    module ModuleA (
+        ab_if: modport InterfaceA::mp_ab,
+    ){
+        let _a: u32 = ab_if.a;
+        let _b: u32 = ab_if.b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     module a_module {
         var _a: $sv::foo_bar;
         var _b: $sv::foo_bar;

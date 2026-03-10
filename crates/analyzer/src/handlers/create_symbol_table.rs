@@ -486,15 +486,18 @@ impl CreateSymbolTable {
         let mut ret: HashMap<_, _> = HashMap::new();
 
         match default {
-            SymModportDefault::Same(target) | SymModportDefault::Converse(target) => {
-                if let Ok(mp_symbol) = symbol_table::resolve((target, namespace))
-                    && let SymbolKind::Modport(modport) = mp_symbol.found.kind
-                {
-                    for member in &modport.members {
-                        if let Some(member_symbol) = symbol_table::get(*member)
-                            && let SymbolKind::ModportVariableMember(member) = member_symbol.kind
-                        {
-                            ret.insert(member_symbol.token.text, member.direction);
+            SymModportDefault::Same(targets) | SymModportDefault::Converse(targets) => {
+                for target in targets {
+                    if let Ok(mp_symbol) = symbol_table::resolve((target, namespace))
+                        && let SymbolKind::Modport(modport) = mp_symbol.found.kind
+                    {
+                        for member in &modport.members {
+                            if let Some(member_symbol) = symbol_table::get(*member)
+                                && let SymbolKind::ModportVariableMember(member) =
+                                    member_symbol.kind
+                            {
+                                ret.insert(member_symbol.token.text, member.direction);
+                            }
                         }
                     }
                 }
@@ -1096,17 +1099,25 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     match x.modport_default.as_ref() {
                         ModportDefault::Input(_) => Some(crate::symbol::ModportDefault::Input),
                         ModportDefault::Output(_) => Some(crate::symbol::ModportDefault::Output),
-                        ModportDefault::SameLParenIdentifierRParen(x) => {
-                            reference_table::add(x.identifier.as_ref().into());
-                            Some(crate::symbol::ModportDefault::Same(
-                                x.identifier.identifier_token.token,
-                            ))
+                        ModportDefault::SameLParenModportDefaultListRParen(x) => {
+                            let targets: Vec<_> = x.modport_default_list.as_ref().into();
+                            for target in &targets {
+                                reference_table::add((*target).into());
+                            }
+
+                            let modports: Vec<_> =
+                                targets.iter().map(|x| x.identifier_token.token).collect();
+                            Some(crate::symbol::ModportDefault::Same(modports))
                         }
-                        ModportDefault::ConverseLParenIdentifierRParen(x) => {
-                            reference_table::add(x.identifier.as_ref().into());
-                            Some(crate::symbol::ModportDefault::Converse(
-                                x.identifier.identifier_token.token,
-                            ))
+                        ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
+                            let targets: Vec<_> = x.modport_default_list.as_ref().into();
+                            for target in &targets {
+                                reference_table::add((*target).into());
+                            }
+
+                            let modports: Vec<_> =
+                                targets.iter().map(|x| x.identifier_token.token).collect();
+                            Some(crate::symbol::ModportDefault::Converse(modports))
                         }
                     }
                 } else {
