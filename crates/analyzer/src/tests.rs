@@ -8146,6 +8146,15 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: $sv::a_struct = $sv::a_struct'{ a: 1 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
