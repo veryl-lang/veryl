@@ -1094,12 +1094,12 @@ impl From<&ModportDefault> for TokenRange {
         match value {
             ModportDefault::Input(x) => x.input.as_ref().into(),
             ModportDefault::Output(x) => x.output.as_ref().into(),
-            ModportDefault::SameLParenIdentifierRParen(x) => {
+            ModportDefault::SameLParenModportDefaultListRParen(x) => {
                 let beg = x.same.same_token.token;
                 let end = x.r_paren.r_paren_token.token;
                 TokenRange { beg, end }
             }
-            ModportDefault::ConverseLParenIdentifierRParen(x) => {
+            ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
                 let beg = x.converse.converse_token.token;
                 let end = x.r_paren.r_paren_token.token;
                 TokenRange { beg, end }

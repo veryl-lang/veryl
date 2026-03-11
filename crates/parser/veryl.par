@@ -798,8 +798,10 @@ ModportItem: Identifier Colon Direction;
 
 ModportDefault: Input
               | Output
-              | Same LParen Identifier RParen
-              | Converse LParen Identifier RParen;
+              | Same LParen ModportDefaultList RParen
+              | Converse LParen ModportDefaultList RParen;
+
+ModportDefaultList: Identifier { Comma Identifier } [ Comma ];
 
 EnumDeclaration: Enum Identifier [ Colon ScalarType ] LBrace EnumList RBrace;
 

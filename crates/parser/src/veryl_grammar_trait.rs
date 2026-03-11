@@ -463,6 +463,19 @@ impl<'a> From<&'a StatementBlockGroup> for Vec<&'a StatementBlockItem> {
     }
 }
 
+impl<'a> From<&'a ModportDefaultList> for Vec<&'a Identifier> {
+    fn from(x: &'a ModportDefaultList) -> Self {
+        let mut ret = Vec::new();
+
+        ret.push(x.identifier.as_ref());
+        for x in &x.modport_default_list_list {
+            ret.push(x.identifier.as_ref());
+        }
+
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
