@@ -37,6 +37,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --locked --target ${{ matrix.target }}
+      - name: Run tests (git-gitoxide)
+        run: cargo test --locked --target ${{ matrix.target }} --features git-gitoxide
 
   gen_sv:
     runs-on: ubuntu-latest

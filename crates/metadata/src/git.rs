@@ -2,7 +2,7 @@
 mod gitoxide;
 #[cfg(feature = "git-gitoxide")]
 pub use gitoxide::Git;
-#[cfg(feature = "git-command")]
+#[cfg(all(feature = "git-command", not(feature = "git-gitoxide")))]
 mod command;
-#[cfg(feature = "git-command")]
+#[cfg(all(feature = "git-command", not(feature = "git-gitoxide")))]
 pub use command::Git;
