@@ -995,6 +995,17 @@ impl Value {
             Value::BigUint(x) => !x.payload.is_zero(),
         }
     }
+
+    pub fn is_semantically_not_positive(&self) -> bool {
+        if self.is_xz() {
+            return false;
+        }
+
+        match self {
+            Value::U64(x) => x.signed && x.to_i64().is_some_and(|v| v <= 0),
+            Value::BigUint(x) => x.signed && x.to_bigint().is_some_and(|v| v <= 0.into()),
+        }
+    }
 }
 
 impl fmt::LowerHex for Value {
