@@ -8183,6 +8183,17 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: bit<5>[1] = '{$sv::FOO};
+        const B: bit<5>[1] = A;
+    }
+
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
