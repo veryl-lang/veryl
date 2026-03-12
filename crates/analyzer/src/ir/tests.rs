@@ -2173,4 +2173,95 @@ fn assignment_operator_with_array_index() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2*4>[2];
+
+        for i in 0..8 :g {
+            always_comb {
+                a[i[2]][2*i[1:0]+:2] = '0;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var0[0](a): logic<8> = 8'hxx;
+  var var0[1](a): logic<8> = 8'hxx;
+  const var1(g[0].i): bit<32> = 32'h00000000;
+  const var2(g[1].i): bit<32> = 32'h00000001;
+  const var3(g[2].i): bit<32> = 32'h00000002;
+  const var4(g[3].i): bit<32> = 32'h00000003;
+  const var5(g[4].i): bit<32> = 32'h00000004;
+  const var6(g[5].i): bit<32> = 32'h00000005;
+  const var7(g[6].i): bit<32> = 32'h00000006;
+  const var8(g[7].i): bit<32> = 32'h00000007;
+
+  comb {
+    var0[1'h0][32'h00000000+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h0][32'h00000002+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h0][32'h00000004+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h0][32'h00000006+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h1][32'h00000000+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h1][32'h00000002+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h1][32'h00000004+:32'sh00000002] = '0;
+  }
+  comb {
+    var0[1'h1][32'h00000006+:32'sh00000002] = '0;
+  }
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<2*4>[2];
+        always_comb {
+            for i: u32 in 0..8 {
+                a[i[2]][2*i[1:0]+:2] = '0;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var0[0](a): logic<8> = 8'hxx;
+  var var0[1](a): logic<8> = 8'hxx;
+  const var1([0].i): bit<32> = 32'h00000000;
+  const var2([1].i): bit<32> = 32'h00000001;
+  const var3([2].i): bit<32> = 32'h00000002;
+  const var4([3].i): bit<32> = 32'h00000003;
+  const var5([4].i): bit<32> = 32'h00000004;
+  const var6([5].i): bit<32> = 32'h00000005;
+  const var7([6].i): bit<32> = 32'h00000006;
+  const var8([7].i): bit<32> = 32'h00000007;
+
+  comb {
+    var0[1'h0][32'h00000000+:32'sh00000002] = '0;
+    var0[1'h0][32'h00000002+:32'sh00000002] = '0;
+    var0[1'h0][32'h00000004+:32'sh00000002] = '0;
+    var0[1'h0][32'h00000006+:32'sh00000002] = '0;
+    var0[1'h1][32'h00000000+:32'sh00000002] = '0;
+    var0[1'h1][32'h00000002+:32'sh00000002] = '0;
+    var0[1'h1][32'h00000004+:32'sh00000002] = '0;
+    var0[1'h1][32'h00000006+:32'sh00000002] = '0;
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }

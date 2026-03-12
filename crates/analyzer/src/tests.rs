@@ -1083,6 +1083,34 @@ fn multiple_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<4*2>[2];
+        for i in 0..8 :g {
+            always_comb {
+                a[i[2]][2*i[1:0]+:2] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<4*2>[2];
+        always_comb {
+            for i: u32 in 0..8 {
+                a[i[2]][2*i[1:0]+:2] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
