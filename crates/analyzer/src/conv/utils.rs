@@ -1217,6 +1217,7 @@ pub fn eval_struct_constructor(
         let members = match &r#type.kind {
             ir::TypeKind::Struct(x) => &x.members,
             ir::TypeKind::Union(x) => &x.members,
+            ir::TypeKind::SystemVerilog => &vec![],
             _ => {
                 // TODO error: non-struct/union type
                 return Err(ir_error!(token));
