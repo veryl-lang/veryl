@@ -632,27 +632,28 @@ impl Lockfile {
                     let path = Self::dependency_path(&x.url, &x.path, &x.revision)?;
                     let toml = path.join("Veryl.toml");
 
+                    // Acquire the lock before checking path existence to prevent
+                    // race conditions where gix::prepare_clone creates an
+                    // incomplete directory that other threads may observe.
+                    let lock = veryl_path::lock_dir("dependencies")?;
                     if !path.exists() {
-                        let lock = veryl_path::lock_dir("dependencies")?;
                         let git = self.git_clone(&x.url, &path)?;
                         git.fetch()?;
                         git.checkout(Some(&x.revision))?;
-                        veryl_path::unlock_dir(lock)?;
                     } else {
                         let git = Git::open(&path)?;
                         let ret = git.is_clean().is_ok_and(|x| x);
 
                         // If the existing path is not git repository, cleanup and re-try
                         if !ret || !toml.exists() {
-                            let lock = veryl_path::lock_dir("dependencies")?;
                             veryl_path::ignore_directory_not_empty(fs::remove_dir_all(&path))
                                 .map_err(|x| MetadataError::file_io(x, &path))?;
                             let git = self.git_clone(&x.url, &path)?;
                             git.fetch()?;
                             git.checkout(Some(&x.revision))?;
-                            veryl_path::unlock_dir(lock)?;
                         }
                     }
+                    veryl_path::unlock_dir(lock)?;
 
                     Metadata::load(toml)
                 }
