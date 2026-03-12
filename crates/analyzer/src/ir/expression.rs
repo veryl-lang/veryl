@@ -333,14 +333,14 @@ impl Expression {
             let value = self.eval_value(context);
             let comptime = self.comptime_mut();
             if comptime.value.is_unknown()
-                && let Some(x) = value
+                && let Some(x) = &value
             {
-                comptime.value = ValueVariant::Numeric(x);
+                comptime.value = ValueVariant::Numeric(x.clone());
             }
 
             // const optimization
             if comptime.is_const
-                && let Ok(value) = comptime.get_value()
+                && let Some(value) = value
                 && !value.is_xz()
             {
                 let is_global = comptime.is_global;
