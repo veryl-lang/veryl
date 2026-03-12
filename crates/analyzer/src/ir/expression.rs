@@ -192,8 +192,23 @@ impl Expression {
                 let mut is_const = true;
                 let mut is_global = true;
                 for item in items {
-                    is_const &= item.is_const();
-                    is_global &= item.is_global();
+                    match item {
+                        ArrayLiteralItem::Value(x, y) => {
+                            let x_context = x.gather_context(context);
+                            is_const &= x_context.is_const;
+                            is_global &= x_context.is_global;
+                            if let Some(y) = y {
+                                let y_context = y.gather_context(context);
+                                is_const &= y_context.is_const;
+                                is_global &= y_context.is_global;
+                            }
+                        }
+                        ArrayLiteralItem::Defaul(x) => {
+                            let x_context = x.gather_context(context);
+                            is_const &= x_context.is_const;
+                            is_global &= x_context.is_global;
+                        }
+                    }
                 }
 
                 comptime.is_const = is_const;
