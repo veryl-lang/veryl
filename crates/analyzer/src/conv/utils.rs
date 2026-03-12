@@ -397,19 +397,19 @@ fn eval_array_literal_expressions(
 
         let mut part_type = r#type.clone();
         part_type.width.drain(0..expr.select.len());
-        let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
 
-        let mut part_value = expr
-            .expr
-            .eval_value(context)
-            .ok_or_else(|| ir_error!(token))?;
-        part_value.trunc(part_width);
+        if let Some(mut part_value) = expr.expr.eval_value(context) {
+            let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
+            part_value.trunc(part_width);
 
-        value = if let Some(x) = value {
-            Some(x.concat(&part_value))
+            value = if let Some(x) = value {
+                Some(x.concat(&part_value))
+            } else {
+                Some(part_value)
+            };
         } else {
-            Some(part_value)
-        };
+            value = None;
+        }
 
         prev = Some(expr.index);
     }
