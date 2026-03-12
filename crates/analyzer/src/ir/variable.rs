@@ -778,7 +778,14 @@ impl Variable {
             return false;
         };
         if let Some(total_width) = self.total_width() {
-            value.trunc(total_width);
+            let value_width = value.width();
+            let value = if value_width >= total_width {
+                value.trunc(total_width);
+                value
+            } else {
+                value.expand(total_width, true).into_owned()
+            };
+
             if let Some(x) = self.value.get_mut(index) {
                 if let Some((beg, end)) = range {
                     x.assign(value, beg, end);
