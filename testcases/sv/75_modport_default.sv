@@ -10,21 +10,49 @@ interface veryl_testcase_Interface75;
         return e;
     endfunction
 
+    function automatic logic get_a() ;
+        return a;
+    endfunction
+
+    function automatic logic get_b() ;
+        return b;
+    endfunction
+
+    function automatic void set_c(
+        input var logic x
+    ) ;
+        c = x;
+    endfunction
+
+    function automatic void set_d(
+        input var logic x
+    ) ;
+        d = x;
+    endfunction
+
     modport master_ac (
-        input  a,
-        output c
+        input  a    ,
+        output c    ,
+        import get_a,
+        import set_c
     );
 
     modport master_bd (
-        input  b,
-        output d
+        input  b    ,
+        output d    ,
+        import get_b,
+        import set_d
     );
 
     modport master (
-        input  a,
-        input  b,
-        output c,
-        output d
+        input  a    ,
+        input  b    ,
+        output c    ,
+        output d    ,
+        import get_a,
+        import get_b,
+        import set_c,
+        import set_d
     );
 
     modport slave_ac (
@@ -73,10 +101,14 @@ interface veryl_testcase_Interface75;
     );
 
     modport partial_same (
-        output a,
-        input  b,
-        output c,
-        output d
+        output a    ,
+        input  b    ,
+        output c    ,
+        output d    ,
+        import get_a,
+        import get_b,
+        import set_c,
+        import set_d
     );
 endinterface
 //# sourceMappingURL=../map/75_modport_default.sv.map

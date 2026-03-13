@@ -1968,27 +1968,33 @@ impl Emitter {
             if let SymbolKind::Modport(x) = symbol.found.kind {
                 for (i, x) in x.members.iter().enumerate() {
                     let symbol = symbol_table::get(*x).unwrap();
-                    if let TokenSource::Generated(_) = symbol.token.source
-                        && let SymbolKind::ModportVariableMember(x) = symbol.kind
-                    {
-                        if i != 0 || arg.modport_declaration_opt.is_some() {
-                            self.str(",");
-                            self.newline();
-                        }
-                        let token = arg
-                            .modport_declaration_opt0
-                            .clone()
-                            .unwrap()
-                            .dot_dot
-                            .dot_dot_token;
-                        self.align_start(align_kind::DIRECTION);
-                        self.duplicated_token(&token.replace(&x.direction.to_string()));
-                        self.align_finish(align_kind::DIRECTION);
-                        self.space(1);
-                        self.align_start(align_kind::IDENTIFIER);
-                        self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
-                        self.align_finish(align_kind::IDENTIFIER);
+                    if !matches!(symbol.token.source, TokenSource::Generated(_)) {
+                        continue;
                     }
+
+                    let direction = match symbol.kind {
+                        SymbolKind::ModportVariableMember(x) => x.direction,
+                        SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
+                        _ => continue,
+                    };
+
+                    if i != 0 || arg.modport_declaration_opt.is_some() {
+                        self.str(",");
+                        self.newline();
+                    }
+                    let token = arg
+                        .modport_declaration_opt0
+                        .clone()
+                        .unwrap()
+                        .dot_dot
+                        .dot_dot_token;
+                    self.align_start(align_kind::DIRECTION);
+                    self.duplicated_token(&token.replace(&direction.to_string()));
+                    self.align_finish(align_kind::DIRECTION);
+                    self.space(1);
+                    self.align_start(align_kind::IDENTIFIER);
+                    self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
+                    self.align_finish(align_kind::IDENTIFIER);
                 }
             } else {
                 unreachable!();
