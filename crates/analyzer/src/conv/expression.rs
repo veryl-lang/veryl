@@ -322,25 +322,32 @@ impl Conv<&FactorType> for ir::Factor {
                 }
             }
             FactorTypeGroup::FixedType(x) => {
-                let (kind, width, signed) = match x.fixed_type.as_ref() {
-                    FixedType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
-                    FixedType::U16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false),
-                    FixedType::U32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
-                    FixedType::U64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
-                    FixedType::I8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), true),
-                    FixedType::I16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), true),
-                    FixedType::I32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), true),
-                    FixedType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true),
-                    FixedType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
-                    FixedType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
-                    FixedType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
-                    FixedType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
-                    FixedType::Strin(_) => (TypeKind::Unknown, Shape::new(vec![Some(1)]), false),
+                let (kind, width, signed, is_positive) = match x.fixed_type.as_ref() {
+                    FixedType::P8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false, true),
+                    FixedType::P16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false, true),
+                    FixedType::P32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, true),
+                    FixedType::P64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, true),
+                    FixedType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false, false),
+                    FixedType::U16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false, false),
+                    FixedType::U32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, false),
+                    FixedType::U64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, false),
+                    FixedType::I8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), true, false),
+                    FixedType::I16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), true, false),
+                    FixedType::I32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), true, false),
+                    FixedType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true, false),
+                    FixedType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, false),
+                    FixedType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, false),
+                    FixedType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
+                    FixedType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
+                    FixedType::Strin(_) => {
+                        (TypeKind::Unknown, Shape::new(vec![Some(1)]), false, false)
+                    }
                 };
                 Type {
                     kind,
                     width,
                     signed,
+                    is_positive,
                     ..Default::default()
                 }
             }
@@ -376,39 +383,61 @@ impl Conv<&CastingType> for ir::Factor {
                 return eval_factor_path(context, symbol_path, var_path, false, token);
             }
         } else {
-            let (kind, width, signed) = match value {
-                CastingType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false),
-                CastingType::U16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false),
-                CastingType::U32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
-                CastingType::U64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
-                CastingType::I8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), true),
-                CastingType::I16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), true),
-                CastingType::I32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), true),
-                CastingType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true),
-                CastingType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false),
-                CastingType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false),
-                CastingType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
-                CastingType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false),
-                CastingType::Clock(_) => (TypeKind::Clock, Shape::new(vec![Some(1)]), false),
-                CastingType::ClockPosedge(_) => {
-                    (TypeKind::ClockPosedge, Shape::new(vec![Some(1)]), false)
-                }
-                CastingType::ClockNegedge(_) => {
-                    (TypeKind::ClockNegedge, Shape::new(vec![Some(1)]), false)
-                }
-                CastingType::Reset(_) => (TypeKind::Reset, Shape::new(vec![Some(1)]), false),
-                CastingType::ResetAsyncHigh(_) => {
-                    (TypeKind::ResetAsyncHigh, Shape::new(vec![Some(1)]), false)
-                }
-                CastingType::ResetAsyncLow(_) => {
-                    (TypeKind::ResetAsyncLow, Shape::new(vec![Some(1)]), false)
-                }
-                CastingType::ResetSyncHigh(_) => {
-                    (TypeKind::ResetSyncHigh, Shape::new(vec![Some(1)]), false)
-                }
-                CastingType::ResetSyncLow(_) => {
-                    (TypeKind::ResetSyncLow, Shape::new(vec![Some(1)]), false)
-                }
+            let (kind, width, signed, is_positive) = match value {
+                CastingType::P8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false, true),
+                CastingType::P16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false, true),
+                CastingType::P32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, true),
+                CastingType::P64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, true),
+                CastingType::U8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), false, false),
+                CastingType::U16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), false, false),
+                CastingType::U32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, false),
+                CastingType::U64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, false),
+                CastingType::I8(_) => (TypeKind::Bit, Shape::new(vec![Some(8)]), true, false),
+                CastingType::I16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), true, false),
+                CastingType::I32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), true, false),
+                CastingType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true, false),
+                CastingType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, false),
+                CastingType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, false),
+                CastingType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
+                CastingType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
+                CastingType::Clock(_) => (TypeKind::Clock, Shape::new(vec![Some(1)]), false, false),
+                CastingType::ClockPosedge(_) => (
+                    TypeKind::ClockPosedge,
+                    Shape::new(vec![Some(1)]),
+                    false,
+                    false,
+                ),
+                CastingType::ClockNegedge(_) => (
+                    TypeKind::ClockNegedge,
+                    Shape::new(vec![Some(1)]),
+                    false,
+                    false,
+                ),
+                CastingType::Reset(_) => (TypeKind::Reset, Shape::new(vec![Some(1)]), false, false),
+                CastingType::ResetAsyncHigh(_) => (
+                    TypeKind::ResetAsyncHigh,
+                    Shape::new(vec![Some(1)]),
+                    false,
+                    false,
+                ),
+                CastingType::ResetAsyncLow(_) => (
+                    TypeKind::ResetAsyncLow,
+                    Shape::new(vec![Some(1)]),
+                    false,
+                    false,
+                ),
+                CastingType::ResetSyncHigh(_) => (
+                    TypeKind::ResetSyncHigh,
+                    Shape::new(vec![Some(1)]),
+                    false,
+                    false,
+                ),
+                CastingType::ResetSyncLow(_) => (
+                    TypeKind::ResetSyncLow,
+                    Shape::new(vec![Some(1)]),
+                    false,
+                    false,
+                ),
                 CastingType::Based(x) => {
                     let token: TokenRange = x.based.based_token.token.into();
                     let comptime: Comptime = Conv::conv(context, x.based.as_ref())?;
@@ -439,6 +468,7 @@ impl Conv<&CastingType> for ir::Factor {
                 kind,
                 width,
                 signed,
+                is_positive,
                 ..Default::default()
             }
         };

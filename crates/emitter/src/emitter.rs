@@ -580,24 +580,66 @@ impl Emitter {
         }
     }
 
-    fn case_inside_statement(&mut self, arg: &CaseStatement) {
+    fn emit_case_statement(&mut self, arg: &CaseStatement) {
         let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.case.case_token.token);
         self.token(&arg.case.case_token.append(&prefix, &None));
         self.space(1);
         self.str("(");
         self.expression(&arg.expression);
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
+        if Self::is_simple_case_statement(arg) {
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(")"));
+        } else {
+            self.token_will_push(&arg.l_brace.l_brace_token.replace(") inside"));
+        }
         let len = arg.case_statement_list.len();
         for (i, x) in arg.case_statement_list.iter().enumerate() {
             let force_default = force_last_item_default & (i == (len - 1));
             self.newline_list(i);
-            self.case_inside_item(&x.case_item, force_default);
+            self.emit_case_item(&x.case_item, force_default);
         }
         self.newline_list_post(arg.case_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endcase"));
     }
 
-    fn case_inside_item(&mut self, arg: &CaseItem, force_default: bool) {
+    fn is_simple_case_statement(arg: &CaseStatement) -> bool {
+        let mut context = Context::default();
+
+        for statement in &arg.case_statement_list {
+            if let CaseItemGroup::CaseCondition(case_item) =
+                statement.case_item.case_item_group.as_ref()
+            {
+                let condition = &case_item.case_condition;
+                if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
+                    return false;
+                }
+
+                for x in &condition.case_condition_list {
+                    if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
+    fn is_simple_case_condition(condition: &RangeItem, context: &mut Context) -> bool {
+        if condition.range.range_opt.is_some() {
+            return false;
+        }
+
+        let expr: IrResult<ir::Expression> =
+            Conv::conv(context, condition.range.expression.as_ref());
+        let Ok(mut expr) = expr else {
+            return false;
+        };
+
+        let comptime = expr.eval_comptime(context, None);
+        comptime.r#type.is_2state()
+    }
+
+    fn emit_case_item(&mut self, arg: &CaseItem, force_default: bool) {
         self.align_start(align_kind::EXPRESSION);
         match &*arg.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
@@ -631,7 +673,7 @@ impl Emitter {
         }
     }
 
-    fn case_expaneded_statement(&mut self, arg: &CaseStatement) {
+    fn emit_expanded_case_statement(&mut self, arg: &CaseStatement) {
         let (prefix, force_last_item_default) = self.cond_type_prefix(&arg.case.case_token.token);
         self.token(&arg.case.case_token.append(&prefix, &None));
         self.space(1);
@@ -642,13 +684,13 @@ impl Emitter {
         for (i, x) in arg.case_statement_list.iter().enumerate() {
             let force_default = force_last_item_default & (i == (len - 1));
             self.newline_list(i);
-            self.case_expanded_item(&arg.expression, &x.case_item, force_default);
+            self.emit_expanded_case_item(&arg.expression, &x.case_item, force_default);
         }
         self.newline_list_post(arg.case_statement_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace("endcase"));
     }
 
-    fn case_expanded_item(&mut self, lhs: &Expression, item: &CaseItem, force_default: bool) {
+    fn emit_expanded_case_item(&mut self, lhs: &Expression, item: &CaseItem, force_default: bool) {
         self.align_start(align_kind::EXPRESSION);
         match &*item.case_item_group {
             CaseItemGroup::CaseCondition(x) => {
@@ -1968,27 +2010,33 @@ impl Emitter {
             if let SymbolKind::Modport(x) = symbol.found.kind {
                 for (i, x) in x.members.iter().enumerate() {
                     let symbol = symbol_table::get(*x).unwrap();
-                    if let TokenSource::Generated(_) = symbol.token.source
-                        && let SymbolKind::ModportVariableMember(x) = symbol.kind
-                    {
-                        if i != 0 || arg.modport_declaration_opt.is_some() {
-                            self.str(",");
-                            self.newline();
-                        }
-                        let token = arg
-                            .modport_declaration_opt0
-                            .clone()
-                            .unwrap()
-                            .dot_dot
-                            .dot_dot_token;
-                        self.align_start(align_kind::DIRECTION);
-                        self.duplicated_token(&token.replace(&x.direction.to_string()));
-                        self.align_finish(align_kind::DIRECTION);
-                        self.space(1);
-                        self.align_start(align_kind::IDENTIFIER);
-                        self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
-                        self.align_finish(align_kind::IDENTIFIER);
+                    if !matches!(symbol.token.source, TokenSource::Generated(_)) {
+                        continue;
                     }
+
+                    let direction = match symbol.kind {
+                        SymbolKind::ModportVariableMember(x) => x.direction,
+                        SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
+                        _ => continue,
+                    };
+
+                    if i != 0 || arg.modport_declaration_opt.is_some() {
+                        self.str(",");
+                        self.newline();
+                    }
+                    let token = arg
+                        .modport_declaration_opt0
+                        .clone()
+                        .unwrap()
+                        .dot_dot
+                        .dot_dot_token;
+                    self.align_start(align_kind::DIRECTION);
+                    self.duplicated_token(&token.replace(&direction.to_string()));
+                    self.align_finish(align_kind::DIRECTION);
+                    self.space(1);
+                    self.align_start(align_kind::IDENTIFIER);
+                    self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
+                    self.align_finish(align_kind::IDENTIFIER);
                 }
             } else {
                 unreachable!();
@@ -2366,6 +2414,26 @@ impl VerylWalker for Emitter {
     fn u64(&mut self, arg: &U64) {
         let literal: TypeLiteral = arg.into();
         self.veryl_token(&arg.u64_token.replace(&literal.to_sv_string()));
+    }
+
+    /// Semantic action for non-terminal 'P8'
+    fn p8(&mut self, arg: &P8) {
+        self.veryl_token(&arg.p8_token.replace("byte unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'P16'
+    fn p16(&mut self, arg: &P16) {
+        self.veryl_token(&arg.p16_token.replace("shortint unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'P32'
+    fn p32(&mut self, arg: &P32) {
+        self.veryl_token(&arg.p32_token.replace("int unsigned"));
+    }
+
+    /// Semantic action for non-terminal 'P64'
+    fn p64(&mut self, arg: &P64) {
+        self.veryl_token(&arg.p64_token.replace("longint unsigned"));
     }
 
     /// Semantic action for non-terminal 'Identifier'
@@ -2760,10 +2828,10 @@ impl VerylWalker for Emitter {
     fn expression12(&mut self, arg: &Expression12) {
         if let Some(x) = &arg.expression12_opt {
             match x.casting_type.as_ref() {
-                CastingType::U8(_) => self.str("unsigned'(byte'("),
-                CastingType::U16(_) => self.str("unsigned'(shortint'("),
-                CastingType::U32(_) => self.str("unsigned'(int'("),
-                CastingType::U64(_) => self.str("unsigned'(longint'("),
+                CastingType::U8(_) | CastingType::P8(_) => self.str("unsigned'(byte'("),
+                CastingType::U16(_) | CastingType::P16(_) => self.str("unsigned'(shortint'("),
+                CastingType::U32(_) | CastingType::P32(_) => self.str("unsigned'(int'("),
+                CastingType::U64(_) | CastingType::P64(_) => self.str("unsigned'(longint'("),
                 CastingType::I8(_) => self.str("signed'(byte'("),
                 CastingType::I16(_) => self.str("signed'(shortint'("),
                 CastingType::I32(_) => self.str("signed'(int'("),
@@ -3678,9 +3746,9 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'CaseStatement'
     fn case_statement(&mut self, arg: &CaseStatement) {
         if self.build_opt.expand_inside_operation {
-            self.case_expaneded_statement(arg);
+            self.emit_expanded_case_statement(arg);
         } else {
-            self.case_inside_statement(arg);
+            self.emit_case_statement(arg);
         }
     }
 

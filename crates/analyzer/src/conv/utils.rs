@@ -21,6 +21,26 @@ use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
+fn format_positive_type_name(r#type: &ir::Type) -> Option<String> {
+    if !r#type.is_positive {
+        return None;
+    }
+
+    if let Some(width) = r#type.width.first()
+        && let Some(w) = width
+    {
+        return Some(match *w {
+            8 => "p8".to_string(),
+            16 => "p16".to_string(),
+            32 => "p32".to_string(),
+            64 => "p64".to_string(),
+            _ => r#type.to_string(),
+        });
+    }
+
+    Some(r#type.to_string())
+}
+
 pub fn eval_expr(
     context: &mut Context,
     dst_type: Option<ir::Type>,
@@ -377,19 +397,19 @@ fn eval_array_literal_expressions(
 
         let mut part_type = r#type.clone();
         part_type.width.drain(0..expr.select.len());
-        let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
 
-        let mut part_value = expr
-            .expr
-            .eval_value(context)
-            .ok_or_else(|| ir_error!(token))?;
-        part_value.trunc(part_width);
+        if let Some(mut part_value) = expr.expr.eval_value(context) {
+            let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
+            part_value.trunc(part_width);
 
-        value = if let Some(x) = value {
-            Some(x.concat(&part_value))
+            value = if let Some(x) = value {
+                Some(x.concat(&part_value))
+            } else {
+                Some(part_value)
+            };
         } else {
-            Some(part_value)
-        };
+            value = None;
+        }
 
         prev = Some(expr.index);
     }
@@ -627,6 +647,7 @@ pub fn eval_type(
     let mut width = Shape::default();
     let mut array = Shape::default();
     let mut signed = false;
+    let mut is_positive = false;
 
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
@@ -865,6 +886,26 @@ pub fn eval_type(
         {
             // Fixed type given as generic arg
             match path.paths[0].base.to_string().as_str() {
+                "p8" => {
+                    width.push(Some(8));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
+                "p16" => {
+                    width.push(Some(16));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
+                "p32" => {
+                    width.push(Some(32));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
+                "p64" => {
+                    width.push(Some(64));
+                    is_positive = true;
+                    ir::TypeKind::Bit
+                }
                 "u8" => {
                     width.push(Some(8));
                     ir::TypeKind::Bit
@@ -914,6 +955,7 @@ pub fn eval_type(
     Ok(ir::Type {
         kind,
         signed,
+        is_positive,
         width,
         array,
     })
@@ -1175,6 +1217,7 @@ pub fn eval_struct_constructor(
         let members = match &r#type.kind {
             ir::TypeKind::Struct(x) => &x.members,
             ir::TypeKind::Union(x) => &x.members,
+            ir::TypeKind::SystemVerilog => &vec![],
             _ => {
                 // TODO error: non-struct/union type
                 return Err(ir_error!(token));
@@ -2250,6 +2293,16 @@ pub fn check_compatibility(
     src: &ir::Comptime,
     token: &TokenRange,
 ) {
+    if dst.is_positive
+        && let Ok(value) = src.get_value()
+        && (!value.is_positive() || value.is_semantically_not_positive())
+    {
+        context.insert_error(AnalyzerError::non_positive_value(
+            "non-positive",
+            &format_positive_type_name(dst).unwrap(),
+            token,
+        ));
+    }
     if !dst.compatible(src) {
         let src_type = src.r#type.to_string();
         let dst_type = dst.to_string();

@@ -10,15 +10,54 @@ interface Interface75 {
         return e;
     }
 
+    function get_a () -> logic {
+        return a;
+    }
+
+    function get_b () -> logic {
+        return b;
+    }
+
+    function set_c (
+        x: input logic,
+    ) {
+        c = x;
+    }
+
+    function set_d (
+        x: input logic,
+    ) {
+        d = x;
+    }
+
+    modport master_ac {
+        a    : input ,
+        c    : output,
+        get_a: import,
+        set_c: import,
+    }
+
+    modport master_bd {
+        b    : input ,
+        d    : output,
+        get_b: import,
+        set_d: import,
+    }
+
     modport master {
-        a: input ,
-        b: input ,
-        c: output,
-        d: output,
+        ..same(master_ac, master_bd)
+    }
+
+    modport slave_ac {
+        ..converse(master_ac)
+    }
+
+    modport slave_db {
+        ..converse(master_bd)
     }
 
     modport slave {
-        ..converse(master)
+        ..converse(master_ac, master_bd)
     }
 
     modport all_input {
@@ -37,14 +76,6 @@ interface Interface75 {
     modport partial_input {
         c: output,
         ..input
-    }
-
-    modport master2 {
-        ..same(master)
-    }
-
-    modport slave2 {
-        ..converse(master2)
     }
 
     modport partial_same {

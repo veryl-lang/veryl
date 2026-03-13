@@ -177,6 +177,10 @@ SwitchTerm            : <INITIAL, Generic                                       
 TriTerm               : <INITIAL, Generic                                             >'tri'                                                                                 : Token; // Keyword: Type
 TrueTerm              : <INITIAL, Generic                                             >'true'                                                                                : Token; // Keyword: Literal
 TypeTerm              : <INITIAL, Generic                                             >'type'                                                                                : Token; // Keyword: Statement
+P8Term                : <INITIAL, Generic                                             >'p8'                                                                                  : Token; // Keyword: Type
+P16Term               : <INITIAL, Generic                                             >'p16'                                                                                 : Token; // Keyword: Type
+P32Term               : <INITIAL, Generic                                             >'p32'                                                                                 : Token; // Keyword: Type
+P64Term               : <INITIAL, Generic                                             >'p64'                                                                                 : Token; // Keyword: Type
 U8Term                : <INITIAL, Generic                                             >'u8'                                                                                  : Token; // Keyword: Type
 U16Term               : <INITIAL, Generic                                             >'u16'                                                                                 : Token; // Keyword: Type
 U32Term               : <INITIAL, Generic                                             >'u32'                                                                                 : Token; // Keyword: Type
@@ -325,6 +329,10 @@ SwitchToken        : SwitchTerm        : Token Comments;
 TriToken           : TriTerm           : Token Comments;
 TrueToken          : TrueTerm          : Token Comments;
 TypeToken          : TypeTerm          : Token Comments;
+P8Token            : P8Term            : Token Comments;
+P16Token           : P16Term           : Token Comments;
+P32Token           : P32Term           : Token Comments;
+P64Token           : P64Term           : Token Comments;
 U8Token            : U8Term            : Token Comments;
 U16Token           : U16Term           : Token Comments;
 U32Token           : U32Term           : Token Comments;
@@ -479,6 +487,10 @@ Switch        : SwitchToken        : VerylToken;
 Tri           : TriToken           : VerylToken;
 True          : TrueToken          : VerylToken;
 Type          : TypeToken          : VerylToken;
+P8            : P8Token            : VerylToken;
+P16           : P16Token           : VerylToken;
+P32           : P32Token           : VerylToken;
+P64           : P64Token           : VerylToken;
 U8            : U8Token            : VerylToken;
 U16           : U16Token           : VerylToken;
 U32           : U32Token           : VerylToken;
@@ -623,7 +635,7 @@ RangeOperator: DotDot
 // ScalarType / ArrayType / CastingType
 // ----------------------------------------------------------------------------
 
-FixedType: U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | BBool | LBool | Strin;
+FixedType: P8 | P16 | P32 | P64 | U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | BBool | LBool | Strin;
 
 VariableType: Clock
             | ClockPosedge
@@ -650,6 +662,10 @@ CastingType: U8
            | U16
            | U32
            | U64
+           | P8
+           | P16
+           | P32
+           | P64
            | I8
            | I16
            | I32
@@ -782,8 +798,10 @@ ModportItem: Identifier Colon Direction;
 
 ModportDefault: Input
               | Output
-              | Same LParen Identifier RParen
-              | Converse LParen Identifier RParen;
+              | Same LParen ModportDefaultList RParen
+              | Converse LParen ModportDefaultList RParen;
+
+ModportDefaultList: Identifier { Comma Identifier } [ Comma ];
 
 EnumDeclaration: Enum Identifier [ Colon ScalarType ] LBrace EnumList RBrace;
 

@@ -426,6 +426,10 @@ impl_token_range_singular!(Switch);
 impl_token_range_singular!(Tri);
 impl_token_range_singular!(True);
 impl_token_range_singular!(Type);
+impl_token_range_singular!(P8);
+impl_token_range_singular!(P16);
+impl_token_range_singular!(P32);
+impl_token_range_singular!(P64);
 impl_token_range_singular!(U8);
 impl_token_range_singular!(U16);
 impl_token_range_singular!(U32);
@@ -744,7 +748,8 @@ impl_token_range_enum!(RangeOperator, dot_dot, dot_dot_equ);
 // ----------------------------------------------------------------------------
 
 impl_token_range_enum!(
-    FixedType, u8, u16, u32, u64, i32, i8, i16, i64, f32, f64, b_bool, l_bool, strin
+    FixedType, p8, p16, p32, p64, u8, u16, u32, u64, i32, i8, i16, i64, f32, f64, b_bool, l_bool,
+    strin
 );
 impl_token_range_enum!(
     VariableType,
@@ -813,6 +818,10 @@ impl_token_ext!(ArrayType);
 
 impl_token_range_enum!(
     CastingType,
+    p8,
+    p16,
+    p32,
+    p64,
     u8,
     u16,
     u32,
@@ -1085,12 +1094,12 @@ impl From<&ModportDefault> for TokenRange {
         match value {
             ModportDefault::Input(x) => x.input.as_ref().into(),
             ModportDefault::Output(x) => x.output.as_ref().into(),
-            ModportDefault::SameLParenIdentifierRParen(x) => {
+            ModportDefault::SameLParenModportDefaultListRParen(x) => {
                 let beg = x.same.same_token.token;
                 let end = x.r_paren.r_paren_token.token;
                 TokenRange { beg, end }
             }
-            ModportDefault::ConverseLParenIdentifierRParen(x) => {
+            ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
                 let beg = x.converse.converse_token.token;
                 let end = x.r_paren.r_paren_token.token;
                 TokenRange { beg, end }

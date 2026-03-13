@@ -138,6 +138,7 @@ impl LanguageServer for Backend {
                 name: String::from("veryl-ls"),
                 version: Some(String::from(env!("CARGO_PKG_VERSION"))),
             }),
+            offset_encoding: None,
         })
     }
 

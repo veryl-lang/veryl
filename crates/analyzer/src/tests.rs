@@ -1083,6 +1083,34 @@ fn multiple_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<4*2>[2];
+        for i in 0..8 :g {
+            always_comb {
+                a[i[2]][2*i[1:0]+:2] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<4*2>[2];
+        always_comb {
+            for i: u32 in 0..8 {
+                a[i[2]][2*i[1:0]+:2] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -6153,24 +6181,36 @@ fn unknown_member() {
         var a: logic;
         var b: logic;
         var c: logic;
+        function get_a() -> logic {
+            return a;
+        }
+        function get_b() -> logic {
+            return b;
+        }
+        function get_c() -> logic {
+            return c;
+        }
         modport mp_a {
-            a: input,
+            a    : input ,
+            get_a: import,
         }
         modport mp_b {
-            b: input,
+            b    : input ,
+            get_b: import,
             ..same(mp_a)
         }
         modport mp_c {
-            c: input,
+            c    : input ,
+            get_c: import,
             ..same(mp_b)
         }
     }
     module ModuleA (
         if_a: modport IfA::mp_c,
     ) {
-        let _a: logic = if_a.a;
-        let _b: logic = if_a.b;
-        let _c: logic = if_a.c;
+        let _a: logic = if_a.get_a();
+        let _b: logic = if_a.get_b();
+        let _c: logic = if_a.get_c();
     }
     "#;
 
@@ -6257,6 +6297,56 @@ fn unknown_member() {
         aif: modport a_if::slave,
     ) {
         let _b: u32 = aif.a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: u32;
+        var b: u32;
+        modport mp_a {
+            a: input,
+        }
+        modport mp_b {
+            b: input,
+        }
+        modport mp_ab {
+            ..same(mp_a, mp_b)
+        }
+    }
+    module ModuleA (
+        ab_if: modport InterfaceA::mp_ab,
+    ){
+        let _a: u32 = ab_if.a;
+        let _b: u32 = ab_if.b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA {
+        var a: u32;
+        var b: u32;
+        modport mp_a {
+            a: output,
+        }
+        modport mp_b {
+            b: output,
+        }
+        modport mp_ab {
+            ..converse(mp_a, mp_b)
+        }
+    }
+    module ModuleA (
+        ab_if: modport InterfaceA::mp_ab,
+    ){
+        let _a: u32 = ab_if.a;
+        let _b: u32 = ab_if.b;
     }
     "#;
 
@@ -8096,6 +8186,34 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: $sv::a_struct = $sv::a_struct'{ a: 1 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: bit<5>[1] = '{$sv::FOO};
+        const B: bit<5>[1] = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32[1] = '{ 1 + 1 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -8785,6 +8903,19 @@ fn invalid_select() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32[4] = '{0, 1, 2, 3};
+        let _b: u32[2] = _a[0:1];
+        let _c: u32[2] = _a[0+:2];
+        let _d: u32[2] = _a[3-:2];
+        let _e: u32[2] = _a[1 step 2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleA {
@@ -10379,4 +10510,226 @@ fn fixed_type_with_signed_modifier() {
         errors[0],
         AnalyzerError::FixedTypeWithSignedModifier { .. }
     ));
+}
+
+#[test]
+fn positive_type_validation_zero() {
+    let code = r#"
+    module ModuleA {
+        const A: p8 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: p16 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: p32 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: p64 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param P: p32 = 0
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
+
+    let code = r#"
+    module ModuleA {
+        let _a: p8 = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
+}
+
+#[test]
+fn positive_type_validation_max() {
+    let code = r#"
+    module ModuleA {
+        const A: p8 = 8'd255;
+        const B: p16 = 16'd65535;
+        const C: p32 = 32'd4294967295;
+        const D: p64 = 64'd18446744073709551615;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn positive_type_validation() {
+    let code = r#"
+    module ModuleA {
+        const A: p8 = 1;
+        const B: p16 = 255;
+        const C: p32 = 65535;
+        const D: p64 = 32'hFFFFFFFF;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleF #(
+        param P: p32 = 100
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleI {
+        const A: p32 = 10;
+        const B: u32 = 0;
+        const C: p16 = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleJ {
+        const A: p8 = 8'hFF;
+        const B: p16 = 16'h1234;
+        const C: p32 = 32'h1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleK {
+        const A: p8 = 8'b1;
+        const B: p16 = 16'b1111_1111_1111_1111;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleL {
+        let a: p8 = -1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 1);
+
+    let code = r#"
+    module ModuleL {
+        let a: p8 = 'x;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 1);
+
+    let code = r#"
+    module ModuleL {
+        let a: p8 = 'z;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 1);
+
+    let code = r#"
+    module ModuleM {
+        let b: p16 = -1;
+        let c: p32 = -100;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 2);
+
+    let code = r#"
+    module ModuleM {
+        let b: p16 = -(-1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    let non_pos_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+        .collect();
+    assert_eq!(non_pos_errors.len(), 0);
+
+    // let code = r#"
+    // module ModuleN {
+    //     let arr: p8[2] = '{1, 0};
+    // }
+    // "#;
+
+    // let errors = analyze(code);
+    // let non_pos_errors: Vec<_> = errors
+    //     .iter()
+    //     .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+    //     .collect();
+    // assert_eq!(non_pos_errors.len(), 1);
+
+    // let code = r#"
+    // module ModuleO {
+    //     let a: p8 = 1;
+    //     let b: p16 = 100;
+    //     let c: p32[2] = '{1, 255};
+    // }
+    // "#;
+
+    // let errors = analyze(code);
+    // let non_pos_errors: Vec<_> = errors
+    //     .iter()
+    //     .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
+    //     .collect();
+    // assert_eq!(non_pos_errors.len(), 0);
 }

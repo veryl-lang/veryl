@@ -101,30 +101,37 @@ pub fn check_modport(context: &mut Context, arg: &ModportItem) {
 }
 
 pub fn check_modport_default(context: &mut Context, arg: &ModportDefault, name: StrId) {
-    let default_member_identifier = match arg {
-        ModportDefault::ConverseLParenIdentifierRParen(x) => x.identifier.as_ref(),
-        ModportDefault::SameLParenIdentifierRParen(x) => x.identifier.as_ref(),
+    let default_member_identifiers: Vec<_> = match arg {
+        ModportDefault::SameLParenModportDefaultListRParen(x) => {
+            x.modport_default_list.as_ref().into()
+        }
+        ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
+            x.modport_default_list.as_ref().into()
+        }
         _ => return,
     };
-    let Ok(symbol) = symbol_table::resolve(default_member_identifier) else {
-        return;
-    };
 
-    if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
-        // Check modport default member type
-        context.insert_error(AnalyzerError::mismatch_type(
-            &symbol.found.token.to_string(),
-            "modport",
-            &symbol.found.kind.to_kind_name(),
-            &default_member_identifier.identifier_token.token.into(),
-        ));
-    } else if symbol.found.token.text == name {
-        // Check self reference
-        context.insert_error(AnalyzerError::mismatch_type(
-            &symbol.found.token.to_string(),
-            "other modport",
-            "ownself",
-            &default_member_identifier.identifier_token.token.into(),
-        ));
+    for identifier in default_member_identifiers {
+        let Ok(symbol) = symbol_table::resolve(identifier) else {
+            return;
+        };
+
+        if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
+            // Check modport default member type
+            context.insert_error(AnalyzerError::mismatch_type(
+                &symbol.found.token.to_string(),
+                "modport",
+                &symbol.found.kind.to_kind_name(),
+                &identifier.identifier_token.token.into(),
+            ));
+        } else if symbol.found.token.text == name {
+            // Check self reference
+            context.insert_error(AnalyzerError::mismatch_type(
+                &symbol.found.token.to_string(),
+                "other modport",
+                "ownself",
+                &identifier.identifier_token.token.into(),
+            ));
+        }
     }
 }

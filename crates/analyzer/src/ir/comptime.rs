@@ -322,6 +322,7 @@ impl ValueVariant {
 pub struct Type {
     pub kind: TypeKind,
     pub signed: bool,
+    pub is_positive: bool,
     pub array: Shape,
     pub width: Shape,
 }
@@ -1019,6 +1020,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(vec![Some(width)]),
             signed: false,
+            is_positive: false,
         }
     }
 
@@ -1028,6 +1030,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(width.to_vec()),
             signed: false,
+            is_positive: false,
         }
     }
 
@@ -1047,6 +1050,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(vec![Some(width)]),
             signed: false,
+            is_positive: false,
         }
     }
 
@@ -1066,6 +1070,7 @@ mod tests {
             array: Shape::default(),
             width: Shape::new(vec![Some(width)]),
             signed: false,
+            is_positive: false,
         }
     }
 

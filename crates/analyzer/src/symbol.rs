@@ -1193,6 +1193,10 @@ impl Type {
             TypeKind::U16 => Shape::new(vec![Some(16)]),
             TypeKind::U32 => Shape::new(vec![Some(32)]),
             TypeKind::U64 => Shape::new(vec![Some(64)]),
+            TypeKind::P8 => Shape::new(vec![Some(8)]),
+            TypeKind::P16 => Shape::new(vec![Some(16)]),
+            TypeKind::P32 => Shape::new(vec![Some(32)]),
+            TypeKind::P64 => Shape::new(vec![Some(64)]),
             TypeKind::I8 => Shape::new(vec![Some(8)]),
             TypeKind::I16 => Shape::new(vec![Some(16)]),
             TypeKind::I32 => Shape::new(vec![Some(32)]),
@@ -1265,6 +1269,11 @@ impl Type {
             }
         };
 
+        let is_positive = matches!(
+            &self.kind,
+            TypeKind::P8 | TypeKind::P16 | TypeKind::P32 | TypeKind::P64
+        );
+
         let kind = match &self.kind {
             TypeKind::Clock => ir::TypeKind::Clock,
             TypeKind::ClockPosedge => ir::TypeKind::ClockPosedge,
@@ -1276,6 +1285,10 @@ impl Type {
             TypeKind::ResetSyncLow => ir::TypeKind::ResetSyncLow,
             TypeKind::Bit
             | TypeKind::BBool
+            | TypeKind::P8
+            | TypeKind::P16
+            | TypeKind::P32
+            | TypeKind::P64
             | TypeKind::U8
             | TypeKind::U16
             | TypeKind::U32
@@ -1305,6 +1318,7 @@ impl Type {
         Ok(ir::Type {
             kind,
             signed,
+            is_positive,
             width,
             array,
         })
@@ -1339,6 +1353,10 @@ pub enum TypeKind {
     String,
     UserDefined(UserDefinedType),
     AbstractInterface(Option<StrId>),
+    P8,
+    P16,
+    P32,
+    P64,
     Any,
 }
 
@@ -1492,6 +1510,10 @@ impl fmt::Display for Type {
             TypeKind::ResetSyncLow => text.push_str("reset sync low"),
             TypeKind::Bit => text.push_str("bit"),
             TypeKind::Logic => text.push_str("logic"),
+            TypeKind::P8 => text.push_str("p8"),
+            TypeKind::P16 => text.push_str("p16"),
+            TypeKind::P32 => text.push_str("p32"),
+            TypeKind::P64 => text.push_str("p64"),
             TypeKind::U8 => text.push_str("u8"),
             TypeKind::U16 => text.push_str("u16"),
             TypeKind::U32 => text.push_str("u32"),
@@ -1675,6 +1697,10 @@ impl TryFrom<&syntax_tree::Expression> for Type {
 impl From<&syntax_tree::FixedType> for Type {
     fn from(value: &syntax_tree::FixedType) -> Self {
         let kind = match value {
+            syntax_tree::FixedType::P8(_) => TypeKind::P8,
+            syntax_tree::FixedType::P16(_) => TypeKind::P16,
+            syntax_tree::FixedType::P32(_) => TypeKind::P32,
+            syntax_tree::FixedType::P64(_) => TypeKind::P64,
             syntax_tree::FixedType::U8(_) => TypeKind::U8,
             syntax_tree::FixedType::U16(_) => TypeKind::U16,
             syntax_tree::FixedType::U32(_) => TypeKind::U32,
@@ -1735,6 +1761,10 @@ impl From<&syntax_tree::FactorType> for Type {
             }
             syntax_tree::FactorTypeGroup::FixedType(x) => {
                 let kind = match x.fixed_type.as_ref() {
+                    syntax_tree::FixedType::P8(_) => TypeKind::P8,
+                    syntax_tree::FixedType::P16(_) => TypeKind::P16,
+                    syntax_tree::FixedType::P32(_) => TypeKind::P32,
+                    syntax_tree::FixedType::P64(_) => TypeKind::P64,
                     syntax_tree::FixedType::U8(_) => TypeKind::U8,
                     syntax_tree::FixedType::U16(_) => TypeKind::U16,
                     syntax_tree::FixedType::U32(_) => TypeKind::U32,
@@ -2252,8 +2282,8 @@ pub struct ModportProperty {
 pub enum ModportDefault {
     Input,
     Output,
-    Same(Token),
-    Converse(Token),
+    Same(Vec<Token>),
+    Converse(Vec<Token>),
 }
 
 #[derive(Debug, Clone)]

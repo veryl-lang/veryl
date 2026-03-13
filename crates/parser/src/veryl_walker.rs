@@ -923,6 +923,34 @@ pub trait VerylWalker {
         after!(self, r#type, arg);
     }
 
+    /// Semantic action for non-terminal 'P8'
+    fn p8(&mut self, arg: &P8) {
+        before!(self, p8, arg);
+        self.veryl_token(&arg.p8_token);
+        after!(self, p8, arg);
+    }
+
+    /// Semantic action for non-terminal 'P16'
+    fn p16(&mut self, arg: &P16) {
+        before!(self, p16, arg);
+        self.veryl_token(&arg.p16_token);
+        after!(self, p16, arg);
+    }
+
+    /// Semantic action for non-terminal 'P32'
+    fn p32(&mut self, arg: &P32) {
+        before!(self, p32, arg);
+        self.veryl_token(&arg.p32_token);
+        after!(self, p32, arg);
+    }
+
+    /// Semantic action for non-terminal 'P64'
+    fn p64(&mut self, arg: &P64) {
+        before!(self, p64, arg);
+        self.veryl_token(&arg.p64_token);
+        after!(self, p64, arg);
+    }
+
     /// Semantic action for non-terminal 'U8'
     fn u8(&mut self, arg: &U8) {
         before!(self, u8, arg);
@@ -1663,6 +1691,10 @@ pub trait VerylWalker {
     fn fixed_type(&mut self, arg: &FixedType) {
         before!(self, fixed_type, arg);
         match arg {
+            FixedType::P8(x) => self.p8(&x.p8),
+            FixedType::P16(x) => self.p16(&x.p16),
+            FixedType::P32(x) => self.p32(&x.p32),
+            FixedType::P64(x) => self.p64(&x.p64),
             FixedType::U8(x) => self.u8(&x.u8),
             FixedType::U16(x) => self.u16(&x.u16),
             FixedType::U32(x) => self.u32(&x.u32),
@@ -1765,6 +1797,10 @@ pub trait VerylWalker {
     fn casting_type(&mut self, arg: &CastingType) {
         before!(self, casting_type, arg);
         match arg {
+            CastingType::P8(x) => self.p8(&x.p8),
+            CastingType::P16(x) => self.p16(&x.p16),
+            CastingType::P32(x) => self.p32(&x.p32),
+            CastingType::P64(x) => self.p64(&x.p64),
             CastingType::U8(x) => self.u8(&x.u8),
             CastingType::U16(x) => self.u16(&x.u16),
             CastingType::U32(x) => self.u32(&x.u32),
@@ -2343,20 +2379,34 @@ pub trait VerylWalker {
         match arg {
             ModportDefault::Input(x) => self.input(&x.input),
             ModportDefault::Output(x) => self.output(&x.output),
-            ModportDefault::SameLParenIdentifierRParen(x) => {
+            ModportDefault::SameLParenModportDefaultListRParen(x) => {
                 self.same(&x.same);
                 self.l_paren(&x.l_paren);
-                self.identifier(&x.identifier);
+                self.modport_default_list(&x.modport_default_list);
                 self.r_paren(&x.r_paren);
             }
-            ModportDefault::ConverseLParenIdentifierRParen(x) => {
+            ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
                 self.converse(&x.converse);
                 self.l_paren(&x.l_paren);
-                self.identifier(&x.identifier);
+                self.modport_default_list(&x.modport_default_list);
                 self.r_paren(&x.r_paren);
             }
         }
         after!(self, modport_default, arg);
+    }
+
+    /// Semantic action for non-terminal 'ModportDefaultList'
+    fn modport_default_list(&mut self, arg: &ModportDefaultList) {
+        before!(self, modport_default_list, arg);
+        self.identifier(&arg.identifier);
+        for x in &arg.modport_default_list_list {
+            self.comma(&x.comma);
+            self.identifier(&x.identifier);
+        }
+        if let Some(ref x) = arg.modport_default_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, modport_default_list, arg);
     }
 
     /// Semantic action for non-terminal 'EnumDeclaration'

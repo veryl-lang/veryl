@@ -1801,6 +1801,19 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'ModportDefaultList'
+    fn modport_default_list(&mut self, arg: &ModportDefaultList) {
+        self.identifier(&arg.identifier);
+        for x in &arg.modport_default_list_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.identifier(&x.identifier);
+        }
+        if let Some(ref x) = arg.modport_default_list_opt {
+            self.comma(&x.comma);
+        }
+    }
+
     /// Semantic action for non-terminal 'ModportItem'
     fn modport_item(&mut self, arg: &ModportItem) {
         self.align_start(align_kind::IDENTIFIER);
