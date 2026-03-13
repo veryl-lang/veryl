@@ -6181,24 +6181,36 @@ fn unknown_member() {
         var a: logic;
         var b: logic;
         var c: logic;
+        function get_a() -> logic {
+            return a;
+        }
+        function get_b() -> logic {
+            return b;
+        }
+        function get_c() -> logic {
+            return c;
+        }
         modport mp_a {
-            a: input,
+            a    : input ,
+            get_a: import,
         }
         modport mp_b {
-            b: input,
+            b    : input ,
+            get_b: import,
             ..same(mp_a)
         }
         modport mp_c {
-            c: input,
+            c    : input ,
+            get_c: import,
             ..same(mp_b)
         }
     }
     module ModuleA (
         if_a: modport IfA::mp_c,
     ) {
-        let _a: logic = if_a.a;
-        let _b: logic = if_a.b;
-        let _c: logic = if_a.c;
+        let _a: logic = if_a.get_a();
+        let _b: logic = if_a.get_b();
+        let _c: logic = if_a.get_c();
     }
     "#;
 
