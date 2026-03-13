@@ -15,17 +15,17 @@ module veryl_testcase_Module72 (
 
     always_comb begin
 
-        case (x) inside
+        case (x)
             0: a = 1;
             default: a = 1;
         endcase
 
-        case (x) inside
+        case (x)
             0: b = 1;
             default: b = 1;
         endcase
 
-        case (x) inside
+        case (x)
             0: c = 1;
             default: c = 1;
         endcase

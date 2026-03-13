@@ -1,9 +1,12 @@
 module Module16 {
-    const y: bit = 1;
+    const A: logic = 1;
+    const B: bit   = 1;
 
     var a: logic   ;
     var b: logic   ;
+    var c: logic   ;
     let x: logic    = 1;
+    let y: logic    = 1;
     let z: logic<3> = 1;
 
     always_comb {
@@ -17,7 +20,7 @@ module Module16 {
             } //
             3, 4           : a = 1;
             5..=7          : a = 1;
-            y - 1          : a = 1;
+            A - 1          : a = 1;
             10, 11, 12, 13,
             14, 15, 16, 17 : a = 1;
             default        : a = 1;
@@ -25,19 +28,29 @@ module Module16 {
     }
 
     always_comb {
+        case y {
+            0      : b = 1;
+            1      : b = 1;
+            2, 3   : b = 1;
+            B - 1  : b = 1;
+            default: b = 1;
+        }
+    }
+
+    always_comb {
         switch {
-            z == 0: b = 1;
-            z == 1: b = 1;
+            z == 0: c = 1;
+            z == 1: c = 1;
             z == 2: {
-                b = 1;
-                b = 1;
-                b = 1;
+                c = 1;
+                c = 1;
+                c = 1;
             } //
-            z == 3, z == 4                             : b = 1;
+            z == 3, z == 4                             : c = 1;
             z == 'd05, z == 'd06, z == 'd07, z == 'd08,
             z == 'd09, z == 'd10, z == 'd11, z == 'd12,
-            z == 'd13, z == 'd14, z == 'd15, z == 'd16 : b = 1;
-            default                                    : b = 1;
+            z == 'd13, z == 'd14, z == 'd15, z == 'd16 : c = 1;
+            default                                    : c = 1;
         }
     }
 }
