@@ -8906,6 +8906,19 @@ fn invalid_select() {
 
     let code = r#"
     module ModuleA {
+        let _a: u32[4] = '{0, 1, 2, 3};
+        let _b: u32[2] = _a[0:1];
+        let _c: u32[2] = _a[0+:2];
+        let _d: u32[2] = _a[3-:2];
+        let _e: u32[2] = _a[1 step 2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
         let _a: logic<2> = 1;
         let _b: logic<2> = _a[0][0];
     }
