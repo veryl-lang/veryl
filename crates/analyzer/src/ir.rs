@@ -35,7 +35,7 @@ pub use signature::Signature;
 pub use statement::{
     AssignDestination, AssignStatement, IfResetStatement, IfStatement, Statement, StatementBlock,
 };
-pub use system_function::SystemFunctionCall;
+pub use system_function::{Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind};
 pub use variable::{
     VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, VarSelectOp, Variable,
     VariableInfo,

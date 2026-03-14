@@ -145,18 +145,17 @@ impl Op {
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
             },
-            Op::Eq
-            | Op::EqWildcard
-            | Op::Ne
-            | Op::NeWildcard
-            | Op::Greater
-            | Op::GreaterEq
-            | Op::Less
-            | Op::LessEq
-            | Op::LogicAnd
-            | Op::LogicOr => ExpressionContext {
+            Op::Eq | Op::EqWildcard | Op::Ne | Op::NeWildcard | Op::LogicAnd | Op::LogicOr => {
+                ExpressionContext {
+                    width: 1,
+                    signed: false,
+                    is_const: x.is_const & y.is_const,
+                    is_global: x.is_global & y.is_global,
+                }
+            }
+            Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => ExpressionContext {
                 width: 1,
-                signed: false,
+                signed: x.signed & y.signed,
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
             },

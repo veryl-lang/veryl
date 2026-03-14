@@ -2,6 +2,7 @@ use crate::ir::{Shape, Type, TypeKind};
 use crate::{BigInt, BigUint, HashMap, Sign};
 use num_traits::{Num, One, ToPrimitive, Zero, one, zero};
 use std::borrow::Cow;
+use std::cell::LazyCell;
 use std::{fmt, str};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 
@@ -182,6 +183,31 @@ impl ValueU64 {
             self.payload.to_i64()
         }
     }
+
+    pub fn format_hex(&self) -> String {
+        gen_hex_string(self.payload, self.mask_xz, self.width)
+    }
+
+    pub fn format_bin(&self) -> String {
+        gen_bin_string(self.payload, self.mask_xz, self.width)
+    }
+
+    pub fn format_dec(&self) -> String {
+        if self.mask_xz != 0 {
+            "x".to_string()
+        } else if self.signed {
+            match self.to_i64() {
+                Some(v) => format!("{v}"),
+                None => "x".to_string(),
+            }
+        } else {
+            format!("{}", self.payload)
+        }
+    }
+
+    pub fn format_oct(&self) -> String {
+        gen_oct_string(self.payload, self.mask_xz, self.width)
+    }
 }
 
 fn gen_hex_string(payload: u64, mask_xz: u64, width: u32) -> String {
@@ -248,6 +274,49 @@ fn gen_bin_string(payload: u64, mask_xz: u64, width: u32) -> String {
             ret.push('x');
         } else if mask_z[i] != '0' {
             ret.push('z');
+        } else {
+            ret.push(payload[i]);
+        }
+    }
+
+    ret
+}
+
+fn gen_oct_string(payload: u64, mask_xz: u64, width: u32) -> String {
+    let len = width.div_ceil(3) as usize;
+
+    let first_full_bit_char = match width % 3 {
+        0 => '7',
+        1 => '1',
+        2 => '3',
+        _ => unreachable!(),
+    };
+
+    let mask_x = mask_xz & !payload;
+    let mask_z = mask_xz & payload;
+
+    let payload = format!("{:01$o}", payload, len);
+    let mask_x = format!("{:01$o}", mask_x, len);
+    let mask_z = format!("{:01$o}", mask_z, len);
+
+    let payload: Vec<_> = payload.chars().collect();
+    let mask_x: Vec<_> = mask_x.chars().collect();
+    let mask_z: Vec<_> = mask_z.chars().collect();
+
+    let mut ret = String::new();
+    for i in 0..len {
+        if mask_x[i] != '0' {
+            if mask_x[i] == '7' || (i == 0 && mask_x[i] == first_full_bit_char) {
+                ret.push('x');
+            } else {
+                ret.push('X');
+            }
+        } else if mask_z[i] != '0' {
+            if mask_z[i] == '7' || (i == 0 && mask_z[i] == first_full_bit_char) {
+                ret.push('z');
+            } else {
+                ret.push('Z');
+            }
         } else {
             ret.push(payload[i]);
         }
@@ -497,6 +566,70 @@ impl ValueBigUint {
         } else {
             None
         }
+    }
+
+    pub fn format_hex(&self) -> String {
+        let payload_digits = self.payload.to_u64_digits();
+        let mask_xz_digits = self.mask_xz.to_u64_digits();
+        let mut remaining = self.width;
+        let mut i = 0;
+        let mut ret = String::new();
+        while remaining != 0 {
+            let width = if remaining < 64 { remaining } else { 64 };
+            let p = payload_digits.get(i).unwrap_or(&0);
+            let m = mask_xz_digits.get(i).unwrap_or(&0);
+            ret = format!("{}{ret}", gen_hex_string(*p, *m, width));
+            remaining -= width;
+            i += 1;
+        }
+        ret
+    }
+
+    pub fn format_bin(&self) -> String {
+        let payload_digits = self.payload.to_u64_digits();
+        let mask_xz_digits = self.mask_xz.to_u64_digits();
+        let mut remaining = self.width;
+        let mut i = 0;
+        let mut ret = String::new();
+        while remaining != 0 {
+            let width = if remaining < 64 { remaining } else { 64 };
+            let p = payload_digits.get(i).unwrap_or(&0);
+            let m = mask_xz_digits.get(i).unwrap_or(&0);
+            ret = format!("{}{ret}", gen_bin_string(*p, *m, width));
+            remaining -= width;
+            i += 1;
+        }
+        ret
+    }
+
+    pub fn format_dec(&self) -> String {
+        if *self.mask_xz != BigUint::zero() {
+            "x".to_string()
+        } else if self.signed {
+            match self.to_bigint() {
+                Some(v) => format!("{v}"),
+                None => "x".to_string(),
+            }
+        } else {
+            format!("{}", self.payload)
+        }
+    }
+
+    pub fn format_oct(&self) -> String {
+        let payload_digits = self.payload.to_u64_digits();
+        let mask_xz_digits = self.mask_xz.to_u64_digits();
+        let mut remaining = self.width;
+        let mut i = 0;
+        let mut ret = String::new();
+        while remaining != 0 {
+            let width = if remaining < 64 { remaining } else { 64 };
+            let p = payload_digits.get(i).unwrap_or(&0);
+            let m = mask_xz_digits.get(i).unwrap_or(&0);
+            ret = format!("{}{ret}", gen_oct_string(*p, *m, width));
+            remaining -= width;
+            i += 1;
+        }
+        ret
     }
 }
 
@@ -949,6 +1082,41 @@ impl Value {
         }
     }
 
+    pub fn format_hex(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_hex(),
+            Self::BigUint(x) => x.format_hex(),
+        }
+    }
+
+    pub fn format_bin(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_bin(),
+            Self::BigUint(x) => x.format_bin(),
+        }
+    }
+
+    pub fn format_dec(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_dec(),
+            Self::BigUint(x) => x.format_dec(),
+        }
+    }
+
+    pub fn format_oct(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_oct(),
+            Self::BigUint(x) => x.format_oct(),
+        }
+    }
+
+    pub fn payload_u64(&self) -> u64 {
+        match self {
+            Self::U64(x) => x.payload,
+            Self::BigUint(x) => x.payload.to_u64().unwrap_or(0),
+        }
+    }
+
     pub fn to_ir_type(&self) -> Type {
         let kind = if self.is_xz() {
             TypeKind::Logic
@@ -1006,6 +1174,21 @@ impl Value {
             Value::BigUint(x) => x.signed && x.to_bigint().is_some_and(|v| v <= 0.into()),
         }
     }
+}
+
+pub fn value_u64_offset() -> isize {
+    let offset = LazyCell::new(|| {
+        let x = Value::new(0, 64, false);
+        let value_ptr = &x as *const Value as *const u8;
+
+        if let Value::U64(ref inner) = x {
+            let u64_ptr = inner as *const ValueU64 as *const u8;
+            unsafe { u64_ptr.offset_from(value_ptr) }
+        } else {
+            unreachable!()
+        }
+    });
+    *offset
 }
 
 impl fmt::LowerHex for Value {

@@ -1,0 +1,7 @@
+module Top (
+    clk: input  clock     ,
+    a  : input  logic<128>,
+    b  : output logic<128>,
+) {
+    assign b = a;
+}
