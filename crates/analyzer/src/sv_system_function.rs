@@ -166,6 +166,8 @@ pub fn sv_system_functions() -> Vec<SvSystemFunction> {
         ),
         SvSystemFunction::new("$size", &[("expression_or_data_type", Direction::Input)]),
         // Math functions
+        SvSystemFunction::new("min", &[("x", Direction::Input), ("y", Direction::Input)]),
+        SvSystemFunction::new("max", &[("x", Direction::Input), ("y", Direction::Input)]),
         SvSystemFunction::new("$clog2", &[("n", Direction::Input)]),
         SvSystemFunction::new("$ln", &[("x", Direction::Input)]),
         SvSystemFunction::new("$log10", &[("x", Direction::Input)]),
