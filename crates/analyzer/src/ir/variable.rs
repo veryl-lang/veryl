@@ -356,13 +356,14 @@ impl VarSelectOp {
         }
     }
 
-    pub fn eval_value(&self, beg: usize, end: usize) -> (usize, usize) {
-        match self {
-            VarSelectOp::Colon => (beg, end),
-            VarSelectOp::PlusColon => ((beg + end).saturating_sub(1), beg),
-            VarSelectOp::MinusColon => (beg, beg.saturating_sub(end) + 1),
-            VarSelectOp::Step => ((beg * end + end).saturating_sub(1), beg * end),
-        }
+    pub fn eval_value(&self, beg: usize, end: usize, is_array: bool) -> (usize, usize) {
+        let (beg, end, swap) = match self {
+            VarSelectOp::Colon => (beg, end, false),
+            VarSelectOp::PlusColon => ((beg + end).saturating_sub(1), beg, is_array),
+            VarSelectOp::MinusColon => (beg, beg.saturating_sub(end) + 1, is_array),
+            VarSelectOp::Step => ((beg * end + end).saturating_sub(1), beg * end, is_array),
+        };
+        if swap { (end, beg) } else { (beg, end) }
     }
 }
 
@@ -486,7 +487,7 @@ impl VarSelect {
                 let (beg, end) = if let Some((op, x)) = &self.1 {
                     range.set_end(x.token_range());
                     let end = x.eval_value(context)?.to_usize().unwrap_or(0);
-                    op.eval_value(beg, end)
+                    op.eval_value(beg, end, is_array)
                 } else {
                     (beg, beg)
                 };
@@ -605,7 +606,7 @@ impl VarSelect {
                 let x = x.eval_value(context)?.to_usize().unwrap_or(0);
                 let (x, y) = if let Some((op, y)) = &self.1 {
                     let y = y.eval_value(context)?.to_usize().unwrap_or(0);
-                    op.eval_value(x, y)
+                    op.eval_value(x, y, is_array)
                 } else {
                     (x, x)
                 };
@@ -623,7 +624,7 @@ impl VarSelect {
 
                     let (x, y) = if let Some((op, y)) = &self.1 {
                         let y = y.eval_value(context)?.to_usize().unwrap_or(0);
-                        op.eval_value(x, y)
+                        op.eval_value(x, y, is_array)
                     } else {
                         (x, x)
                     };
