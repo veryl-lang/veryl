@@ -1,0 +1,7 @@
+module Module84 {
+    var foo: logic<max(3, 1)>;
+    var bar: logic<min(3, 1)>;
+
+    assign foo = '0;
+    assign bar = '0;
+}

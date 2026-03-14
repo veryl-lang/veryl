@@ -1930,6 +1930,57 @@ impl Emitter {
         self.modport_connections_tables.pop();
     }
 
+    fn emit_builtin_min_max(
+        &mut self,
+        identifier: &ExpressionIdentifier,
+        function_call: &FunctionCall,
+    ) -> bool {
+        let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) else {
+            return false;
+        };
+        if !matches!(symbol.found.kind, SymbolKind::SystemFunction(_)) {
+            return false;
+        }
+
+        let is_max = match symbol.found.token.text.to_string().as_str() {
+            "min" => false,
+            "max" => true,
+            _ => return false,
+        };
+
+        let Some(call_opt) = &function_call.function_call_opt else {
+            return false;
+        };
+
+        let list = call_opt.argument_list.as_ref();
+        let mut args = Vec::with_capacity(1 + list.argument_list_list.len());
+        args.push(&list.argument_item);
+        for x in &list.argument_list_list {
+            args.push(&x.argument_item);
+        }
+
+        if args.len() != 2 || args.iter().any(|x| x.argument_item_opt.is_some()) {
+            return false;
+        }
+
+        let x = &args[0].argument_expression.expression;
+        let y = &args[1].argument_expression.expression;
+
+        self.str("((");
+        self.expression(x);
+        self.str(") ");
+        self.str(if is_max { ">" } else { "<" });
+        self.str(" (");
+        self.expression(y);
+        self.str(") ? (");
+        self.expression(x);
+        self.str(") : (");
+        self.expression(y);
+        self.str("))");
+
+        true
+    }
+
     fn emit_argument_item(&mut self, arg: &ArgumentItem, port_index: usize) {
         let modport_entry =
             if let Some(identifier) = arg.argument_expression.expression.unwrap_identifier() {
@@ -3030,8 +3081,10 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.identifier_factor_opt {
             match x.identifier_factor_opt_group.as_ref() {
                 IdentifierFactorOptGroup::FunctionCall(x) => {
-                    self.expression_identifier(&arg.expression_identifier);
-                    self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                    if !self.emit_builtin_min_max(&arg.expression_identifier, &x.function_call) {
+                        self.expression_identifier(&arg.expression_identifier);
+                        self.emit_function_call(&arg.expression_identifier, &x.function_call);
+                    }
                 }
                 IdentifierFactorOptGroup::StructConstructor(x) => {
                     self.expression_identifier(&arg.expression_identifier);

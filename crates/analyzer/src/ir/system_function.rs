@@ -50,6 +50,8 @@ pub struct SystemFunctionCall {
 pub enum SystemFunctionKind {
     Bits(Input),
     Size(Input),
+    Min(Input, Input),
+    Max(Input, Input),
     Clog2(Input),
     Onehot(Input),
     Readmemh(Input, Output),
@@ -137,6 +139,30 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
+            "min" => {
+                if args.len() != 2 {
+                    // TODO mismatch arity
+                    return Err(ir_error!(token));
+                }
+                let arg0 = create_input(context, name, None, args.remove(0));
+                let arg1 = create_input(context, name, None, args.remove(0));
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Min(arg0, arg1),
+                    comptime,
+                })
+            }
+            "max" => {
+                if args.len() != 2 {
+                    // TODO mismatch arity
+                    return Err(ir_error!(token));
+                }
+                let arg0 = create_input(context, name, None, args.remove(0));
+                let arg1 = create_input(context, name, None, args.remove(0));
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Max(arg0, arg1),
+                    comptime,
+                })
+            }
             "$clog2" => {
                 if args.len() != 1 {
                     // TODO mismatch arity
@@ -207,6 +233,24 @@ impl SystemFunctionCall {
                 };
                 value.map(|x| Value::new(x as u64, 32, false))
             }
+            SystemFunctionKind::Min(x, y) => {
+                let x = x.0.eval_value(context)?;
+                let y = y.0.eval_value(context)?;
+                if x.payload() <= y.payload() {
+                    Some(x)
+                } else {
+                    Some(y)
+                }
+            }
+            SystemFunctionKind::Max(x, y) => {
+                let x = x.0.eval_value(context)?;
+                let y = y.0.eval_value(context)?;
+                if x.payload() >= y.payload() {
+                    Some(x)
+                } else {
+                    Some(y)
+                }
+            }
             SystemFunctionKind::Clog2(x) => {
                 let value = x.0.eval_value(context)?;
                 let value = value.payload();
@@ -231,6 +275,8 @@ impl SystemFunctionCall {
         match &self.kind {
             SystemFunctionKind::Bits(_)
             | SystemFunctionKind::Size(_)
+            | SystemFunctionKind::Min(_, _)
+            | SystemFunctionKind::Max(_, _)
             | SystemFunctionKind::Clog2(_)
             | SystemFunctionKind::Onehot(_) => {
                 let mut ret = self.comptime.clone();
@@ -262,6 +308,8 @@ impl fmt::Display for SystemFunctionCall {
         match &self.kind {
             SystemFunctionKind::Bits(x) => format!("$bits({x})").fmt(f),
             SystemFunctionKind::Size(x) => format!("$size({x})").fmt(f),
+            SystemFunctionKind::Min(x, y) => format!("min({x}, {y})").fmt(f),
+            SystemFunctionKind::Max(x, y) => format!("max({x}, {y})").fmt(f),
             SystemFunctionKind::Clog2(x) => format!("$clog2({x})").fmt(f),
             SystemFunctionKind::Onehot(x) => format!("$onehot({x})").fmt(f),
             SystemFunctionKind::Readmemh(x, y) => format!("$readmemh({x}, {y})").fmt(f),

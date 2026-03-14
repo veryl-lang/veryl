@@ -404,12 +404,16 @@ fn system_function() {
         let a3: logic = $clog2(3);
         let a4: logic = $clog2(4);
         let a5: logic = $clog2(5);
+        let a6: logic = min(1, 2);
+        let a7: logic = max(1, 2);
         const b0: u32 = $clog2(0);
         const b1: u32 = $clog2(1);
         const b2: u32 = $clog2(2);
         const b3: u32 = $clog2(3);
         const b4: u32 = $clog2(4);
         const b5: u32 = $clog2(5);
+        const b6: u32 = min(3, 4);
+        const b7: u32 = max(3, 4);
     }
     "#;
 
@@ -420,12 +424,16 @@ fn system_function() {
   let var3(a3): logic = 1'hx;
   let var4(a4): logic = 1'hx;
   let var5(a5): logic = 1'hx;
-  const var6(b0): bit<32> = 32'h00000000;
-  const var7(b1): bit<32> = 32'h00000000;
-  const var8(b2): bit<32> = 32'h00000001;
-  const var9(b3): bit<32> = 32'h00000002;
-  const var10(b4): bit<32> = 32'h00000002;
-  const var11(b5): bit<32> = 32'h00000003;
+  let var6(a6): logic = 1'hx;
+  let var7(a7): logic = 1'hx;
+  const var8(b0): bit<32> = 32'h00000000;
+  const var9(b1): bit<32> = 32'h00000000;
+  const var10(b2): bit<32> = 32'h00000001;
+  const var11(b3): bit<32> = 32'h00000002;
+  const var12(b4): bit<32> = 32'h00000002;
+  const var13(b5): bit<32> = 32'h00000003;
+  const var14(b6): bit<32> = 32'sh00000003;
+  const var15(b7): bit<32> = 32'sh00000004;
 
   comb {
     var0 = 32'h00000000;
@@ -444,6 +452,12 @@ fn system_function() {
   }
   comb {
     var5 = 32'h00000003;
+  }
+  comb {
+    var6 = 32'sh00000001;
+  }
+  comb {
+    var7 = 32'sh00000002;
   }
 }
 "#;
@@ -1124,8 +1138,8 @@ fn interface_function() {
     var11 = var3;
   }
   func var13(if_a.FuncA) -> var14 {
-    var15 = var1;
-    var14 = var1;
+    var15 = var0;
+    var14 = var0;
   }
 
   comb {
@@ -1637,8 +1651,8 @@ fn string() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(S): string = 32'h0000010b;
-  const var1(T): string = 32'h0000010e;
+  const var0(S): string = 32'h0000010d;
+  const var1(T): string = 32'h00000110;
   var var2(g1._a): logic = 1'hx;
   var var3(g2._d): logic = 1'hx;
   var var4(g3._f): logic = 1'hx;
