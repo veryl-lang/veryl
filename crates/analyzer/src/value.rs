@@ -2,8 +2,60 @@ use crate::ir::{Shape, Type, TypeKind};
 use crate::{BigInt, BigUint, HashMap, Sign};
 use num_traits::{Num, One, ToPrimitive, Zero, one, zero};
 use std::borrow::Cow;
+use std::cell::LazyCell;
 use std::{fmt, str};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
+
+/// Convert a BigUint to u128. Returns the low 128 bits.
+pub fn biguint_to_u128(v: &BigUint) -> u128 {
+    let digits = v.to_u64_digits();
+    match digits.len() {
+        0 => 0,
+        1 => digits[0] as u128,
+        _ => (digits[0] as u128) | ((digits[1] as u128) << 64),
+    }
+}
+
+/// Convert a u128 to BigUint.
+pub fn u128_to_biguint(v: u128) -> BigUint {
+    let lo = v as u64;
+    let hi = (v >> 64) as u64;
+    if hi == 0 {
+        BigUint::from(lo)
+    } else {
+        BigUint::from(lo) | (BigUint::from(hi) << 64)
+    }
+}
+
+/// Write a BigUint as little-endian bytes into `buf`, zero-filling unused bytes.
+pub fn biguint_to_le_bytes(v: &BigUint, buf: &mut [u8]) {
+    buf.fill(0);
+    let digits = v.to_u64_digits();
+    for (i, &d) in digits.iter().enumerate() {
+        let offset = i * 8;
+        if offset + 8 <= buf.len() {
+            buf[offset..offset + 8].copy_from_slice(&d.to_le_bytes());
+        }
+    }
+}
+
+/// Construct a BigUint from a little-endian byte buffer.
+pub fn biguint_from_le_bytes(buf: &[u8]) -> BigUint {
+    // Read u32 chunks for BigUint::from_slice (which expects native-endian u32s)
+    let n_u32 = buf.len() / 4;
+    let mut digits = Vec::with_capacity(n_u32);
+    for i in 0..n_u32 {
+        let offset = i * 4;
+        let d = u32::from_le_bytes([
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+        ]);
+        digits.push(d);
+    }
+    BigUint::from_slice(&digits)
+}
 
 // repr(C) is necessary for pointer access from Cranelift
 #[repr(C)]
@@ -182,6 +234,31 @@ impl ValueU64 {
             self.payload.to_i64()
         }
     }
+
+    pub fn format_hex(&self) -> String {
+        gen_hex_string(self.payload, self.mask_xz, self.width)
+    }
+
+    pub fn format_bin(&self) -> String {
+        gen_bin_string(self.payload, self.mask_xz, self.width)
+    }
+
+    pub fn format_dec(&self) -> String {
+        if self.mask_xz != 0 {
+            "x".to_string()
+        } else if self.signed {
+            match self.to_i64() {
+                Some(v) => format!("{v}"),
+                None => "x".to_string(),
+            }
+        } else {
+            format!("{}", self.payload)
+        }
+    }
+
+    pub fn format_oct(&self) -> String {
+        gen_oct_string(self.payload, self.mask_xz, self.width)
+    }
 }
 
 fn gen_hex_string(payload: u64, mask_xz: u64, width: u32) -> String {
@@ -248,6 +325,49 @@ fn gen_bin_string(payload: u64, mask_xz: u64, width: u32) -> String {
             ret.push('x');
         } else if mask_z[i] != '0' {
             ret.push('z');
+        } else {
+            ret.push(payload[i]);
+        }
+    }
+
+    ret
+}
+
+fn gen_oct_string(payload: u64, mask_xz: u64, width: u32) -> String {
+    let len = width.div_ceil(3) as usize;
+
+    let first_full_bit_char = match width % 3 {
+        0 => '7',
+        1 => '1',
+        2 => '3',
+        _ => unreachable!(),
+    };
+
+    let mask_x = mask_xz & !payload;
+    let mask_z = mask_xz & payload;
+
+    let payload = format!("{:01$o}", payload, len);
+    let mask_x = format!("{:01$o}", mask_x, len);
+    let mask_z = format!("{:01$o}", mask_z, len);
+
+    let payload: Vec<_> = payload.chars().collect();
+    let mask_x: Vec<_> = mask_x.chars().collect();
+    let mask_z: Vec<_> = mask_z.chars().collect();
+
+    let mut ret = String::new();
+    for i in 0..len {
+        if mask_x[i] != '0' {
+            if mask_x[i] == '7' || (i == 0 && mask_x[i] == first_full_bit_char) {
+                ret.push('x');
+            } else {
+                ret.push('X');
+            }
+        } else if mask_z[i] != '0' {
+            if mask_z[i] == '7' || (i == 0 && mask_z[i] == first_full_bit_char) {
+                ret.push('z');
+            } else {
+                ret.push('Z');
+            }
         } else {
             ret.push(payload[i]);
         }
@@ -498,6 +618,80 @@ impl ValueBigUint {
             None
         }
     }
+
+    /// Convert payload to u128, returning 0 if the value doesn't fit.
+    pub fn payload_u128(&self) -> u128 {
+        biguint_to_u128(&self.payload)
+    }
+
+    /// Convert mask_xz to u128, returning 0 if the value doesn't fit.
+    pub fn mask_xz_u128(&self) -> u128 {
+        biguint_to_u128(&self.mask_xz)
+    }
+
+    pub fn format_hex(&self) -> String {
+        let payload_digits = self.payload.to_u64_digits();
+        let mask_xz_digits = self.mask_xz.to_u64_digits();
+        let mut remaining = self.width;
+        let mut i = 0;
+        let mut ret = String::new();
+        while remaining != 0 {
+            let width = if remaining < 64 { remaining } else { 64 };
+            let p = payload_digits.get(i).unwrap_or(&0);
+            let m = mask_xz_digits.get(i).unwrap_or(&0);
+            ret = format!("{}{ret}", gen_hex_string(*p, *m, width));
+            remaining -= width;
+            i += 1;
+        }
+        ret
+    }
+
+    pub fn format_bin(&self) -> String {
+        let payload_digits = self.payload.to_u64_digits();
+        let mask_xz_digits = self.mask_xz.to_u64_digits();
+        let mut remaining = self.width;
+        let mut i = 0;
+        let mut ret = String::new();
+        while remaining != 0 {
+            let width = if remaining < 64 { remaining } else { 64 };
+            let p = payload_digits.get(i).unwrap_or(&0);
+            let m = mask_xz_digits.get(i).unwrap_or(&0);
+            ret = format!("{}{ret}", gen_bin_string(*p, *m, width));
+            remaining -= width;
+            i += 1;
+        }
+        ret
+    }
+
+    pub fn format_dec(&self) -> String {
+        if *self.mask_xz != BigUint::zero() {
+            "x".to_string()
+        } else if self.signed {
+            match self.to_bigint() {
+                Some(v) => format!("{v}"),
+                None => "x".to_string(),
+            }
+        } else {
+            format!("{}", self.payload)
+        }
+    }
+
+    pub fn format_oct(&self) -> String {
+        let payload_digits = self.payload.to_u64_digits();
+        let mask_xz_digits = self.mask_xz.to_u64_digits();
+        let mut remaining = self.width;
+        let mut i = 0;
+        let mut ret = String::new();
+        while remaining != 0 {
+            let width = if remaining < 64 { remaining } else { 64 };
+            let p = payload_digits.get(i).unwrap_or(&0);
+            let m = mask_xz_digits.get(i).unwrap_or(&0);
+            ret = format!("{}{ret}", gen_oct_string(*p, *m, width));
+            remaining -= width;
+            i += 1;
+        }
+        ret
+    }
 }
 
 impl fmt::LowerHex for ValueBigUint {
@@ -570,6 +764,25 @@ impl Value {
             Self::U64(ValueU64::new(payload.to_u64().unwrap(), width, signed))
         } else {
             Self::BigUint(ValueBigUint::new_biguint(payload, width, signed))
+        }
+    }
+
+    /// Construct a Value from u128 payload and mask_xz.
+    pub fn from_u128(payload: u128, mask_xz: u128, width: usize, signed: bool) -> Self {
+        if width <= 64 {
+            Self::U64(ValueU64 {
+                payload: payload as u64,
+                mask_xz: mask_xz as u64,
+                width: width as u32,
+                signed,
+            })
+        } else {
+            Self::BigUint(ValueBigUint {
+                payload: Box::new(u128_to_biguint(payload)),
+                mask_xz: Box::new(u128_to_biguint(mask_xz)),
+                width: width as u32,
+                signed,
+            })
         }
     }
 
@@ -949,6 +1162,88 @@ impl Value {
         }
     }
 
+    pub fn format_hex(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_hex(),
+            Self::BigUint(x) => x.format_hex(),
+        }
+    }
+
+    pub fn format_bin(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_bin(),
+            Self::BigUint(x) => x.format_bin(),
+        }
+    }
+
+    pub fn format_dec(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_dec(),
+            Self::BigUint(x) => x.format_dec(),
+        }
+    }
+
+    pub fn format_oct(&self) -> String {
+        match self {
+            Self::U64(x) => x.format_oct(),
+            Self::BigUint(x) => x.format_oct(),
+        }
+    }
+
+    pub fn payload_u64(&self) -> u64 {
+        match self {
+            Self::U64(x) => x.payload,
+            Self::BigUint(x) => x.payload.to_u64().unwrap_or(0),
+        }
+    }
+
+    pub fn payload_u128(&self) -> u128 {
+        match self {
+            Self::U64(x) => x.payload as u128,
+            Self::BigUint(x) => biguint_to_u128(&x.payload),
+        }
+    }
+
+    pub fn mask_xz_u128(&self) -> u128 {
+        match self {
+            Self::U64(x) => x.mask_xz as u128,
+            Self::BigUint(x) => biguint_to_u128(&x.mask_xz),
+        }
+    }
+
+    /// Write payload to a little-endian byte buffer.
+    /// `buf` must be at least `nb` bytes (8-byte aligned).
+    pub fn write_payload_to_bytes(&self, buf: &mut [u8]) {
+        biguint_to_le_bytes(&self.payload(), buf);
+    }
+
+    /// Write mask_xz to a little-endian byte buffer.
+    /// `buf` must be at least `nb` bytes (8-byte aligned).
+    pub fn write_mask_xz_to_bytes(&self, buf: &mut [u8]) {
+        biguint_to_le_bytes(&self.mask_xz(), buf);
+    }
+
+    /// Construct a Value from little-endian byte buffers.
+    pub fn from_le_bytes(payload: &[u8], mask_xz: &[u8], width: usize, signed: bool) -> Value {
+        let p = biguint_from_le_bytes(payload);
+        let m = biguint_from_le_bytes(mask_xz);
+        if width <= 64 {
+            Value::U64(ValueU64 {
+                payload: p.to_u64().unwrap_or(0),
+                mask_xz: m.to_u64().unwrap_or(0),
+                width: width as u32,
+                signed,
+            })
+        } else {
+            Value::BigUint(ValueBigUint {
+                payload: Box::new(p),
+                mask_xz: Box::new(m),
+                width: width as u32,
+                signed,
+            })
+        }
+    }
+
     pub fn to_ir_type(&self) -> Type {
         let kind = if self.is_xz() {
             TypeKind::Logic
@@ -1006,6 +1301,21 @@ impl Value {
             Value::BigUint(x) => x.signed && x.to_bigint().is_some_and(|v| v <= 0.into()),
         }
     }
+}
+
+pub fn value_u64_offset() -> isize {
+    let offset = LazyCell::new(|| {
+        let x = Value::new(0, 64, false);
+        let value_ptr = &x as *const Value as *const u8;
+
+        if let Value::U64(ref inner) = x {
+            let u64_ptr = inner as *const ValueU64 as *const u8;
+            unsafe { u64_ptr.offset_from(value_ptr) }
+        } else {
+            unreachable!()
+        }
+    });
+    *offset
 }
 
 impl fmt::LowerHex for Value {

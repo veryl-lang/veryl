@@ -1,0 +1,525 @@
+module RiscvCore (
+    clk: input  clock     ,
+    rst: input  reset     ,
+    out: output logic<32> ,
+) {
+    // ==================== Memory ====================
+    var imem   : logic<32> [256];
+    var dmem   : logic<32> [256];
+    var regfile: logic<32> [32];
+
+    initial {
+        $readmemh("program.hex", imem);
+    }
+
+    // ==================== Pipeline Registers ====================
+    var pc: logic<32>;
+
+    // IF/ID
+    var if_id_pc   : logic<32>;
+    var if_id_instr: logic<32>;
+    var if_id_valid: logic    ;
+
+    // ID/EX
+    var id_ex_pc        : logic<32>;
+    var id_ex_rs1_data  : logic<32>;
+    var id_ex_rs2_data  : logic<32>;
+    var id_ex_imm       : logic<32>;
+    var id_ex_rd        : logic<5> ;
+    var id_ex_rs1       : logic<5> ;
+    var id_ex_rs2       : logic<5> ;
+    var id_ex_alu_op    : logic<4> ;
+    var id_ex_alu_src   : logic    ;
+    var id_ex_mem_read  : logic    ;
+    var id_ex_mem_write : logic    ;
+    var id_ex_reg_write : logic    ;
+    var id_ex_wb_sel    : logic<2> ;
+    var id_ex_branch    : logic    ;
+    var id_ex_funct3    : logic<3> ;
+    var id_ex_jump      : logic    ;
+    var id_ex_is_jalr   : logic    ;
+    var id_ex_imm_result: logic    ;
+    var id_ex_valid     : logic    ;
+
+    // EX/MEM
+    var ex_mem_alu_result: logic<32>;
+    var ex_mem_rs2_data  : logic<32>;
+    var ex_mem_rd        : logic<5> ;
+    var ex_mem_pc_plus4  : logic<32>;
+    var ex_mem_mem_read  : logic    ;
+    var ex_mem_mem_write : logic    ;
+    var ex_mem_reg_write : logic    ;
+    var ex_mem_wb_sel    : logic<2> ;
+    var ex_mem_valid     : logic    ;
+
+    // MEM/WB
+    var mem_wb_result   : logic<32>;
+    var mem_wb_rd       : logic<5> ;
+    var mem_wb_reg_write: logic    ;
+    var mem_wb_valid    : logic    ;
+
+    // ==================== Decode (Combinational) ====================
+    var dec_opcode: logic<7>;
+    var dec_rd    : logic<5>;
+    var dec_funct3: logic<3>;
+    var dec_rs1   : logic<5>;
+    var dec_rs2   : logic<5>;
+    var dec_funct7: logic<7>;
+
+    var dec_imm_i: logic<32>;
+    var dec_imm_s: logic<32>;
+    var dec_imm_b: logic<32>;
+    var dec_imm_u: logic<32>;
+    var dec_imm_j: logic<32>;
+
+    var dec_imm       : logic<32>;
+    var dec_alu_op    : logic<4> ;
+    var dec_alu_src   : logic    ;
+    var dec_mem_read  : logic    ;
+    var dec_mem_write : logic    ;
+    var dec_reg_write : logic    ;
+    var dec_wb_sel    : logic<2> ;
+    var dec_branch    : logic    ;
+    var dec_jump      : logic    ;
+    var dec_is_jalr   : logic    ;
+    var dec_imm_result: logic    ;
+    var dec_rs1_addr  : logic<5> ;
+    var dec_rs2_addr  : logic<5> ;
+
+    always_comb {
+        dec_opcode = if_id_instr[6:0];
+        dec_rd     = if_id_instr[11:7];
+        dec_funct3 = if_id_instr[14:12];
+        dec_rs1    = if_id_instr[19:15];
+        dec_rs2    = if_id_instr[24:20];
+        dec_funct7 = if_id_instr[31:25];
+
+        // Immediate generation
+        dec_imm_i = {if_id_instr[31] repeat 20, if_id_instr[31:20]};
+        dec_imm_s = {if_id_instr[31] repeat 20, if_id_instr[31:25], if_id_instr[11:7]};
+        dec_imm_b = {if_id_instr[31] repeat 20, if_id_instr[7], if_id_instr[30:25], if_id_instr[11:8], 1'b0};
+        dec_imm_u = {if_id_instr[31:12], 12'b0};
+        dec_imm_j = {if_id_instr[31] repeat 12, if_id_instr[19:12], if_id_instr[20], if_id_instr[30:21], 1'b0};
+
+        // Defaults
+        dec_alu_op     = 4'b0000;
+        dec_alu_src    = 0;
+        dec_mem_read   = 0;
+        dec_mem_write  = 0;
+        dec_reg_write  = 0;
+        dec_wb_sel     = 2'b00;
+        dec_branch     = 0;
+        dec_jump       = 0;
+        dec_is_jalr    = 0;
+        dec_imm_result = 0;
+        dec_imm        = 32'b0;
+        dec_rs1_addr   = dec_rs1;
+        dec_rs2_addr   = dec_rs2;
+
+        if if_id_valid {
+            case dec_opcode {
+                7'b0110011: {
+                    // R-type: ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND
+                    dec_alu_op    = {dec_funct7[5], dec_funct3};
+                    dec_reg_write = 1;
+                }
+                7'b0010011: {
+                    // I-type ALU: ADDI, SLTI, SLTIU, XORI, ORI, ANDI, SLLI, SRLI, SRAI
+                    dec_alu_op    = if dec_funct3 == 3'b101 ? {dec_funct7[5], dec_funct3} : {1'b0, dec_funct3};
+                    dec_alu_src   = 1;
+                    dec_reg_write = 1;
+                    dec_imm       = dec_imm_i;
+                }
+                7'b0000011: {
+                    // LW
+                    dec_alu_op    = 4'b0000;
+                    dec_alu_src   = 1;
+                    dec_mem_read  = 1;
+                    dec_reg_write = 1;
+                    dec_wb_sel    = 2'b01;
+                    dec_imm       = dec_imm_i;
+                }
+                7'b0100011: {
+                    // SW
+                    dec_alu_op    = 4'b0000;
+                    dec_alu_src   = 1;
+                    dec_mem_write = 1;
+                    dec_imm       = dec_imm_s;
+                }
+                7'b1100011: {
+                    // Branch: BEQ, BNE, BLT, BGE, BLTU, BGEU
+                    dec_branch = 1;
+                    dec_imm    = dec_imm_b;
+                }
+                7'b0110111: {
+                    // LUI: rd = imm_u
+                    dec_reg_write  = 1;
+                    dec_imm        = dec_imm_u;
+                    dec_imm_result = 1;
+                    dec_rs1_addr   = 5'b0;
+                    dec_rs2_addr   = 5'b0;
+                }
+                7'b0010111: {
+                    // AUIPC: rd = PC + imm_u
+                    dec_reg_write  = 1;
+                    dec_imm        = if_id_pc + dec_imm_u;
+                    dec_imm_result = 1;
+                    dec_rs1_addr   = 5'b0;
+                    dec_rs2_addr   = 5'b0;
+                }
+                7'b1101111: {
+                    // JAL: rd = PC+4, jump to PC+imm
+                    dec_jump      = 1;
+                    dec_reg_write = 1;
+                    dec_wb_sel    = 2'b10;
+                    dec_imm       = dec_imm_j;
+                    dec_rs1_addr  = 5'b0;
+                    dec_rs2_addr  = 5'b0;
+                }
+                7'b1100111: {
+                    // JALR: rd = PC+4, jump to (rs1+imm)&~1
+                    dec_jump      = 1;
+                    dec_is_jalr   = 1;
+                    dec_reg_write = 1;
+                    dec_wb_sel    = 2'b10;
+                    dec_alu_src   = 1;
+                    dec_imm       = dec_imm_i;
+                }
+                default: {}
+            }
+        }
+    }
+
+    // ==================== Register File Read (with WB->ID forwarding) ====================
+    var rf_rs1_data: logic<32>;
+    var rf_rs2_data: logic<32>;
+
+    always_comb {
+        rf_rs1_data =
+            if dec_rs1_addr == 5'b0 ? 32'b0
+            : if mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1_addr ? mem_wb_result
+            : regfile[dec_rs1_addr];
+
+        rf_rs2_data =
+            if dec_rs2_addr == 5'b0 ? 32'b0
+            : if mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs2_addr ? mem_wb_result
+            : regfile[dec_rs2_addr];
+    }
+
+    // ==================== Hazard Detection ====================
+    var stall: logic;
+
+    always_comb {
+        stall = id_ex_valid && id_ex_mem_read && if_id_valid && (
+            (dec_rs1_addr == id_ex_rd && id_ex_rd != 5'b0) ||
+            (dec_rs2_addr == id_ex_rd && id_ex_rd != 5'b0)
+        );
+    }
+
+    // ==================== EX Stage: Forwarding ====================
+    var fwd_rs1       : logic<32>;
+    var fwd_rs2       : logic<32>;
+    var ex_mem_fwd_data: logic<32>;
+
+    always_comb {
+        // Forwarding data from EX/MEM (pc+4 for JAL/JALR, alu_result otherwise)
+        ex_mem_fwd_data = if ex_mem_wb_sel == 2'b10 ? ex_mem_pc_plus4 : ex_mem_alu_result;
+
+        fwd_rs1 =
+            if id_ex_rs1 == 5'b0 ? 32'b0
+            : if ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1 ? ex_mem_fwd_data
+            : if mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1 ? mem_wb_result
+            : id_ex_rs1_data;
+
+        fwd_rs2 =
+            if id_ex_rs2 == 5'b0 ? 32'b0
+            : if ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs2 ? ex_mem_fwd_data
+            : if mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2 ? mem_wb_result
+            : id_ex_rs2_data;
+    }
+
+    // ==================== EX Stage: ALU ====================
+    var alu_in1   : logic<32>;
+    var alu_in2   : logic<32>;
+    var alu_result: logic<32>;
+    var alu_add   : logic<32>;
+    var alu_sub   : logic<32>;
+    var alu_slt   : logic    ;
+    var alu_sltu  : logic    ;
+    var shamt     : logic<5> ;
+
+    // Barrel shifter temporaries
+    var sll_s0: logic<32>;
+    var sll_s1: logic<32>;
+    var sll_s2: logic<32>;
+    var sll_s3: logic<32>;
+    var sll_s4: logic<32>;
+    var srl_s0: logic<32>;
+    var srl_s1: logic<32>;
+    var srl_s2: logic<32>;
+    var srl_s3: logic<32>;
+    var srl_s4: logic<32>;
+    var sra_s0: logic<32>;
+    var sra_s1: logic<32>;
+    var sra_s2: logic<32>;
+    var sra_s3: logic<32>;
+    var sra_s4: logic<32>;
+
+    always_comb {
+        alu_in1 = fwd_rs1;
+        alu_in2 = if id_ex_alu_src ? id_ex_imm : fwd_rs2;
+
+        alu_add = alu_in1 + alu_in2;
+        alu_sub = alu_in1 - alu_in2;
+
+        // Signed less-than (MSB-based, no dynamic shift needed)
+        alu_slt = (alu_in1[31] & ~alu_in2[31]) | (~(alu_in1[31] ^ alu_in2[31]) & alu_sub[31]);
+
+        // Unsigned less-than
+        alu_sltu = alu_in1 <: alu_in2;
+
+        // Barrel shifter for SLL (5 MUX stages with constant shifts)
+        shamt  = alu_in2[4:0];
+        sll_s0 = if shamt[0] ? {alu_in1[30:0], 1'b0}   : alu_in1;
+        sll_s1 = if shamt[1] ? {sll_s0[29:0], 2'b0}     : sll_s0;
+        sll_s2 = if shamt[2] ? {sll_s1[27:0], 4'b0}     : sll_s1;
+        sll_s3 = if shamt[3] ? {sll_s2[23:0], 8'b0}     : sll_s2;
+        sll_s4 = if shamt[4] ? {sll_s3[15:0], 16'b0}    : sll_s3;
+
+        // Barrel shifter for SRL
+        srl_s0 = if shamt[0] ? {1'b0, alu_in1[31:1]}    : alu_in1;
+        srl_s1 = if shamt[1] ? {2'b0, srl_s0[31:2]}     : srl_s0;
+        srl_s2 = if shamt[2] ? {4'b0, srl_s1[31:4]}     : srl_s1;
+        srl_s3 = if shamt[3] ? {8'b0, srl_s2[31:8]}     : srl_s2;
+        srl_s4 = if shamt[4] ? {16'b0, srl_s3[31:16]}   : srl_s3;
+
+        // Barrel shifter for SRA (fill with sign bit)
+        sra_s0 = if shamt[0] ? {alu_in1[31], alu_in1[31:1]}             : alu_in1;
+        sra_s1 = if shamt[1] ? {alu_in1[31] repeat 2, sra_s0[31:2]}    : sra_s0;
+        sra_s2 = if shamt[2] ? {alu_in1[31] repeat 4, sra_s1[31:4]}    : sra_s1;
+        sra_s3 = if shamt[3] ? {alu_in1[31] repeat 8, sra_s2[31:8]}    : sra_s2;
+        sra_s4 = if shamt[4] ? {alu_in1[31] repeat 16, sra_s3[31:16]} : sra_s3;
+
+        // ALU operation select
+        if id_ex_imm_result {
+            alu_result = id_ex_imm;
+        } else {
+            case id_ex_alu_op {
+                4'b0000: alu_result = alu_add;
+                4'b1000: alu_result = alu_sub;
+                4'b0001: alu_result = sll_s4;
+                4'b0010: alu_result = {31'b0, alu_slt};
+                4'b0011: alu_result = {31'b0, alu_sltu};
+                4'b0100: alu_result = alu_in1 ^ alu_in2;
+                4'b0101: alu_result = srl_s4;
+                4'b1101: alu_result = sra_s4;
+                4'b0110: alu_result = alu_in1 | alu_in2;
+                4'b0111: alu_result = alu_in1 & alu_in2;
+                default: alu_result = alu_add;
+            }
+        }
+    }
+
+    // ==================== EX Stage: Branch Resolution ====================
+    var branch_taken : logic    ;
+    var branch_target: logic<32>;
+    var flush        : logic    ;
+    var branch_sub   : logic<32>;
+
+    always_comb {
+        branch_taken  = 0;
+        branch_target = 32'b0;
+        branch_sub    = fwd_rs1 - fwd_rs2;
+
+        if id_ex_valid && id_ex_jump {
+            branch_taken = 1;
+            if id_ex_is_jalr {
+                branch_target = (fwd_rs1 + id_ex_imm) & 32'hFFFFFFFE;
+            } else {
+                branch_target = id_ex_pc + id_ex_imm;
+            }
+        } else if id_ex_valid && id_ex_branch {
+            branch_target = id_ex_pc + id_ex_imm;
+            case id_ex_funct3 {
+                3'b000: branch_taken = branch_sub == 32'b0;                                       // BEQ
+                3'b001: branch_taken = branch_sub != 32'b0;                                       // BNE
+                3'b100: branch_taken = (fwd_rs1[31] & ~fwd_rs2[31])                               // BLT
+                                     | (~(fwd_rs1[31] ^ fwd_rs2[31]) & branch_sub[31]);
+                3'b101: branch_taken = ~((fwd_rs1[31] & ~fwd_rs2[31])                             // BGE
+                                     | (~(fwd_rs1[31] ^ fwd_rs2[31]) & branch_sub[31]));
+                3'b110: branch_taken = fwd_rs1 <: fwd_rs2;                                        // BLTU
+                3'b111: branch_taken = ~(fwd_rs1 <: fwd_rs2) | (branch_sub == 32'b0);             // BGEU
+                default: {}
+            }
+        }
+
+        flush = branch_taken;
+    }
+
+    // ==================== MEM Stage ====================
+    var mem_read_data: logic<32>;
+
+    always_comb {
+        mem_read_data = dmem[ex_mem_alu_result[9:2]];
+    }
+
+    // ==================== WB Data Select ====================
+    var wb_data: logic<32>;
+
+    always_comb {
+        case ex_mem_wb_sel {
+            2'b01  : wb_data = mem_read_data;
+            2'b10  : wb_data = ex_mem_pc_plus4;
+            default: wb_data = ex_mem_alu_result;
+        }
+    }
+
+    // ==================== Sequential: PC ====================
+    always_ff {
+        if_reset {
+            pc = 32'b0;
+        } else if flush {
+            pc = branch_target;
+        } else if ~stall {
+            pc = pc + 4;
+        }
+    }
+
+    // ==================== Sequential: IF/ID ====================
+    always_ff {
+        if_reset {
+            if_id_valid = 0;
+            if_id_pc    = 32'b0;
+            if_id_instr = 32'b0;
+        } else if flush {
+            if_id_valid = 0;
+            if_id_pc    = 32'b0;
+            if_id_instr = 32'b0;
+        } else if ~stall {
+            if_id_valid = 1;
+            if_id_pc    = pc;
+            if_id_instr = imem[pc[9:2]];
+        }
+    }
+
+    // ==================== Sequential: ID/EX ====================
+    always_ff {
+        if_reset {
+            id_ex_valid      = 0;
+            id_ex_reg_write  = 0;
+            id_ex_mem_read   = 0;
+            id_ex_mem_write  = 0;
+            id_ex_branch     = 0;
+            id_ex_jump       = 0;
+            id_ex_pc         = 32'b0;
+            id_ex_rs1_data   = 32'b0;
+            id_ex_rs2_data   = 32'b0;
+            id_ex_imm        = 32'b0;
+            id_ex_rd         = 5'b0;
+            id_ex_rs1        = 5'b0;
+            id_ex_rs2        = 5'b0;
+            id_ex_alu_op     = 4'b0;
+            id_ex_alu_src    = 0;
+            id_ex_wb_sel     = 2'b0;
+            id_ex_funct3     = 3'b0;
+            id_ex_is_jalr    = 0;
+            id_ex_imm_result = 0;
+        } else if flush || stall {
+            id_ex_valid      = 0;
+            id_ex_reg_write  = 0;
+            id_ex_mem_read   = 0;
+            id_ex_mem_write  = 0;
+            id_ex_branch     = 0;
+            id_ex_jump       = 0;
+        } else {
+            id_ex_valid      = if_id_valid;
+            id_ex_pc         = if_id_pc;
+            id_ex_rs1_data   = rf_rs1_data;
+            id_ex_rs2_data   = rf_rs2_data;
+            id_ex_imm        = dec_imm;
+            id_ex_rd         = dec_rd;
+            id_ex_rs1        = dec_rs1_addr;
+            id_ex_rs2        = dec_rs2_addr;
+            id_ex_alu_op     = dec_alu_op;
+            id_ex_alu_src    = dec_alu_src;
+            id_ex_mem_read   = dec_mem_read;
+            id_ex_mem_write  = dec_mem_write;
+            id_ex_reg_write  = dec_reg_write;
+            id_ex_wb_sel     = dec_wb_sel;
+            id_ex_branch     = dec_branch;
+            id_ex_funct3     = dec_funct3;
+            id_ex_jump       = dec_jump;
+            id_ex_is_jalr    = dec_is_jalr;
+            id_ex_imm_result = dec_imm_result;
+        }
+    }
+
+    // ==================== Sequential: EX/MEM ====================
+    always_ff {
+        if_reset {
+            ex_mem_valid     = 0;
+            ex_mem_reg_write = 0;
+            ex_mem_mem_read  = 0;
+            ex_mem_mem_write = 0;
+            ex_mem_alu_result = 32'b0;
+            ex_mem_rs2_data  = 32'b0;
+            ex_mem_rd        = 5'b0;
+            ex_mem_pc_plus4  = 32'b0;
+            ex_mem_wb_sel    = 2'b0;
+        } else {
+            ex_mem_valid      = id_ex_valid;
+            ex_mem_alu_result = alu_result;
+            ex_mem_rs2_data   = fwd_rs2;
+            ex_mem_rd         = id_ex_rd;
+            ex_mem_pc_plus4   = id_ex_pc + 4;
+            ex_mem_mem_read   = id_ex_mem_read;
+            ex_mem_mem_write  = id_ex_mem_write;
+            ex_mem_reg_write  = id_ex_reg_write;
+            ex_mem_wb_sel     = id_ex_wb_sel;
+        }
+    }
+
+    // ==================== Sequential: MEM/WB ====================
+    always_ff {
+        if_reset {
+            mem_wb_valid     = 0;
+            mem_wb_reg_write = 0;
+            mem_wb_result    = 32'b0;
+            mem_wb_rd        = 5'b0;
+        } else {
+            mem_wb_valid     = ex_mem_valid;
+            mem_wb_result    = wb_data;
+            mem_wb_rd        = ex_mem_rd;
+            mem_wb_reg_write = ex_mem_reg_write;
+        }
+    }
+
+    // ==================== Sequential: Data Memory Write ====================
+    always_ff {
+        if ex_mem_valid && ex_mem_mem_write {
+            dmem[ex_mem_alu_result[9:2]] = ex_mem_rs2_data;
+        }
+    }
+
+    // ==================== Sequential: Register File Write ====================
+    always_ff {
+        if mem_wb_valid && mem_wb_reg_write && mem_wb_rd != 5'b0 {
+            regfile[mem_wb_rd] = mem_wb_result;
+        }
+    }
+
+    // Output: expose write-back result for observation
+    assign out = mem_wb_result;
+}
+
+module Top (
+    clk: input  clock     ,
+    rst: input  reset     ,
+    out: output logic<32> ,
+) {
+    inst u_core: RiscvCore (
+        clk,
+        rst,
+        out,
+    );
+}

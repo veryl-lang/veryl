@@ -1,18 +1,13 @@
-pub struct Simulator;
+pub mod cranelift;
+pub mod ir;
+pub mod simulator;
+pub mod wide_ops;
 
-impl Simulator {
-    pub fn new(_top: &str) -> Self {
-        Self
-    }
-
-    pub fn set(&mut self, _port: &str, _value: usize) {}
-
-    pub fn get(&mut self, _port: &str) -> usize {
-        0
-    }
-
-    pub fn step(&mut self) {}
-}
+pub use ir::Config;
+pub use simulator::Simulator;
 
 #[cfg(test)]
 mod tests;
+
+type HashMap<K, V> = fxhash::FxHashMap<K, V>;
+type HashSet<V> = fxhash::FxHashSet<V>;

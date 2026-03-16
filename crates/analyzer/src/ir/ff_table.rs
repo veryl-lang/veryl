@@ -3,9 +3,9 @@ use crate::ir::VarId;
 
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
-    assigned: Option<usize>,
-    refered: Vec<usize>,
-    is_ff: bool,
+    pub assigned: Option<usize>,
+    pub refered: Vec<usize>,
+    pub is_ff: bool,
 }
 
 impl FfTableEntry {
@@ -25,7 +25,7 @@ impl FfTableEntry {
 
 #[derive(Clone, Debug, Default)]
 pub struct FfTable {
-    table: HashMap<(VarId, usize), FfTableEntry>,
+    pub table: HashMap<(VarId, usize), FfTableEntry>,
 }
 
 impl FfTable {
