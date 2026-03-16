@@ -15,6 +15,7 @@ use veryl_parser::veryl_grammar_trait::{self as syntax_tree};
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum State {
     Idle,
+    Debug,
     Info,
     Warning,
     Error,
@@ -46,47 +47,33 @@ impl Cocotb {
     }
 
     fn parse_line(&mut self, line: &str, force_error: bool) {
-        self.debug(line);
+        self.debug(line); // Show all lines in debug mode by default
 
+        // Check for keyword presence to set line's state
         if force_error {
-            self.error(line);
+            self.state = State::Error;
         } else {
-            if !line.starts_with("                ") {
-                self.state = State::Idle;
+            if line.contains("DEBUG") {
+                self.state = State::Debug;
+            } else if line.contains("INFO") {
+                self.state = State::Info;
+            } else if line.contains("WARNING") {
+                self.state = State::Warning;
+            } else if line.contains("ERROR") {
+                self.state = State::Error;
+            } else if line.contains("CRTITICAL") {
+                self.state = State::Fatal;
             }
+        }
 
-            match self.state {
-                State::Idle => {
-                    if line.ends_with("failed") {
-                        self.error(line);
-                        self.state = State::Error;
-                    } else if line.starts_with("     0.00ns INFO") {
-                        self.info(line);
-                        self.state = State::Info;
-                    } else if line.starts_with("     0.00ns WARNING") {
-                        self.warning(line);
-                        self.state = State::Warning;
-                    } else if line.starts_with("     0.00ns ERROR") {
-                        self.error(line);
-                        self.state = State::Error;
-                    } else if line.starts_with("     0.00ns CRITICAL") {
-                        self.fatal(line);
-                        self.state = State::Fatal;
-                    }
-                }
-                State::Info => {
-                    self.info(line);
-                }
-                State::Warning => {
-                    self.warning(line);
-                }
-                State::Error => {
-                    self.error(line);
-                }
-                State::Fatal => {
-                    self.fatal(line);
-                }
-            }
+        // Display the line
+        match self.state {
+            State::Debug => self.debug(line),
+            State::Idle => self.info(line),
+            State::Info => self.info(line),
+            State::Warning => self.warning(line),
+            State::Error => self.error(line),
+            State::Fatal => self.fatal(line),
         }
     }
 
