@@ -9,3 +9,4 @@ pub use simulator::Simulator;
 mod tests;
 
 type HashMap<K, V> = fxhash::FxHashMap<K, V>;
+type HashSet<V> = fxhash::FxHashSet<V>;

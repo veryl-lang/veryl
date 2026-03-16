@@ -1,16 +1,22 @@
+use crate::HashSet;
 use crate::cranelift::Context as CraneliftContext;
 use crate::cranelift::FuncPtr;
 use crate::ir::context::{Context as ConvContext, Conv};
-use crate::ir::expression::ExpressionContext;
 use crate::ir::expression::build_linear_index_expr;
-use crate::ir::{CombValue, Expression, FfValue, ProtoExpression, Value};
-use cranelift::prelude::types::I64;
+use crate::ir::expression::{
+    ExpressionContext, band_const, gen_mask_for_width, gen_mask_range_128, iconst_128,
+};
+use crate::ir::variable::{
+    native_bytes as calc_native_bytes, read_native_value, write_native_value,
+};
+use crate::ir::{Expression, ProtoExpression, Value};
+use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::conv::utils::eval_array_literal;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::FunctionCall;
 use veryl_analyzer::ir::{SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant};
-use veryl_analyzer::value::{MaskCache, ValueU64, value_u64_offset};
+use veryl_analyzer::value::{MaskCache, ValueU64};
 
 /// A single block within a ProtoStatements list: either interpreted or JIT-compiled.
 pub enum ProtoStatementBlock {
@@ -24,22 +30,23 @@ pub struct ProtoStatements(pub Vec<ProtoStatementBlock>);
 impl ProtoStatements {
     pub(crate) fn to_statements(
         &self,
-        ff_ptr: *mut FfValue,
-        comb_ptr: *mut CombValue,
+        ff_ptr: *mut u8,
+        comb_ptr: *mut u8,
+        use_4state: bool,
     ) -> Vec<Statement> {
         let mut result = Vec::new();
         for block in &self.0 {
             match block {
                 ProtoStatementBlock::Interpreted(proto) => {
                     for s in proto {
-                        result.push(s.apply_values_ptr(ff_ptr, comb_ptr));
+                        result.push(unsafe { s.apply_values_ptr(ff_ptr, comb_ptr, use_4state) });
                     }
                 }
                 ProtoStatementBlock::Compiled(func) => {
                     result.push(Statement::Binary(
                         *func,
-                        ff_ptr as *const FfValue,
-                        comb_ptr as *const CombValue,
+                        ff_ptr as *const u8,
+                        comb_ptr as *const u8,
                     ));
                 }
             }
@@ -63,17 +70,21 @@ pub enum SystemFunctionCall {
     },
     Readmemh {
         filename: String,
-        elements: Vec<(*mut Value, Option<*mut Value>)>,
+        /// (current_ptr, next_ptr, native_bytes, use_4state)
+        elements: Vec<(*mut u8, Option<*mut u8>, usize, bool)>,
         width: usize,
     },
 }
 
 #[derive(Clone)]
 pub struct AssignDynamicStatement {
-    pub dst_base_ptr: *mut Value,
+    pub dst_base_ptr: *mut u8,
     pub dst_stride: isize,
     pub dst_num_elements: usize,
     pub dst_index_expr: Expression,
+    pub dst_width: usize,
+    pub dst_native_bytes: usize,
+    pub dst_use_4state: bool,
     pub select: Option<(usize, usize)>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
@@ -84,13 +95,28 @@ pub enum Statement {
     Assign(AssignStatement),
     AssignDynamic(AssignDynamicStatement),
     If(IfStatement),
-    Binary(FuncPtr, *const FfValue, *const CombValue),
+    Binary(FuncPtr, *const u8, *const u8),
+    BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
     SystemFunctionCall(SystemFunctionCall),
 }
 
 impl Statement {
     pub fn is_binary(&self) -> bool {
-        matches!(self, Statement::Binary(_, _, _))
+        matches!(
+            self,
+            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _)
+        )
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Statement::Assign(_) => "Assign",
+            Statement::AssignDynamic(_) => "AssignDynamic",
+            Statement::If(_) => "If",
+            Statement::Binary(_, _, _) => "Binary",
+            Statement::BinaryBatch(_, _) => "BinaryBatch",
+            Statement::SystemFunctionCall(_) => "SystemFunctionCall",
+        }
     }
 
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
@@ -101,16 +127,21 @@ impl Statement {
             Statement::Binary(func, ff_values, comb_values) => unsafe {
                 func(*ff_values, *comb_values);
             },
+            Statement::BinaryBatch(func, args) => unsafe {
+                for &(ff_values, comb_values) in args {
+                    func(ff_values, comb_values);
+                }
+            },
             Statement::SystemFunctionCall(x) => x.eval_step(mask_cache),
         }
     }
 
-    pub fn gather_variable(&self, inputs: &mut Vec<*const Value>, outputs: &mut Vec<*const Value>) {
+    pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         match self {
             Statement::Assign(x) => x.gather_variable(inputs, outputs),
             Statement::AssignDynamic(x) => x.gather_variable(inputs, outputs),
             Statement::If(x) => x.gather_variable(inputs, outputs),
-            Statement::Binary(_, _, _) => (),
+            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) => (),
             Statement::SystemFunctionCall(x) => x.gather_variable(inputs),
         }
     }
@@ -208,19 +239,17 @@ impl SystemFunctionCall {
                 let values = parse_hex_file(filename, *width);
                 let count = values.len().min(elements.len());
                 for i in 0..count {
-                    let (current, next) = elements[i];
-                    unsafe {
-                        (*current).set_value(values[i].clone());
-                        if let Some(next) = next {
-                            (*next).set_value(values[i].clone());
-                        }
+                    let (current, next, nb, use_4state) = elements[i];
+                    unsafe { write_native_value(current, nb, use_4state, &values[i]) };
+                    if let Some(next) = next {
+                        unsafe { write_native_value(next, nb, use_4state, &values[i]) };
                     }
                 }
             }
         }
     }
 
-    pub fn gather_variable(&self, inputs: &mut Vec<*const Value>) {
+    pub fn gather_variable(&self, inputs: &mut Vec<*const u8>) {
         match self {
             SystemFunctionCall::Display { args, .. } => {
                 for e in args {
@@ -257,6 +286,8 @@ pub struct ProtoAssignDynamicStatement {
     pub select: Option<(usize, usize)>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: ProtoExpression,
+    /// Canonical (current) base byte offset for FF variables.
+    pub dst_ff_current_base_offset: isize,
 }
 
 impl ProtoAssignDynamicStatement {
@@ -272,6 +303,8 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
+        let nb = calc_native_bytes(self.dst_width);
+        let nb_i32 = nb as i32;
 
         if let Some((beg, end)) = self.rhs_select {
             let mask = ValueU64::gen_mask(beg - end + 1);
@@ -305,9 +338,7 @@ impl ProtoAssignDynamicStatement {
         } else {
             context.comb_values
         };
-        let static_offset = builder
-            .ins()
-            .iconst(I64, (self.dst_base_offset + value_u64_offset()) as i64);
+        let static_offset = builder.ins().iconst(I64, self.dst_base_offset as i64);
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
@@ -316,45 +347,67 @@ impl ProtoAssignDynamicStatement {
 
         if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
+            let load_type = if nb == 4 { I32 } else { I64 };
 
             let payload = builder.ins().ishl_imm(payload, end as i64);
-            let org = builder.ins().load(I64, load_mem_flag, addr, 0);
+            let org = builder.ins().load(load_type, load_mem_flag, addr, 0);
+            let org = if nb == 4 {
+                builder.ins().uextend(I64, org)
+            } else {
+                org
+            };
             let org = builder.ins().band_imm(org, !mask as i64);
-            let payload = builder.ins().bor(payload, org);
-
-            builder.ins().store(store_mem_flag, payload, addr, 0);
+            let result = builder.ins().bor(payload, org);
+            if nb == 4 {
+                // istore32 expects I64 and truncates internally
+                builder.ins().istore32(store_mem_flag, result, addr, 0);
+            } else {
+                builder.ins().store(store_mem_flag, result, addr, 0);
+            }
             if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
-                let org = builder.ins().load(I64, load_mem_flag, addr, 8);
+                let org = builder.ins().load(load_type, load_mem_flag, addr, nb_i32);
+                let org = if nb == 4 {
+                    builder.ins().uextend(I64, org)
+                } else {
+                    org
+                };
                 let org = builder.ins().band_imm(org, !mask as i64);
-                let mask_xz = builder.ins().bor(mask_xz, org);
-
-                builder.ins().store(store_mem_flag, mask_xz, addr, 8);
+                let result = builder.ins().bor(mask_xz, org);
+                if nb == 4 {
+                    builder.ins().istore32(store_mem_flag, result, addr, nb_i32);
+                } else {
+                    builder.ins().store(store_mem_flag, result, addr, nb_i32);
+                }
             }
         } else {
             match self.dst_width {
                 8 => {
                     builder.ins().istore8(store_mem_flag, payload, addr, 0);
                     if let Some(mask_xz) = mask_xz {
-                        builder.ins().istore8(store_mem_flag, mask_xz, addr, 8);
+                        builder.ins().istore8(store_mem_flag, mask_xz, addr, nb_i32);
                     }
                 }
                 16 => {
                     builder.ins().istore16(store_mem_flag, payload, addr, 0);
                     if let Some(mask_xz) = mask_xz {
-                        builder.ins().istore16(store_mem_flag, mask_xz, addr, 8);
+                        builder
+                            .ins()
+                            .istore16(store_mem_flag, mask_xz, addr, nb_i32);
                     }
                 }
                 32 => {
                     builder.ins().istore32(store_mem_flag, payload, addr, 0);
                     if let Some(mask_xz) = mask_xz {
-                        builder.ins().istore32(store_mem_flag, mask_xz, addr, 8);
+                        builder
+                            .ins()
+                            .istore32(store_mem_flag, mask_xz, addr, nb_i32);
                     }
                 }
                 64 => {
                     builder.ins().store(store_mem_flag, payload, addr, 0);
                     if let Some(mask_xz) = mask_xz {
-                        builder.ins().store(store_mem_flag, mask_xz, addr, 8);
+                        builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
                     }
                 }
                 _ => {
@@ -363,11 +416,20 @@ impl ProtoAssignDynamicStatement {
                     }
                     let mask = (1u64 << self.dst_width) - 1;
                     let payload = builder.ins().band_imm(payload, mask as i64);
-
-                    builder.ins().store(store_mem_flag, payload, addr, 0);
+                    if nb == 4 {
+                        builder.ins().istore32(store_mem_flag, payload, addr, 0);
+                    } else {
+                        builder.ins().store(store_mem_flag, payload, addr, 0);
+                    }
                     if let Some(mask_xz) = mask_xz {
                         let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
-                        builder.ins().store(store_mem_flag, mask_xz, addr, 8);
+                        if nb == 4 {
+                            builder
+                                .ins()
+                                .istore32(store_mem_flag, mask_xz, addr, nb_i32);
+                        } else {
+                            builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
+                        }
                     }
                 }
             }
@@ -377,12 +439,25 @@ impl ProtoAssignDynamicStatement {
     }
 }
 
+/// A pre-compiled JIT block reused from a cached module instance.
+/// Stores the function pointer and byte deltas so that the same compiled
+/// code can be called with adjusted ff/comb base pointers.
+#[derive(Clone, Debug)]
+pub struct CompiledBlockStatement {
+    pub func: FuncPtr,
+    pub ff_delta_bytes: isize,
+    pub comb_delta_bytes: isize,
+    pub input_offsets: Vec<(bool, isize)>,
+    pub output_offsets: Vec<(bool, isize)>,
+}
+
 #[derive(Clone, Debug)]
 pub enum ProtoStatement {
     Assign(ProtoAssignStatement),
     AssignDynamic(ProtoAssignDynamicStatement),
     If(ProtoIfStatement),
     SystemFunctionCall(ProtoSystemFunctionCall),
+    CompiledBlock(CompiledBlockStatement),
 }
 
 impl ProtoStatement {
@@ -392,6 +467,7 @@ impl ProtoStatement {
             ProtoStatement::AssignDynamic(x) => x.can_build_binary(),
             ProtoStatement::If(x) => x.can_build_binary(),
             ProtoStatement::SystemFunctionCall(_) => false,
+            ProtoStatement::CompiledBlock(_) => false,
         }
     }
 
@@ -444,84 +520,138 @@ impl ProtoStatement {
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } => {}
             },
+            ProtoStatement::CompiledBlock(x) => {
+                inputs.extend_from_slice(&x.input_offsets);
+                outputs.extend_from_slice(&x.output_offsets);
+            }
         }
     }
 
-    pub fn apply_values_ptr(
-        &self,
-        ff_values_ptr: *mut FfValue,
-        comb_values_ptr: *mut CombValue,
-    ) -> Statement {
+    /// Returns the set of canonical (current) FF byte offsets written by this statement.
+    pub fn gather_ff_canonical_offsets(&self) -> HashSet<isize> {
+        let mut result = HashSet::default();
         match self {
             ProtoStatement::Assign(x) => {
-                Statement::Assign(x.apply_values_ptr(ff_values_ptr, comb_values_ptr))
+                if x.dst_is_ff {
+                    result.insert(x.dst_ff_current_offset);
+                }
             }
             ProtoStatement::AssignDynamic(x) => {
-                let dst_base_ptr = if x.dst_is_ff {
-                    unsafe { (ff_values_ptr as *mut u8).offset(x.dst_base_offset) as *mut Value }
-                } else {
-                    unsafe { (comb_values_ptr as *mut u8).offset(x.dst_base_offset) as *mut Value }
-                };
-                let dst_index_expr = x
-                    .dst_index_expr
-                    .apply_values_ptr(ff_values_ptr, comb_values_ptr);
-                let expr = x.expr.apply_values_ptr(ff_values_ptr, comb_values_ptr);
-                Statement::AssignDynamic(AssignDynamicStatement {
-                    dst_base_ptr,
-                    dst_stride: x.dst_stride,
-                    dst_num_elements: x.dst_num_elements,
-                    dst_index_expr,
-                    select: x.select,
-                    rhs_select: x.rhs_select,
-                    expr,
-                })
+                if x.dst_is_ff {
+                    for i in 0..x.dst_num_elements {
+                        let current_stride = x.dst_stride;
+                        result.insert(x.dst_ff_current_base_offset + current_stride * i as isize);
+                    }
+                }
             }
             ProtoStatement::If(x) => {
-                Statement::If(x.apply_values_ptr(ff_values_ptr, comb_values_ptr))
+                for s in &x.true_side {
+                    result.extend(s.gather_ff_canonical_offsets());
+                }
+                for s in &x.false_side {
+                    result.extend(s.gather_ff_canonical_offsets());
+                }
             }
-            ProtoStatement::SystemFunctionCall(x) => match x {
-                ProtoSystemFunctionCall::Display { format_str, args } => {
-                    let args = args
-                        .iter()
-                        .map(|a| a.apply_values_ptr(ff_values_ptr, comb_values_ptr))
-                        .collect();
-                    Statement::SystemFunctionCall(SystemFunctionCall::Display {
-                        format_str: format_str.clone(),
-                        args,
+            ProtoStatement::SystemFunctionCall(_) => {}
+            ProtoStatement::CompiledBlock(x) => {
+                for (is_ff, off) in &x.output_offsets {
+                    if *is_ff {
+                        result.insert(*off);
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// # Safety
+    /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
+    pub unsafe fn apply_values_ptr(
+        &self,
+        ff_values_ptr: *mut u8,
+        comb_values_ptr: *mut u8,
+        use_4state: bool,
+    ) -> Statement {
+        unsafe {
+            match self {
+                ProtoStatement::Assign(x) => Statement::Assign(x.apply_values_ptr(
+                    ff_values_ptr,
+                    comb_values_ptr,
+                    use_4state,
+                )),
+                ProtoStatement::AssignDynamic(x) => {
+                    let nb = calc_native_bytes(x.dst_width);
+                    let dst_base_ptr = if x.dst_is_ff {
+                        ff_values_ptr.offset(x.dst_base_offset)
+                    } else {
+                        comb_values_ptr.offset(x.dst_base_offset)
+                    };
+                    let dst_index_expr = x.dst_index_expr.apply_values_ptr(
+                        ff_values_ptr,
+                        comb_values_ptr,
+                        use_4state,
+                    );
+                    let expr = x
+                        .expr
+                        .apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                    Statement::AssignDynamic(AssignDynamicStatement {
+                        dst_base_ptr,
+                        dst_stride: x.dst_stride,
+                        dst_num_elements: x.dst_num_elements,
+                        dst_index_expr,
+                        dst_width: x.dst_width,
+                        dst_native_bytes: nb,
+                        dst_use_4state: use_4state,
+                        select: x.select,
+                        rhs_select: x.rhs_select,
+                        expr,
                     })
                 }
-                ProtoSystemFunctionCall::Readmemh {
-                    filename,
-                    elements,
-                    width,
-                } => {
-                    let resolved: Vec<_> = elements
-                        .iter()
-                        .map(|elem| {
-                            let current = if elem.is_ff {
-                                unsafe {
-                                    (ff_values_ptr as *mut u8).offset(elem.current_offset)
-                                        as *mut Value
-                                }
-                            } else {
-                                unsafe {
-                                    (comb_values_ptr as *mut u8).offset(elem.current_offset)
-                                        as *mut Value
-                                }
-                            };
-                            let next = elem.next_offset.map(|off| unsafe {
-                                (ff_values_ptr as *mut u8).offset(off) as *mut Value
-                            });
-                            (current, next)
+                ProtoStatement::If(x) => {
+                    Statement::If(x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                }
+                ProtoStatement::SystemFunctionCall(x) => match x {
+                    ProtoSystemFunctionCall::Display { format_str, args } => {
+                        let args = args
+                            .iter()
+                            .map(|a| a.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                            .collect();
+                        Statement::SystemFunctionCall(SystemFunctionCall::Display {
+                            format_str: format_str.clone(),
+                            args,
                         })
-                        .collect();
-                    Statement::SystemFunctionCall(SystemFunctionCall::Readmemh {
-                        filename: filename.clone(),
-                        elements: resolved,
-                        width: *width,
-                    })
+                    }
+                    ProtoSystemFunctionCall::Readmemh {
+                        filename,
+                        elements,
+                        width,
+                    } => {
+                        let nb = calc_native_bytes(*width);
+                        let resolved: Vec<_> = elements
+                            .iter()
+                            .map(|elem| {
+                                let current = if elem.is_ff {
+                                    ff_values_ptr.offset(elem.current_offset)
+                                } else {
+                                    comb_values_ptr.offset(elem.current_offset)
+                                };
+                                let next = elem.next_offset.map(|off| ff_values_ptr.offset(off));
+                                (current, next, nb, use_4state)
+                            })
+                            .collect();
+                        Statement::SystemFunctionCall(SystemFunctionCall::Readmemh {
+                            filename: filename.clone(),
+                            elements: resolved,
+                            width: *width,
+                        })
+                    }
+                },
+                ProtoStatement::CompiledBlock(x) => {
+                    let adjusted_ff = (ff_values_ptr as *const u8).offset(x.ff_delta_bytes);
+                    let adjusted_comb = (comb_values_ptr as *const u8).offset(x.comb_delta_bytes);
+                    Statement::Binary(x.func, adjusted_ff, adjusted_comb)
                 }
-            },
+            }
         }
     }
 
@@ -533,16 +663,25 @@ impl ProtoStatement {
     ) -> Option<()> {
         match self {
             ProtoStatement::Assign(x) => x.build_binary(context, builder),
-            ProtoStatement::AssignDynamic(x) => x.build_binary(context, builder),
+            ProtoStatement::AssignDynamic(x) => {
+                let result = x.build_binary(context, builder);
+                // Dynamic assigns write to runtime-computed addresses; invalidate all cached loads
+                context.load_cache.clear();
+                result
+            }
             ProtoStatement::If(x) => x.build_binary(context, builder, is_last),
             ProtoStatement::SystemFunctionCall(_) => None,
+            ProtoStatement::CompiledBlock(_) => None,
         }
     }
 }
 
 #[derive(Clone)]
 pub struct AssignStatement {
-    pub dst: *mut Value,
+    pub dst: *mut u8,
+    pub dst_width: usize,
+    pub dst_native_bytes: usize,
+    pub dst_use_4state: bool,
     pub select: Option<(usize, usize)>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
@@ -557,17 +696,34 @@ impl AssignStatement {
             value
         };
         if let Some((beg, end)) = self.select {
+            let mut current = unsafe {
+                read_native_value(
+                    self.dst,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    self.dst_width as u32,
+                    false,
+                )
+            };
+            current.assign(value, beg, end);
             unsafe {
-                (*self.dst).assign(value, beg, end);
+                write_native_value(
+                    self.dst,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    &current,
+                );
             }
         } else {
+            let mut value = value;
+            value.trunc(self.dst_width);
             unsafe {
-                (*self.dst).set_value(value);
+                write_native_value(self.dst, self.dst_native_bytes, self.dst_use_4state, &value);
             }
         }
     }
 
-    pub fn gather_variable(&self, inputs: &mut Vec<*const Value>, outputs: &mut Vec<*const Value>) {
+    pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         self.expr.gather_variable(inputs, outputs);
         outputs.push(self.dst);
     }
@@ -580,9 +736,7 @@ impl AssignDynamicStatement {
             .to_usize()
             .unwrap_or(0)
             .min(self.dst_num_elements - 1);
-        let dst = unsafe {
-            (self.dst_base_ptr as *mut u8).offset(self.dst_stride * idx as isize) as *mut Value
-        };
+        let dst = unsafe { self.dst_base_ptr.offset(self.dst_stride * idx as isize) };
 
         let value = self.expr.eval(mask_cache);
         let value = if let Some((beg, end)) = self.rhs_select {
@@ -591,24 +745,32 @@ impl AssignDynamicStatement {
             value
         };
         if let Some((beg, end)) = self.select {
+            let mut current = unsafe {
+                read_native_value(
+                    dst,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    self.dst_width as u32,
+                    false,
+                )
+            };
+            current.assign(value, beg, end);
             unsafe {
-                (*dst).assign(value, beg, end);
-            }
+                write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
+            };
         } else {
-            unsafe {
-                (*dst).set_value(value);
-            }
+            let mut value = value;
+            value.trunc(self.dst_width);
+            unsafe { write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &value) };
         }
     }
 
-    pub fn gather_variable(&self, inputs: &mut Vec<*const Value>, outputs: &mut Vec<*const Value>) {
+    pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         self.dst_index_expr.gather_variable(inputs, &mut vec![]);
         self.expr.gather_variable(inputs, &mut vec![]);
         for i in 0..self.dst_num_elements {
-            let ptr = unsafe {
-                (self.dst_base_ptr as *const u8).offset(self.dst_stride * i as isize)
-                    as *const Value
-            };
+            let ptr =
+                unsafe { self.dst_base_ptr.offset(self.dst_stride * i as isize) as *const u8 };
             outputs.push(ptr);
         }
     }
@@ -622,6 +784,9 @@ pub struct ProtoAssignStatement {
     pub select: Option<(usize, usize)>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: ProtoExpression,
+    /// Canonical (current) byte offset for FF variables.
+    /// Used by sort_ff_event to identify which FF slots are written.
+    pub dst_ff_current_offset: isize,
 }
 
 impl ProtoAssignStatement {
@@ -629,28 +794,38 @@ impl ProtoAssignStatement {
         if !self.expr.can_build_binary() {
             return false;
         }
-        self.dst_width <= 64
+        self.dst_width <= 128
     }
 
-    pub fn apply_values_ptr(
+    /// # Safety
+    /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
+    pub unsafe fn apply_values_ptr(
         &self,
-        ff_values_ptr: *mut FfValue,
-        comb_values_ptr: *mut CombValue,
+        ff_values_ptr: *mut u8,
+        comb_values_ptr: *mut u8,
+        use_4state: bool,
     ) -> AssignStatement {
-        // dst_offset is a byte offset: next field for FF, current field for comb
-        let dst = if self.dst_is_ff {
-            unsafe { (ff_values_ptr as *mut u8).add(self.dst_offset as usize) as *mut Value }
-        } else {
-            unsafe { (comb_values_ptr as *mut u8).add(self.dst_offset as usize) as *mut Value }
-        };
+        unsafe {
+            let nb = calc_native_bytes(self.dst_width);
+            let dst = if self.dst_is_ff {
+                ff_values_ptr.add(self.dst_offset as usize)
+            } else {
+                comb_values_ptr.add(self.dst_offset as usize)
+            };
 
-        let expr = self.expr.apply_values_ptr(ff_values_ptr, comb_values_ptr);
+            let expr = self
+                .expr
+                .apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
 
-        AssignStatement {
-            dst,
-            select: self.select,
-            rhs_select: self.rhs_select,
-            expr,
+            AssignStatement {
+                dst,
+                dst_width: self.dst_width,
+                dst_native_bytes: nb,
+                dst_use_4state: use_4state,
+                select: self.select,
+                rhs_select: self.rhs_select,
+                expr,
+            }
         }
     }
 
@@ -659,17 +834,38 @@ impl ProtoAssignStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        let known_bits = self.expr.effective_bits();
+        let wide = self.dst_width > 64;
+
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
+        let nb = calc_native_bytes(self.dst_width);
+        let nb_i32 = nb as i32;
+
+        // Widen expression result to I128 if destination is 128-bit
+        if wide && self.expr.width() <= 64 {
+            payload = builder.ins().uextend(I128, payload);
+            if let Some(mxz) = mask_xz {
+                mask_xz = Some(builder.ins().uextend(I128, mxz));
+            }
+        }
+
+        // Narrow known_bits if rhs_select is applied
+        let known_bits = if let Some((beg, end)) = self.rhs_select {
+            beg - end + 1
+        } else {
+            known_bits
+        };
 
         if let Some((beg, end)) = self.rhs_select {
-            let mask = ValueU64::gen_mask(beg - end + 1);
+            let select_width = beg - end + 1;
+            let mask = gen_mask_for_width(select_width);
 
             payload = builder.ins().ushr_imm(payload, end as i64);
-            payload = builder.ins().band_imm(payload, mask as i64);
+            payload = band_const(builder, payload, mask, wide);
 
             if let Some(mxz) = mask_xz {
                 let mxz = builder.ins().ushr_imm(mxz, end as i64);
-                let mxz = builder.ins().band_imm(mxz, mask as i64);
+                let mxz = band_const(builder, mxz, mask, wide);
                 mask_xz = Some(mxz);
             }
         }
@@ -683,93 +879,222 @@ impl ProtoAssignStatement {
             context.comb_values
         };
 
-        let dst_offset = (self.dst_offset + value_u64_offset()) as i32;
+        let dst_offset = self.dst_offset as i32;
+        let cache_key = (self.dst_is_ff, dst_offset);
 
         if let Some((beg, end)) = self.select {
-            let mask = ValueU64::gen_mask_range(beg, end);
-
+            // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
-            let org = builder
-                .ins()
-                .load(I64, load_mem_flag, base_addr, dst_offset);
-            let org = builder.ins().band_imm(org, !mask as i64);
-            let payload = builder.ins().bor(payload, org);
 
-            builder
-                .ins()
-                .store(store_mem_flag, payload, base_addr, dst_offset);
-            if let Some(mask_xz) = mask_xz {
-                let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
-                let org = builder
-                    .ins()
-                    .load(I64, load_mem_flag, base_addr, dst_offset + 8);
-                let org = builder.ins().band_imm(org, !mask as i64);
-                let mask_xz = builder.ins().bor(mask_xz, org);
+            let load_type = if nb == 16 {
+                I128
+            } else if nb == 4 {
+                I32
+            } else {
+                I64
+            };
 
+            // Use cached value if available, otherwise load from memory
+            let (org_payload, org_mask_xz) =
+                if let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key) {
+                    (cached_p, cached_m)
+                } else {
+                    let p = builder
+                        .ins()
+                        .load(load_type, load_mem_flag, base_addr, dst_offset);
+                    let p = if nb == 4 {
+                        builder.ins().uextend(I64, p)
+                    } else {
+                        p
+                    };
+                    let m = if context.use_4state {
+                        let m = builder.ins().load(
+                            load_type,
+                            load_mem_flag,
+                            base_addr,
+                            dst_offset + nb_i32,
+                        );
+                        Some(if nb == 4 {
+                            builder.ins().uextend(I64, m)
+                        } else {
+                            m
+                        })
+                    } else {
+                        None
+                    };
+                    (p, m)
+                };
+
+            let not_mask = if wide {
+                let mask = gen_mask_range_128(beg, end);
+                iconst_128(builder, !mask)
+            } else {
+                let mask = ValueU64::gen_mask_range(beg, end);
+                builder.ins().iconst(I64, !mask as i64)
+            };
+            let org = builder.ins().band(org_payload, not_mask);
+            let result = builder.ins().bor(payload, org);
+            if nb == 4 {
                 builder
                     .ins()
-                    .store(store_mem_flag, mask_xz, base_addr, dst_offset + 8);
+                    .istore32(store_mem_flag, result, base_addr, dst_offset);
+            } else {
+                builder
+                    .ins()
+                    .store(store_mem_flag, result, base_addr, dst_offset);
             }
-        } else {
-            match self.dst_width {
-                8 => {
-                    builder
-                        .ins()
-                        .istore8(store_mem_flag, payload, base_addr, dst_offset);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore8(store_mem_flag, mask_xz, base_addr, dst_offset + 8);
-                    }
-                }
-                16 => {
-                    builder
-                        .ins()
-                        .istore16(store_mem_flag, payload, base_addr, dst_offset);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore16(store_mem_flag, mask_xz, base_addr, dst_offset + 8);
-                    }
-                }
-                32 => {
-                    builder
-                        .ins()
-                        .istore32(store_mem_flag, payload, base_addr, dst_offset);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore32(store_mem_flag, mask_xz, base_addr, dst_offset + 8);
-                    }
-                }
-                64 => {
-                    builder
-                        .ins()
-                        .store(store_mem_flag, payload, base_addr, dst_offset);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .store(store_mem_flag, mask_xz, base_addr, dst_offset + 8);
-                    }
-                }
-                _ => {
-                    if self.dst_width >= 64 {
-                        return None;
-                    }
-                    let mask = (1u64 << self.dst_width) - 1;
-                    let payload = builder.ins().band_imm(payload, mask as i64);
 
+            let result_mask_xz = if let Some(mask_xz) = mask_xz {
+                let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
+                let z = if wide { context.zero_128 } else { context.zero };
+                let org_m = org_mask_xz.unwrap_or(z);
+                let org_m = builder.ins().band(org_m, not_mask);
+                let result_m = builder.ins().bor(mask_xz, org_m);
+                if nb == 4 {
+                    builder.ins().istore32(
+                        store_mem_flag,
+                        result_m,
+                        base_addr,
+                        dst_offset + nb_i32,
+                    );
+                } else {
                     builder
                         .ins()
-                        .store(store_mem_flag, payload, base_addr, dst_offset);
-                    if let Some(mask_xz) = mask_xz {
-                        let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
+                        .store(store_mem_flag, result_m, base_addr, dst_offset + nb_i32);
+                }
+                Some(result_m)
+            } else {
+                None
+            };
+
+            // Forward stored value to load cache
+            context
+                .load_cache
+                .insert(cache_key, (result, result_mask_xz));
+        } else {
+            // Store elimination: skip memory store for internal comb variables,
+            // keeping only load_cache forwarding.
+            let skip_store =
+                context.store_elim_enabled && context.store_elim_offsets.contains(&cache_key);
+
+            if !skip_store {
+                let needs_trunc = known_bits > self.dst_width;
+
+                match self.dst_width {
+                    8 => {
                         builder
                             .ins()
-                            .store(store_mem_flag, mask_xz, base_addr, dst_offset + 8);
+                            .istore8(store_mem_flag, payload, base_addr, dst_offset);
+                        if let Some(mask_xz) = mask_xz {
+                            builder.ins().istore8(
+                                store_mem_flag,
+                                mask_xz,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                    }
+                    16 => {
+                        builder
+                            .ins()
+                            .istore16(store_mem_flag, payload, base_addr, dst_offset);
+                        if let Some(mask_xz) = mask_xz {
+                            builder.ins().istore16(
+                                store_mem_flag,
+                                mask_xz,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                    }
+                    32 => {
+                        builder
+                            .ins()
+                            .istore32(store_mem_flag, payload, base_addr, dst_offset);
+                        if let Some(mask_xz) = mask_xz {
+                            builder.ins().istore32(
+                                store_mem_flag,
+                                mask_xz,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                    }
+                    64 => {
+                        builder
+                            .ins()
+                            .store(store_mem_flag, payload, base_addr, dst_offset);
+                        if let Some(mask_xz) = mask_xz {
+                            builder.ins().store(
+                                store_mem_flag,
+                                mask_xz,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                    }
+                    128 => {
+                        builder
+                            .ins()
+                            .store(store_mem_flag, payload, base_addr, dst_offset);
+                        if let Some(mask_xz) = mask_xz {
+                            builder.ins().store(
+                                store_mem_flag,
+                                mask_xz,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                    }
+                    _ => {
+                        if self.dst_width > 128 {
+                            return None;
+                        }
+                        let payload = if needs_trunc {
+                            let mask = gen_mask_for_width(self.dst_width);
+                            band_const(builder, payload, mask, wide)
+                        } else {
+                            payload
+                        };
+                        // Store using the appropriate native width
+                        if nb == 4 {
+                            builder
+                                .ins()
+                                .istore32(store_mem_flag, payload, base_addr, dst_offset);
+                        } else {
+                            builder
+                                .ins()
+                                .store(store_mem_flag, payload, base_addr, dst_offset);
+                        }
+                        if let Some(mask_xz) = mask_xz {
+                            let mask_xz = if needs_trunc {
+                                let mask = gen_mask_for_width(self.dst_width);
+                                band_const(builder, mask_xz, mask, wide)
+                            } else {
+                                mask_xz
+                            };
+                            if nb == 4 {
+                                builder.ins().istore32(
+                                    store_mem_flag,
+                                    mask_xz,
+                                    base_addr,
+                                    dst_offset + nb_i32,
+                                );
+                            } else {
+                                builder.ins().store(
+                                    store_mem_flag,
+                                    mask_xz,
+                                    base_addr,
+                                    dst_offset + nb_i32,
+                                );
+                            }
+                        }
                     }
                 }
             }
+
+            // Forward value to load cache (always, even when store is eliminated)
+            context.load_cache.insert(cache_key, (payload, mask_xz));
         }
 
         Some(())
@@ -789,7 +1114,12 @@ impl IfStatement {
             let cond = x.eval(mask_cache);
             match &cond {
                 Value::U64(x) => (x.payload & !x.mask_xz) != 0,
-                Value::BigUint(x) => *x.payload != (&*x.payload & &*x.mask_xz),
+                Value::BigUint(x) => {
+                    use veryl_analyzer::value::biguint_to_u128;
+                    let payload = biguint_to_u128(&x.payload);
+                    let mask_xz = biguint_to_u128(&x.mask_xz);
+                    (payload & !mask_xz) != 0
+                }
             }
         } else {
             false
@@ -806,7 +1136,7 @@ impl IfStatement {
         }
     }
 
-    pub fn gather_variable(&self, inputs: &mut Vec<*const Value>, outputs: &mut Vec<*const Value>) {
+    pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         if let Some(x) = &self.cond {
             x.gather_variable(inputs, outputs);
         }
@@ -838,30 +1168,35 @@ impl ProtoIfStatement {
             && self.false_side.iter().all(|s| s.can_build_binary())
     }
 
-    pub fn apply_values_ptr(
+    /// # Safety
+    /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
+    pub unsafe fn apply_values_ptr(
         &self,
-        ff_values_ptr: *mut FfValue,
-        comb_values_ptr: *mut CombValue,
+        ff_values_ptr: *mut u8,
+        comb_values_ptr: *mut u8,
+        use_4state: bool,
     ) -> IfStatement {
-        let cond = self
-            .cond
-            .as_ref()
-            .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr));
-        let true_side: Vec<_> = self
-            .true_side
-            .iter()
-            .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr))
-            .collect();
-        let false_side: Vec<_> = self
-            .false_side
-            .iter()
-            .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr))
-            .collect();
+        unsafe {
+            let cond = self
+                .cond
+                .as_ref()
+                .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state));
+            let true_side: Vec<_> = self
+                .true_side
+                .iter()
+                .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                .collect();
+            let false_side: Vec<_> = self
+                .false_side
+                .iter()
+                .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                .collect();
 
-        IfStatement {
-            cond,
-            true_side,
-            false_side,
+            IfStatement {
+                cond,
+                true_side,
+                false_side,
+            }
         }
     }
 
@@ -875,6 +1210,7 @@ impl ProtoIfStatement {
         let false_block = builder.create_block();
         let final_block = builder.create_block();
 
+        // Evaluate condition
         if let Some(x) = &self.cond {
             let (cond_payload, cond_mask_xz) = x.build_binary(context, builder)?;
             let effective_cond = if let Some(mask_xz) = cond_mask_xz {
@@ -887,6 +1223,12 @@ impl ProtoIfStatement {
                 .brif(effective_cond, true_block, &[], false_block, &[]);
         }
 
+        context.load_cache.clear();
+        // Disable store elimination inside If blocks: load_cache is cleared
+        // at block boundaries, so eliminated stores would leave stale values.
+        let prev_store_elim = context.store_elim_enabled;
+        context.store_elim_enabled = false;
+
         builder.switch_to_block(true_block);
         let len = self.true_side.len();
         for (i, x) in self.true_side.iter().enumerate() {
@@ -898,6 +1240,8 @@ impl ProtoIfStatement {
         } else {
             builder.ins().jump(final_block, &[]);
         }
+
+        context.load_cache.clear();
 
         builder.switch_to_block(false_block);
         let len = self.true_side.len();
@@ -912,6 +1256,9 @@ impl ProtoIfStatement {
         }
 
         builder.switch_to_block(final_block);
+
+        context.load_cache.clear();
+        context.store_elim_enabled = prev_store_elim;
 
         Some(())
     }
@@ -1125,6 +1472,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     select,
                     rhs_select,
                     expr: expr.clone(),
+                    dst_ff_current_offset: element.current_offset,
                 }));
             } else {
                 let array_shape = meta.r#type.array.clone();
@@ -1146,6 +1494,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     select,
                     rhs_select,
                     expr: expr.clone(),
+                    dst_ff_current_base_offset: base_current,
                 }));
             }
         }
@@ -1179,11 +1528,12 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let index = meta.r#type.array.calc_index(&idx_vals)?;
             let element = &meta.elements[index];
             let dst_is_ff = element.is_ff;
+            let current_offset = element.current_offset;
             // FF assignment writes to next
             let dst_offset = if dst_is_ff {
                 element.next_offset
             } else {
-                element.current_offset
+                current_offset
             };
 
             let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
@@ -1195,6 +1545,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 select,
                 rhs_select: None,
                 expr,
+                dst_ff_current_offset: current_offset,
             }))
         } else {
             // Dynamic index
@@ -1218,6 +1569,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 select,
                 rhs_select: None,
                 expr,
+                dst_ff_current_base_offset: base_current,
             }))
         }
     }
@@ -1245,12 +1597,13 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
 
         let element = &meta.elements[index];
         let dst_is_ff = element.is_ff;
+        let current_offset = element.current_offset;
         let dst_width = meta.width;
         // FF assignment writes to next
         let dst_offset = if dst_is_ff {
             element.next_offset
         } else {
-            element.current_offset
+            current_offset
         };
 
         let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
@@ -1262,6 +1615,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             select,
             rhs_select: None,
             expr,
+            dst_ff_current_offset: current_offset,
         })
     }
 }
@@ -1342,6 +1696,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 select: None,
                 rhs_select: None,
                 expr: proto_expr,
+                dst_ff_current_offset: 0, // not FF
             }));
         }
 
@@ -1397,6 +1752,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     select,
                     rhs_select: None,
                     expr: arg_expr.clone(),
+                    dst_ff_current_offset: dst_element.current_offset,
                 }));
             }
         }

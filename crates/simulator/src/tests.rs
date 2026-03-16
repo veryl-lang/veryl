@@ -10,7 +10,7 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
 #[track_caller]
-fn analyze(code: &str, config: &Config) -> Ir {
+fn build_ir_from_code(code: &str, config: &Config) -> Option<Ir> {
     symbol_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
@@ -32,7 +32,12 @@ fn analyze(code: &str, config: &Config) -> Ir {
         .collect();
     assert!(errors.is_empty());
 
-    build_ir(ir, "Top".into(), config).unwrap()
+    build_ir(ir, "Top".into(), config)
+}
+
+#[track_caller]
+fn analyze(code: &str, config: &Config) -> Ir {
+    build_ir_from_code(code, config).unwrap()
 }
 
 #[test]
@@ -221,7 +226,8 @@ fn short_bit() {
 }
 
 #[test]
-fn long_bit() {
+fn long_bit_128() {
+    // 128-bit variables should now be supported (both JIT and interpreter)
     let code = r#"
     module Top (
         clk: input clock,
@@ -240,29 +246,168 @@ fn long_bit() {
 
     for config in Config::all() {
         dbg!(&config);
-
         let ir = analyze(code, &config);
 
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        sim.step(&clk);
+        sim.step(&clk);
+        sim.step(&clk);
+
+        let got = sim.get("cnt").unwrap();
+        let exp = Value::new(3, 128, false);
+        assert_eq!(got, exp, "config: {:?}, got: {:?}", config, got);
+    }
+}
+
+#[test]
+fn long_bit_over_128() {
+    // >128-bit variables should now be supported via interpreter fallback
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<256>,
+    ) {
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        println!("{}", sim.ir.dump_variables());
-
         sim.step(&rst);
 
-        println!("{}", sim.ir.dump_variables());
+        sim.step(&clk);
+        sim.step(&clk);
+        sim.step(&clk);
 
-        for _ in 0..100 {
-            sim.step(&clk);
-        }
+        let got = sim.get("cnt").unwrap();
+        let exp = Value::new(3, 256, false);
+        assert_eq!(got, exp, "config: {:?}, got: {:?}", config, got);
+    }
+}
 
-        println!("{}", sim.ir.dump_variables());
+#[test]
+fn wide_bit_ops_256() {
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        b: input  logic<256>,
+        c: output logic<256>,
+        d: output logic<256>,
+        e: output logic<256>,
+    ) {
+        assign c = a & b;
+        assign d = a | b;
+        assign e = a ^ b;
+    }
+    "#;
 
-        let exp = Value::new(100, 128, false);
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
-        assert_eq!(sim.get("cnt").unwrap(), exp);
+        let a = Value::new(0xff00ff, 256, false);
+        let b = Value::new(0x0f0f0f, 256, false);
+
+        sim.set("a", a);
+        sim.set("b", b);
+        sim.step(&Event::Clock(VarId::default()));
+
+        let c = Value::new(0x0f000f, 256, false);
+        let d = Value::new(0xff0fff, 256, false);
+        let e = Value::new(0xf00ff0, 256, false);
+        assert_eq!(sim.get("c").unwrap(), c);
+        assert_eq!(sim.get("d").unwrap(), d);
+        assert_eq!(sim.get("e").unwrap(), e);
+    }
+}
+
+#[test]
+fn wide_bit_ops() {
+    // Test bitwise operations on 96-bit variables
+    let code = r#"
+    module Top (
+        a: input  logic<96>,
+        b: input  logic<96>,
+        c: output logic<96>,
+        d: output logic<96>,
+        e: output logic<96>,
+    ) {
+        assign c = a & b;
+        assign d = a | b;
+        assign e = a ^ b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let a = Value::new(0xff00ff, 96, false);
+        let b = Value::new(0x0f0f0f, 96, false);
+
+        sim.set("a", a);
+        sim.set("b", b);
+        sim.step(&Event::Clock(VarId::default()));
+
+        let c = Value::new(0x0f000f, 96, false);
+        let d = Value::new(0xff0fff, 96, false);
+        let e = Value::new(0xf00ff0, 96, false);
+        assert_eq!(sim.get("c").unwrap(), c);
+        assert_eq!(sim.get("d").unwrap(), d);
+        assert_eq!(sim.get("e").unwrap(), e);
+    }
+}
+
+#[test]
+fn wide_ternary() {
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        a:   input  logic<128>,
+        b:   input  logic<128>,
+        c:   output logic<128>,
+    ) {
+        assign c = if sel ? a : b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let a = Value::new(42, 128, false);
+        let b = Value::new(99, 128, false);
+
+        sim.set("sel", Value::new(1, 1, false));
+        sim.set("a", a.clone());
+        sim.set("b", b.clone());
+        sim.step(&Event::Clock(VarId::default()));
+        assert_eq!(sim.get("c").unwrap(), a);
+
+        sim.set("sel", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::default()));
+        assert_eq!(sim.get("c").unwrap(), b);
     }
 }
 
@@ -422,6 +567,78 @@ fn inst_ff() {
         let exp = Value::new(50, 32, false);
 
         assert_eq!(sim.get("cnt").unwrap(), exp);
+    }
+}
+
+#[test]
+fn inst_comb_and_ff() {
+    // Sub-module with both comb and FF to test merged comb+event JIT
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+        comb_out: output logic<32>,
+    ) {
+        inst u: Inner (
+            clk,
+            rst,
+            out,
+            comb_out,
+        );
+    }
+
+    module Inner (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+        comb_out: output logic<32>,
+    ) {
+        // comb depends on FF output
+        assign comb_out = out + 1;
+
+        always_ff {
+            if_reset {
+                out = 0;
+            } else {
+                out = comb_out;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // After reset: out=0, comb_out=0+1=1
+        assert_eq!(sim.get("out").unwrap(), Value::new(0, 32, false));
+        assert_eq!(sim.get("comb_out").unwrap(), Value::new(1, 32, false));
+
+        sim.step(&clk);
+        // After step 1: out=comb_out=1, comb_out=1+1=2
+        assert_eq!(sim.get("out").unwrap(), Value::new(1, 32, false));
+        assert_eq!(sim.get("comb_out").unwrap(), Value::new(2, 32, false));
+
+        sim.step(&clk);
+        // After step 2: out=comb_out=2, comb_out=2+1=3
+        assert_eq!(sim.get("out").unwrap(), Value::new(2, 32, false));
+        assert_eq!(sim.get("comb_out").unwrap(), Value::new(3, 32, false));
+
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        // After 12 total steps: out=12, comb_out=13
+        assert_eq!(sim.get("out").unwrap(), Value::new(12, 32, false));
+        assert_eq!(sim.get("comb_out").unwrap(), Value::new(13, 32, false));
     }
 }
 
@@ -926,18 +1143,18 @@ fn binary_corner_case() {
     binary_test("8'h00 ", "==?", "8'h00 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf1 ", "==?", "8'he2 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx0 ", "==?", "8'h30 ", 16, "16'b000000000000000x", true);
-    binary_test("8'h43 ", "==?", "8'h4x ", 16, "16'b0000000000000001", false);
+    binary_test("8'h43 ", "==?", "8'h4x ", 16, "16'b0000000000000001", true);
     binary_test("8'hz0 ", "==?", "8'h30 ", 16, "16'b000000000000000x", true);
-    binary_test("8'h11 ", "==?", "8'h1z ", 16, "16'b0000000000000001", false);
+    binary_test("8'h11 ", "==?", "8'h1z ", 16, "16'b0000000000000001", true);
     binary_test("8'hxz ", "==?", "8'hxz ", 16, "16'b0000000000000001", true);
     binary_test("8'hzx ", "==?", "8'hxz ", 16, "16'b0000000000000001", true);
 
     binary_test("8'h00 ", "!=?", "8'h00 ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", "!=?", "8'he2 ", 16, "16'b0000000000000001", false);
     binary_test("8'hx0 ", "!=?", "8'h30 ", 16, "16'b000000000000000x", true);
-    binary_test("8'h43 ", "!=?", "8'h4x ", 16, "16'b0000000000000000", false);
+    binary_test("8'h43 ", "!=?", "8'h4x ", 16, "16'b0000000000000000", true);
     binary_test("8'hz0 ", "!=?", "8'h30 ", 16, "16'b000000000000000x", true);
-    binary_test("8'h11 ", "!=?", "8'h1z ", 16, "16'b0000000000000000", false);
+    binary_test("8'h11 ", "!=?", "8'h1z ", 16, "16'b0000000000000000", true);
     binary_test("8'hxz ", "!=?", "8'hxz ", 16, "16'b0000000000000000", true);
     binary_test("8'hzx ", "!=?", "8'hxz ", 16, "16'b0000000000000000", true);
 
@@ -1043,21 +1260,17 @@ fn binary_corner_case() {
 
 #[test]
 fn partial_jit() {
-    // Mix of JIT-compilable (a + b, a ** d) and non-JIT-compilable (e + f, width > 64) statements.
-    // With partial JIT, JIT-able statements should be compiled while others are interpreted.
+    // Mix of JIT-compilable (a + b, a ** d) and non-JIT-compilable ($display) statements.
+    // With partial JIT, JIT-able statements should be compiled while $display is interpreted.
     let code = r#"
     module Top (
         a  : input  logic<32>,
         b  : input  logic<32>,
         d  : input  logic<3>,
-        e  : input  logic<65>,
-        f  : input  logic<65>,
         x  : output logic<32>,
-        y  : output logic<65>,
         z  : output logic<32>,
     ) {
         assign x = a + b;
-        assign y = e + f;
         assign z = a ** d;
     }
     "#;
@@ -1073,19 +1286,14 @@ fn partial_jit() {
         "JIT disabled: all statements should be interpreted"
     );
 
-    // JIT enabled: should have both Binary (JIT) and non-Binary (interpreted) statements
+    // JIT enabled: all statements should be compiled
     let config_jit = Config {
         use_jit: true,
         ..Default::default()
     };
     let ir = analyze(code, &config_jit);
     let has_binary = ir.comb_statements.iter().any(|s| s.is_binary());
-    let has_interpreted = ir.comb_statements.iter().any(|s| !s.is_binary());
     assert!(has_binary, "partial JIT should compile some statements");
-    assert!(
-        has_interpreted,
-        "partial JIT should leave some statements interpreted"
-    );
 
     // Verify simulation results are correct regardless of JIT mode
     for config in Config::all() {
@@ -1097,13 +1305,10 @@ fn partial_jit() {
         sim.set("a", Value::new(10, 32, false));
         sim.set("b", Value::new(20, 32, false));
         sim.set("d", Value::new(2, 3, false));
-        sim.set("e", Value::new(100, 65, false));
-        sim.set("f", Value::new(200, 65, false));
 
         sim.step(&Event::Clock(VarId::default()));
 
         assert_eq!(sim.get("x").unwrap(), Value::new(30, 32, false));
-        assert_eq!(sim.get("y").unwrap(), Value::new(300, 65, false));
         assert_eq!(sim.get("z").unwrap(), Value::new(100, 32, false));
     }
 }

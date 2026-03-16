@@ -1,15 +1,44 @@
 use crate::HashMap;
-use crate::ir::context::{Context, Conv, ScopeContext};
+use crate::HashSet;
+use crate::cranelift;
+use crate::ir::context::{Context, Conv, JitCacheEntry, JitCachedFunc, ScopeContext};
 use crate::ir::expression::ExpressionContext;
-use crate::ir::statement::ProtoAssignStatement;
+use crate::ir::statement::{CompiledBlockStatement, ProtoAssignStatement};
 use crate::ir::variable::{ModuleVariableMeta, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use veryl_analyzer::ir as air;
+
+/// Collect variable offsets from statements, filtering out internal variables
+/// (those that appear in both inputs and outputs) to avoid dependency cycles
+/// when the compiled block is used in analyze_dependency.
+type VarOffsets = Vec<(bool, isize)>;
+
+fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets) {
+    let mut all_inputs = vec![];
+    let mut all_outputs = vec![];
+    for s in stmts {
+        s.gather_variable_offsets(&mut all_inputs, &mut all_outputs);
+    }
+
+    let input_set: HashSet<(bool, isize)> = all_inputs.iter().cloned().collect();
+    let output_set: HashSet<(bool, isize)> = all_outputs.iter().cloned().collect();
+    let internal: HashSet<(bool, isize)> = input_set.intersection(&output_set).cloned().collect();
+
+    all_inputs.retain(|x| !internal.contains(x));
+    all_outputs.retain(|x| !internal.contains(x));
+    all_inputs.dedup();
+    all_outputs.dedup();
+
+    (all_inputs, all_outputs)
+}
 
 pub struct ProtoDeclaration {
     pub event_statements: HashMap<Event, Vec<ProtoStatement>>,
     pub comb_statements: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
+    /// Full internal comb statements (before merge optimization removed them).
+    /// Present only when merged comb+event functions are used.
+    pub full_internal_comb: Option<Vec<ProtoStatement>>,
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
@@ -25,6 +54,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     event_statements: HashMap::default(),
                     comb_statements,
                     child_modules: vec![],
+                    full_internal_comb: None,
                 })
             }
             air::Declaration::Ff(x) => {
@@ -51,6 +81,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
                     child_modules: vec![],
+                    full_internal_comb: None,
                 })
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
@@ -66,6 +97,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
                     child_modules: vec![],
+                    full_internal_comb: None,
                 })
             }
             air::Declaration::Final(x) => {
@@ -80,6 +112,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
                     child_modules: vec![],
+                    full_internal_comb: None,
                 })
             }
             _ => None,
@@ -100,8 +133,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         child_module.gather_ff(&mut child_analyzer_context, &mut child_ff_table);
         child_ff_table.update_is_ff();
 
-        let ff_start = context.ff_total_count as isize;
-        let comb_start = context.comb_total_count as isize;
+        let ff_start = context.ff_total_bytes as isize;
+        let comb_start = context.comb_total_bytes as isize;
         let (child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
             &child_ff_table,
@@ -110,8 +143,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             comb_start,
         )?;
 
-        context.ff_total_count += child_ff_count;
-        context.comb_total_count += child_comb_count;
+        context.ff_total_bytes += child_ff_count;
+        context.comb_total_bytes += child_comb_count;
 
         let child_scope = ScopeContext {
             variable_meta: child_variable_meta.clone(),
@@ -141,6 +174,253 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         context.scope_contexts.pop();
 
+        // JIT cache: reuse compiled code across instances of the same module type.
+        // ff_start and comb_start are already byte offsets.
+        let mut full_internal_comb: Option<Vec<ProtoStatement>> = None;
+        if context.config.use_jit {
+            let ff_start_bytes = ff_start;
+            let comb_start_bytes = comb_start;
+            let module_name = child_module.name;
+
+            if let Some(cache_entry) = context.jit_cache.get(&module_name) {
+                // Cache hit: replace internal logic with CompiledBlocks using delta
+                let ff_delta = ff_start_bytes - cache_entry.ref_ff_start_bytes;
+                let comb_delta = comb_start_bytes - cache_entry.ref_comb_start_bytes;
+
+                let adjust = |offsets: &[(bool, isize)]| -> Vec<(bool, isize)> {
+                    offsets
+                        .iter()
+                        .map(|(is_ff, off)| {
+                            (*is_ff, off + if *is_ff { ff_delta } else { comb_delta })
+                        })
+                        .collect()
+                };
+
+                for (event, stmts) in all_event_statements.iter_mut() {
+                    // Prefer merged function (comb+event combined) over event-only
+                    let cached = cache_entry
+                        .merged_funcs
+                        .get(event)
+                        .or_else(|| cache_entry.event_funcs.get(event));
+                    if let Some(cached) = cached {
+                        *stmts = vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                            func: cached.func,
+                            ff_delta_bytes: ff_delta,
+                            comb_delta_bytes: comb_delta,
+                            input_offsets: adjust(&cached.input_offsets),
+                            output_offsets: adjust(&cached.output_offsets),
+                        })];
+                    }
+                }
+
+                full_internal_comb = if !cache_entry.merged_funcs.is_empty() {
+                    let full = all_comb_statements.clone();
+                    all_comb_statements.clear();
+                    Some(full)
+                } else {
+                    None
+                };
+
+                if !cache_entry.merged_funcs.is_empty() {
+                    // Internal comb already cleared above
+                } else if let Some(cached) = &cache_entry.comb_func {
+                    all_comb_statements =
+                        vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                            func: cached.func,
+                            ff_delta_bytes: ff_delta,
+                            comb_delta_bytes: comb_delta,
+                            input_offsets: adjust(&cached.input_offsets),
+                            output_offsets: adjust(&cached.output_offsets),
+                        })];
+                }
+            } else {
+                // Cache miss: save originals before individual compilation
+                let original_comb = all_comb_statements.clone();
+                let original_events: HashMap<Event, Vec<ProtoStatement>> =
+                    all_event_statements.clone();
+
+                // Compile events individually
+                let mut event_funcs = HashMap::default();
+                for (event, stmts) in all_event_statements.iter_mut() {
+                    if stmts.iter().all(|s| s.can_build_binary())
+                        && !stmts.is_empty()
+                        && let Some(func) = cranelift::build_binary(context, stmts.clone())
+                    {
+                        let (input_offsets, output_offsets) = gather_external_offsets(stmts);
+
+                        event_funcs.insert(
+                            event.clone(),
+                            JitCachedFunc {
+                                func,
+                                input_offsets: input_offsets.clone(),
+                                output_offsets: output_offsets.clone(),
+                            },
+                        );
+
+                        *stmts = vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                            func,
+                            ff_delta_bytes: 0,
+                            comb_delta_bytes: 0,
+                            input_offsets,
+                            output_offsets,
+                        })];
+                    }
+                }
+
+                // Compile comb individually
+                let comb_func = if all_comb_statements.iter().all(|s| s.can_build_binary())
+                    && !all_comb_statements.is_empty()
+                {
+                    if let Some(func) =
+                        cranelift::build_binary(context, all_comb_statements.clone())
+                    {
+                        let (input_offsets, output_offsets) =
+                            gather_external_offsets(&all_comb_statements);
+
+                        all_comb_statements =
+                            vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                                func,
+                                ff_delta_bytes: 0,
+                                comb_delta_bytes: 0,
+                                input_offsets: input_offsets.clone(),
+                                output_offsets: output_offsets.clone(),
+                            })];
+
+                        Some(JitCachedFunc {
+                            func,
+                            input_offsets,
+                            output_offsets,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // Compile merged comb+event functions using saved originals.
+                // The merged function computes comb then event in one JIT call,
+                // allowing load_cache to forward comb stores to event loads.
+                let comb_jittable =
+                    !original_comb.is_empty() && original_comb.iter().all(|s| s.can_build_binary());
+                let mut merged_funcs = HashMap::default();
+
+                if comb_jittable {
+                    // Sort comb for inlining optimization
+                    let sorted_comb = super::module::analyze_dependency(original_comb.clone());
+
+                    // Compute external reads: output port comb offsets that are
+                    // read by port connections after the merged function returns
+                    let mut external_reads = HashSet::default();
+                    for output in &src.outputs {
+                        for child_var_id in &output.id {
+                            if let Some(child_meta) = child_variable_meta.get(child_var_id) {
+                                let element = &child_meta.elements[0];
+                                if !element.is_ff {
+                                    external_reads.insert(element.current_offset);
+                                }
+                            }
+                        }
+                    }
+
+                    for (event, orig_stmts) in &original_events {
+                        if orig_stmts.is_empty() || !orig_stmts.iter().all(|s| s.can_build_binary())
+                        {
+                            continue;
+                        }
+
+                        // Inline single-use comb variables into event statements
+                        let (opt_comb, opt_events) = if let Some(sorted) = &sorted_comb {
+                            super::optimize::optimize_merged(
+                                sorted.clone(),
+                                orig_stmts.clone(),
+                                &external_reads,
+                            )
+                        } else {
+                            (original_comb.clone(), orig_stmts.clone())
+                        };
+
+                        // Check that optimized statements are still jittable
+                        let all_jittable = opt_comb
+                            .iter()
+                            .chain(opt_events.iter())
+                            .all(|s| s.can_build_binary());
+                        if !all_jittable {
+                            continue;
+                        }
+
+                        // Compute store elimination set: internal comb offsets
+                        // that are not externally read (port connections, etc.)
+                        let mut store_elim = HashSet::default();
+                        for s in &opt_comb {
+                            if let ProtoStatement::Assign(a) = s
+                                && !a.dst_is_ff
+                                && a.select.is_none()
+                                && !external_reads.contains(&a.dst_offset)
+                            {
+                                store_elim.insert((a.dst_is_ff, a.dst_offset as i32));
+                            }
+                        }
+
+                        let mut merged = opt_comb;
+                        merged.extend(opt_events);
+
+                        if let Some(func) = cranelift::build_binary_with_store_elim(
+                            context,
+                            merged.clone(),
+                            store_elim,
+                        ) {
+                            let (input_offsets, output_offsets) = gather_external_offsets(&merged);
+
+                            // Replace event_statements with merged CompiledBlock
+                            all_event_statements.insert(
+                                event.clone(),
+                                vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                                    func,
+                                    ff_delta_bytes: 0,
+                                    comb_delta_bytes: 0,
+                                    input_offsets: input_offsets.clone(),
+                                    output_offsets: output_offsets.clone(),
+                                })],
+                            );
+
+                            merged_funcs.insert(
+                                event.clone(),
+                                JitCachedFunc {
+                                    func,
+                                    input_offsets,
+                                    output_offsets,
+                                },
+                            );
+                        }
+                    }
+                }
+
+                // If any merged functions were compiled, save full internal comb
+                // and clear it from comb_statements. Port connections are added
+                // after this block so they remain in comb_statements.
+                // The full comb is needed by get()/dump() for correctness.
+                full_internal_comb = if !merged_funcs.is_empty() {
+                    let full = all_comb_statements.clone();
+                    all_comb_statements.clear();
+                    Some(full)
+                } else {
+                    None
+                };
+
+                context.jit_cache.insert(
+                    module_name,
+                    JitCacheEntry {
+                        ref_ff_start_bytes: ff_start_bytes,
+                        ref_comb_start_bytes: comb_start_bytes,
+                        event_funcs,
+                        comb_func,
+                        merged_funcs,
+                    },
+                );
+            }
+        }
+
         // Input ports: parent expr → child port var
         for input in &src.inputs {
             let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
@@ -155,6 +435,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     select: None,
                     rhs_select: None,
                     expr: proto_expr.clone(),
+                    dst_ff_current_offset: 0, // not FF
                 }));
             }
         }
@@ -197,6 +478,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     select: None,
                     rhs_select: None,
                     expr: child_expr,
+                    dst_ff_current_offset: parent_element.current_offset,
                 }));
             }
         }
@@ -248,6 +530,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             event_statements: remapped_events,
             comb_statements: all_comb_statements,
             child_modules: vec![child_module_meta],
+            full_internal_comb,
         })
     }
 }

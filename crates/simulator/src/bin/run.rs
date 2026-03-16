@@ -3,8 +3,8 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::{Analyzer, Context};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
-use veryl_simulator::ir::{self, Ir};
 use veryl_simulator::ir::Event;
+use veryl_simulator::ir::{self, Ir};
 use veryl_simulator::{Config, Simulator};
 
 #[derive(clap::Parser)]
@@ -100,6 +100,15 @@ fn main() {
         let pct = jit as f64 / total as f64 * 100.0;
         eprintln!("JIT: {jit}/{total} statements ({pct:.1}%)");
     }
+    eprintln!("FF swap entries: {}", sim.ir.ff_swap_entries.len());
+    eprintln!(
+        "FF buffer: {} bytes, Comb buffer: {} bytes",
+        sim.ir.ff_values.len(),
+        sim.ir.comb_values.len()
+    );
+    let (cj, ci, ej, ei) = sim.ir.detailed_stats();
+    eprintln!("  comb: {cj} JIT + {ci} interp = {}", cj + ci);
+    eprintln!("  event: {ej} JIT + {ei} interp = {}", ej + ei);
 
     veryl_analyzer::stopwatch::dump();
 }
