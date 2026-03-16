@@ -9,6 +9,34 @@ use veryl_simulator::{Config, Simulator};
 #[cfg(target_os = "linux")]
 mod perf;
 
+const COUNTER_CODE: &str = include_str!("../compare/counter/test.veryl");
+const WALLACE_CODE: &str = include_str!("../compare/wallace/test.veryl");
+const LFSR256_CODE: &str = include_str!("../compare/lfsr256/test.veryl");
+
+struct BenchDesign {
+    name: &'static str,
+    code: &'static str,
+    cycle: u64,
+}
+
+const DESIGNS: &[BenchDesign] = &[
+    BenchDesign {
+        name: "counter",
+        code: COUNTER_CODE,
+        cycle: 100_000,
+    },
+    BenchDesign {
+        name: "wallace",
+        code: WALLACE_CODE,
+        cycle: 100_000,
+    },
+    BenchDesign {
+        name: "lfsr256",
+        code: LFSR256_CODE,
+        cycle: 100_000,
+    },
+];
+
 fn build(code: &str, top: &str) -> Ir {
     let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(black_box(&code), &"").unwrap();
@@ -29,53 +57,22 @@ fn build(code: &str, top: &str) -> Ir {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let code = r#"
-    module Top #(
-        param N: u32 = 10,
-    )(
-        clk: input clock,
-        rst: input reset,
-        cnt: output logic<32>[N],
-    ) {
-        for i in 0..N: g {
-            always_ff {
-                if_reset {
-                    cnt[i] = 0;
-                } else {
-                    cnt[i] += 1;
-                }
-            }
-        }
-    }
-    "#;
-
-    let mut group = c.benchmark_group("startup");
-    group.throughput(Throughput::Bytes(code.len() as u64));
-    group.bench_function("sim_ir", |b| {
-        b.iter_with_large_drop(|| {
-            let _ = build(black_box(&code), "Top");
-        })
-    });
-    group.finish();
-
-    let cycle = 100000;
-
     let mut group = c.benchmark_group("throughput");
-    group.throughput(Throughput::Elements(cycle));
-    group.bench_function("sim_run", |b| {
-        b.iter_with_large_drop(|| {
-            let ir = build(black_box(&code), "Top");
-            let mut sim = Simulator::<std::io::Empty>::new(ir, None);
-            let clk = sim.get_clock("clk").unwrap();
-            let rst = sim.get_reset("rst").unwrap();
-
-            sim.step(&rst);
-
-            for _ in 0..cycle {
-                sim.step(&clk);
-            }
-        })
-    });
+    for design in DESIGNS {
+        group.throughput(Throughput::Elements(design.cycle));
+        group.bench_function(design.name, |b| {
+            b.iter_with_large_drop(|| {
+                let ir = build(black_box(design.code), "Top");
+                let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+                let clk = sim.get_clock("clk").unwrap();
+                let rst = sim.get_reset("rst").unwrap();
+                sim.step(&rst);
+                for _ in 0..design.cycle {
+                    sim.step(&clk);
+                }
+            })
+        });
+    }
     group.finish();
 }
 

@@ -1,7 +1,10 @@
-use crate::cranelift::Context as CraneliftContext;
+use crate::cranelift::{
+    Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
+};
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::variable::{native_bytes as calc_native_bytes, read_native_value};
 use crate::ir::{Op, ProtoStatement, Value};
+use crate::wide_ops;
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
@@ -152,6 +155,263 @@ pub(crate) fn gen_mask_for_width(width: usize) -> u128 {
     } else {
         (1u128 << width) - 1
     }
+}
+
+// ── Wide (>128-bit) helper utilities ────────────────────────────────
+
+/// Returns true if this width requires pointer-based wide representation.
+pub(crate) fn is_wide_ptr(width: usize) -> bool {
+    width > 128
+}
+
+/// Allocate a wide stack slot and zero-fill it.
+pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> CraneliftValue {
+    let ptr = alloc_wide_slot(builder, nb);
+    let zero = builder.ins().iconst(I64, 0);
+    for i in 0..(nb / 8) {
+        builder
+            .ins()
+            .store(MemFlags::trusted(), zero, ptr, (i * 8) as i32);
+    }
+    ptr
+}
+
+/// Promote a narrow register value to a wide pointer (store into stack slot).
+/// If already wide (>128 bit), returns as-is.
+pub(crate) fn ensure_wide_ptr_val(
+    builder: &mut FunctionBuilder,
+    val: CraneliftValue,
+    src_width: usize,
+    dst_nb: usize,
+) -> CraneliftValue {
+    if is_wide_ptr(src_width) {
+        return val; // already a pointer
+    }
+    let ptr = alloc_wide_zero(builder, dst_nb);
+    // Store the value at offset 0
+    builder.ins().store(MemFlags::trusted(), val, ptr, 0);
+    ptr
+}
+
+/// Helper function addresses for wide operations, used with call_indirect.
+///
+/// Converts extern "C" function pointers to usize via a two-step cast
+/// (fn → *const () → usize) to satisfy both the compiler and clippy.
+pub(crate) mod wide_fn_addrs {
+    use crate::wide_ops;
+
+    macro_rules! fn_addr {
+        ($f:expr) => {{
+            // Two-step cast: fn item → raw pointer → usize
+            let ptr = $f as *const ();
+            ptr as usize
+        }};
+    }
+
+    pub fn band() -> usize {
+        fn_addr!(wide_ops::wide_band)
+    }
+    pub fn bor() -> usize {
+        fn_addr!(wide_ops::wide_bor)
+    }
+    pub fn bxor() -> usize {
+        fn_addr!(wide_ops::wide_bxor)
+    }
+    pub fn bxor_not() -> usize {
+        fn_addr!(wide_ops::wide_bxor_not)
+    }
+    pub fn band_not() -> usize {
+        fn_addr!(wide_ops::wide_band_not)
+    }
+    pub fn bnot() -> usize {
+        fn_addr!(wide_ops::wide_bnot)
+    }
+    pub fn add() -> usize {
+        fn_addr!(wide_ops::wide_add)
+    }
+    pub fn sub() -> usize {
+        fn_addr!(wide_ops::wide_sub)
+    }
+    pub fn mul() -> usize {
+        fn_addr!(wide_ops::wide_mul)
+    }
+    pub fn negate() -> usize {
+        fn_addr!(wide_ops::wide_negate)
+    }
+    pub fn copy() -> usize {
+        fn_addr!(wide_ops::wide_copy)
+    }
+    pub fn eq() -> usize {
+        fn_addr!(wide_ops::wide_eq)
+    }
+    pub fn ne() -> usize {
+        fn_addr!(wide_ops::wide_ne)
+    }
+    pub fn ucmp() -> usize {
+        fn_addr!(wide_ops::wide_ucmp)
+    }
+    pub fn scmp() -> usize {
+        fn_addr!(wide_ops::wide_scmp)
+    }
+    pub fn shl() -> usize {
+        fn_addr!(wide_ops::wide_shl)
+    }
+    pub fn lshr() -> usize {
+        fn_addr!(wide_ops::wide_lshr)
+    }
+    pub fn ashr() -> usize {
+        fn_addr!(wide_ops::wide_ashr)
+    }
+    pub fn is_nonzero() -> usize {
+        fn_addr!(wide_ops::wide_is_nonzero)
+    }
+    pub fn is_all_ones() -> usize {
+        fn_addr!(wide_ops::wide_is_all_ones)
+    }
+    pub fn popcnt_parity() -> usize {
+        fn_addr!(wide_ops::wide_popcnt_parity)
+    }
+    pub fn apply_mask() -> usize {
+        fn_addr!(wide_ops::wide_apply_mask)
+    }
+    pub fn fill_ones() -> usize {
+        fn_addr!(wide_ops::wide_fill_ones)
+    }
+}
+
+/// Emit a wide bitwise binary op via helper call.
+fn emit_wide_binary_op(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    func_addr: usize,
+    a: CraneliftValue,
+    b: CraneliftValue,
+    nb: usize,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        func_addr,
+        &[dst, a, b, nb_val],
+    );
+    dst
+}
+
+/// Emit a wide unary op via helper call.
+fn emit_wide_unary_op(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    func_addr: usize,
+    a: CraneliftValue,
+    nb: usize,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::UnaryOp,
+        func_addr,
+        &[dst, a, nb_val],
+    );
+    dst
+}
+
+/// Build a wide constant from u64 digit values, stored in a stack slot.
+fn emit_wide_const(builder: &mut FunctionBuilder, digits: &[u64], nb: usize) -> CraneliftValue {
+    let ptr = alloc_wide_slot(builder, nb);
+    let n_words = nb / 8;
+    for i in 0..n_words {
+        let val = digits.get(i).copied().unwrap_or(0);
+        let v = builder.ins().iconst(I64, val as i64);
+        builder
+            .ins()
+            .store(MemFlags::trusted(), v, ptr, (i * 8) as i32);
+    }
+    ptr
+}
+
+/// Apply width mask to a wide buffer (clear bits >= width).
+pub(crate) fn emit_wide_apply_mask(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    nb: usize,
+    width: usize,
+) {
+    let packed = wide_ops::pack_nb_width(nb, width);
+    let packed_val = builder.ins().iconst(I32, packed as i64);
+    let dummy = builder.ins().iconst(I64, 0);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::UnaryOp,
+        wide_fn_addrs::apply_mask(),
+        &[ptr, dummy, packed_val],
+    );
+}
+
+/// Check if a wide mask_xz buffer is nonzero. Returns an I8 truth value.
+fn emit_wide_is_nonzero(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    nb: usize,
+) -> CraneliftValue {
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    let result = call_helper_ret(
+        context,
+        builder,
+        HelperSig::Reduce,
+        wide_fn_addrs::is_nonzero(),
+        &[ptr, nb_val],
+    );
+    builder.ins().icmp_imm(IntCC::NotEqual, result, 0)
+}
+
+/// Create a wide all-ones mask for the given width (ones in [0..width), zeros above).
+fn emit_wide_fill_ones(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    nb: usize,
+    width: usize,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    let packed = wide_ops::pack_nb_width(nb, width);
+    let packed_val = builder.ins().iconst(I32, packed as i64);
+    let dummy = builder.ins().iconst(I64, 0);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::UnaryOp,
+        wide_fn_addrs::fill_ones(),
+        &[dst, dummy, packed_val],
+    );
+    dst
+}
+
+/// Conditionally select between two wide values word-by-word.
+fn emit_wide_select(
+    builder: &mut FunctionBuilder,
+    cond: CraneliftValue,
+    true_ptr: CraneliftValue,
+    false_ptr: CraneliftValue,
+    nb: usize,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    let n_words = nb / 8;
+    let flags = MemFlags::trusted();
+    for i in 0..n_words {
+        let off = (i * 8) as i32;
+        let t = builder.ins().load(I64, flags, true_ptr, off);
+        let f = builder.ins().load(I64, flags, false_ptr, off);
+        let r = builder.ins().select(cond, t, f);
+        builder.ins().store(flags, r, dst, off);
+    }
+    dst
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -451,11 +711,8 @@ pub enum ProtoExpression {
 impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
         match self {
-            ProtoExpression::Variable { width, .. } => *width <= 128,
-            ProtoExpression::Value { value, .. } => match value {
-                Value::U64(_) => true,
-                Value::BigUint(v) => v.width as usize <= 128,
-            },
+            ProtoExpression::Variable { .. } => true,
+            ProtoExpression::Value { .. } => true,
             ProtoExpression::Unary { op, x, .. } => {
                 x.can_build_binary()
                     && matches!(
@@ -508,27 +765,24 @@ impl ProtoExpression {
                             | Op::LogicAnd
                             | Op::LogicOr
                     )
-                    // Reject I128 div/rem (not reliably supported on all backends)
+                    // Reject div/rem for width > 64 (not supported on all backends,
+                    // and not implemented for wide values)
                     && !(matches!(op, Op::Div | Op::Rem) && expr_context.width > 64)
             }
-            ProtoExpression::Concatenation {
-                elements, width, ..
-            } => *width <= 128 && elements.iter().all(|(expr, _, _)| expr.can_build_binary()),
+            ProtoExpression::Concatenation { elements, .. } => {
+                elements.iter().all(|(expr, _, _)| expr.can_build_binary())
+            }
             ProtoExpression::Ternary {
                 cond,
                 true_expr,
                 false_expr,
-                width,
                 ..
             } => {
-                *width <= 128
-                    && cond.can_build_binary()
+                cond.can_build_binary()
                     && true_expr.can_build_binary()
                     && false_expr.can_build_binary()
             }
-            ProtoExpression::DynamicVariable {
-                width, index_expr, ..
-            } => *width <= 128 && index_expr.can_build_binary(),
+            ProtoExpression::DynamicVariable { index_expr, .. } => index_expr.can_build_binary(),
         }
     }
 
@@ -761,8 +1015,28 @@ impl ProtoExpression {
                 select,
                 ..
             } => {
-                if *width > 128 {
-                    return None;
+                // Wide path: >128-bit variable → return memory pointer
+                if is_wide_ptr(*width) {
+                    let nb = calc_native_bytes(*width);
+                    let base_addr = if *is_ff {
+                        context.ff_values
+                    } else {
+                        context.comb_values
+                    };
+                    let ptr = builder.ins().iadd_imm(base_addr, *offset as i64);
+
+                    // Select on >128-bit values: fall back to interpreter
+                    if select.is_some() {
+                        return None;
+                    }
+
+                    let mask_xz = if context.use_4state {
+                        Some(builder.ins().iadd_imm(ptr, nb as i64))
+                    } else {
+                        None
+                    };
+
+                    return Some((ptr, mask_xz));
                 }
 
                 let nb = calc_native_bytes(*width);
@@ -858,46 +1132,83 @@ impl ProtoExpression {
 
                 Some((payload, mask_xz))
             }
-            ProtoExpression::Value { value, .. } => match value {
-                Value::U64(x) => {
-                    let payload = x.payload as i64;
-                    let payload = builder.ins().iconst(I64, payload);
-
+            ProtoExpression::Value { value, width, .. } => {
+                // If expression width is >128, always return a wide pointer
+                // to ensure consistency with is_wide_ptr() checks in callers.
+                if is_wide_ptr(*width) {
+                    let nb = calc_native_bytes(*width);
+                    let (payload_digits, mask_digits): (Vec<u64>, Vec<u64>) = match value {
+                        Value::U64(x) => (vec![x.payload], vec![x.mask_xz]),
+                        Value::BigUint(x) => (x.payload.to_u64_digits(), x.mask_xz.to_u64_digits()),
+                    };
+                    let payload = emit_wide_const(builder, &payload_digits, nb);
                     let mask_xz = if context.use_4state {
-                        let mask_xz = x.mask_xz as i64;
-                        let mask_xz = builder.ins().iconst(I64, mask_xz);
-                        Some(mask_xz)
+                        Some(emit_wide_const(builder, &mask_digits, nb))
                     } else {
                         None
                     };
-                    Some((payload, mask_xz))
+                    return Some((payload, mask_xz));
                 }
-                Value::BigUint(x) => {
-                    if x.width as usize > 128 {
-                        return None;
+
+                match value {
+                    Value::U64(x) => {
+                        let payload = x.payload as i64;
+                        let payload = builder.ins().iconst(I64, payload);
+
+                        let mask_xz = if context.use_4state {
+                            let mask_xz = x.mask_xz as i64;
+                            let mask_xz = builder.ins().iconst(I64, mask_xz);
+                            Some(mask_xz)
+                        } else {
+                            None
+                        };
+                        Some((payload, mask_xz))
                     }
-                    let payload = x.payload_u128();
-                    let payload = iconst_128(builder, payload);
+                    Value::BigUint(x) => {
+                        // Use expression width (not BigUint x.width) for consistency
+                        // with is_wide_ptr() checks in callers.
+                        if is_wide_ptr(*width) {
+                            let nb = calc_native_bytes(*width);
+                            let payload_digits = x.payload.to_u64_digits();
+                            let payload = emit_wide_const(builder, &payload_digits, nb);
 
-                    let mask_xz = if context.use_4state {
-                        let mask_xz = x.mask_xz_u128();
-                        let mask_xz = iconst_128(builder, mask_xz);
-                        Some(mask_xz)
-                    } else {
-                        None
-                    };
-                    Some((payload, mask_xz))
+                            let mask_xz = if context.use_4state {
+                                let mask_digits = x.mask_xz.to_u64_digits();
+                                Some(emit_wide_const(builder, &mask_digits, nb))
+                            } else {
+                                None
+                            };
+                            return Some((payload, mask_xz));
+                        }
+                        let payload = x.payload_u128();
+                        let payload = iconst_128(builder, payload);
+
+                        let mask_xz = if context.use_4state {
+                            let mask_xz = x.mask_xz_u128();
+                            let mask_xz = iconst_128(builder, mask_xz);
+                            Some(mask_xz)
+                        } else {
+                            None
+                        };
+                        Some((payload, mask_xz))
+                    }
                 }
-            },
+            }
             ProtoExpression::Unary {
                 op,
                 x,
                 expr_context,
                 ..
             } => {
+                let width = expr_context.width;
+
+                // Wide path for >128-bit unary operations
+                if is_wide_ptr(width) || is_wide_ptr(x.width()) {
+                    return self.build_binary_wide_unary(context, builder);
+                }
+
                 let (mut x_payload, mut x_mask_xz) = x.build_binary(context, builder)?;
 
-                let width = expr_context.width;
                 let wide = width > 64;
                 let x_wide = x.width() > 64;
                 if expr_context.signed {
@@ -1086,6 +1397,14 @@ impl ProtoExpression {
                 expr_context,
                 ..
             } => {
+                // Wide path for >128-bit binary operations
+                let needs_wide_ptr = is_wide_ptr(expr_context.width)
+                    || is_wide_ptr(x.width())
+                    || is_wide_ptr(y.width());
+                if needs_wide_ptr {
+                    return self.build_binary_wide_binary(context, builder);
+                }
+
                 let (mut x_payload, mut x_mask_xz) = x.build_binary(context, builder)?;
                 let (mut y_payload, mut y_mask_xz) = y.build_binary(context, builder)?;
 
@@ -1724,8 +2043,9 @@ impl ProtoExpression {
             ProtoExpression::Concatenation {
                 elements, width, ..
             } => {
-                if *width > 128 {
-                    return None;
+                // Wide path for >128-bit concatenation
+                if is_wide_ptr(*width) {
+                    return self.build_binary_wide_concat(context, builder);
                 }
 
                 let wide = *width > 64;
@@ -1855,6 +2175,14 @@ impl ProtoExpression {
                 width,
                 ..
             } => {
+                // Wide path for >128-bit ternary
+                if is_wide_ptr(*width)
+                    || is_wide_ptr(true_expr.width())
+                    || is_wide_ptr(false_expr.width())
+                {
+                    return self.build_binary_wide_ternary(context, builder);
+                }
+
                 let (cond_payload, cond_mask_xz) = cond.build_binary(context, builder)?;
                 let (mut true_payload, mut true_mask_xz) =
                     true_expr.build_binary(context, builder)?;
@@ -1910,7 +2238,8 @@ impl ProtoExpression {
                 width,
                 ..
             } => {
-                if *width > 128 {
+                // Wide DynamicVariable: fall back to interpreter for now
+                if is_wide_ptr(*width) {
                     return None;
                 }
 
@@ -1990,6 +2319,855 @@ impl ProtoExpression {
                 Some((payload, mask_xz))
             }
         }
+    }
+
+    // ── Wide (>128-bit) build_binary implementations ───────────────
+
+    fn build_binary_wide_unary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        let ProtoExpression::Unary {
+            op,
+            x,
+            expr_context,
+            ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let width = expr_context.width;
+        let x_width = x.width();
+        let (x_payload, x_mask_xz) = x.build_binary(context, builder)?;
+
+        // Reduction ops always produce 1-bit I64 results
+        let is_reduction = matches!(
+            op,
+            Op::BitAnd
+                | Op::BitNand
+                | Op::BitOr
+                | Op::BitNor
+                | Op::LogicNot
+                | Op::BitXor
+                | Op::BitXnor
+        );
+
+        if is_reduction {
+            // Input is wide, output is I64 (1-bit)
+            let x_ptr = if is_wide_ptr(x_width) {
+                x_payload
+            } else {
+                ensure_wide_ptr_val(builder, x_payload, x_width, calc_native_bytes(x_width))
+            };
+            let x_nb = calc_native_bytes(x_width);
+            let packed = wide_ops::pack_nb_width(x_nb, x_width);
+            let nb_val = builder.ins().iconst(I32, x_nb as i64);
+            let packed_val = builder.ins().iconst(I32, packed as i64);
+
+            let payload = match op {
+                Op::BitAnd => call_helper_ret(
+                    context,
+                    builder,
+                    HelperSig::Reduce,
+                    wide_fn_addrs::is_all_ones(),
+                    &[x_ptr, packed_val],
+                ),
+                Op::BitNand => {
+                    let r = call_helper_ret(
+                        context,
+                        builder,
+                        HelperSig::Reduce,
+                        wide_fn_addrs::is_all_ones(),
+                        &[x_ptr, packed_val],
+                    );
+                    builder.ins().bxor_imm(r, 1)
+                }
+                Op::BitOr | Op::LogicNot => {
+                    let r = call_helper_ret(
+                        context,
+                        builder,
+                        HelperSig::Reduce,
+                        wide_fn_addrs::is_nonzero(),
+                        &[x_ptr, nb_val],
+                    );
+                    if matches!(op, Op::LogicNot | Op::BitNor) {
+                        builder.ins().bxor_imm(r, 1)
+                    } else {
+                        r
+                    }
+                }
+                Op::BitNor => {
+                    let r = call_helper_ret(
+                        context,
+                        builder,
+                        HelperSig::Reduce,
+                        wide_fn_addrs::is_nonzero(),
+                        &[x_ptr, nb_val],
+                    );
+                    builder.ins().bxor_imm(r, 1)
+                }
+                Op::BitXor => call_helper_ret(
+                    context,
+                    builder,
+                    HelperSig::Reduce,
+                    wide_fn_addrs::popcnt_parity(),
+                    &[x_ptr, nb_val],
+                ),
+                Op::BitXnor => {
+                    let r = call_helper_ret(
+                        context,
+                        builder,
+                        HelperSig::Reduce,
+                        wide_fn_addrs::popcnt_parity(),
+                        &[x_ptr, nb_val],
+                    );
+                    builder.ins().bxor_imm(r, 1)
+                }
+                _ => unreachable!(),
+            };
+
+            // 4-state: if x has any X/Z bits, result is X
+            if let Some(x_mask_xz) = x_mask_xz {
+                let x_mask_ptr = if is_wide_ptr(x_width) {
+                    x_mask_xz
+                } else {
+                    ensure_wide_ptr_val(builder, x_mask_xz, x_width, x_nb)
+                };
+                let is_xz = emit_wide_is_nonzero(context, builder, x_mask_ptr, x_nb);
+                let one = builder.ins().iconst(I64, 1);
+                let payload = builder.ins().select(is_xz, context.zero, payload);
+                let mask_xz = builder.ins().select(is_xz, one, context.zero);
+                return Some((payload, Some(mask_xz)));
+            }
+            return Some((payload, None));
+        }
+
+        // Non-reduction unary ops with wide result
+        let nb = calc_native_bytes(width);
+        let x_nb = calc_native_bytes(x_width);
+        let x_ptr = if is_wide_ptr(x_width) {
+            x_payload
+        } else {
+            ensure_wide_ptr_val(builder, x_payload, x_width, nb)
+        };
+
+        let payload = match op {
+            Op::Add => {
+                // Identity: just copy
+                if x_nb == nb {
+                    x_ptr
+                } else {
+                    emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, nb)
+                }
+            }
+            Op::Sub => {
+                // Negate: ~x + 1
+                let dst = emit_wide_unary_op(context, builder, wide_fn_addrs::negate(), x_ptr, nb);
+                emit_wide_apply_mask(context, builder, dst, nb, width);
+                dst
+            }
+            Op::BitNot => {
+                let dst = emit_wide_unary_op(context, builder, wide_fn_addrs::bnot(), x_ptr, nb);
+                emit_wide_apply_mask(context, builder, dst, nb, width);
+                dst
+            }
+            _ => return None,
+        };
+
+        // 4-state handling for non-reduction ops
+        if let Some(x_mask_xz) = x_mask_xz {
+            let x_mask_ptr = if is_wide_ptr(x_width) {
+                x_mask_xz
+            } else {
+                ensure_wide_ptr_val(builder, x_mask_xz, x_width, nb)
+            };
+
+            let mask_xz = match op {
+                Op::Add => x_mask_ptr,
+                Op::Sub | Op::BitNot => {
+                    // If any X/Z, set result mask to all-ones for the width
+                    let is_xz = emit_wide_is_nonzero(context, builder, x_mask_ptr, nb);
+                    let full_mask = emit_wide_fill_ones(context, builder, nb, width);
+                    let zero = alloc_wide_zero(builder, nb);
+                    emit_wide_select(builder, is_xz, full_mask, zero, nb)
+                }
+                _ => return None,
+            };
+            Some((payload, Some(mask_xz)))
+        } else {
+            Some((payload, None))
+        }
+    }
+
+    fn build_binary_wide_binary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        let ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            expr_context,
+            ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let width = expr_context.width;
+        let x_width = x.width();
+        let y_width = y.width();
+
+        let (x_payload, x_mask_xz) = x.build_binary(context, builder)?;
+        let (y_payload, y_mask_xz) = y.build_binary(context, builder)?;
+
+        // Determine the native byte size for the operation
+        let op_nb = calc_native_bytes(width.max(x_width).max(y_width));
+
+        // Ensure both operands are wide pointers of the right size
+        let x_ptr = if is_wide_ptr(x_width) {
+            x_payload
+        } else {
+            ensure_wide_ptr_val(builder, x_payload, x_width, op_nb)
+        };
+        let y_ptr = if is_wide_ptr(y_width) {
+            y_payload
+        } else {
+            ensure_wide_ptr_val(builder, y_payload, y_width, op_nb)
+        };
+
+        // Result is comparison (1-bit I64)?
+        let is_cmp = matches!(
+            op,
+            Op::Eq
+                | Op::Ne
+                | Op::Greater
+                | Op::GreaterEq
+                | Op::Less
+                | Op::LessEq
+                | Op::LogicAnd
+                | Op::LogicOr
+        );
+
+        if is_cmp {
+            let nb_val = builder.ins().iconst(I32, op_nb as i64);
+            let payload = match op {
+                Op::Eq => call_helper_ret(
+                    context,
+                    builder,
+                    HelperSig::Compare,
+                    wide_fn_addrs::eq(),
+                    &[x_ptr, y_ptr, nb_val],
+                ),
+                Op::Ne => call_helper_ret(
+                    context,
+                    builder,
+                    HelperSig::Compare,
+                    wide_fn_addrs::ne(),
+                    &[x_ptr, y_ptr, nb_val],
+                ),
+                Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
+                    let cmp_result = if expr_context.signed {
+                        let packed = wide_ops::pack_nb_width(op_nb, width);
+                        let packed_val = builder.ins().iconst(I32, packed as i64);
+                        call_helper_ret(
+                            context,
+                            builder,
+                            HelperSig::Compare,
+                            wide_fn_addrs::scmp(),
+                            &[x_ptr, y_ptr, packed_val],
+                        )
+                    } else {
+                        call_helper_ret(
+                            context,
+                            builder,
+                            HelperSig::Compare,
+                            wide_fn_addrs::ucmp(),
+                            &[x_ptr, y_ptr, nb_val],
+                        )
+                    };
+                    // cmp_result is -1/0/1, convert to boolean
+                    match op {
+                        Op::Greater => {
+                            let r = builder
+                                .ins()
+                                .icmp_imm(IntCC::SignedGreaterThan, cmp_result, 0);
+                            builder.ins().uextend(I64, r)
+                        }
+                        Op::GreaterEq => {
+                            let r = builder.ins().icmp_imm(
+                                IntCC::SignedGreaterThanOrEqual,
+                                cmp_result,
+                                0,
+                            );
+                            builder.ins().uextend(I64, r)
+                        }
+                        Op::Less => {
+                            let r = builder.ins().icmp_imm(IntCC::SignedLessThan, cmp_result, 0);
+                            builder.ins().uextend(I64, r)
+                        }
+                        Op::LessEq => {
+                            let r =
+                                builder
+                                    .ins()
+                                    .icmp_imm(IntCC::SignedLessThanOrEqual, cmp_result, 0);
+                            builder.ins().uextend(I64, r)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                Op::LogicAnd | Op::LogicOr => {
+                    let nb_val2 = builder.ins().iconst(I32, op_nb as i64);
+                    let x_nz = call_helper_ret(
+                        context,
+                        builder,
+                        HelperSig::Reduce,
+                        wide_fn_addrs::is_nonzero(),
+                        &[x_ptr, nb_val],
+                    );
+                    let y_nz = call_helper_ret(
+                        context,
+                        builder,
+                        HelperSig::Reduce,
+                        wide_fn_addrs::is_nonzero(),
+                        &[y_ptr, nb_val2],
+                    );
+                    if matches!(op, Op::LogicAnd) {
+                        builder.ins().band(x_nz, y_nz)
+                    } else {
+                        builder.ins().bor(x_nz, y_nz)
+                    }
+                }
+                _ => unreachable!(),
+            };
+
+            // 4-state for comparisons: if any mask is nonzero, result is X
+            let mask_xz = wide_any_xz(context, builder, x_mask_xz, y_mask_xz, x_width, y_width);
+            if let Some(is_xz) = mask_xz {
+                let one = builder.ins().iconst(I64, 1);
+                let payload = builder.ins().select(is_xz, context.zero, payload);
+                let mask_xz = builder.ins().select(is_xz, one, context.zero);
+                return Some((payload, Some(mask_xz)));
+            }
+            return Some((payload, None));
+        }
+
+        // Non-comparison binary op with wide result
+        let result_nb = calc_native_bytes(width);
+        let nb_val = builder.ins().iconst(I32, op_nb as i64);
+
+        let payload = match op {
+            Op::Add => {
+                emit_wide_binary_op(context, builder, wide_fn_addrs::add(), x_ptr, y_ptr, op_nb)
+            }
+            Op::Sub => {
+                emit_wide_binary_op(context, builder, wide_fn_addrs::sub(), x_ptr, y_ptr, op_nb)
+            }
+            Op::Mul => {
+                emit_wide_binary_op(context, builder, wide_fn_addrs::mul(), x_ptr, y_ptr, op_nb)
+            }
+            Op::BitAnd => {
+                emit_wide_binary_op(context, builder, wide_fn_addrs::band(), x_ptr, y_ptr, op_nb)
+            }
+            Op::BitOr => {
+                emit_wide_binary_op(context, builder, wide_fn_addrs::bor(), x_ptr, y_ptr, op_nb)
+            }
+            Op::BitXor => {
+                emit_wide_binary_op(context, builder, wide_fn_addrs::bxor(), x_ptr, y_ptr, op_nb)
+            }
+            Op::BitXnor => emit_wide_binary_op(
+                context,
+                builder,
+                wide_fn_addrs::bxor_not(),
+                x_ptr,
+                y_ptr,
+                op_nb,
+            ),
+            Op::LogicShiftL | Op::ArithShiftL => {
+                // Shift amount: extract from y_ptr as u64
+                let amount = builder.ins().load(I64, MemFlags::trusted(), y_ptr, 0);
+                let dst = alloc_wide_slot(builder, op_nb);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    wide_fn_addrs::shl(),
+                    &[dst, x_ptr, amount, nb_val],
+                );
+                dst
+            }
+            Op::LogicShiftR => {
+                let amount = builder.ins().load(I64, MemFlags::trusted(), y_ptr, 0);
+                let dst = alloc_wide_slot(builder, op_nb);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    wide_fn_addrs::lshr(),
+                    &[dst, x_ptr, amount, nb_val],
+                );
+                dst
+            }
+            Op::ArithShiftR => {
+                let amount = builder.ins().load(I64, MemFlags::trusted(), y_ptr, 0);
+                let dst = alloc_wide_slot(builder, op_nb);
+                let packed = wide_ops::pack_nb_width(op_nb, x_width);
+                let packed_val = builder.ins().iconst(I32, packed as i64);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    wide_fn_addrs::ashr(),
+                    &[dst, x_ptr, amount, packed_val],
+                );
+                dst
+            }
+            Op::Pow => {
+                // Binary exponentiation via helper calls
+                // result = 1; while exp > 0 { if exp & 1: result *= base; base *= base; exp >>= 1; }
+                // For simplicity, fall back to interpreter for wide Pow
+                return None;
+            }
+            _ => return None,
+        };
+
+        // Apply width mask
+        if result_nb == op_nb {
+            emit_wide_apply_mask(context, builder, payload, op_nb, width);
+        }
+
+        // 4-state handling for arithmetic/bitwise ops
+        let mask_xz = self.build_wide_4state_binary_mask(
+            context,
+            builder,
+            op,
+            &WideOperandPair {
+                x_mask_xz,
+                y_mask_xz,
+                x_ptr,
+                y_ptr,
+                x_width,
+                y_width,
+                width,
+                op_nb,
+            },
+        );
+
+        Some((payload, mask_xz))
+    }
+
+    /// Build 4-state mask_xz for wide binary ops.
+    fn build_wide_4state_binary_mask(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        op: &Op,
+        operands: &WideOperandPair,
+    ) -> Option<CraneliftValue> {
+        let WideOperandPair {
+            x_mask_xz,
+            y_mask_xz,
+            x_ptr,
+            y_ptr,
+            x_width,
+            y_width,
+            width,
+            op_nb,
+        } = *operands;
+        if !context.use_4state {
+            return None;
+        }
+        let x_mask_ptr = x_mask_xz.map(|m| {
+            if is_wide_ptr(x_width) {
+                m
+            } else {
+                ensure_wide_ptr_val(builder, m, x_width, op_nb)
+            }
+        });
+        let y_mask_ptr = y_mask_xz.map(|m| {
+            if is_wide_ptr(y_width) {
+                m
+            } else {
+                ensure_wide_ptr_val(builder, m, y_width, op_nb)
+            }
+        });
+
+        match op {
+            Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                // For bitwise ops with 4-state, compute mask using helper calls
+                let (x_m, y_m) = match (x_mask_ptr, y_mask_ptr) {
+                    (Some(x), Some(y)) => (x, y),
+                    (Some(x), None) => (x, alloc_wide_zero(builder, op_nb)),
+                    (None, Some(y)) => (alloc_wide_zero(builder, op_nb), y),
+                    (None, None) => return None,
+                };
+
+                let result_mask = match op {
+                    Op::BitAnd => {
+                        // mask = (x_m & y_m) | (x_m & ~y_m & y_p) | (y_m & ~x_m & x_p)
+                        let t1 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            x_m,
+                            y_m,
+                            op_nb,
+                        );
+                        let t2 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band_not(),
+                            x_m,
+                            y_m,
+                            op_nb,
+                        );
+                        let t3 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            t2,
+                            y_ptr,
+                            op_nb,
+                        );
+                        let t4 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band_not(),
+                            y_m,
+                            x_m,
+                            op_nb,
+                        );
+                        let t5 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            t4,
+                            x_ptr,
+                            op_nb,
+                        );
+                        let t6 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::bor(),
+                            t1,
+                            t3,
+                            op_nb,
+                        );
+                        emit_wide_binary_op(context, builder, wide_fn_addrs::bor(), t6, t5, op_nb)
+                    }
+                    Op::BitOr => {
+                        // mask = (x_m & y_m) | (x_m & ~y_m & ~y_p) | (y_m & ~x_m & ~x_p)
+                        let t1 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            x_m,
+                            y_m,
+                            op_nb,
+                        );
+                        let ny_m =
+                            emit_wide_unary_op(context, builder, wide_fn_addrs::bnot(), y_m, op_nb);
+                        let ny_p = emit_wide_unary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::bnot(),
+                            y_ptr,
+                            op_nb,
+                        );
+                        let t2 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            x_m,
+                            ny_m,
+                            op_nb,
+                        );
+                        let t3 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            t2,
+                            ny_p,
+                            op_nb,
+                        );
+                        let nx_m =
+                            emit_wide_unary_op(context, builder, wide_fn_addrs::bnot(), x_m, op_nb);
+                        let nx_p = emit_wide_unary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::bnot(),
+                            x_ptr,
+                            op_nb,
+                        );
+                        let t4 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            y_m,
+                            nx_m,
+                            op_nb,
+                        );
+                        let t5 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::band(),
+                            t4,
+                            nx_p,
+                            op_nb,
+                        );
+                        let t6 = emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::bor(),
+                            t1,
+                            t3,
+                            op_nb,
+                        );
+                        emit_wide_binary_op(context, builder, wide_fn_addrs::bor(), t6, t5, op_nb)
+                    }
+                    Op::BitXor | Op::BitXnor => {
+                        // mask = x_m | y_m
+                        emit_wide_binary_op(context, builder, wide_fn_addrs::bor(), x_m, y_m, op_nb)
+                    }
+                    _ => unreachable!(),
+                };
+                Some(result_mask)
+            }
+            Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::LogicShiftL
+            | Op::LogicShiftR
+            | Op::ArithShiftL
+            | Op::ArithShiftR => {
+                // If any operand has X/Z, result mask = all-ones for width
+                let is_xz = wide_any_xz(context, builder, x_mask_xz, y_mask_xz, x_width, y_width)?;
+                let full_mask = emit_wide_fill_ones(context, builder, op_nb, width);
+                let zero = alloc_wide_zero(builder, op_nb);
+                Some(emit_wide_select(builder, is_xz, full_mask, zero, op_nb))
+            }
+            _ => None,
+        }
+    }
+
+    fn build_binary_wide_concat(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let nb = calc_native_bytes(*width);
+        let mut acc = alloc_wide_zero(builder, nb);
+        let mut acc_xz: Option<CraneliftValue> = if context.use_4state {
+            Some(alloc_wide_zero(builder, nb))
+        } else {
+            None
+        };
+
+        let nb_val = builder.ins().iconst(I32, nb as i64);
+
+        for (expr, repeat, elem_width) in elements {
+            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+            let ew = *elem_width;
+
+            // Ensure element is a wide pointer
+            let elem_ptr = if is_wide_ptr(expr.width()) {
+                elem_payload
+            } else {
+                ensure_wide_ptr_val(builder, elem_payload, expr.width(), nb)
+            };
+            let elem_xz_ptr = elem_mask_xz.map(|m| {
+                if is_wide_ptr(expr.width()) {
+                    m
+                } else {
+                    ensure_wide_ptr_val(builder, m, expr.width(), nb)
+                }
+            });
+
+            for _ in 0..*repeat {
+                // acc <<= ew
+                let amount = builder.ins().iconst(I64, ew as i64);
+                let new_acc = alloc_wide_slot(builder, nb);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    wide_fn_addrs::shl(),
+                    &[new_acc, acc, amount, nb_val],
+                );
+                // acc |= elem
+                let result = emit_wide_binary_op(
+                    context,
+                    builder,
+                    wide_fn_addrs::bor(),
+                    new_acc,
+                    elem_ptr,
+                    nb,
+                );
+                acc = result;
+
+                if let Some(acc_xz_val) = acc_xz {
+                    let new_xz = alloc_wide_slot(builder, nb);
+                    call_helper_void(
+                        context,
+                        builder,
+                        HelperSig::BinaryOp,
+                        wide_fn_addrs::shl(),
+                        &[new_xz, acc_xz_val, amount, nb_val],
+                    );
+                    acc_xz = if let Some(elem_xz) = elem_xz_ptr {
+                        Some(emit_wide_binary_op(
+                            context,
+                            builder,
+                            wide_fn_addrs::bor(),
+                            new_xz,
+                            elem_xz,
+                            nb,
+                        ))
+                    } else {
+                        Some(new_xz)
+                    };
+                }
+            }
+        }
+
+        // Apply width mask
+        emit_wide_apply_mask(context, builder, acc, nb, *width);
+        if let Some(xz) = acc_xz {
+            emit_wide_apply_mask(context, builder, xz, nb, *width);
+        }
+
+        Some((acc, acc_xz))
+    }
+
+    fn build_binary_wide_ternary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        let ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            width,
+            ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let nb = calc_native_bytes(*width);
+        let (cond_payload, cond_mask_xz) = cond.build_binary(context, builder)?;
+        let (true_payload, true_mask_xz) = true_expr.build_binary(context, builder)?;
+        let (false_payload, false_mask_xz) = false_expr.build_binary(context, builder)?;
+
+        // Condition is always narrow
+        let cond_wide = cond.width() > 64;
+        let effective_cond = if let Some(mask_xz) = cond_mask_xz {
+            builder.ins().band_not(cond_payload, mask_xz)
+        } else {
+            cond_payload
+        };
+        let cond_nz = icmp_const(builder, IntCC::NotEqual, effective_cond, 0, cond_wide);
+
+        // Ensure both branches are wide pointers
+        let true_ptr = if is_wide_ptr(true_expr.width()) {
+            true_payload
+        } else {
+            ensure_wide_ptr_val(builder, true_payload, true_expr.width(), nb)
+        };
+        let false_ptr = if is_wide_ptr(false_expr.width()) {
+            false_payload
+        } else {
+            ensure_wide_ptr_val(builder, false_payload, false_expr.width(), nb)
+        };
+
+        let payload = emit_wide_select(builder, cond_nz, true_ptr, false_ptr, nb);
+
+        // 4-state
+        let mask_xz = if context.use_4state {
+            let t_xz = true_mask_xz
+                .map(|m| {
+                    if is_wide_ptr(true_expr.width()) {
+                        m
+                    } else {
+                        ensure_wide_ptr_val(builder, m, true_expr.width(), nb)
+                    }
+                })
+                .unwrap_or_else(|| alloc_wide_zero(builder, nb));
+            let f_xz = false_mask_xz
+                .map(|m| {
+                    if is_wide_ptr(false_expr.width()) {
+                        m
+                    } else {
+                        ensure_wide_ptr_val(builder, m, false_expr.width(), nb)
+                    }
+                })
+                .unwrap_or_else(|| alloc_wide_zero(builder, nb));
+            Some(emit_wide_select(builder, cond_nz, t_xz, f_xz, nb))
+        } else {
+            None
+        };
+
+        Some((payload, mask_xz))
+    }
+}
+
+/// Operand info for wide 4-state mask computation.
+struct WideOperandPair {
+    x_mask_xz: Option<CraneliftValue>,
+    y_mask_xz: Option<CraneliftValue>,
+    x_ptr: CraneliftValue,
+    y_ptr: CraneliftValue,
+    x_width: usize,
+    y_width: usize,
+    width: usize,
+    op_nb: usize,
+}
+
+/// Check if either wide operand has nonzero mask_xz. Returns an I8 truth value.
+fn wide_any_xz(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    x_mask_xz: Option<CraneliftValue>,
+    y_mask_xz: Option<CraneliftValue>,
+    x_width: usize,
+    y_width: usize,
+) -> Option<CraneliftValue> {
+    if !context.use_4state {
+        return None;
+    }
+    let x_has_xz = x_mask_xz.map(|m| {
+        if is_wide_ptr(x_width) {
+            emit_wide_is_nonzero(context, builder, m, calc_native_bytes(x_width))
+        } else {
+            let wide = x_width > 64;
+            icmp_const(builder, IntCC::NotEqual, m, 0, wide)
+        }
+    });
+    let y_has_xz = y_mask_xz.map(|m| {
+        if is_wide_ptr(y_width) {
+            emit_wide_is_nonzero(context, builder, m, calc_native_bytes(y_width))
+        } else {
+            let wide = y_width > 64;
+            icmp_const(builder, IntCC::NotEqual, m, 0, wide)
+        }
+    });
+
+    match (x_has_xz, y_has_xz) {
+        (Some(x), Some(y)) => Some(builder.ins().bor(x, y)),
+        (Some(x), None) => Some(x),
+        (None, Some(y)) => Some(y),
+        (None, None) => None,
     }
 }
 

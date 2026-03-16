@@ -794,7 +794,7 @@ impl ProtoAssignStatement {
         if !self.expr.can_build_binary() {
             return false;
         }
-        self.dst_width <= 128
+        true
     }
 
     /// # Safety
@@ -834,6 +834,11 @@ impl ProtoAssignStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        // Wide path: >128-bit destination
+        if self.dst_width > 128 {
+            return self.build_binary_wide(context, builder);
+        }
+
         let known_bits = self.expr.effective_bits();
         let wide = self.dst_width > 64;
 
@@ -1095,6 +1100,74 @@ impl ProtoAssignStatement {
 
             // Forward value to load cache (always, even when store is eliminated)
             context.load_cache.insert(cache_key, (payload, mask_xz));
+        }
+
+        Some(())
+    }
+
+    /// Wide (>128-bit) store: copy from expression pointer to destination memory.
+    fn build_binary_wide(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<()> {
+        use crate::ir::expression::{emit_wide_apply_mask, is_wide_ptr};
+
+        // Select on wide destination: fall back to interpreter
+        if self.select.is_some() || self.rhs_select.is_some() {
+            return None;
+        }
+
+        let expr_width = self.expr.width();
+        let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
+        let nb = calc_native_bytes(self.dst_width);
+        let n_words = nb / 8;
+        let flags = MemFlags::trusted();
+
+        let base_addr = if self.dst_is_ff {
+            context.ff_values
+        } else {
+            context.comb_values
+        };
+        let dst_offset = self.dst_offset as i32;
+
+        // Source is a wide pointer (for >128-bit expressions)
+        // Use expr_width captured before build_binary to determine representation.
+        // build_binary returns a pointer for width > 128, register otherwise.
+        let src_ptr = if is_wide_ptr(expr_width) {
+            payload
+        } else {
+            // Expression was narrow but dest is wide — store into temp slot
+            use crate::ir::expression::ensure_wide_ptr_val;
+            ensure_wide_ptr_val(builder, payload, expr_width, nb)
+        };
+
+        // Apply width mask to the source to truncate extra bits
+        emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
+
+        // Copy word by word from source to destination
+        for i in 0..n_words {
+            let off = (i * 8) as i32;
+            let val = builder.ins().load(I64, flags, src_ptr, off);
+            builder.ins().store(flags, val, base_addr, dst_offset + off);
+        }
+
+        // 4-state mask
+        if let Some(mask_xz) = mask_xz {
+            let mask_ptr = if is_wide_ptr(self.expr.width()) {
+                mask_xz
+            } else {
+                use crate::ir::expression::ensure_wide_ptr_val;
+                ensure_wide_ptr_val(builder, mask_xz, self.expr.width(), nb)
+            };
+            emit_wide_apply_mask(context, builder, mask_ptr, nb, self.dst_width);
+            for i in 0..n_words {
+                let off = (i * 8) as i32;
+                let val = builder.ins().load(I64, flags, mask_ptr, off);
+                builder
+                    .ins()
+                    .store(flags, val, base_addr, dst_offset + nb as i32 + off);
+            }
         }
 
         Some(())

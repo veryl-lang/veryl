@@ -1,0 +1,18 @@
+module Top (
+    clk : input  clock     ,
+    rst : input  reset     ,
+    q   : output logic<256>,
+) {
+    // 256-bit xorshift PRNG
+    // Each cycle: 3 XOR + 3 shift operations on 256-bit values
+    always_ff {
+        if_reset {
+            q = 1;
+        } else {
+            var t: logic<256>;
+            t = q ^ (q << 13);
+            t = t ^ (t >> 7);
+            q = t ^ (t << 17);
+        }
+    }
+}

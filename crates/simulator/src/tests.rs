@@ -341,6 +341,235 @@ fn wide_bit_ops_256() {
 }
 
 #[test]
+fn wide_256_arithmetic() {
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        b: input  logic<256>,
+        sum: output logic<256>,
+        diff: output logic<256>,
+        prod: output logic<256>,
+    ) {
+        assign sum = a + b;
+        assign diff = a - b;
+        assign prod = a * b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let a = Value::new(100, 256, false);
+        let b = Value::new(42, 256, false);
+
+        sim.set("a", a);
+        sim.set("b", b);
+        sim.step(&Event::Clock(VarId::default()));
+
+        assert_eq!(sim.get("sum").unwrap(), Value::new(142, 256, false));
+        assert_eq!(sim.get("diff").unwrap(), Value::new(58, 256, false));
+        assert_eq!(sim.get("prod").unwrap(), Value::new(4200, 256, false));
+    }
+}
+
+#[test]
+fn wide_256_comparison() {
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        b: input  logic<256>,
+        eq: output logic,
+        ne: output logic,
+        gt: output logic,
+        lt: output logic,
+    ) {
+        assign eq = a == b;
+        assign ne = a != b;
+        assign gt = a >: b;
+        assign lt = a <: b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let a = Value::new(100, 256, false);
+        let b = Value::new(42, 256, false);
+
+        sim.set("a", a);
+        sim.set("b", b);
+        sim.step(&Event::Clock(VarId::default()));
+
+        assert_eq!(
+            sim.get("eq").unwrap(),
+            Value::new(0, 1, false),
+            "config: {:?}",
+            config
+        );
+        assert_eq!(
+            sim.get("ne").unwrap(),
+            Value::new(1, 1, false),
+            "config: {:?}",
+            config
+        );
+        assert_eq!(
+            sim.get("gt").unwrap(),
+            Value::new(1, 1, false),
+            "config: {:?}",
+            config
+        );
+        assert_eq!(
+            sim.get("lt").unwrap(),
+            Value::new(0, 1, false),
+            "config: {:?}",
+            config
+        );
+    }
+}
+
+#[test]
+fn wide_256_shift() {
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        s: input  logic<8>,
+        left: output logic<256>,
+        right: output logic<256>,
+    ) {
+        assign left  = a << s;
+        assign right = a >> s;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let a = Value::new(0xff, 256, false);
+        let s = Value::new(4, 8, false);
+
+        sim.set("a", a);
+        sim.set("s", s);
+        sim.step(&Event::Clock(VarId::default()));
+
+        assert_eq!(
+            sim.get("left").unwrap(),
+            Value::new(0xff0, 256, false),
+            "config: {:?}",
+            config
+        );
+        assert_eq!(
+            sim.get("right").unwrap(),
+            Value::new(0xf, 256, false),
+            "config: {:?}",
+            config
+        );
+    }
+}
+
+#[test]
+fn wide_256_ternary() {
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        a: input  logic<256>,
+        b: input  logic<256>,
+        c: output logic<256>,
+    ) {
+        assign c = if sel ?  a : b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let a = Value::new(100, 256, false);
+        let b = Value::new(200, 256, false);
+
+        sim.set("sel", Value::new(1, 1, false));
+        sim.set("a", a.clone());
+        sim.set("b", b.clone());
+        sim.step(&Event::Clock(VarId::default()));
+
+        assert_eq!(sim.get("c").unwrap(), a, "config: {:?}", config);
+
+        sim.set("sel", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::default()));
+
+        assert_eq!(sim.get("c").unwrap(), b, "config: {:?}", config);
+    }
+}
+
+/// Regression: 256-bit values in for-generate with narrow constant assignment.
+/// Exercises two fixed bugs:
+///   1. Value width mismatch: BigUint(width=256) inside ProtoExpression(width=32)
+///      caused build_binary to return a pointer while the caller expected a register.
+///   2. Unaligned memory access: 32-bit variables before 256-bit elements
+///      placed them at non-8-byte-aligned offsets, crashing wide_ops helpers.
+#[test]
+fn wide_256_array_for_generate() {
+    // Use separate output ports (not an array) so sim.get() can access them.
+    // The for-generate still creates the alignment pattern that triggers bug #2.
+    let code = r#"
+    module Top (
+        clk : input  clock    ,
+        rst : input  reset    ,
+        a   : output logic<256>,
+        b   : output logic<256>,
+    ) {
+        // a small 32-bit var before wide vars to create unaligned layout
+        var pad: logic<32>;
+        assign pad = 0;
+
+        always_ff {
+            if_reset {
+                a = 1;
+                b = 2;
+            } else {
+                a += 1;
+                b += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        sim.step(&clk);
+        sim.step(&clk);
+        sim.step(&clk);
+
+        // After reset: a=1, b=2. After 3 clocks: a=4, b=5
+        assert_eq!(
+            sim.get("a").unwrap(),
+            Value::new(4, 256, false),
+            "config: {:?}",
+            config
+        );
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(5, 256, false),
+            "config: {:?}",
+            config
+        );
+    }
+}
+
+#[test]
 fn wide_bit_ops() {
     // Test bitwise operations on 96-bit variables
     let code = r#"

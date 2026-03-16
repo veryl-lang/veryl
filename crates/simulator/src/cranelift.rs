@@ -2,16 +2,29 @@ use crate::ir::Context as ConvContext;
 use crate::ir::ProtoStatement;
 use crate::{HashMap, HashSet};
 use cranelift::codegen::control::ControlPlane;
-use cranelift::codegen::ir::{AbiParam, Function, Signature, UserFuncName};
+use cranelift::codegen::ir::{AbiParam, Function, SigRef, Signature, StackSlotData, UserFuncName};
 use cranelift::codegen::isa::{self, CallConv};
 use cranelift::codegen::{self, settings};
 use cranelift::frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift::prelude::types::I64;
+use cranelift::prelude::types::{I32, I64};
 use cranelift::prelude::*;
 use indent::indent_all_by;
 use target_lexicon::Triple;
 
 pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8);
+
+/// Signature kinds for helper function calls via call_indirect.
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
+pub enum HelperSig {
+    /// (I64, I64, I64, I32) -> void  [binary ops, shifts: dst, a, b/amount, nb]
+    BinaryOp,
+    /// (I64, I64, I32) -> void  [unary ops, copy: dst, a, nb]
+    UnaryOp,
+    /// (I64, I64, I32) -> I64  [comparisons: a, b, nb -> result]
+    Compare,
+    /// (I64, I32) -> I64  [reductions: a, nb -> result]
+    Reduce,
+}
 
 pub struct Context {
     pub use_4state: bool,
@@ -25,6 +38,88 @@ pub struct Context {
     pub store_elim_offsets: HashSet<(bool, i32)>,
     /// Whether store elimination is active (disabled inside If blocks).
     pub store_elim_enabled: bool,
+    /// Helper function signatures (cached per arity/return type).
+    pub helper_sigs: HashMap<HelperSig, SigRef>,
+    /// Calling convention for helper functions.
+    pub call_conv: CallConv,
+}
+
+/// Get or create a SigRef for the given helper signature kind.
+pub fn get_or_create_sig(
+    context: &mut Context,
+    builder: &mut FunctionBuilder,
+    kind: HelperSig,
+) -> SigRef {
+    if let Some(&sig) = context.helper_sigs.get(&kind) {
+        return sig;
+    }
+
+    let mut sig = Signature::new(context.call_conv);
+    match kind {
+        HelperSig::BinaryOp => {
+            sig.params.push(AbiParam::new(I64)); // dst
+            sig.params.push(AbiParam::new(I64)); // a
+            sig.params.push(AbiParam::new(I64)); // b / amount
+            sig.params.push(AbiParam::new(I32)); // nb
+        }
+        HelperSig::UnaryOp => {
+            sig.params.push(AbiParam::new(I64)); // dst
+            sig.params.push(AbiParam::new(I64)); // a
+            sig.params.push(AbiParam::new(I32)); // nb
+        }
+        HelperSig::Compare => {
+            sig.params.push(AbiParam::new(I64)); // a
+            sig.params.push(AbiParam::new(I64)); // b
+            sig.params.push(AbiParam::new(I32)); // nb
+            sig.returns.push(AbiParam::new(I64));
+        }
+        HelperSig::Reduce => {
+            sig.params.push(AbiParam::new(I64)); // a
+            sig.params.push(AbiParam::new(I32)); // nb
+            sig.returns.push(AbiParam::new(I64));
+        }
+    }
+
+    let sig_ref = builder.import_signature(sig);
+    context.helper_sigs.insert(kind, sig_ref);
+    sig_ref
+}
+
+/// Call a helper function that returns void.
+pub fn call_helper_void(
+    context: &mut Context,
+    builder: &mut FunctionBuilder,
+    kind: HelperSig,
+    func_addr: usize,
+    args: &[Value],
+) {
+    let sig_ref = get_or_create_sig(context, builder, kind);
+    let ptr = builder.ins().iconst(I64, func_addr as i64);
+    builder.ins().call_indirect(sig_ref, ptr, args);
+}
+
+/// Call a helper function that returns an I64 value.
+pub fn call_helper_ret(
+    context: &mut Context,
+    builder: &mut FunctionBuilder,
+    kind: HelperSig,
+    func_addr: usize,
+    args: &[Value],
+) -> Value {
+    let sig_ref = get_or_create_sig(context, builder, kind);
+    let ptr = builder.ins().iconst(I64, func_addr as i64);
+    let call = builder.ins().call_indirect(sig_ref, ptr, args);
+    builder.inst_results(call)[0]
+}
+
+/// Allocate a stack slot of `nb` bytes and return its address as an I64 value.
+pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
+        nb as u32,
+        8,
+    ));
+    builder.ins().stack_addr(I64, slot, 0)
 }
 
 /// Build a JIT function with store elimination for internal comb variables.
@@ -91,6 +186,8 @@ fn build_binary_inner(
         load_cache: HashMap::default(),
         store_elim_offsets: store_elim,
         store_elim_enabled: true,
+        helper_sigs: HashMap::default(),
+        call_conv,
     };
 
     let len = proto.len();
