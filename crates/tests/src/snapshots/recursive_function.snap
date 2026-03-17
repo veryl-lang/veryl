@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unresolved_expression
+
+  × unresolved expression
+   ╭─[../../testcases/error/recursive_function.veryl:6:16]
+ 5 │     function recurse(x: input logic<32>) -> logic<32> {
+ 6 │         return recurse(x);
+   ·                ───┬───
+   ·                   ╰── could not resolve this expression
+ 7 │     }
+   ╰────

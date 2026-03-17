@@ -8,6 +8,7 @@ use veryl_analyzer::symbol_table;
 use veryl_metadata::{FilelistType, Metadata, SimType};
 use veryl_parser::resource_table;
 use veryl_simulator::ir::{Config, build_ir};
+use veryl_simulator::simulator_error::SimulatorError;
 use veryl_simulator::testbench::{TestResult, run_native_testbench};
 
 pub struct CmdTest {
@@ -114,7 +115,7 @@ fn run_native_test(
     test_name: &str,
     top: &Option<resource_table::StrId>,
     wave: bool,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), SimulatorError> {
     let top_name = if let Some(top_str) = top {
         resource_table::get_str_value(*top_str).unwrap_or_default()
     } else {
@@ -122,15 +123,18 @@ fn run_native_test(
     };
 
     let config = Config::default();
-    let top_str_id = resource_table::get_str_id(top_name.clone())
-        .ok_or_else(|| format!("Unknown module name: {top_name}"))?;
-    let sim_ir = build_ir(ir.clone(), top_str_id, &config)
-        .ok_or_else(|| format!("Failed to build IR for {top_name}"))?;
+    let top_str_id = resource_table::get_str_id(top_name.clone()).ok_or_else(|| {
+        SimulatorError::TopModuleNotFound {
+            module_name: top_name.clone(),
+        }
+    })?;
+    let sim_ir = build_ir(ir.clone(), top_str_id, &config)?;
 
     let dump: Option<Box<dyn std::io::Write>> = if wave {
         let path = format!("{}.vcd", test_name);
-        let file = std::fs::File::create(&path)
-            .map_err(|e| format!("Failed to create VCD file {path}: {e}"))?;
+        let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
+            message: format!("failed to create VCD file {path}: {e}"),
+        })?;
         info!("  Dumping waveform to {}", path);
         Some(Box::new(file))
     } else {
@@ -139,6 +143,6 @@ fn run_native_test(
 
     match run_native_testbench(sim_ir, dump)? {
         TestResult::Pass => Ok(()),
-        TestResult::Fail(msg) => Err(msg),
+        TestResult::Fail(msg) => Err(SimulatorError::TestFailed { message: msg }),
     }
 }

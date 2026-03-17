@@ -6,7 +6,9 @@ use crate::ir::expression::ExpressionContext;
 use crate::ir::statement::{CompiledBlockStatement, ProtoAssignStatement};
 use crate::ir::variable::{ModuleVariableMeta, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
+use crate::simulator_error::SimulatorError;
 use veryl_analyzer::ir as air;
+use veryl_parser::token_range::TokenRange;
 
 /// Collect variable offsets from statements, filtering out internal variables
 /// (those that appear in both inputs and outputs) to avoid dependency cycles
@@ -42,7 +44,7 @@ pub struct ProtoDeclaration {
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
-    fn conv(context: &mut Context, src: &air::Declaration) -> Option<Self> {
+    fn conv(context: &mut Context, src: &air::Declaration) -> Result<Self, SimulatorError> {
         match src {
             air::Declaration::Comb(x) => {
                 let mut comb_statements = vec![];
@@ -50,7 +52,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
                     comb_statements.extend(stmts);
                 }
-                Some(ProtoDeclaration {
+                Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
                     comb_statements,
                     child_modules: vec![],
@@ -70,14 +72,14 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 if let Some(reset) = &x.reset {
                     let reset_event = Event::Reset(reset.id);
                     let head = statements.remove(0);
-                    let (true_side, false_side) = head.split_if_reset()?;
+                    let (true_side, false_side) = head.split_if_reset().unwrap();
                     event_statements.insert(reset_event, true_side);
                     event_statements.insert(clock_event, false_side);
                 } else {
                     event_statements.insert(clock_event, statements);
                 }
 
-                Some(ProtoDeclaration {
+                Ok(ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
                     child_modules: vec![],
@@ -93,7 +95,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 }
                 let mut event_statements = HashMap::default();
                 event_statements.insert(Event::Initial, initial_statements);
-                Some(ProtoDeclaration {
+                Ok(ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
                     child_modules: vec![],
@@ -108,22 +110,27 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 }
                 let mut event_statements = HashMap::default();
                 event_statements.insert(Event::Final, final_statements);
-                Some(ProtoDeclaration {
+                Ok(ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
                     child_modules: vec![],
                     full_internal_comb: None,
                 })
             }
-            _ => None,
+            air::Declaration::Null => Ok(ProtoDeclaration {
+                event_statements: HashMap::default(),
+                comb_statements: vec![],
+                child_modules: vec![],
+                full_internal_comb: None,
+            }),
         }
     }
 }
 
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
-    fn conv(context: &mut Context, src: &air::InstDeclaration) -> Option<Self> {
+    fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = &src.component else {
-            return None;
+            panic!("InstDeclaration for non-Module component");
         };
 
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
@@ -141,7 +148,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.config.use_4state,
             ff_start,
             comb_start,
-        )?;
+        )
+        .unwrap();
 
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;
@@ -158,8 +166,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         for decl in &child_module.declarations {
             let proto_decl: ProtoDeclaration = match Conv::conv(context, decl) {
-                Some(d) => d,
-                None => continue,
+                Ok(d) => d,
+                Err(_) => continue,
             };
 
             for (event, mut stmts) in proto_decl.event_statements {
@@ -306,8 +314,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let mut merged_funcs = HashMap::default();
 
                 if comb_jittable {
-                    // Sort comb for inlining optimization
-                    let sorted_comb = super::module::analyze_dependency(original_comb.clone());
+                    // Sort comb for inlining optimization.
+                    // Combinational loops in child modules will be caught by the
+                    // parent-level analyze_dependency call, so we can safely skip
+                    // the merge optimization here.
+                    let sorted_comb = super::module::analyze_dependency(original_comb.clone()).ok();
 
                     // Compute external reads: output port comb offsets that are
                     // read by port connections after the merged function returns
@@ -426,7 +437,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
 
             for child_var_id in &input.id {
-                let child_meta = child_variable_meta.get(child_var_id)?;
+                let child_meta = child_variable_meta.get(child_var_id).unwrap();
                 let element = &child_meta.elements[0];
                 all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                     dst_offset: element.current_offset,
@@ -436,6 +447,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     rhs_select: None,
                     expr: proto_expr.clone(),
                     dst_ff_current_offset: 0, // not FF
+                    token: TokenRange::default(),
                 }));
             }
         }
@@ -443,7 +455,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // Output ports: child port var → parent dst
         for output in &src.outputs {
             for (child_var_id, parent_dst) in output.id.iter().zip(output.dst.iter()) {
-                let child_meta = child_variable_meta.get(child_var_id)?;
+                let child_meta = child_variable_meta.get(child_var_id).unwrap();
                 let child_element = &child_meta.elements[0];
 
                 let child_expr = ProtoExpression::Variable {
@@ -458,11 +470,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 };
 
                 let parent_scope = context.scope();
-                let parent_meta = parent_scope.variable_meta.get(&parent_dst.id)?;
+                let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
                 let parent_index = parent_dst
                     .index
-                    .eval_value(&mut parent_scope.analyzer_context)?;
-                let parent_index = parent_meta.r#type.array.calc_index(&parent_index)?;
+                    .eval_value(&mut parent_scope.analyzer_context)
+                    .unwrap();
+                let parent_index = parent_meta.r#type.array.calc_index(&parent_index).unwrap();
                 let parent_element = &parent_meta.elements[parent_index];
 
                 let (dst_offset, dst_is_ff) = if parent_element.is_ff {
@@ -479,6 +492,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     rhs_select: None,
                     expr: child_expr,
                     dst_ff_current_offset: parent_element.current_offset,
+                    token: TokenRange::default(),
                 }));
             }
         }
@@ -526,7 +540,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             children: all_child_modules,
         };
 
-        Some(ProtoDeclaration {
+        Ok(ProtoDeclaration {
             event_statements: remapped_events,
             comb_statements: all_comb_statements,
             child_modules: vec![child_module_meta],

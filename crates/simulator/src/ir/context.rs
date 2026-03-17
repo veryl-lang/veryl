@@ -1,10 +1,12 @@
 use crate::HashMap;
+use crate::HashSet;
 use crate::cranelift::FuncPtr;
 use crate::ir::Config;
 use crate::ir::ProtoStatement;
 use crate::ir::VarId;
 use crate::ir::VariableMeta;
 use crate::ir::event::Event;
+use crate::simulator_error::SimulatorError;
 use memmap2::Mmap;
 use veryl_parser::resource_table::StrId;
 
@@ -44,6 +46,7 @@ pub struct Context {
     pub comb_total_bytes: usize,
     pub pending_statements: Vec<ProtoStatement>,
     pub jit_cache: HashMap<StrId, JitCacheEntry>,
+    pub expanding_functions: HashSet<VarId>,
 }
 
 impl Context {
@@ -53,5 +56,5 @@ impl Context {
 }
 
 pub trait Conv<T>: Sized {
-    fn conv(context: &mut Context, src: T) -> Option<Self>;
+    fn conv(context: &mut Context, src: T) -> Result<Self, SimulatorError>;
 }

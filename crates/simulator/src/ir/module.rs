@@ -10,10 +10,13 @@ use crate::ir::{
     Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement,
     VarId, VarPath,
 };
+use crate::simulator_error::SimulatorError;
 use daggy::Dag;
 use daggy::petgraph::algo;
+use daggy::petgraph::visit::{Bfs, Walker};
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 pub struct Module {
     pub name: StrId,
@@ -308,7 +311,9 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
     ProtoStatements(blocks)
 }
 
-pub(crate) fn analyze_dependency(statements: Vec<ProtoStatement>) -> Option<Vec<ProtoStatement>> {
+pub(crate) fn analyze_dependency(
+    statements: Vec<ProtoStatement>,
+) -> Result<Vec<ProtoStatement>, SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
         Var(bool, isize), // (is_ff, offset)
@@ -322,6 +327,26 @@ pub(crate) fn analyze_dependency(statements: Vec<ProtoStatement>) -> Option<Vec<
 
     let mut dag = Dag::<Node, ()>::new();
     let mut dag_nodes: HashMap<Node, _> = HashMap::default();
+
+    // Closure to collect cycle participant tokens via BFS from a node
+    let collect_cycle_tokens = |dag: &Dag<Node, ()>,
+                                table: &HashMap<usize, ProtoStatement>,
+                                from: daggy::NodeIndex,
+                                trigger_id: usize| {
+        let mut tokens = vec![];
+        let bfs = Bfs::new(dag.graph(), from);
+        for node_idx in bfs.iter(dag.graph()) {
+            if let Node::Statement(id) = dag.graph()[node_idx]
+                && id != trigger_id
+                && let Some(stmt) = table.get(&id)
+                && let Some(token) = stmt.token()
+                && token != TokenRange::default()
+            {
+                tokens.push(token);
+            }
+        }
+        tokens
+    };
 
     for (id, x) in &table {
         let mut inputs = vec![];
@@ -337,7 +362,14 @@ pub(crate) fn analyze_dependency(statements: Vec<ProtoStatement>) -> Option<Vec<
             let var = *dag_nodes
                 .entry(var_node)
                 .or_insert_with(|| dag.add_node(var_node));
-            dag.add_edge(var, stmt, ()).ok()?;
+            if dag.add_edge(var, stmt, ()).is_err() {
+                let participant_tokens = collect_cycle_tokens(&dag, &table, stmt, *id);
+                let trigger_token = table[id].token().unwrap_or_default();
+                return Err(SimulatorError::combinational_loop(
+                    &trigger_token,
+                    &participant_tokens,
+                ));
+            }
         }
 
         for var_key in outputs {
@@ -345,11 +377,18 @@ pub(crate) fn analyze_dependency(statements: Vec<ProtoStatement>) -> Option<Vec<
             let var = *dag_nodes
                 .entry(var_node)
                 .or_insert_with(|| dag.add_node(var_node));
-            dag.add_edge(stmt, var, ()).ok()?;
+            if dag.add_edge(stmt, var, ()).is_err() {
+                let participant_tokens = collect_cycle_tokens(&dag, &table, var, *id);
+                let trigger_token = table[id].token().unwrap_or_default();
+                return Err(SimulatorError::combinational_loop(
+                    &trigger_token,
+                    &participant_tokens,
+                ));
+            }
         }
     }
 
-    let nodes = algo::toposort(dag.graph(), None).ok()?;
+    let nodes = algo::toposort(dag.graph(), None).unwrap();
 
     let mut ret = vec![];
     for i in nodes {
@@ -358,7 +397,7 @@ pub(crate) fn analyze_dependency(statements: Vec<ProtoStatement>) -> Option<Vec<
         }
     }
 
-    Some(ret)
+    Ok(ret)
 }
 
 /// Sort event (FF) statements and determine which FF variables need
@@ -654,7 +693,7 @@ fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
 }
 
 impl Conv<&air::Module> for ProtoModule {
-    fn conv(context: &mut Context, src: &air::Module) -> Option<Self> {
+    fn conv(context: &mut Context, src: &air::Module) -> Result<Self, SimulatorError> {
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
@@ -671,7 +710,8 @@ impl Conv<&air::Module> for ProtoModule {
             context.config.use_4state,
             ff_start,
             comb_start,
-        )?;
+        )
+        .unwrap();
 
         context.ff_total_bytes += ff_bytes;
         context.comb_total_bytes += comb_bytes;
@@ -690,10 +730,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut full_comb_extra: Vec<ProtoStatement> = vec![];
 
         for decl in &src.declarations {
-            let proto_decl: ProtoDeclaration = match Conv::conv(context, decl) {
-                Some(d) => d,
-                None => continue,
-            };
+            let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
             for (event, mut stmts) in proto_decl.event_statements {
                 all_event_statements
@@ -718,8 +755,12 @@ impl Conv<&air::Module> for ProtoModule {
             None
         };
 
-        // TODO report combinational loop
-        let sorted_comb = analyze_dependency(all_comb_statements)?;
+        let sorted_comb = match analyze_dependency(all_comb_statements) {
+            Ok(sorted) => sorted,
+            Err(err) => {
+                return Err(err);
+            }
+        };
 
         // Collect comb offsets from named variables (ports, user-visible state).
         // These must NOT be eliminated by DFG optimization since they are
@@ -743,7 +784,12 @@ impl Conv<&air::Module> for ProtoModule {
         let full_comb_statements = if has_merged {
             let mut full = full_comb_extra;
             full.extend(lite_comb_copy.unwrap());
-            let full_sorted = analyze_dependency(full)?;
+            let full_sorted = match analyze_dependency(full) {
+                Ok(sorted) => sorted,
+                Err(err) => {
+                    return Err(err);
+                }
+            };
             let full_sorted = super::optimize::optimize_comb(
                 full_sorted,
                 &all_event_statements,
@@ -782,7 +828,7 @@ impl Conv<&air::Module> for ProtoModule {
             children: all_child_modules,
         };
 
-        Some(ProtoModule {
+        Ok(ProtoModule {
             name: src.name,
             ports: src.ports.clone(),
             ff_bytes: context.ff_total_bytes,

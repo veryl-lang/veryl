@@ -1,0 +1,21 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+combinational_loop
+
+  × combinational loop detected
+   ╭─[../../testcases/error/combinational_loop.veryl:7:5]
+ 6 │     assign b = c + a;
+ 7 │     assign c = b + 1;
+   ·     ────────┬────────
+   ·             ╰── Error location
+ 8 │ }
+   ╰────
+   ╭─[../../testcases/error/combinational_loop.veryl:6:5]
+ 5 │ ) {
+ 6 │     assign b = c + a;
+   ·     ────────┬────────
+   ·             ╰── involved in loop
+ 7 │     assign c = b + 1;
+   ╰────

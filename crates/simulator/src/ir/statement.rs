@@ -10,6 +10,7 @@ use crate::ir::variable::{
     native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
+use crate::simulator_error::SimulatorError;
 use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::conv::utils::eval_array_literal;
@@ -18,6 +19,7 @@ use veryl_analyzer::ir::FunctionCall;
 use veryl_analyzer::ir::{SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant};
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 /// A single block within a ProtoStatements list: either interpreted or JIT-compiled.
 pub enum ProtoStatementBlock {
@@ -518,6 +520,13 @@ impl ProtoStatement {
         }
     }
 
+    pub fn token(&self) -> Option<TokenRange> {
+        match self {
+            ProtoStatement::Assign(x) => Some(x.token),
+            _ => None,
+        }
+    }
+
     /// Split a ProtoStatement::If with no condition (i.e. if_reset) into its two sides.
     pub fn split_if_reset(self) -> Option<(Vec<ProtoStatement>, Vec<ProtoStatement>)> {
         if let ProtoStatement::If(x) = self {
@@ -867,6 +876,8 @@ pub struct ProtoAssignStatement {
     /// Canonical (current) byte offset for FF variables.
     /// Used by sort_ff_event to identify which FF slots are written.
     pub dst_ff_current_offset: isize,
+    /// Source location from the original assign statement.
+    pub token: TokenRange,
 }
 
 impl ProtoAssignStatement {
@@ -1431,13 +1442,13 @@ fn extract_display_args(
             format_str = extract_string_value(&first.0)?;
         } else {
             // Not a string literal; treat as expression argument
-            let proto: ProtoExpression = Conv::conv(context, &first.0)?;
+            let proto: ProtoExpression = Conv::conv(context, &first.0).ok()?;
             exprs.push(proto);
         }
     }
 
     for input in iter {
-        let proto: ProtoExpression = Conv::conv(context, &input.0)?;
+        let proto: ProtoExpression = Conv::conv(context, &input.0).ok()?;
         exprs.push(proto);
     }
 
@@ -1466,7 +1477,7 @@ fn extract_string_value(expr: &air::Expression) -> Option<String> {
 }
 
 impl Conv<&air::Statement> for Vec<ProtoStatement> {
-    fn conv(context: &mut ConvContext, src: &air::Statement) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &air::Statement) -> Result<Self, SimulatorError> {
         let mut result = match src {
             air::Statement::Assign(x) => Conv::conv(context, x)?,
             air::Statement::FunctionCall(x) => Conv::conv(context, x.as_ref())?,
@@ -1480,7 +1491,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
             }
             air::Statement::SystemFunctionCall(x) => match &x.kind {
                 SystemFunctionKind::Display(inputs) => {
-                    let (format_str, exprs) = extract_display_args(context, inputs)?;
+                    let (format_str, exprs) = extract_display_args(context, inputs).unwrap();
                     vec![ProtoStatement::SystemFunctionCall(
                         ProtoSystemFunctionCall::Display {
                             format_str,
@@ -1489,12 +1500,12 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     )]
                 }
                 SystemFunctionKind::Readmemh(input, output) => {
-                    let raw = extract_string_value(&input.0)?;
+                    let raw = extract_string_value(&input.0).unwrap();
                     let filename = raw.trim_matches('"').to_string();
                     let dst = &output.0[0];
                     let id = dst.id;
                     let scope = context.scope();
-                    let meta = scope.variable_meta.get(&id)?;
+                    let meta = scope.variable_meta.get(&id).unwrap();
                     let width = meta.width;
                     let elements: Vec<ReadmemhElement> = meta
                         .elements
@@ -1529,7 +1540,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         ProtoSystemFunctionCall::Finish,
                     )]
                 }
-                _ => return None,
+                _ => panic!("unhandled SystemFunctionKind"),
             },
             air::Statement::TbMethodCall(x) => {
                 let method = match &x.method {
@@ -1548,7 +1559,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     method,
                 }]
             }
-            _ => return None,
+            air::Statement::Null => vec![],
         };
 
         // Drain pending statements from function calls within expressions
@@ -1558,16 +1569,16 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
             result = pending;
         }
 
-        Some(result)
+        Ok(result)
     }
 }
 
 impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
-    fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         if matches!(src.expr, air::Expression::ArrayLiteral(..)) {
             let dst = &src.dst[0];
             let scope = context.scope();
-            let meta = scope.variable_meta.get(&dst.id)?;
+            let meta = scope.variable_meta.get(&dst.id).unwrap();
             let dst_type = meta.r#type.clone();
             let mut expr_clone = src.expr.clone();
 
@@ -1577,7 +1588,8 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 Some(&dst_type.width),
                 &mut expr_clone,
             )
-            .ok()??;
+            .unwrap()
+            .unwrap();
 
             let mut result = Vec::new();
             for array_expr in array_exprs {
@@ -1596,18 +1608,18 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
                 result.push(ProtoStatement::Assign(proto));
             }
-            return Some(result);
+            return Ok(result);
         }
 
         if src.dst.len() <= 1 {
             let stmt: ProtoStatement = Conv::conv(context, src)?;
-            return Some(vec![stmt]);
+            return Ok(vec![stmt]);
         }
 
         let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
         let mut result = Vec::new();
-        let mut remaining = src.width?;
+        let mut remaining = src.width.unwrap();
 
         for dst in &src.dst {
             let scope = context.scope();
@@ -1624,7 +1636,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             let dst_elem_width = if let Some((beg, end)) = select {
                 beg - end + 1
             } else {
-                dst.comptime.r#type.total_width()?
+                dst.comptime.r#type.total_width().unwrap()
             };
 
             let rhs_select = Some((remaining - 1, remaining - dst_elem_width));
@@ -1637,7 +1649,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             };
 
             if let Some(idx_vals) = const_index {
-                let index = meta.r#type.array.calc_index(&idx_vals)?;
+                let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                 let element = &meta.elements[index];
                 let dst_is_ff = element.is_ff;
                 let dst_width = meta.width;
@@ -1655,10 +1667,11 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_offset: element.current_offset,
+                    token: src.token,
                 }));
             } else {
                 let array_shape = meta.r#type.array.clone();
-                let dyn_info = meta.dynamic_index_info()?;
+                let dyn_info = meta.dynamic_index_info().unwrap();
                 let num_elements = meta.elements.len();
                 let (base_current, base_next, stride, is_ff) = dyn_info;
                 let dst_base_offset = if is_ff { base_next } else { base_current };
@@ -1681,12 +1694,12 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             }
         }
 
-        Some(result)
+        Ok(result)
     }
 }
 
 impl Conv<&air::AssignStatement> for ProtoStatement {
-    fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         // TODO multiple dst
         let dst = &src.dst[0];
         let id = dst.id;
@@ -1707,7 +1720,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         };
 
         if let Some(idx_vals) = const_index {
-            let index = meta.r#type.array.calc_index(&idx_vals)?;
+            let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
             let element = &meta.elements[index];
             let dst_is_ff = element.is_ff;
             let current_offset = element.current_offset;
@@ -1720,7 +1733,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 
             let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
-            Some(ProtoStatement::Assign(ProtoAssignStatement {
+            Ok(ProtoStatement::Assign(ProtoAssignStatement {
                 dst_offset,
                 dst_is_ff,
                 dst_width,
@@ -1728,11 +1741,12 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 rhs_select: None,
                 expr,
                 dst_ff_current_offset: current_offset,
+                token: src.token,
             }))
         } else {
             // Dynamic index
             let array_shape = meta.r#type.array.clone();
-            let dyn_info = meta.dynamic_index_info()?;
+            let dyn_info = meta.dynamic_index_info().unwrap();
             let num_elements = meta.elements.len();
             let (base_current, base_next, stride, is_ff) = dyn_info;
             // FF assignment writes to next
@@ -1741,7 +1755,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
             let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
-            Some(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+            Ok(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
                 dst_base_offset,
                 dst_stride: stride,
                 dst_is_ff: is_ff,
@@ -1758,7 +1772,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 }
 
 impl Conv<&air::AssignStatement> for ProtoAssignStatement {
-    fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let scope = context.scope();
 
         // TODO multiple dst
@@ -1767,8 +1781,8 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
         let id = dst.id;
         let meta = scope.variable_meta.get(&id).unwrap();
 
-        let index = dst.index.eval_value(&mut scope.analyzer_context)?;
-        let index = meta.r#type.array.calc_index(&index)?;
+        let index = dst.index.eval_value(&mut scope.analyzer_context).unwrap();
+        let index = meta.r#type.array.calc_index(&index).unwrap();
 
         let select = if !dst.select.is_empty() {
             dst.select
@@ -1790,7 +1804,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
 
         let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
-        Some(ProtoAssignStatement {
+        Ok(ProtoAssignStatement {
             dst_offset,
             dst_is_ff,
             dst_width,
@@ -1798,12 +1812,13 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             rhs_select: None,
             expr,
             dst_ff_current_offset: current_offset,
+            token: src.token,
         })
     }
 }
 
 impl Conv<&air::IfStatement> for ProtoIfStatement {
-    fn conv(context: &mut ConvContext, src: &air::IfStatement) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &air::IfStatement) -> Result<Self, SimulatorError> {
         let cond: ProtoExpression = Conv::conv(context, &src.cond)?;
 
         let mut true_side = vec![];
@@ -1818,7 +1833,7 @@ impl Conv<&air::IfStatement> for ProtoIfStatement {
             false_side.extend(stmts);
         }
 
-        Some(ProtoIfStatement {
+        Ok(ProtoIfStatement {
             cond: Some(cond),
             true_side,
             false_side,
@@ -1827,7 +1842,10 @@ impl Conv<&air::IfStatement> for ProtoIfStatement {
 }
 
 impl Conv<&air::IfResetStatement> for ProtoIfStatement {
-    fn conv(context: &mut ConvContext, src: &air::IfResetStatement) -> Option<Self> {
+    fn conv(
+        context: &mut ConvContext,
+        src: &air::IfResetStatement,
+    ) -> Result<Self, SimulatorError> {
         let mut true_side = vec![];
         for x in &src.true_side {
             let stmts: Vec<ProtoStatement> = Conv::conv(context, x)?;
@@ -1840,7 +1858,7 @@ impl Conv<&air::IfResetStatement> for ProtoIfStatement {
             false_side.extend(stmts);
         }
 
-        Some(ProtoIfStatement {
+        Ok(ProtoIfStatement {
             cond: None,
             true_side,
             false_side,
@@ -1849,7 +1867,22 @@ impl Conv<&air::IfResetStatement> for ProtoIfStatement {
 }
 
 impl Conv<&FunctionCall> for Vec<ProtoStatement> {
-    fn conv(context: &mut ConvContext, src: &FunctionCall) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &FunctionCall) -> Result<Self, SimulatorError> {
+        if !context.expanding_functions.insert(src.id) {
+            let name = context
+                .scope()
+                .analyzer_context
+                .functions
+                .get(&src.id)
+                .unwrap()
+                .name
+                .to_string();
+            return Err(SimulatorError::recursive_function(
+                &name,
+                &src.comptime.token,
+            ));
+        }
+
         let mut result = Vec::new();
 
         // Clone to avoid borrow conflict with context
@@ -1857,19 +1890,20 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             .scope()
             .analyzer_context
             .functions
-            .get(&src.id)?
+            .get(&src.id)
+            .unwrap()
             .clone();
         let body = if let Some(ref idx) = src.index {
-            func.get_function(idx)?
+            func.get_function(idx).unwrap()
         } else {
-            func.get_function(&[])?
+            func.get_function(&[]).unwrap()
         };
 
         for (var_path, expr) in &src.inputs {
-            let arg_var_id = body.arg_map.get(var_path)?;
+            let arg_var_id = body.arg_map.get(var_path).unwrap();
             let proto_expr: ProtoExpression = Conv::conv(context, expr)?;
             let scope = context.scope();
-            let meta = scope.variable_meta.get(arg_var_id)?;
+            let meta = scope.variable_meta.get(arg_var_id).unwrap();
             let element = &meta.elements[0];
             result.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst_offset: element.current_offset,
@@ -1879,6 +1913,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 rhs_select: None,
                 expr: proto_expr,
                 dst_ff_current_offset: 0, // not FF
+                token: TokenRange::default(),
             }));
         }
 
@@ -1893,9 +1928,9 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
         }
 
         for (var_path, destinations) in &src.outputs {
-            let arg_var_id = body.arg_map.get(var_path)?;
+            let arg_var_id = body.arg_map.get(var_path).unwrap();
             let scope = context.scope();
-            let arg_meta = scope.variable_meta.get(arg_var_id)?;
+            let arg_meta = scope.variable_meta.get(arg_var_id).unwrap();
             let arg_element = &arg_meta.elements[0];
             let arg_expr = ProtoExpression::Variable {
                 offset: arg_element.current_offset,
@@ -1909,9 +1944,9 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             };
             for dst in destinations {
                 let scope = context.scope();
-                let dst_meta = scope.variable_meta.get(&dst.id)?;
-                let dst_index = dst.index.eval_value(&mut scope.analyzer_context)?;
-                let dst_index = dst_meta.r#type.array.calc_index(&dst_index)?;
+                let dst_meta = scope.variable_meta.get(&dst.id).unwrap();
+                let dst_index = dst.index.eval_value(&mut scope.analyzer_context).unwrap();
+                let dst_index = dst_meta.r#type.array.calc_index(&dst_index).unwrap();
                 let dst_element = &dst_meta.elements[dst_index];
 
                 let select = if !dst.select.is_empty() {
@@ -1935,11 +1970,13 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     rhs_select: None,
                     expr: arg_expr.clone(),
                     dst_ff_current_offset: dst_element.current_offset,
+                    token: TokenRange::default(),
                 }));
             }
         }
 
-        Some(result)
+        context.expanding_functions.remove(&src.id);
+        Ok(result)
     }
 }
 
@@ -1947,7 +1984,7 @@ fn parse_hex_file(filename: &str, width: usize) -> Vec<veryl_analyzer::value::Va
     let content = match std::fs::read_to_string(filename) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("$readmemh: failed to read '{}': {}", filename, e);
+            log::warn!("$readmemh: failed to read '{}': {}", filename, e);
             return vec![];
         }
     };

@@ -1,0 +1,13 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+no_initial_block
+
+  × no initial block found in module "no_initial_block"
+   ╭─[../../testcases/error/no_initial_block.veryl:1:8]
+ 1 │ module no_initial_block (
+   ·        ────────┬───────
+   ·                ╰── this module has no initial block
+ 2 │     a: input  logic<8>,
+   ╰────

@@ -223,6 +223,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
 
         Ok(ir::Module {
             name: value.identifier.text(),
+            token: value.identifier.as_ref().into(),
             ports,
             port_types,
             variables,
@@ -434,6 +435,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
 
         Ok(ir::Module {
             name: value.identifier.text(),
+            token: value.identifier.as_ref().into(),
             ports,
             port_types,
             variables,

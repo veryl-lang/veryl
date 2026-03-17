@@ -8,10 +8,12 @@ use crate::symbol::ClockDomain;
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone)]
 pub struct Module {
     pub name: StrId,
+    pub token: TokenRange,
     pub ports: HashMap<VarPath, VarId>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
     pub variables: HashMap<VarId, Variable>,

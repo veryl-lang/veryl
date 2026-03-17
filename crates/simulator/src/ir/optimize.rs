@@ -375,7 +375,7 @@ pub fn optimize_merged(
         .collect();
 
     if dce_count > 0 || inline_count > 0 {
-        eprintln!(
+        log::debug!(
             "Merged optimize: {} dead eliminated, {} inlined ({} → {} comb stmts)",
             dce_count,
             inline_count,
