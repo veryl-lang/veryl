@@ -4,6 +4,7 @@ use crate::cranelift::{
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::variable::{native_bytes as calc_native_bytes, read_native_value};
 use crate::ir::{Op, ProtoStatement, Value};
+use crate::simulator_error::SimulatorError;
 use crate::wide_ops;
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Value as CraneliftValue;
@@ -3226,7 +3227,7 @@ pub fn build_linear_index_expr(
     context: &mut ConvContext,
     array: &veryl_analyzer::ir::ShapeRef,
     index: &air::VarIndex,
-) -> Option<ProtoExpression> {
+) -> Result<ProtoExpression, SimulatorError> {
     let index_width = 32;
     let index_expr_context = ExpressionContext {
         width: index_width,
@@ -3234,22 +3235,26 @@ pub fn build_linear_index_expr(
     };
 
     if array.is_empty() || (array.dims() == 1 && array[0] == Some(1) && index.0.is_empty()) {
-        return Some(ProtoExpression::Value {
+        return Ok(ProtoExpression::Value {
             value: Value::new(0, index_width, false),
             width: index_width,
             expr_context: index_expr_context,
         });
     }
 
-    if index.0.len() != array.dims() {
-        return None;
-    }
+    assert_eq!(
+        index.0.len(),
+        array.dims(),
+        "index dimension mismatch: {} != {}",
+        index.0.len(),
+        array.dims()
+    );
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
 
     for (i, dim_size) in array.iter().enumerate().rev() {
-        let dim_size = (*dim_size)?;
+        let dim_size = dim_size.expect("array dimension size must be known");
         let idx_proto: ProtoExpression = Conv::conv(context, &index.0[i])?;
 
         let mul_expr = if base == 1 {
@@ -3284,15 +3289,15 @@ pub fn build_linear_index_expr(
         base *= dim_size;
     }
 
-    ret
+    Ok(ret.expect("non-empty array must produce index expression"))
 }
 
 impl Conv<&air::Expression> for ProtoExpression {
-    fn conv(context: &mut ConvContext, src: &air::Expression) -> Option<Self> {
+    fn conv(context: &mut ConvContext, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
             air::Expression::Term(x) => match x.as_ref() {
                 air::Factor::Variable(id, index, select, comptime) => {
-                    let width = comptime.r#type.total_width()?;
+                    let width = comptime.r#type.total_width().unwrap();
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     // Try constant index first
@@ -3310,12 +3315,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                     };
 
                     if let Some(idx_vals) = const_index {
-                        let index = meta.r#type.array.calc_index(&idx_vals)?;
+                        let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                         let element = &meta.elements[index];
                         let is_ff = element.is_ff;
                         let offset = element.current_offset;
 
-                        Some(ProtoExpression::Variable {
+                        Ok(ProtoExpression::Variable {
                             offset,
                             is_ff,
                             select: select_val,
@@ -3325,13 +3330,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                     } else {
                         // Dynamic index: build linear index ProtoExpression directly
                         let array_shape = meta.r#type.array.clone();
-                        let dyn_info = meta.dynamic_index_info()?;
+                        let dyn_info = meta.dynamic_index_info().unwrap();
                         let num_elements = meta.elements.len();
                         let (base_offset, _, stride, is_ff) = dyn_info;
 
                         let index_proto = build_linear_index_expr(context, &array_shape, index)?;
 
-                        Some(ProtoExpression::DynamicVariable {
+                        Ok(ProtoExpression::DynamicVariable {
                             base_offset,
                             stride,
                             is_ff,
@@ -3344,11 +3349,11 @@ impl Conv<&air::Expression> for ProtoExpression {
                     }
                 }
                 air::Factor::Value(comptime) => {
-                    let value = comptime.get_value().ok().cloned()?;
-                    let width = comptime.r#type.total_width()?;
+                    let value = comptime.get_value().ok().cloned().unwrap();
+                    let width = comptime.r#type.total_width().unwrap();
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
-                    Some(ProtoExpression::Value {
+                    Ok(ProtoExpression::Value {
                         value,
                         width,
                         expr_context,
@@ -3363,22 +3368,23 @@ impl Conv<&air::Expression> for ProtoExpression {
                         .scope()
                         .analyzer_context
                         .functions
-                        .get(&call.id)?
+                        .get(&call.id)
+                        .unwrap()
                         .clone();
                     let body = if let Some(ref idx) = call.index {
-                        func.get_function(idx)?
+                        func.get_function(idx).unwrap()
                     } else {
-                        func.get_function(&[])?
+                        func.get_function(&[]).unwrap()
                     };
-                    let ret_id = body.ret?;
+                    let ret_id = body.ret.unwrap();
 
                     let scope = context.scope();
-                    let meta = scope.variable_meta.get(&ret_id)?;
+                    let meta = scope.variable_meta.get(&ret_id).unwrap();
                     let element = &meta.elements[0];
-                    let width = call.comptime.r#type.total_width()?;
+                    let width = call.comptime.r#type.total_width().unwrap();
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
-                    Some(ProtoExpression::Variable {
+                    Ok(ProtoExpression::Variable {
                         offset: element.current_offset,
                         is_ff: element.is_ff,
                         select: None,
@@ -3386,7 +3392,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                         expr_context,
                     })
                 }
-                _ => None,
+                air::Factor::SystemFunctionCall(_) => {
+                    unreachable!("system function calls are resolved by the analyzer")
+                }
+                air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
+                    Err(SimulatorError::unresolved_expression(&comptime.token))
+                }
             },
             air::Expression::Unary(op, x, comptime) => {
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
@@ -3402,7 +3413,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let mut mc = MaskCache::default();
                     let result = op.eval_value_unary(xv, width, expr_context.signed, &mut mc);
                     if matches!(&result, Value::U64(_)) {
-                        return Some(ProtoExpression::Value {
+                        return Ok(ProtoExpression::Value {
                             value: result,
                             width,
                             expr_context,
@@ -3410,7 +3421,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     }
                 }
 
-                Some(ProtoExpression::Unary {
+                Ok(ProtoExpression::Unary {
                     op: *op,
                     x: Box::new(x),
                     width,
@@ -3438,7 +3449,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let mut mc = MaskCache::default();
                     let result = op.eval_value_binary(xv, yv, width, expr_context.signed, &mut mc);
                     if matches!(&result, Value::U64(_)) {
-                        return Some(ProtoExpression::Value {
+                        return Ok(ProtoExpression::Value {
                             value: result,
                             width,
                             expr_context,
@@ -3446,7 +3457,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     }
                 }
 
-                Some(ProtoExpression::Binary {
+                Ok(ProtoExpression::Binary {
                     x: Box::new(x),
                     op: *op,
                     y: Box::new(y),
@@ -3461,8 +3472,10 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let elem_width = converted.width();
 
                     let repeat = if let Some(rep) = rep {
-                        let val = rep.eval_value(&mut context.scope().analyzer_context)?;
-                        val.to_usize()?
+                        let val = rep
+                            .eval_value(&mut context.scope().analyzer_context)
+                            .unwrap();
+                        val.to_usize().unwrap()
                     } else {
                         1
                     };
@@ -3471,13 +3484,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
                 // Concatenation's comptime.expr_context.width is not set by apply_context,
                 // so we must use comptime.r#type.total_width() instead.
-                let width = comptime.r#type.total_width()?;
+                let width = comptime.r#type.total_width().unwrap();
                 let expr_context = ExpressionContext {
                     width,
                     signed: comptime.r#type.signed,
                 };
 
-                Some(ProtoExpression::Concatenation {
+                Ok(ProtoExpression::Concatenation {
                     elements,
                     width,
                     expr_context,
@@ -3490,7 +3503,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
-                Some(ProtoExpression::Ternary {
+                Ok(ProtoExpression::Ternary {
                     cond: Box::new(cond),
                     true_expr: Box::new(true_expr),
                     false_expr: Box::new(false_expr),
@@ -3501,29 +3514,29 @@ impl Conv<&air::Expression> for ProtoExpression {
             air::Expression::StructConstructor(r#type, members, _comptime) => {
                 let struct_members = match &r#type.kind {
                     air::TypeKind::Struct(s) => &s.members,
-                    _ => return None,
+                    _ => panic!("StructConstructor with non-Struct type"),
                 };
 
                 let mut elements = Vec::new();
                 for ((_name, expr), member_type) in members.iter().zip(struct_members.iter()) {
                     let converted: ProtoExpression = Conv::conv(context, expr)?;
-                    let elem_width = member_type.width()?;
+                    let elem_width = member_type.width().unwrap();
                     elements.push((Box::new(converted), 1, elem_width));
                 }
 
-                let width = r#type.total_width()?;
+                let width = r#type.total_width().unwrap();
                 let expr_context = ExpressionContext {
                     width,
                     signed: false,
                 };
 
-                Some(ProtoExpression::Concatenation {
+                Ok(ProtoExpression::Concatenation {
                     elements,
                     width,
                     expr_context,
                 })
             }
-            _ => None,
+            _ => panic!("unhandled Expression variant"),
         }
     }
 }

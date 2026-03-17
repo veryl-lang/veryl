@@ -1,0 +1,6 @@
+module no_initial_block (
+    a: input  logic<8>,
+    b: output logic<8>,
+) {
+    assign b = a + 1;
+}

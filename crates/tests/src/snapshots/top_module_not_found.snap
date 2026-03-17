@@ -1,0 +1,7 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+top_module_not_found
+
+  × top module "top_module_not_found" not found

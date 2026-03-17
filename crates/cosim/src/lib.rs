@@ -19,7 +19,7 @@ fn build_ir(code: &str, top: &str, config: &Config) -> sir::Ir {
     Analyzer::analyze_post_pass1();
     analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
 
-    sir::build_ir(ir, top.into(), config).unwrap()
+    sir::build_ir(ir, top.into(), config).expect("Failed to build IR")
 }
 
 type Sim = Simulator<std::io::Empty>;

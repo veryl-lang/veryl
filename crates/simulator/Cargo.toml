@@ -16,6 +16,9 @@ cranelift      = "0.129.1"
 daggy          = {workspace = true}
 fxhash         = {workspace = true}
 indent         = {workspace = true}
+log            = {workspace = true}
+miette         = {workspace = true}
+thiserror      = {workspace = true}
 memmap2        = "0.9.9"
 num-traits     = {workspace = true}
 target-lexicon = "0.13.4"

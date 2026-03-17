@@ -6225,10 +6225,13 @@ dependencies = [
  "daggy",
  "fxhash",
  "indent",
+ "log",
  "memmap2",
+ "miette",
  "num-traits",
  "pprof",
  "target-lexicon",
+ "thiserror 2.0.18",
  "toml 1.0.6+spec-1.1.0",
  "vcd",
  "veryl-analyzer",
@@ -6273,6 +6276,7 @@ dependencies = [
  "veryl-metadata",
  "veryl-parser",
  "veryl-path",
+ "veryl-simulator",
  "walkdir",
 ]
 

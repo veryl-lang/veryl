@@ -279,12 +279,37 @@ mod error {
                 ));
                 errors.append(&mut Analyzer::analyze_post_pass2());
 
-                let err = Report::from(errors.remove(0));
                 let mut out = String::new();
-                GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
-                    .with_links(false)
-                    .render_report(&mut out, err.as_ref())
-                    .unwrap();
+                let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
+                    .with_links(false);
+
+                if !errors.is_empty() {
+                    let err = Report::from(errors.remove(0));
+                    handler.render_report(&mut out, err.as_ref()).unwrap();
+                } else {
+                    // No analyzer errors; try building simulator IR
+                    let top = veryl_parser::resource_table::get_str_id(name.clone())
+                        .unwrap_or_else(|| name.as_str().into());
+                    let config = veryl_simulator::ir::Config::default();
+                    match veryl_simulator::ir::build_ir(ir, top, &config) {
+                        Err(sim_err) => {
+                            handler
+                                .render_report(&mut out, &sim_err as &dyn miette::Diagnostic)
+                                .unwrap();
+                        }
+                        Ok(sim_ir) => {
+                            // build_ir succeeded; try running as testbench
+                            match veryl_simulator::testbench::run_native_testbench(sim_ir, None) {
+                                Err(tb_err) => {
+                                    handler
+                                        .render_report(&mut out, &tb_err as &dyn miette::Diagnostic)
+                                        .unwrap();
+                                }
+                                Ok(_) => panic!("expected an error for test case: {name}"),
+                            }
+                        }
+                    }
+                }
 
                 let mut settings = Settings::clone_current();
                 settings.set_prepend_module_to_snapshot(false);

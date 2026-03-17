@@ -53,7 +53,7 @@ fn build(code: &str, top: &str) -> Ir {
     let mut config = Config::default();
     config.use_jit = true;
 
-    ir::build_ir(ir, top.into(), &config).unwrap()
+    ir::build_ir(ir, top.into(), &config).expect("Failed to build IR")
 }
 
 fn criterion_benchmark(c: &mut Criterion) {

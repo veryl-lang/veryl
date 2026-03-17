@@ -1,0 +1,8 @@
+module combinational_loop (
+    a: input  logic<8>,
+    b: output logic<8>,
+    c: output logic<8>,
+) {
+    assign b = c + a;
+    assign c = b + 1;
+}

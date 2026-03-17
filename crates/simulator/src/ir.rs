@@ -25,13 +25,16 @@ pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
 
 use crate::HashMap;
+use crate::simulator_error::SimulatorError;
 use memmap2::Mmap;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 pub struct Ir {
     pub name: StrId,
+    pub token: TokenRange,
     pub ports: HashMap<VarPath, VarId>,
     pub ff_values: Box<[u8]>,
     pub comb_values: Box<[u8]>,
@@ -50,9 +53,15 @@ pub struct Ir {
 }
 
 impl Ir {
-    pub fn from_module(module: Module, binary: Vec<Mmap>, use_4state: bool) -> Ir {
+    pub fn from_module(
+        module: Module,
+        binary: Vec<Mmap>,
+        use_4state: bool,
+        token: TokenRange,
+    ) -> Ir {
         Ir {
             name: module.name,
+            token,
             ports: module.ports,
             ff_values: module.ff_values,
             comb_values: module.comb_values,
@@ -137,21 +146,29 @@ impl Ir {
     }
 }
 
-pub fn build_ir(ir: air::Ir, top: StrId, config: &Config) -> Option<Ir> {
+pub fn build_ir(ir: air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
     for x in &ir.components {
         if let air::Component::Module(x) = x
             && top == x.name
         {
+            let token = x.token;
             let mut context = context::Context {
                 config: config.clone(),
                 ..Default::default()
             };
             let proto: ProtoModule = Conv::conv(&mut context, x)?;
             let module = proto.instantiate();
-            return Some(Ir::from_module(module, context.binary, config.use_4state));
+            return Ok(Ir::from_module(
+                module,
+                context.binary,
+                config.use_4state,
+                token,
+            ));
         }
     }
-    None
+    Err(SimulatorError::TopModuleNotFound {
+        module_name: top.to_string(),
+    })
 }
 
 #[derive(Clone, Debug, Default)]

@@ -1,6 +1,7 @@
 use crate::HashMap;
 use crate::ir::{Event, Expression, Ir, Statement, SystemFunctionCall, TbMethodKind};
 use crate::simulator::Simulator;
+use crate::simulator_error::SimulatorError;
 use veryl_parser::resource_table::StrId;
 
 pub enum TestbenchStatement {
@@ -199,15 +200,17 @@ pub fn run_testbench<T: std::io::Write>(
 pub fn run_native_testbench(
     ir: Ir,
     dump: Option<Box<dyn std::io::Write>>,
-) -> Result<TestResult, String> {
+) -> Result<TestResult, SimulatorError> {
     let mut sim = Simulator::new(ir, dump);
     let event_map = build_event_map(&sim.ir.event_statements);
 
+    let module_name = sim.ir.name.to_string();
+    let token = sim.ir.token;
     let initial_stmts = sim
         .ir
         .event_statements
         .get(&Event::Initial)
-        .ok_or_else(|| "No initial block found".to_string())?;
+        .ok_or_else(|| SimulatorError::no_initial_block(&module_name, &token))?;
 
     let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, 3);
     Ok(run_testbench(&mut sim, &tb_stmts))
