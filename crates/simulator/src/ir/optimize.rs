@@ -73,12 +73,17 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
                 }
             }
             ProtoSystemFunctionCall::Readmemh { .. } => {}
+            ProtoSystemFunctionCall::Assert { condition, .. } => {
+                count_expr_reads(condition, counts);
+            }
+            ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::CompiledBlock(x) => {
             for (is_ff, off) in &x.input_offsets {
                 *counts.entry((*is_ff, *off)).or_insert(0) += 1;
             }
         }
+        ProtoStatement::TbMethodCall { .. } => {}
     }
 }
 
@@ -277,8 +282,6 @@ pub fn optimize_comb(
     // - If output is single-use within comb AND not observable, inline it
     let mut inline_map: HashMap<CombKey, ProtoExpression> = HashMap::default();
     let mut result: Vec<ProtoStatement> = Vec::new();
-    let mut dce_count = 0usize;
-    let mut inline_count = 0usize;
 
     for stmt in comb_stmts {
         // Apply pending substitutions
@@ -293,14 +296,12 @@ pub fn optimize_comb(
 
                 if count == 0 && !is_observable {
                     // Dead code: output never read and not externally visible
-                    dce_count += 1;
                     continue;
                 }
 
                 if count == 1 && !is_observable {
                     // Single-use, not externally visible: inline the expression
                     inline_map.insert(key, x.expr.clone());
-                    inline_count += 1;
                     continue;
                 }
 
@@ -310,16 +311,6 @@ pub fn optimize_comb(
                 result.push(stmt);
             }
         }
-    }
-
-    if dce_count > 0 || inline_count > 0 {
-        eprintln!(
-            "DFG optimize: {} dead eliminated, {} inlined ({} → {} stmts)",
-            dce_count,
-            inline_count,
-            dce_count + inline_count + result.len(),
-            result.len()
-        );
     }
 
     result

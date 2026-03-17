@@ -7,11 +7,12 @@ use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition};
 use crate::ir::{
     self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, Shape, ShapeRef,
-    Signature, ValueVariant, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
+    Signature, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind, VarPath, VarPathSelect,
+    VarSelect, Variable,
 };
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, Symbol,
-    SymbolKind, TypeKind,
+    SymbolKind, TbComponentKind, TypeKind,
 };
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind};
 use crate::symbol_table::{self, ResolveResult};
@@ -2381,6 +2382,80 @@ pub fn parse_expression(s: &str) -> Expression {
     let mut extractor = Extractor(None);
     extractor.veryl(&parser.veryl);
     extractor.0.unwrap()
+}
+
+pub fn tb_method_call(
+    context: &mut Context,
+    expr_id: &ExpressionIdentifier,
+    func_call: &FunctionCall,
+    token: TokenRange,
+) -> IrResult<Option<ir::Statement>> {
+    let path: GenericSymbolPath = expr_id.into();
+
+    // Need at least 2 path elements: instance.method
+    if path.paths.len() < 2 {
+        return Ok(None);
+    }
+
+    // Resolve just the first element (the instance name)
+    let inst_name = path.paths[0].base.text;
+    let inst_path = crate::symbol_path::SymbolPath::new(&[inst_name]);
+    let inst_namespace = match crate::namespace_table::get(path.paths[0].base.id) {
+        Some(ns) => ns,
+        None => return Ok(None),
+    };
+
+    let inst_symbol = match symbol_table::resolve((&inst_path, &inst_namespace)) {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+
+    let type_name = match &inst_symbol.found.kind {
+        SymbolKind::Instance(x) => &x.type_name,
+        _ => return Ok(None),
+    };
+
+    // Resolve the instance's type to check if it's a TbComponent
+    let type_path = type_name.mangled_path();
+    let type_symbol = match symbol_table::resolve((&type_path, &inst_symbol.found.namespace)) {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+
+    let tb_kind = match &type_symbol.found.kind {
+        SymbolKind::TbComponent(x) => &x.kind,
+        _ => return Ok(None),
+    };
+
+    let method_name = resource_table::get_str_value(path.paths[path.paths.len() - 1].base.text);
+    let method_name = method_name.as_deref().unwrap_or("");
+
+    // Parse arguments for the method call
+    let args = if let Some(ref arg_list) = func_call.function_call_opt {
+        Some(argument_list(context, arg_list.argument_list.as_ref())?)
+    } else {
+        None
+    };
+
+    let method = match (tb_kind, method_name) {
+        (TbComponentKind::ClockGen, "next") => {
+            let count = if let Some(ir::Arguments::Positional(ref positional)) = args
+                && !positional.is_empty()
+            {
+                Some(positional[0].0.clone())
+            } else {
+                None
+            };
+            TbMethod::ClockNext { count }
+        }
+        (TbComponentKind::ResetGen, "assert") => TbMethod::ResetAssert,
+        _ => return Err(ir_error!(token)),
+    };
+
+    Ok(Some(ir::Statement::TbMethodCall(TbMethodCall {
+        inst: inst_name,
+        method,
+    })))
 }
 
 #[cfg(test)]

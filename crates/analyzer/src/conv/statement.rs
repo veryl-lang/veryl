@@ -1,7 +1,7 @@
 use crate::conv::utils::{
     TypePosition, argument_list, case_condition, eval_assign_statement, eval_expr, eval_for_range,
     eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
-    switch_condition,
+    switch_condition, tb_method_call,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -271,6 +271,16 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                 }
             }
             IdentifierStatementGroup::FunctionCall(x) => {
+                // Intercept $tb component method calls before argument evaluation
+                if let Some(tb_stmt) = tb_method_call(
+                    context,
+                    value.expression_identifier.as_ref(),
+                    &x.function_call,
+                    token,
+                )? {
+                    return Ok(ir::StatementBlock(vec![tb_stmt]));
+                }
+
                 let args = if let Some(x) = &x.function_call.function_call_opt {
                     argument_list(context, x.argument_list.as_ref())?
                 } else {

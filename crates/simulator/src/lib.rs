@@ -1,6 +1,7 @@
 pub mod cranelift;
 pub mod ir;
 pub mod simulator;
+pub mod testbench;
 pub mod wide_ops;
 
 pub use ir::Config;

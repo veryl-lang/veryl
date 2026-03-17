@@ -609,6 +609,7 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             ProtoStatement::AssignDynamic(_) => (2, 0),
             ProtoStatement::If(_) => (3, 0),
             ProtoStatement::SystemFunctionCall(_) => (4, 0),
+            ProtoStatement::TbMethodCall { .. } => (4, 0),
         });
     }
 
@@ -760,11 +761,16 @@ impl Conv<&air::Module> for ProtoModule {
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
-                let (sorted, swap_offsets) = sort_ff_event(stmts);
-                if !swap_offsets.is_empty() {
-                    all_swap_offsets.extend(&swap_offsets);
+                // Initial/Final events should preserve source order (no FF dependency sorting)
+                if matches!(event, Event::Initial | Event::Final) {
+                    (event, try_jit(context, stmts))
+                } else {
+                    let (sorted, swap_offsets) = sort_ff_event(stmts);
+                    if !swap_offsets.is_empty() {
+                        all_swap_offsets.extend(&swap_offsets);
+                    }
+                    (event, try_jit(context, sorted))
                 }
-                (event, try_jit(context, sorted))
             })
             .collect();
 

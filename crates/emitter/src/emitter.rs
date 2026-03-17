@@ -4611,6 +4611,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstDeclaration'
     fn inst_declaration(&mut self, arg: &InstDeclaration) {
+        // Skip $tb component instances (clock_gen, reset_gen) — no SV output
+        if let (Ok(symbol), _) =
+            self.resolve_scoped_idnetifier(&arg.component_instantiation.scoped_identifier)
+            && matches!(symbol.found.kind, SymbolKind::TbComponent(_))
+        {
+            return;
+        }
+
         self.token(&arg.inst.inst_token.replace(""));
         self.emit_inst(
             &arg.inst.inst_token,
@@ -6025,7 +6033,8 @@ pub fn symbol_string(
         | SymbolKind::ProtoTypeDef(_)
         | SymbolKind::ProtoFunction(_)
         | SymbolKind::Test(_)
-        | SymbolKind::Embed => {
+        | SymbolKind::Embed
+        | SymbolKind::TbComponent(_) => {
             unreachable!()
         }
     }

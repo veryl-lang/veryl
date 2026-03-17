@@ -54,6 +54,8 @@ pub enum SystemFunctionKind {
     Onehot(Input),
     Readmemh(Input, Output),
     Display(Vec<Input>),
+    Assert(Input, Option<Input>),
+    Finish,
 }
 
 fn create_input(
@@ -192,6 +194,30 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
+            "$assert" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(ir_error!(token));
+                }
+                let arg0 = create_input(context, name, None, args.remove(0));
+                let arg1 = if !args.is_empty() {
+                    Some(create_input(context, name, None, args.remove(0)))
+                } else {
+                    None
+                };
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Assert(arg0, arg1),
+                    comptime,
+                })
+            }
+            "$finish" => {
+                if !args.is_empty() {
+                    return Err(ir_error!(token));
+                }
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Finish,
+                    comptime,
+                })
+            }
             _ => Err(ir_error!(token)),
         }
     }
@@ -235,6 +261,8 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Readmemh(_, _) => None,
             SystemFunctionKind::Display(_) => None,
+            SystemFunctionKind::Assert(_, _) => None,
+            SystemFunctionKind::Finish => None,
         }
     }
 
@@ -253,6 +281,8 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Readmemh(_, _) => self.comptime.clone(),
             SystemFunctionKind::Display(_) => self.comptime.clone(),
+            SystemFunctionKind::Assert(_, _) => self.comptime.clone(),
+            SystemFunctionKind::Finish => self.comptime.clone(),
         }
     }
 
@@ -282,6 +312,14 @@ impl fmt::Display for SystemFunctionCall {
                 let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
                 format!("$display({})", args_str.join(", ")).fmt(f)
             }
+            SystemFunctionKind::Assert(cond, msg) => {
+                if let Some(msg) = msg {
+                    format!("$assert({cond}, {msg})").fmt(f)
+                } else {
+                    format!("$assert({cond})").fmt(f)
+                }
+            }
+            SystemFunctionKind::Finish => "$finish()".fmt(f),
         }
     }
 }

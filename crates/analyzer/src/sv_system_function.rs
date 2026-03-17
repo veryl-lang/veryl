@@ -97,6 +97,12 @@ pub fn sv_system_functions() -> Vec<SvSystemFunction> {
             &[],
         ),
         SvSystemFunction::new("$exit", &[]),
+        // Veryl native testbench system tasks
+        SvSystemFunction::new(
+            "$assert",
+            // condition, optional message
+            &[("condition", Direction::Input)],
+        ),
         // Simulation time system functions
         SvSystemFunction::new("$time", &[]),
         SvSystemFunction::new("$stime", &[]),

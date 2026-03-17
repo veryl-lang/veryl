@@ -713,6 +713,7 @@ pub enum SymbolKind {
     ClockDomain,
     Test(TestProperty),
     Embed,
+    TbComponent(TbComponentProperty),
 }
 
 impl SymbolKind {
@@ -768,6 +769,7 @@ impl SymbolKind {
             SymbolKind::ClockDomain => "clock domain".to_string(),
             SymbolKind::Test(_) => "test".to_string(),
             SymbolKind::Embed => "embed".to_string(),
+            SymbolKind::TbComponent(x) => format!("testbench {}", x.kind),
         }
     }
 
@@ -1039,6 +1041,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::ClockDomain => "clock domain".to_string(),
             SymbolKind::Test(_) => "test".to_string(),
             SymbolKind::Embed => "embed".to_string(),
+            SymbolKind::TbComponent(x) => format!("testbench {} component", x.kind),
         };
         text.fmt(f)
     }
@@ -2065,6 +2068,7 @@ pub struct ModuleProperty {
     pub default_clock: Option<SymbolId>,
     pub default_reset: Option<SymbolId>,
     pub definition: DefinitionId,
+    pub test: Option<TestProperty>,
 }
 
 #[derive(Debug, Clone)]
@@ -2406,6 +2410,7 @@ pub enum TestType {
     Inline,
     CocotbEmbed(Box<syntax_tree::EmbedContent>),
     CocotbInclude(StrId),
+    Native,
 }
 
 #[derive(Debug, Clone)]
@@ -2413,4 +2418,24 @@ pub struct TestProperty {
     pub r#type: TestType,
     pub path: PathId,
     pub top: Option<StrId>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TbComponentKind {
+    ClockGen,
+    ResetGen,
+}
+
+impl std::fmt::Display for TbComponentKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TbComponentKind::ClockGen => write!(f, "clock_gen"),
+            TbComponentKind::ResetGen => write!(f, "reset_gen"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TbComponentProperty {
+    pub kind: TbComponentKind,
 }

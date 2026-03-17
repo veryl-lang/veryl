@@ -53,7 +53,10 @@ fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
             symbol_table::resolve((&x.type_name.mangled_path(), &inst_symbol.namespace))
     {
         match type_symbol.found.kind {
-            SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::SystemVerilog => {
+            SymbolKind::Module(_)
+            | SymbolKind::Interface(_)
+            | SymbolKind::SystemVerilog
+            | SymbolKind::TbComponent(_) => {
                 return Some(type_symbol.found.kind);
             }
             SymbolKind::GenericInstance(ref x) => {
@@ -142,6 +145,7 @@ pub fn check_inst(
                 None
             }
             SymbolKind::SystemVerilog => None,
+            SymbolKind::TbComponent(_) => None,
             _ => {
                 if in_module {
                     Some("module or interface")

@@ -10,6 +10,7 @@ use crate::value::ValueBigUint;
 use indent::indent_all_by;
 use std::borrow::Cow;
 use std::fmt;
+use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Default)]
@@ -22,7 +23,20 @@ pub enum Statement {
     IfReset(IfResetStatement),
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
+    TbMethodCall(TbMethodCall),
     Null,
+}
+
+#[derive(Clone)]
+pub struct TbMethodCall {
+    pub inst: StrId,
+    pub method: TbMethod,
+}
+
+#[derive(Clone)]
+pub enum TbMethod {
+    ClockNext { count: Option<Expression> },
+    ResetAssert,
 }
 
 impl Statement {
@@ -40,6 +54,7 @@ impl Statement {
             Statement::FunctionCall(x) => {
                 x.eval_value(context);
             }
+            Statement::TbMethodCall(_) => (),
             Statement::Null => (),
         }
     }
@@ -59,6 +74,7 @@ impl Statement {
                 x.eval_assign(context, assign_table, assign_context)
             }
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
+            Statement::TbMethodCall(_) => (),
             Statement::Null => (),
         }
     }
@@ -69,7 +85,7 @@ impl Statement {
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl),
-            _ => (),
+            Statement::TbMethodCall(_) | Statement::SystemFunctionCall(_) | Statement::Null => (),
         }
     }
 
@@ -80,6 +96,7 @@ impl Statement {
             Statement::IfReset(x) => x.set_index(index),
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
+            Statement::TbMethodCall(_) => (),
             Statement::Null => (),
         }
     }
@@ -93,6 +110,16 @@ impl fmt::Display for Statement {
             Statement::IfReset(x) => x.fmt(f),
             Statement::SystemFunctionCall(x) => format!("{x};").fmt(f),
             Statement::FunctionCall(x) => format!("{x};").fmt(f),
+            Statement::TbMethodCall(x) => match &x.method {
+                TbMethod::ClockNext { count } => {
+                    if let Some(c) = count {
+                        write!(f, "{}.next({c});", x.inst)
+                    } else {
+                        write!(f, "{}.next();", x.inst)
+                    }
+                }
+                TbMethod::ResetAssert => write!(f, "{}.assert();", x.inst),
+            },
             Statement::Null => "".fmt(f),
         }
     }

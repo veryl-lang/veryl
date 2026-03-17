@@ -6048,6 +6048,7 @@ dependencies = [
  "veryl-migrator",
  "veryl-parser",
  "veryl-path",
+ "veryl-simulator",
  "veryl-sourcemap",
 ]
 

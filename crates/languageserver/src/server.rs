@@ -439,6 +439,7 @@ impl Server {
                     VerylSymbolKind::ClockDomain => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::Test(_) => SymbolKind::MODULE,
                     VerylSymbolKind::Embed => SymbolKind::NAMESPACE,
+                    VerylSymbolKind::TbComponent(_) => SymbolKind::MODULE,
                 };
                 if let Some(location) = to_location(&symbol.token) {
                     #[allow(deprecated)]

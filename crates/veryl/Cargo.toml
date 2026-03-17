@@ -48,5 +48,6 @@ veryl-formatter = {version = "0.19.0", path = "../formatter"}
 veryl-metadata  = {version = "0.19.0", path = "../metadata"}
 veryl-migrator  = {version = "0.19.0", path = "../migrator"}
 veryl-parser    = {version = "0.19.0", path = "../parser"}
+veryl-simulator = {version = "0.19.0", path = "../simulator"}
 veryl-path      = {version = "0.19.0", path = "../path"}
 veryl-sourcemap = {version = "0.19.0", path = "../sourcemap"}

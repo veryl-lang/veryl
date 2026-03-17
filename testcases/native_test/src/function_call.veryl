@@ -1,0 +1,36 @@
+module Counter2 (
+    clk: input clock,
+    rst: input reset,
+    cnt: output logic<32>,
+) {
+    always_ff {
+        if_reset { cnt = 0; }
+        else { cnt += 1; }
+    }
+}
+
+#[test(test_function_call)]
+module test_function_call {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen;
+
+    var cnt: logic<32>;
+
+    inst dut: Counter2 (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
+
+    function step_n(n: input logic<32>) {
+        clk.next(n);
+    }
+
+    initial {
+        rst.assert(clk);
+        step_n(5);
+        step_n(5);
+        $assert(cnt == 32'd10);
+        $finish();
+    }
+}
