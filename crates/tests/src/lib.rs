@@ -5,6 +5,9 @@ const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency_1", "25_dependency_2"];
 const STD_TESTS: [&str; 1] = ["68_std"];
 
 #[cfg(test)]
+const PACKAGE_SELF_REF_TESTS: [&str; 2] = ["84_package_self_ref_1", "84_package_self_ref_2"];
+
+#[cfg(test)]
 static DEPENDENCY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
@@ -35,10 +38,15 @@ mod analyzer {
     fn test(name: &str) {
         if crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name {
             return;
+        } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+            && crate::PACKAGE_SELF_REF_TESTS[0] == name
+        {
+            return;
         }
 
-        let needs_sub_project =
-            crate::DEPENDENCY_TESTS.contains(&name) || crate::STD_TESTS.contains(&name);
+        let needs_sub_project = crate::DEPENDENCY_TESTS.contains(&name)
+            || crate::STD_TESTS.contains(&name)
+            || crate::PACKAGE_SELF_REF_TESTS.contains(&name);
         let _lock = if needs_sub_project {
             Some(crate::DEPENDENCY_LOCK.lock())
         } else {
@@ -63,11 +71,13 @@ mod analyzer {
 
         let files = if crate::DEPENDENCY_TESTS.contains(&name) {
             crate::DEPENDENCY_TESTS.to_vec()
+        } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name) {
+            crate::PACKAGE_SELF_REF_TESTS.to_vec()
         } else {
             vec![name]
         };
 
-        let mut context = Context::default();
+        let mut parse_results = Vec::new();
         for file in &files {
             let file = format!("../../testcases/veryl/{}.veryl", file);
             let input = fs::read_to_string(&file).unwrap();
@@ -79,18 +89,23 @@ mod analyzer {
             dbg!(&errors);
             assert!(errors.is_empty());
 
-            let errors = Analyzer::analyze_post_pass1();
-            dbg!(&errors);
-            assert!(errors.is_empty());
+            parse_results.push((prj, ret.veryl, analyzer));
+        }
 
-            let errors = analyzer.analyze_pass2(&prj, &ret.veryl, &mut context, None);
-            dbg!(&errors);
-            assert!(errors.is_empty());
+        let errors = Analyzer::analyze_post_pass1();
+        dbg!(&errors);
+        assert!(errors.is_empty());
 
-            let errors = Analyzer::analyze_post_pass2();
+        let mut context = Context::default();
+        for (prj, veryl, analyzer) in &parse_results {
+            let errors = analyzer.analyze_pass2(prj, veryl, &mut context, None);
             dbg!(&errors);
             assert!(errors.is_empty());
         }
+
+        let errors = Analyzer::analyze_post_pass2();
+        dbg!(&errors);
+        assert!(errors.is_empty());
     }
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));
@@ -146,10 +161,15 @@ mod emitter {
     fn test(name: &str) {
         if crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name {
             return;
+        } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+            && crate::PACKAGE_SELF_REF_TESTS[0] == name
+        {
+            return;
         }
 
-        let needs_sub_project =
-            crate::DEPENDENCY_TESTS.contains(&name) || crate::STD_TESTS.contains(&name);
+        let needs_sub_project = crate::DEPENDENCY_TESTS.contains(&name)
+            || crate::STD_TESTS.contains(&name)
+            || crate::PACKAGE_SELF_REF_TESTS.contains(&name);
         let _lock = if needs_sub_project {
             Some(crate::DEPENDENCY_LOCK.lock())
         } else {
@@ -174,6 +194,8 @@ mod emitter {
 
         let names = if crate::DEPENDENCY_TESTS.contains(&name) {
             crate::DEPENDENCY_TESTS.to_vec()
+        } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name) {
+            crate::PACKAGE_SELF_REF_TESTS.to_vec()
         } else {
             vec![name]
         };
@@ -201,7 +223,11 @@ mod emitter {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
             let _ = analyzer.analyze_pass1(&prj, &result.veryl);
-            let _ = Analyzer::analyze_post_pass1();
+        }
+        let _ = Analyzer::analyze_post_pass1();
+        for result in &parse_results {
+            let prj = &metadata.project.name;
+            let analyzer = Analyzer::new(&metadata);
             let _ = analyzer.analyze_pass2(&prj, &result.veryl, &mut context, None);
         }
 

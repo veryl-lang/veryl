@@ -314,6 +314,13 @@ impl ReferenceTable {
                     }
 
                     path.paths[i].arguments.append(&mut args);
+
+                    // To ensure generic instances are emitted in the correct order,
+                    // generic args must be processed before the base component is processed.
+                    for arg in &path.paths[i].arguments {
+                        self.generic_symbol_path(arg, namespace, false, None, None);
+                    }
+
                     if path.is_generic_reference() {
                         Self::add_generic_reference(&target_symbol, namespace, &path, i);
                     } else {
