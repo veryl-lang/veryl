@@ -28,7 +28,13 @@ impl CmdBuild {
         Self { opt }
     }
 
-    pub fn exec(&self, metadata: &mut Metadata, include_tests: bool, quiet: bool) -> Result<bool> {
+    pub fn exec(
+        &self,
+        metadata: &mut Metadata,
+        include_tests: bool,
+        quiet: bool,
+        mut ir: Option<&mut veryl_analyzer::ir::Ir>,
+    ) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
         let mut check_error = CheckError::new(metadata.build.error_count_limit);
@@ -78,7 +84,7 @@ impl CmdBuild {
                     &path.prj,
                     &context.parser.veryl,
                     &mut analyzer_context,
-                    None,
+                    ir.as_deref_mut(),
                 );
                 check_error = check_error.append(&mut errors).check_err()?;
             }

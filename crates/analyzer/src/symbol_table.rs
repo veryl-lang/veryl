@@ -12,6 +12,7 @@ use crate::symbol::{
 use crate::symbol_path::{
     GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
 };
+use crate::tb_component;
 use crate::{AnalyzerError, HashMap, namespace_table};
 use connect::check_connect;
 use log::trace;
@@ -113,6 +114,7 @@ impl SymbolTable {
         }
 
         sv_system_function::insert_symbols(&mut ret, &namespace);
+        tb_component::insert_symbols(&mut ret, &namespace);
 
         ret
     }
@@ -462,6 +464,7 @@ impl SymbolTable {
             _ => false,
         };
         let via_namespace = matches!(last_found.kind, SymbolKind::Namespace);
+        let via_tb_component = matches!(last_found_type, Some(SymbolKind::TbComponent(_)));
 
         match &found.kind {
             SymbolKind::Variable(_)
@@ -492,7 +495,9 @@ impl SymbolTable {
             | SymbolKind::AliasPackage(_)
             | SymbolKind::ProtoAliasPackage(_)
             | SymbolKind::ProtoFunction(_) => via_pacakge,
-            SymbolKind::Function(_) => via_modport || via_interface_instance || via_pacakge,
+            SymbolKind::Function(_) => {
+                via_modport || via_interface_instance || via_pacakge || via_tb_component
+            }
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
             SymbolKind::Modport(_) => via_interface || via_interface_instance,
             SymbolKind::GenericInstance(_) => {
@@ -680,7 +685,9 @@ impl SymbolTable {
                             SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
                                 context = self.trace_type_path(context, &x.target)?;
                             }
-                            SymbolKind::Enum(_) | SymbolKind::Namespace => {
+                            SymbolKind::Enum(_)
+                            | SymbolKind::Namespace
+                            | SymbolKind::TbComponent(_) => {
                                 context.namespace = found.inner_namespace();
                                 context.inner = true;
                             }
@@ -1324,7 +1331,7 @@ impl ResolveContext<'_> {
     }
 }
 
-const DEFINED_NAMESPACES: [&str; 2] = ["$sv", "$std"];
+const DEFINED_NAMESPACES: [&str; 3] = ["$sv", "$std", "$tb"];
 
 // Refer IEEE Std 1800-2023 Table B.1 - Reserved keywords
 // This list must be sorted to enable binary search

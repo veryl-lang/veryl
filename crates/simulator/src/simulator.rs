@@ -54,10 +54,7 @@ impl<T: std::io::Write> Simulator<T> {
     }
 
     pub fn get(&mut self, port: &str) -> Option<Value> {
-        if self.comb_dirty {
-            self.ir.eval_comb_full(&mut self.mask_cache);
-            self.comb_dirty = false;
-        }
+        self.ensure_comb_updated();
 
         let port = VarPath::from_str(port).unwrap();
 
@@ -77,6 +74,61 @@ impl<T: std::io::Write> Simulator<T> {
         } else {
             None
         }
+    }
+
+    /// Get a variable value by hierarchical path (e.g., "dut.cnt").
+    /// Searches all module variables including children.
+    pub fn get_var(&mut self, path: &str) -> Option<Value> {
+        self.ensure_comb_updated();
+
+        let target = VarPath::from_str(path).unwrap();
+        Self::find_var_in_module(&self.ir.module_variables, &target, self.ir.use_4state)
+    }
+
+    fn find_var_in_module(
+        module: &ModuleVariables,
+        target: &VarPath,
+        use_4state: bool,
+    ) -> Option<Value> {
+        // If target has multiple segments, try matching child module by name first
+        if target.0.len() > 1 {
+            for child in &module.children {
+                if child.name == target.0[0] {
+                    let sub = VarPath::from_slice(&target.0[1..]);
+                    if let Some(v) = Self::find_var_in_module(child, &sub, use_4state) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+
+        // Look for a variable whose path matches exactly
+        for var in module.variables.values() {
+            if var.path == *target {
+                let value = unsafe {
+                    read_native_value(
+                        var.current_values[0],
+                        var.native_bytes,
+                        use_4state,
+                        var.width as u32,
+                        false,
+                    )
+                };
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    pub fn ensure_comb_updated(&mut self) {
+        if self.comb_dirty {
+            self.ir.eval_comb_full(&mut self.mask_cache);
+            self.comb_dirty = false;
+        }
+    }
+
+    pub fn mark_comb_dirty(&mut self) {
+        self.comb_dirty = true;
     }
 
     pub fn get_clock(&self, port: &str) -> Option<Event> {

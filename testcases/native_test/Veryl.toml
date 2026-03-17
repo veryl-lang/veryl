@@ -1,0 +1,10 @@
+[project]
+name    = "native_test"
+version = "0.1.0"
+
+[build]
+clock_type = "posedge"
+reset_type = "async_low"
+sources    = ["src"]
+
+[test]

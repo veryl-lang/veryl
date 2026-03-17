@@ -17,6 +17,7 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::FunctionCall;
 use veryl_analyzer::ir::{SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant};
 use veryl_analyzer::value::{MaskCache, ValueU64};
+use veryl_parser::resource_table::StrId;
 
 /// A single block within a ProtoStatements list: either interpreted or JIT-compiled.
 pub enum ProtoStatementBlock {
@@ -74,6 +75,11 @@ pub enum SystemFunctionCall {
         elements: Vec<(*mut u8, Option<*mut u8>, usize, bool)>,
         width: usize,
     },
+    Assert {
+        condition: Expression,
+        message: Option<String>,
+    },
+    Finish,
 }
 
 #[derive(Clone)]
@@ -90,6 +96,18 @@ pub struct AssignDynamicStatement {
     pub expr: Expression,
 }
 
+#[derive(Clone, Debug)]
+pub enum ProtoTbMethodKind {
+    ClockNext { count: Option<ProtoExpression> },
+    ResetAssert,
+}
+
+#[derive(Clone)]
+pub enum TbMethodKind {
+    ClockNext { count: Option<Expression> },
+    ResetAssert,
+}
+
 #[derive(Clone)]
 pub enum Statement {
     Assign(AssignStatement),
@@ -98,6 +116,7 @@ pub enum Statement {
     Binary(FuncPtr, *const u8, *const u8),
     BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
     SystemFunctionCall(SystemFunctionCall),
+    TbMethodCall { inst: StrId, method: TbMethodKind },
 }
 
 impl Statement {
@@ -116,6 +135,7 @@ impl Statement {
             Statement::Binary(_, _, _) => "Binary",
             Statement::BinaryBatch(_, _) => "BinaryBatch",
             Statement::SystemFunctionCall(_) => "SystemFunctionCall",
+            Statement::TbMethodCall { .. } => "TbMethodCall",
         }
     }
 
@@ -133,6 +153,7 @@ impl Statement {
                 }
             },
             Statement::SystemFunctionCall(x) => x.eval_step(mask_cache),
+            Statement::TbMethodCall { .. } => (),
         }
     }
 
@@ -143,6 +164,7 @@ impl Statement {
             Statement::If(x) => x.gather_variable(inputs, outputs),
             Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) => (),
             Statement::SystemFunctionCall(x) => x.gather_variable(inputs),
+            Statement::TbMethodCall { .. } => (),
         }
     }
 }
@@ -246,6 +268,16 @@ impl SystemFunctionCall {
                     }
                 }
             }
+            SystemFunctionCall::Assert { condition, message } => {
+                let val = condition.eval(mask_cache);
+                if val.payload_u64() == 0 {
+                    let msg = message.as_deref().unwrap_or("assertion failed");
+                    panic!("$assert failed: {msg}");
+                }
+            }
+            SystemFunctionCall::Finish => {
+                // Handled by testbench driver
+            }
         }
     }
 
@@ -258,6 +290,11 @@ impl SystemFunctionCall {
                 }
             }
             SystemFunctionCall::Readmemh { .. } => {}
+            SystemFunctionCall::Assert { condition, .. } => {
+                let mut dummy_outputs = vec![];
+                condition.gather_variable(inputs, &mut dummy_outputs);
+            }
+            SystemFunctionCall::Finish => {}
         }
     }
 }
@@ -273,6 +310,11 @@ pub enum ProtoSystemFunctionCall {
         elements: Vec<ReadmemhElement>,
         width: usize,
     },
+    Assert {
+        condition: ProtoExpression,
+        message: Option<String>,
+    },
+    Finish,
 }
 
 #[derive(Clone, Debug)]
@@ -458,6 +500,10 @@ pub enum ProtoStatement {
     If(ProtoIfStatement),
     SystemFunctionCall(ProtoSystemFunctionCall),
     CompiledBlock(CompiledBlockStatement),
+    TbMethodCall {
+        inst: StrId,
+        method: ProtoTbMethodKind,
+    },
 }
 
 impl ProtoStatement {
@@ -468,6 +514,7 @@ impl ProtoStatement {
             ProtoStatement::If(x) => x.can_build_binary(),
             ProtoStatement::SystemFunctionCall(_) => false,
             ProtoStatement::CompiledBlock(_) => false,
+            ProtoStatement::TbMethodCall { .. } => false,
         }
     }
 
@@ -519,11 +566,16 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                    condition.gather_variable_offsets(inputs);
+                }
+                ProtoSystemFunctionCall::Finish => {}
             },
             ProtoStatement::CompiledBlock(x) => {
                 inputs.extend_from_slice(&x.input_offsets);
                 outputs.extend_from_slice(&x.output_offsets);
             }
+            ProtoStatement::TbMethodCall { .. } => {}
         }
     }
 
@@ -560,6 +612,7 @@ impl ProtoStatement {
                     }
                 }
             }
+            ProtoStatement::TbMethodCall { .. } => {}
         }
         result
     }
@@ -645,11 +698,37 @@ impl ProtoStatement {
                             width: *width,
                         })
                     }
+                    ProtoSystemFunctionCall::Assert { condition, message } => {
+                        let condition =
+                            condition.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                        Statement::SystemFunctionCall(SystemFunctionCall::Assert {
+                            condition,
+                            message: message.clone(),
+                        })
+                    }
+                    ProtoSystemFunctionCall::Finish => {
+                        Statement::SystemFunctionCall(SystemFunctionCall::Finish)
+                    }
                 },
                 ProtoStatement::CompiledBlock(x) => {
                     let adjusted_ff = (ff_values_ptr as *const u8).offset(x.ff_delta_bytes);
                     let adjusted_comb = (comb_values_ptr as *const u8).offset(x.comb_delta_bytes);
                     Statement::Binary(x.func, adjusted_ff, adjusted_comb)
+                }
+                ProtoStatement::TbMethodCall { inst, method } => {
+                    let method = match method {
+                        ProtoTbMethodKind::ClockNext { count } => {
+                            let count = count.as_ref().map(|e| {
+                                e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
+                            });
+                            TbMethodKind::ClockNext { count }
+                        }
+                        ProtoTbMethodKind::ResetAssert => TbMethodKind::ResetAssert,
+                    };
+                    Statement::TbMethodCall {
+                        inst: *inst,
+                        method,
+                    }
                 }
             }
         }
@@ -672,6 +751,7 @@ impl ProtoStatement {
             ProtoStatement::If(x) => x.build_binary(context, builder, is_last),
             ProtoStatement::SystemFunctionCall(_) => None,
             ProtoStatement::CompiledBlock(_) => None,
+            ProtoStatement::TbMethodCall { .. } => None,
         }
     }
 }
@@ -1437,8 +1517,37 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         },
                     )]
                 }
+                SystemFunctionKind::Assert(cond_input, msg_input) => {
+                    let condition: ProtoExpression = Conv::conv(context, &cond_input.0)?;
+                    let message = msg_input.as_ref().and_then(|m| extract_string_value(&m.0));
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Assert { condition, message },
+                    )]
+                }
+                SystemFunctionKind::Finish => {
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Finish,
+                    )]
+                }
                 _ => return None,
             },
+            air::Statement::TbMethodCall(x) => {
+                let method = match &x.method {
+                    air::TbMethod::ClockNext { count } => {
+                        let count = if let Some(expr) = count {
+                            Some(Conv::conv(context, expr)?)
+                        } else {
+                            None
+                        };
+                        ProtoTbMethodKind::ClockNext { count }
+                    }
+                    air::TbMethod::ResetAssert => ProtoTbMethodKind::ResetAssert,
+                };
+                vec![ProtoStatement::TbMethodCall {
+                    inst: x.inst,
+                    method,
+                }]
+            }
             _ => return None,
         };
 

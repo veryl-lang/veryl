@@ -13,10 +13,10 @@ veryl_testcase.*
 /book/po/*~
 /testcases/working/
 /testcases/map/dependencies/
-/testcases/filelist/dependencies/
-/testcases/filelist/src/*.sv
-/testcases/filelist/*.f
-/testcases/filelist/Veryl.lock
+/testcases/*/dependencies/
+/testcases/*/src/*.sv*
+/testcases/*/*.f
+/testcases/*/Veryl.lock
 /testcases/error/dependencies/
 /crates/metadata/std/
 /crates/std/veryl/*.f

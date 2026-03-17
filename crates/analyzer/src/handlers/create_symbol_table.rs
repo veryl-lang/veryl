@@ -1913,6 +1913,29 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
 
                 let definition = definition_table::insert(Definition::Module(arg.clone()));
+                // Check for #[test(native)] attribute on module declaration
+                let test = (|| {
+                    let attrs = attribute_table::get(&arg.module.module_token.token);
+                    for attr in attrs {
+                        if let Attr::Test(_, top) = attr {
+                            let path = if let TokenSource::File { path, .. } =
+                                arg.identifier.identifier_token.token.source
+                            {
+                                path
+                            } else {
+                                continue;
+                            };
+                            let top = top.or(Some(name));
+                            return Some(TestProperty {
+                                r#type: TestType::Native,
+                                path,
+                                top,
+                            });
+                        }
+                    }
+                    None
+                })();
+
                 let property = ModuleProperty {
                     range: arg.into(),
                     proto,
@@ -1923,6 +1946,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     default_clock,
                     default_reset,
                     definition,
+                    test,
                 };
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,

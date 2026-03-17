@@ -34,6 +34,7 @@ pub use shape::{Shape, ShapeRef};
 pub use signature::Signature;
 pub use statement::{
     AssignDestination, AssignStatement, IfResetStatement, IfStatement, Statement, StatementBlock,
+    TbMethod, TbMethodCall,
 };
 pub use system_function::{Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind};
 pub use variable::{

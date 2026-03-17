@@ -20,6 +20,7 @@ pub mod sv_system_function;
 pub mod symbol;
 pub mod symbol_path;
 pub mod symbol_table;
+pub mod tb_component;
 pub mod type_dag;
 pub mod r#unsafe;
 pub mod unsafe_table;

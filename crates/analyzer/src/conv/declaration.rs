@@ -1,4 +1,6 @@
 use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
+use crate::attribute::{AllowItem, Attribute};
+use crate::attribute_table;
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::bind::check_bind_target;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -20,8 +22,8 @@ use crate::ir::{
     VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::namespace::DefineContext;
-use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind};
-use crate::symbol_path::GenericSymbolPath;
+use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind, TbComponentKind};
+use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::value::Value;
 use crate::{HashMap, ir_error};
@@ -1081,6 +1083,47 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         let in_module = context.is_affiliated(Affiliation::Module);
         let token = value.inst.inst_token.token;
         check_inst(context, in_module, &token, &value.component_instantiation);
+
+        // Generate clock/reset variable for $tb component instances
+        let path: SymbolPathNamespace = value
+            .component_instantiation
+            .scoped_identifier
+            .as_ref()
+            .into();
+        if let Ok(symbol) = symbol_table::resolve(&path)
+            && let SymbolKind::TbComponent(ref tb_prop) = symbol.found.kind
+        {
+            let inst_token: TokenRange = value.component_instantiation.identifier.as_ref().into();
+            let inst_name = value
+                .component_instantiation
+                .identifier
+                .identifier_token
+                .token
+                .text;
+            let var_path = ir::VarPath::new(inst_name);
+            let type_kind = match tb_prop.kind {
+                TbComponentKind::ClockGen => ir::TypeKind::Clock,
+                TbComponentKind::ResetGen => ir::TypeKind::Reset,
+            };
+            let ir_type = ir::Type {
+                kind: type_kind,
+                width: ir::Shape::new(vec![Some(1)]),
+                ..Default::default()
+            };
+            eval_variable(
+                context,
+                &var_path,
+                ir::VarKind::Variable,
+                &ir_type,
+                ClockDomain::None,
+                inst_token,
+            );
+
+            // Suppress UnassignVariable for $tb component variables
+            attribute_table::insert(inst_token, Attribute::Allow(AllowItem::UnassignVariable));
+
+            return Ok(ir::Declaration::Null);
+        }
 
         let clock_domain = if let Ok(symbol) =
             symbol_table::resolve(value.component_instantiation.identifier.as_ref())
