@@ -3349,8 +3349,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                     }
                 }
                 air::Factor::Value(comptime) => {
-                    let value = comptime.get_value().ok().cloned().unwrap();
-                    let width = comptime.r#type.total_width().unwrap();
+                    let value = comptime
+                        .get_value()
+                        .map_err(|_| SimulatorError::unresolved_expression(&comptime.token))?
+                        .clone();
+                    let width = comptime
+                        .r#type
+                        .total_width()
+                        .ok_or_else(|| SimulatorError::unresolved_expression(&comptime.token))?;
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     Ok(ProtoExpression::Value {
@@ -3392,9 +3398,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                         expr_context,
                     })
                 }
-                air::Factor::SystemFunctionCall(_) => {
-                    unreachable!("system function calls are resolved by the analyzer")
-                }
+                air::Factor::SystemFunctionCall(call) => match &call.kind {
+                    air::SystemFunctionKind::Signed(input)
+                    | air::SystemFunctionKind::Unsigned(input) => Conv::conv(context, &input.0),
+                    _ => {
+                        unreachable!("system function calls are resolved by the analyzer")
+                    }
+                },
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
                     Err(SimulatorError::unsupported_description(&comptime.token))
                 }
@@ -3429,6 +3439,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             air::Expression::Binary(x, op, y, comptime) => {
+                // Op::As is a type cast: just return the left operand unchanged.
+                // The right operand is a type, not a runtime value.
+                if matches!(op, Op::As) {
+                    return Conv::conv(context, x.as_ref());
+                }
+
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;

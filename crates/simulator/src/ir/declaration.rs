@@ -459,18 +459,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         for output in &src.outputs {
             for (child_var_id, parent_dst) in output.id.iter().zip(output.dst.iter()) {
                 let child_meta = child_variable_meta.get(child_var_id).unwrap();
-                let child_element = &child_meta.elements[0];
-
-                let child_expr = ProtoExpression::Variable {
-                    offset: child_element.current_offset,
-                    is_ff: child_element.is_ff,
-                    select: None,
-                    width: child_meta.width,
-                    expr_context: ExpressionContext {
-                        width: child_meta.width,
-                        signed: false,
-                    },
-                };
 
                 let parent_scope = context.scope();
                 let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
@@ -478,25 +466,55 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     .index
                     .eval_value(&mut parent_scope.analyzer_context)
                     .unwrap();
-                let parent_index = parent_meta.r#type.array.calc_index(&parent_index).unwrap();
-                let parent_element = &parent_meta.elements[parent_index];
 
-                let (dst_offset, dst_is_ff) = if parent_element.is_ff {
-                    (parent_element.next_offset, true)
+                // Determine which parent elements to connect.
+                // When the parent destination has no index and the variable is an
+                // array, connect each element individually (array-to-array port).
+                let parent_element_indices: Vec<usize> = if let Some(idx) =
+                    parent_meta.r#type.array.calc_index(&parent_index)
+                {
+                    vec![idx]
+                } else if parent_index.is_empty() && !parent_meta.r#type.array.is_empty() {
+                    (0..parent_meta.elements.len()).collect()
                 } else {
-                    (parent_element.current_offset, false)
+                    panic!(
+                        "calc_index failed for output port destination (index {:?}, array {:?})",
+                        parent_index, parent_meta.r#type.array,
+                    );
                 };
 
-                all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                    dst_offset,
-                    dst_is_ff,
-                    dst_width: parent_meta.width,
-                    select: None,
-                    rhs_select: None,
-                    expr: child_expr,
-                    dst_ff_current_offset: parent_element.current_offset,
-                    token: TokenRange::default(),
-                }));
+                for (elem_idx, &parent_elem_idx) in parent_element_indices.iter().enumerate() {
+                    let child_element = &child_meta.elements[elem_idx];
+                    let parent_element = &parent_meta.elements[parent_elem_idx];
+
+                    let child_expr = ProtoExpression::Variable {
+                        offset: child_element.current_offset,
+                        is_ff: child_element.is_ff,
+                        select: None,
+                        width: child_meta.width,
+                        expr_context: ExpressionContext {
+                            width: child_meta.width,
+                            signed: false,
+                        },
+                    };
+
+                    let (dst_offset, dst_is_ff) = if parent_element.is_ff {
+                        (parent_element.next_offset, true)
+                    } else {
+                        (parent_element.current_offset, false)
+                    };
+
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst_offset,
+                        dst_is_ff,
+                        dst_width: parent_meta.width,
+                        select: None,
+                        rhs_select: None,
+                        expr: child_expr,
+                        dst_ff_current_offset: parent_element.current_offset,
+                        token: TokenRange::default(),
+                    }));
+                }
             }
         }
 

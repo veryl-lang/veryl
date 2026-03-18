@@ -56,6 +56,8 @@ pub enum SystemFunctionKind {
     Display(Vec<Input>),
     Assert(Input, Option<Input>),
     Finish,
+    Signed(Input),
+    Unsigned(Input),
 }
 
 fn create_input(
@@ -218,6 +220,28 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
+            "$signed" => {
+                if args.len() != 1 {
+                    return Err(ir_error!(token));
+                }
+                let arg0 = create_input(context, name, None, args.remove(0));
+                comptime.expr_context.signed = true;
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Signed(arg0),
+                    comptime,
+                })
+            }
+            "$unsigned" => {
+                if args.len() != 1 {
+                    return Err(ir_error!(token));
+                }
+                let arg0 = create_input(context, name, None, args.remove(0));
+                comptime.expr_context.signed = false;
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Unsigned(arg0),
+                    comptime,
+                })
+            }
             _ => Err(ir_error!(token)),
         }
     }
@@ -263,6 +287,9 @@ impl SystemFunctionCall {
             SystemFunctionKind::Display(_) => None,
             SystemFunctionKind::Assert(_, _) => None,
             SystemFunctionKind::Finish => None,
+            SystemFunctionKind::Signed(x) | SystemFunctionKind::Unsigned(x) => {
+                x.0.eval_value(context)
+            }
         }
     }
 
@@ -283,6 +310,13 @@ impl SystemFunctionCall {
             SystemFunctionKind::Display(_) => self.comptime.clone(),
             SystemFunctionKind::Assert(_, _) => self.comptime.clone(),
             SystemFunctionKind::Finish => self.comptime.clone(),
+            SystemFunctionKind::Signed(_) | SystemFunctionKind::Unsigned(_) => {
+                let mut ret = self.comptime.clone();
+                if let Some(x) = value {
+                    ret.value = ValueVariant::Numeric(x);
+                }
+                ret
+            }
         }
     }
 
@@ -320,6 +354,8 @@ impl fmt::Display for SystemFunctionCall {
                 }
             }
             SystemFunctionKind::Finish => "$finish()".fmt(f),
+            SystemFunctionKind::Signed(x) => format!("$signed({x})").fmt(f),
+            SystemFunctionKind::Unsigned(x) => format!("$unsigned({x})").fmt(f),
         }
     }
 }

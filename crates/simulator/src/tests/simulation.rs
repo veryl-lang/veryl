@@ -2670,3 +2670,202 @@ fn finish_in_initial() {
         sim.step(&Event::Initial);
     }
 }
+
+// Regression: Op::As in case expression (previously hit unimplemented!() in
+// eval_value_binary and UnresolvedExpression for the type operand).
+#[test]
+fn case_as_enum_cast() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        sel: input  logic<2>,
+        out: output logic<8>,
+    ) {
+        enum Mode: logic<2> {
+            A = 2'd0,
+            B = 2'd1,
+            C = 2'd2,
+        }
+
+        always_comb {
+            case sel as Mode {
+                Mode::A: out = 8'd10;
+                Mode::B: out = 8'd20;
+                Mode::C: out = 8'd30;
+                default: out = 8'd0;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        sim.set("sel", Value::new(0, 2, false));
+        sim.step(&Event::Clock(VarId::default()));
+        assert_eq!(sim.get("out").unwrap(), Value::new(10, 8, false));
+
+        sim.set("sel", Value::new(1, 2, false));
+        sim.step(&Event::Clock(VarId::default()));
+        assert_eq!(sim.get("out").unwrap(), Value::new(20, 8, false));
+
+        sim.set("sel", Value::new(2, 2, false));
+        sim.step(&Event::Clock(VarId::default()));
+        assert_eq!(sim.get("out").unwrap(), Value::new(30, 8, false));
+    }
+}
+
+// Regression: $signed/$unsigned in expressions (previously fell through to
+// the catch-all Err in SystemFunctionCall::new, making the containing
+// always_comb an Unsupported declaration).
+#[test]
+fn signed_unsigned_in_expr() {
+    let code = r#"
+    module Top (
+        a  : input  logic<8>,
+        b  : input  logic<8>,
+        out: output logic<8>,
+    ) {
+        // $signed must not cause IR build failure
+        always_comb {
+            out = $signed(a) + $signed(b);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        sim.set("a", Value::new(3, 8, false));
+        sim.set("b", Value::new(5, 8, false));
+        sim.step(&Event::Clock(VarId::default()));
+        assert_eq!(sim.get("out").unwrap(), Value::new(8, 8, false));
+    }
+}
+
+// Regression: array output port on inst declaration (previously panicked at
+// calc_index().unwrap() because array ports have no scalar index).
+#[test]
+fn inst_array_output_port() {
+    let code = r#"
+    module Top (
+        clk : input  clock,
+        rst : input  reset,
+        out0: output logic<8>,
+        out1: output logic<8>,
+    ) {
+        var arr: logic<8> [2];
+
+        inst u: Inner (
+            clk,
+            rst,
+            o_arr: arr,
+        );
+
+        assign out0 = arr[0];
+        assign out1 = arr[1];
+    }
+
+    module Inner (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_arr: output logic<8> [2],
+    ) {
+        always_ff {
+            if_reset {
+                o_arr[0] = 8'd0;
+                o_arr[1] = 8'd0;
+            } else {
+                o_arr[0] = o_arr[0] + 8'd1;
+                o_arr[1] = o_arr[1] + 8'd3;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("out0").unwrap(), Value::new(0, 8, false));
+        assert_eq!(sim.get("out1").unwrap(), Value::new(0, 8, false));
+
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("out0").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("out1").unwrap(), Value::new(15, 8, false));
+    }
+}
+
+// Regression: comb-only variable read by event statements was incorrectly
+// inlined away by optimize_comb, leaving the event statement reading a stale
+// value.  The split comb/ff pattern (always_comb feeding always_ff) in a
+// child module must work identically to the single-block pattern.
+#[test]
+fn inst_split_comb_ff_counter() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        cnt: output logic<32>,
+    ) {
+        inst u: Inner (
+            clk,
+            rst,
+            out: cnt,
+        );
+    }
+
+    module Inner (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        var next_val: logic<32>;
+
+        always_comb {
+            next_val = out + 1;
+        }
+
+        always_ff {
+            if_reset {
+                out = 0;
+            } else {
+                out = next_val;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("cnt").unwrap(), Value::new(0, 32, false));
+
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("cnt").unwrap(), Value::new(10, 32, false));
+    }
+}
