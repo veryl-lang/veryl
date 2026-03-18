@@ -477,6 +477,7 @@ token_with_comments!(Star);
 
 token_with_comments!(AssignmentOperator);
 token_with_comments!(DiamondOperator);
+token_with_comments!(Operator01);
 token_with_comments!(Operator02);
 token_with_comments!(Operator03);
 token_with_comments!(Operator04);
@@ -484,10 +485,6 @@ token_with_comments!(Operator05);
 token_with_comments!(Operator06);
 token_with_comments!(Operator07);
 token_with_comments!(Operator08);
-token_with_comments!(Operator09);
-token_with_comments!(Operator10);
-token_with_comments!(Operator11);
-token_with_comments!(Operator12);
 token_with_comments!(UnaryOperator);
 
 token_with_comments!(Alias);
