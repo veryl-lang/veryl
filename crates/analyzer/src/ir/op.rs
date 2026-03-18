@@ -1495,6 +1495,10 @@ impl Op {
                     }
                 }
             }
+            Op::As => {
+                // Type cast: value is unchanged, just reinterpreted
+                x.clone()
+            }
             _ => unimplemented!(),
         }
     }

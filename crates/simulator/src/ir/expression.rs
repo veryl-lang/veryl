@@ -3429,6 +3429,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             air::Expression::Binary(x, op, y, comptime) => {
+                // Op::As is a type cast: just return the left operand unchanged.
+                // The right operand is a type, not a runtime value.
+                if matches!(op, Op::As) {
+                    return Conv::conv(context, x.as_ref());
+                }
+
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
