@@ -53,7 +53,7 @@ pub struct TypeDag {
     source: u32,
     candidates: Vec<TypeDagCandidate>,
     errors: Vec<DagError>,
-    dag_owned: HashMap<u32, Vec<u32>>,
+    dag_owned: HashMap<u32, HashSet<u32>>,
     file_dag: Dag<(), (), u32>,
     file_nodes: BiMap<PathId, u32>,
 }
@@ -324,10 +324,7 @@ impl TypeDag {
         if self.exist_edge(child, parent) {
             self.remove_edge(child, parent);
         }
-        self.dag_owned
-            .entry(parent)
-            .and_modify(|x| x.push(child))
-            .or_insert(vec![child]);
+        self.dag_owned.entry(parent).or_default().insert(child);
     }
 
     fn is_dag_owned(&self, parent: u32, child: u32) -> bool {
