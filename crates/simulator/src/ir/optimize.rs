@@ -241,10 +241,13 @@ pub fn optimize_comb(
     event_stmts: &HashMap<super::Event, Vec<ProtoStatement>>,
     observable_comb: &HashSet<isize>,
 ) -> Vec<ProtoStatement> {
-    // Step 1: Count reads of each variable across all comb and event statements
+    // Step 1: Count reads of each variable across all comb and event statements.
+    // Track comb-only reads separately so we only inline within comb.
     let mut read_counts: HashMap<CombKey, usize> = HashMap::default();
+    let mut comb_only_reads: HashMap<CombKey, usize> = HashMap::default();
     for stmt in &comb_stmts {
         count_stmt_reads(stmt, &mut read_counts);
+        count_stmt_reads(stmt, &mut comb_only_reads);
     }
     for stmts in event_stmts.values() {
         for stmt in stmts {
@@ -299,8 +302,9 @@ pub fn optimize_comb(
                     continue;
                 }
 
-                if count == 1 && !is_observable {
-                    // Single-use, not externally visible: inline the expression
+                let comb_reads = comb_only_reads.get(&key).copied().unwrap_or(0);
+                if comb_reads == 1 && count == 1 && !is_observable {
+                    // Single-use within comb, not externally visible: inline
                     inline_map.insert(key, x.expr.clone());
                     continue;
                 }
