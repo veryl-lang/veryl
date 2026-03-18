@@ -289,6 +289,7 @@ impl_token_range_singular!(AllBit);
 // Operator
 impl_token_range_singular!(AssignmentOperator);
 impl_token_range_singular!(DiamondOperator);
+impl_token_range_singular!(Operator01);
 impl_token_range_singular!(Operator02);
 impl_token_range_singular!(Operator03);
 impl_token_range_singular!(Operator04);
@@ -296,10 +297,6 @@ impl_token_range_singular!(Operator05);
 impl_token_range_singular!(Operator06);
 impl_token_range_singular!(Operator07);
 impl_token_range_singular!(Operator08);
-impl_token_range_singular!(Operator09);
-impl_token_range_singular!(Operator10);
-impl_token_range_singular!(Operator11);
-impl_token_range_singular!(Operator12);
 impl_token_range_singular!(UnaryOperator);
 
 // Symbol
@@ -545,44 +542,26 @@ impl From<&IfExpression> for TokenRange {
 impl_token_ext!(IfExpression);
 
 expression_token_range!(Expression01, expression02, expression01_list, expression02);
-expression_token_range!(Expression02, expression03, expression02_list, expression03);
-expression_token_range!(Expression03, expression04, expression03_list, expression04);
-expression_token_range!(Expression04, expression05, expression04_list, expression05);
-expression_token_range!(Expression05, expression06, expression05_list, expression06);
-expression_token_range!(Expression06, expression07, expression06_list, expression07);
-expression_token_range!(Expression07, expression08, expression07_list, expression08);
-expression_token_range!(Expression08, expression09, expression08_list, expression09);
-expression_token_range!(Expression09, expression10, expression09_list, expression10);
-expression_token_range!(Expression10, expression11, expression10_list, expression11);
-expression_token_range!(Expression11, expression12, expression11_list, expression12);
 
-impl From<&Expression12> for TokenRange {
-    fn from(value: &Expression12) -> Self {
-        let mut ret: TokenRange = value.expression13.as_ref().into();
-        if let Some(ref x) = value.expression12_opt {
+impl From<&Expression02> for TokenRange {
+    fn from(value: &Expression02) -> Self {
+        let mut ret: TokenRange = value.factor.as_ref().into();
+        if let Some(ref x) = value.expression02_opt {
             ret.set_end(x.casting_type.as_ref().into());
         };
-        ret
-    }
-}
-impl_token_ext!(Expression12);
-
-impl From<&Expression13> for TokenRange {
-    fn from(value: &Expression13) -> Self {
-        let mut ret: TokenRange = value.factor.as_ref().into();
-        if let Some(x) = value.expression13_list.first() {
-            ret.set_beg(match x.expression13_list_group.as_ref() {
-                Expression13ListGroup::UnaryOperator(x) => x.unary_operator.as_ref().into(),
-                Expression13ListGroup::Operator10(x) => x.operator10.as_ref().into(),
-                Expression13ListGroup::Operator06(x) => x.operator06.as_ref().into(),
-                Expression13ListGroup::Operator05(x) => x.operator05.as_ref().into(),
-                Expression13ListGroup::Operator04(x) => x.operator04.as_ref().into(),
+        if let Some(x) = value.expression02_list.first() {
+            ret.set_beg(match x.expression02_op.as_ref() {
+                Expression02Op::UnaryOperator(x) => x.unary_operator.as_ref().into(),
+                Expression02Op::Operator06(x) => x.operator06.as_ref().into(),
+                Expression02Op::Operator05(x) => x.operator05.as_ref().into(),
+                Expression02Op::Operator03(x) => x.operator03.as_ref().into(),
+                Expression02Op::Operator04(x) => x.operator04.as_ref().into(),
             });
         }
         ret
     }
 }
-impl_token_ext!(Expression13);
+impl_token_ext!(Expression02);
 
 impl From<&Factor> for TokenRange {
     fn from(value: &Factor) -> Self {

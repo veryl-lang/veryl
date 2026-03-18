@@ -574,140 +574,36 @@ impl VerylWalker for Formatter {
         self.expression02(&arg.expression02);
         for x in &arg.expression01_list {
             self.space(1);
-            self.operator02(&x.operator02);
+            self.expression01_op(&x.expression01_op);
             self.space(1);
             self.expression02(&x.expression02);
+        }
+    }
+
+    /// Semantic action for non-terminal 'Expression01Op'
+    #[inline(never)]
+    fn expression01_op(&mut self, arg: &Expression01Op) {
+        match arg {
+            Expression01Op::Operator01(x) => self.operator01(&x.operator01),
+            Expression01Op::Operator02(x) => self.operator02(&x.operator02),
+            Expression01Op::Operator03(x) => self.operator03(&x.operator03),
+            Expression01Op::Operator04(x) => self.operator04(&x.operator04),
+            Expression01Op::Operator05(x) => self.operator05(&x.operator05),
+            Expression01Op::Operator06(x) => self.operator06(&x.operator06),
+            Expression01Op::Operator07(x) => self.operator07(&x.operator07),
+            Expression01Op::Star(x) => self.star(&x.star),
+            Expression01Op::Operator08(x) => self.operator08(&x.operator08),
         }
     }
 
     /// Semantic action for non-terminal 'Expression02'
     #[inline(never)]
     fn expression02(&mut self, arg: &Expression02) {
-        self.expression03(&arg.expression03);
         for x in &arg.expression02_list {
-            self.space(1);
-            self.operator03(&x.operator03);
-            self.space(1);
-            self.expression03(&x.expression03);
+            self.expression02_op(&x.expression02_op);
         }
-    }
-
-    /// Semantic action for non-terminal 'Expression03'
-    #[inline(never)]
-    fn expression03(&mut self, arg: &Expression03) {
-        self.expression04(&arg.expression04);
-        for x in &arg.expression03_list {
-            self.space(1);
-            self.operator04(&x.operator04);
-            self.space(1);
-            self.expression04(&x.expression04);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression04'
-    #[inline(never)]
-    fn expression04(&mut self, arg: &Expression04) {
-        self.expression05(&arg.expression05);
-        for x in &arg.expression04_list {
-            self.space(1);
-            self.operator05(&x.operator05);
-            self.space(1);
-            self.expression05(&x.expression05);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression05'
-    #[inline(never)]
-    fn expression05(&mut self, arg: &Expression05) {
-        self.expression06(&arg.expression06);
-        for x in &arg.expression05_list {
-            self.space(1);
-            self.operator06(&x.operator06);
-            self.space(1);
-            self.expression06(&x.expression06);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression06'
-    #[inline(never)]
-    fn expression06(&mut self, arg: &Expression06) {
-        self.expression07(&arg.expression07);
-        for x in &arg.expression06_list {
-            self.space(1);
-            self.operator07(&x.operator07);
-            self.space(1);
-            self.expression07(&x.expression07);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression07'
-    #[inline(never)]
-    fn expression07(&mut self, arg: &Expression07) {
-        self.expression08(&arg.expression08);
-        for x in &arg.expression07_list {
-            self.space(1);
-            self.operator08(&x.operator08);
-            self.space(1);
-            self.expression08(&x.expression08);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression08'
-    #[inline(never)]
-    fn expression08(&mut self, arg: &Expression08) {
-        self.expression09(&arg.expression09);
-        for x in &arg.expression08_list {
-            self.space(1);
-            self.operator09(&x.operator09);
-            self.space(1);
-            self.expression09(&x.expression09);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression09'
-    #[inline(never)]
-    fn expression09(&mut self, arg: &Expression09) {
-        self.expression10(&arg.expression10);
-        for x in &arg.expression09_list {
-            self.space(1);
-            self.operator10(&x.operator10);
-            self.space(1);
-            self.expression10(&x.expression10);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression10'
-    #[inline(never)]
-    fn expression10(&mut self, arg: &Expression10) {
-        self.expression11(&arg.expression11);
-        for x in &arg.expression10_list {
-            self.space(1);
-            match &*x.expression10_list_group {
-                Expression10ListGroup::Operator11(x) => self.operator11(&x.operator11),
-                Expression10ListGroup::Star(x) => self.star(&x.star),
-            }
-            self.space(1);
-            self.expression11(&x.expression11);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression11'
-    #[inline(never)]
-    fn expression11(&mut self, arg: &Expression11) {
-        self.expression12(&arg.expression12);
-        for x in &arg.expression11_list {
-            self.space(1);
-            self.operator12(&x.operator12);
-            self.space(1);
-            self.expression12(&x.expression12);
-        }
-    }
-
-    /// Semantic action for non-terminal 'Expression12'
-    #[inline(never)]
-    fn expression12(&mut self, arg: &Expression12) {
-        self.expression13(&arg.expression13);
-        if let Some(x) = &arg.expression12_opt {
+        self.factor(&arg.factor);
+        if let Some(x) = &arg.expression02_opt {
             self.space(1);
             self.r#as(&x.r#as);
             self.space(1);

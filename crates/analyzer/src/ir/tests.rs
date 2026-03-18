@@ -2260,3 +2260,81 @@ fn assignment_operator_with_array_index() {
 
     check_ir(code, exp);
 }
+
+#[test]
+fn operator_precedence() {
+    let code = r#"
+    module ModuleA (
+        a: input  logic<32>,
+        b: input  logic<32>,
+        c: input  logic<32>,
+        d: output logic<32>,
+        e: output logic<32>,
+        f: output logic<32>,
+        g: output logic<32>,
+        h: output logic,
+        i: output logic,
+        j: output logic<32>,
+        k: output logic<32>,
+    ) {
+        // mul binds tighter than add: a + b * c => a + (b * c)
+        always_comb { d = a + b * c; }
+        // add binds tighter than shift: a << b + c => a << (b + c)
+        always_comb { e = a << b + c; }
+        // add binds tighter than compare: a + b <: c => (a + b) <: c
+        always_comb { f = a + b <: c; }
+        // power binds tightest: a * b ** c => a * (b ** c)
+        always_comb { g = a * b ** c; }
+        // logical: a || b && c => a || (b && c)
+        always_comb { h = a || b && c; }
+        // bitwise: a | b & c => a | (b & c)
+        always_comb { i = a | b & c; }
+        // left-associativity: a - b - c => (a - b) - c
+        always_comb { j = a - b - c; }
+        // mixed compare and equality: a + b == c => (a + b) == c
+        always_comb { k = a + b == c; }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(a): logic<32> = 32'hxxxxxxxx;
+  input var1(b): logic<32> = 32'hxxxxxxxx;
+  input var2(c): logic<32> = 32'hxxxxxxxx;
+  output var3(d): logic<32> = 32'hxxxxxxxx;
+  output var4(e): logic<32> = 32'hxxxxxxxx;
+  output var5(f): logic<32> = 32'hxxxxxxxx;
+  output var6(g): logic<32> = 32'hxxxxxxxx;
+  output var7(h): logic = 1'hx;
+  output var8(i): logic = 1'hx;
+  output var9(j): logic<32> = 32'hxxxxxxxx;
+  output var10(k): logic<32> = 32'hxxxxxxxx;
+
+  comb {
+    var3 = (var0 + (var1 * var2));
+  }
+  comb {
+    var4 = (var0 << (var1 + var2));
+  }
+  comb {
+    var5 = ((var0 + var1) <: var2);
+  }
+  comb {
+    var6 = (var0 * (var1 ** var2));
+  }
+  comb {
+    var7 = (var0 || (var1 && var2));
+  }
+  comb {
+    var8 = (var0 | (var1 & var2));
+  }
+  comb {
+    var9 = ((var0 - var1) - var2);
+  }
+  comb {
+    var10 = ((var0 + var1) == var2);
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}

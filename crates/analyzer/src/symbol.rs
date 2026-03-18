@@ -1586,65 +1586,10 @@ impl TryFrom<&syntax_tree::Expression> for Type {
         } else {
             return Err(());
         };
-        let value = if value.expression02_list.is_empty() {
-            value.expression03.as_ref()
-        } else {
+        let value = if !value.expression02_list.is_empty() || value.expression02_opt.is_some() {
             return Err(());
-        };
-        let value = if value.expression03_list.is_empty() {
-            value.expression04.as_ref()
         } else {
-            return Err(());
-        };
-        let value = if value.expression04_list.is_empty() {
-            value.expression05.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression05_list.is_empty() {
-            value.expression06.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression06_list.is_empty() {
-            value.expression07.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression07_list.is_empty() {
-            value.expression08.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression08_list.is_empty() {
-            value.expression09.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression09_list.is_empty() {
-            value.expression10.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression10_list.is_empty() {
-            value.expression11.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression11_list.is_empty() {
-            value.expression12.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression12_opt.is_none() {
-            value.expression13.as_ref()
-        } else {
-            return Err(());
-        };
-        let value = if value.expression13_list.is_empty() {
             value.factor.as_ref()
-        } else {
-            return Err(());
         };
 
         match value {

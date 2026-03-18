@@ -324,53 +324,10 @@ impl From<&FixedType> for Factor {
 
 impl From<Factor> for Expression {
     fn from(value: Factor) -> Self {
-        let expression13 = Box::new(Expression13 {
-            expression13_list: vec![],
-            factor: Box::new(value),
-        });
-        let expression12 = Box::new(Expression12 {
-            expression13,
-            expression12_opt: None,
-        });
-        let expression11 = Box::new(Expression11 {
-            expression12,
-            expression11_list: vec![],
-        });
-        let expression10 = Box::new(Expression10 {
-            expression11,
-            expression10_list: vec![],
-        });
-        let expression09 = Box::new(Expression09 {
-            expression10,
-            expression09_list: vec![],
-        });
-        let expression08 = Box::new(Expression08 {
-            expression09,
-            expression08_list: vec![],
-        });
-        let expression07 = Box::new(Expression07 {
-            expression08,
-            expression07_list: vec![],
-        });
-        let expression06 = Box::new(Expression06 {
-            expression07,
-            expression06_list: vec![],
-        });
-        let expression05 = Box::new(Expression05 {
-            expression06,
-            expression05_list: vec![],
-        });
-        let expression04 = Box::new(Expression04 {
-            expression05,
-            expression04_list: vec![],
-        });
-        let expression03 = Box::new(Expression03 {
-            expression04,
-            expression03_list: vec![],
-        });
         let expression02 = Box::new(Expression02 {
-            expression03,
             expression02_list: vec![],
+            factor: Box::new(value),
+            expression02_opt: None,
         });
         let expression01 = Box::new(Expression01 {
             expression02,
@@ -513,59 +470,7 @@ impl Expression {
         if !exp.expression02_list.is_empty() {
             return None;
         }
-
-        let exp = &*exp.expression03;
-        if !exp.expression03_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression04;
-        if !exp.expression04_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression05;
-        if !exp.expression05_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression06;
-        if !exp.expression06_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression07;
-        if !exp.expression07_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression08;
-        if !exp.expression08_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression09;
-        if !exp.expression09_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression10;
-        if !exp.expression10_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression11;
-        if !exp.expression11_list.is_empty() {
-            return None;
-        }
-
-        let exp = &*exp.expression12;
-        if exp.expression12_opt.is_some() {
-            return None;
-        }
-
-        let exp = &*exp.expression13;
-        if !exp.expression13_list.is_empty() {
+        if exp.expression02_opt.is_some() {
             return None;
         }
 

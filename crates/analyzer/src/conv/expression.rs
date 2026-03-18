@@ -50,236 +50,173 @@ impl Conv<&IfExpression> for ir::Expression {
     }
 }
 
+fn resolve_op(op: &Expression01Op) -> (Op, u32) {
+    match op {
+        Expression01Op::Operator01(x) => {
+            let tok = x.operator01.operator01_token.to_string();
+            match tok.as_str() {
+                "||" => (Op::LogicOr, 1),
+                "&&" => (Op::LogicAnd, 2),
+                _ => unreachable!(),
+            }
+        }
+        Expression01Op::Operator03(_) => (Op::BitOr, 3),
+        Expression01Op::Operator04(x) => {
+            let tok = x.operator04.operator04_token.to_string();
+            match tok.as_str() {
+                "^" => (Op::BitXor, 4),
+                "~^" => (Op::BitXnor, 4),
+                _ => unreachable!(),
+            }
+        }
+        Expression01Op::Operator05(_) => (Op::BitAnd, 5),
+        Expression01Op::Operator02(x) => {
+            let tok = x.operator02.operator02_token.to_string();
+            match tok.as_str() {
+                "==" => (Op::Eq, 6),
+                "!=" => (Op::Ne, 6),
+                "==?" => (Op::EqWildcard, 6),
+                "!=?" => (Op::NeWildcard, 6),
+                "<=" => (Op::LessEq, 7),
+                ">=" => (Op::GreaterEq, 7),
+                "<:" => (Op::Less, 7),
+                ">:" => (Op::Greater, 7),
+                "<<<" => (Op::ArithShiftL, 8),
+                ">>>" => (Op::ArithShiftR, 8),
+                "<<" => (Op::LogicShiftL, 8),
+                ">>" => (Op::LogicShiftR, 8),
+                _ => unreachable!(),
+            }
+        }
+        Expression01Op::Operator06(x) => {
+            let tok = x.operator06.operator06_token.to_string();
+            match tok.as_str() {
+                "+" => (Op::Add, 9),
+                "-" => (Op::Sub, 9),
+                _ => unreachable!(),
+            }
+        }
+        Expression01Op::Operator07(x) => {
+            let tok = x.operator07.operator07_token.to_string();
+            match tok.as_str() {
+                "/" => (Op::Div, 10),
+                "%" => (Op::Rem, 10),
+                _ => unreachable!(),
+            }
+        }
+        Expression01Op::Star(_) => (Op::Mul, 10),
+        Expression01Op::Operator08(_) => (Op::Pow, 11),
+    }
+}
+
+fn prec_climb(
+    context: &mut Context,
+    exprs: &[&Expression02],
+    ops: &[(Op, u32)],
+    lo: usize,
+    hi: usize,
+) -> IrResult<ir::Expression> {
+    if lo == hi {
+        return Conv::conv(context, exprs[lo]);
+    }
+    // find the lowest-precedence (leftmost if tied) operator in [lo..hi)
+    let mut min_idx = lo;
+    let mut min_prec = ops[lo].1;
+    for (i, op) in ops.iter().enumerate().take(hi).skip(lo + 1) {
+        if op.1 <= min_prec {
+            min_idx = i;
+            min_prec = op.1;
+        }
+    }
+    let left = prec_climb(context, exprs, ops, lo, min_idx)?;
+    let right = prec_climb(context, exprs, ops, min_idx + 1, hi)?;
+    let token = TokenRange::from_range(&left.token_range(), &right.token_range());
+    let comptime = Box::new(Comptime::create_unknown(token));
+    Ok(ir::Expression::Binary(
+        Box::new(left),
+        ops[min_idx].0,
+        Box::new(right),
+        comptime,
+    ))
+}
+
 impl Conv<&Expression01> for ir::Expression {
     fn conv(context: &mut Context, value: &Expression01) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression02.as_ref())?;
-        for x in &value.expression01_list {
-            let right: ir::Expression = Conv::conv(context, x.expression02.as_ref())?;
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(right), comptime);
+        if value.expression01_list.is_empty() {
+            return Conv::conv(context, value.expression02.as_ref());
         }
-        Ok(ret)
+
+        let mut exprs: Vec<&Expression02> = vec![value.expression02.as_ref()];
+        let mut ops: Vec<(Op, u32)> = Vec::new();
+
+        for x in &value.expression01_list {
+            let (op, prec) = resolve_op(x.expression01_op.as_ref());
+            ops.push((op, prec));
+            exprs.push(x.expression02.as_ref());
+        }
+
+        prec_climb(context, &exprs, &ops, 0, exprs.len() - 1)
     }
 }
 
 impl Conv<&Expression02> for ir::Expression {
     fn conv(context: &mut Context, value: &Expression02) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression03.as_ref())?;
-        for x in &value.expression02_list {
-            let right: ir::Expression = Conv::conv(context, x.expression03.as_ref())?;
+        let mut ret: ir::Expression = Conv::conv(context, value.factor.as_ref())?;
 
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), Op::LogicAnd, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression03> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression03) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression04.as_ref())?;
-        for x in &value.expression03_list {
-            let right: ir::Expression = Conv::conv(context, x.expression04.as_ref())?;
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), Op::BitOr, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression04> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression04) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression05.as_ref())?;
-        for x in &value.expression04_list {
-            let right: ir::Expression = Conv::conv(context, x.expression05.as_ref())?;
-            let op = x.operator05.operator05_token.to_string();
-            let op = match op.as_str() {
-                "^" => Op::BitXor,
-                "~^" => Op::BitXnor,
-                _ => unreachable!(),
-            };
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression05> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression05) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression06.as_ref())?;
-        for x in &value.expression05_list {
-            let right: ir::Expression = Conv::conv(context, x.expression06.as_ref())?;
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), Op::BitAnd, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression06> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression06) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression07.as_ref())?;
-        for x in &value.expression06_list {
-            let right: ir::Expression = Conv::conv(context, x.expression07.as_ref())?;
-            let op = x.operator07.operator07_token.to_string();
-            let op = match op.as_str() {
-                "==" => Op::Eq,
-                "!=" => Op::Ne,
-                "==?" => Op::EqWildcard,
-                "!=?" => Op::NeWildcard,
-                _ => unreachable!(),
-            };
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression07> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression07) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression08.as_ref())?;
-        for x in &value.expression07_list {
-            let right: ir::Expression = Conv::conv(context, x.expression08.as_ref())?;
-            let op = x.operator08.operator08_token.to_string();
-            let op = match op.as_str() {
-                "<=" => Op::LessEq,
-                ">=" => Op::GreaterEq,
-                "<:" => Op::Less,
-                ">:" => Op::Greater,
-                _ => unreachable!(),
-            };
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression08> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression08) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression09.as_ref())?;
-        for x in &value.expression08_list {
-            let right: ir::Expression = Conv::conv(context, x.expression09.as_ref())?;
-            let op = x.operator09.operator09_token.to_string();
-            let op = match op.as_str() {
-                "<<<" => Op::ArithShiftL,
-                ">>>" => Op::ArithShiftR,
-                "<<" => Op::LogicShiftL,
-                ">>" => Op::LogicShiftR,
-                _ => unreachable!(),
-            };
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression09> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression09) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression10.as_ref())?;
-        for x in &value.expression09_list {
-            let right: ir::Expression = Conv::conv(context, x.expression10.as_ref())?;
-            let op = x.operator10.operator10_token.to_string();
-            let op = match op.as_str() {
-                "+" => Op::Add,
-                "-" => Op::Sub,
-                _ => unreachable!(),
-            };
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression10> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression10) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression11.as_ref())?;
-        for x in &value.expression10_list {
-            let right: ir::Expression = Conv::conv(context, x.expression11.as_ref())?;
-            let op = match x.expression10_list_group.as_ref() {
-                Expression10ListGroup::Operator11(x) => {
-                    let op = x.operator11.operator11_token.to_string();
-                    match op.as_str() {
-                        "/" => Op::Div,
-                        "%" => Op::Rem,
-                        _ => unreachable!(),
-                    }
-                }
-                Expression10ListGroup::Star(_) => Op::Mul,
-            };
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), op, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression11> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression11) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression12.as_ref())?;
-        for x in &value.expression11_list {
-            let right: ir::Expression = Conv::conv(context, x.expression12.as_ref())?;
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(Box::new(ret), Op::Pow, Box::new(right), comptime);
-        }
-        Ok(ret)
-    }
-}
-
-impl Conv<&Expression12> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression12) -> IrResult<Self> {
-        let ret: ir::Expression = Conv::conv(context, value.expression13.as_ref())?;
-        if let Some(x) = &value.expression12_opt {
+        // optional `as` cast
+        if let Some(x) = &value.expression02_opt {
             let right: ir::Factor = Conv::conv(context, x.casting_type.as_ref())?;
 
             let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
             let comptime = Box::new(Comptime::create_unknown(token));
 
-            Ok(ir::Expression::Binary(
+            ret = ir::Expression::Binary(
                 Box::new(ret),
                 Op::As,
                 Box::new(ir::Expression::Term(Box::new(right))),
                 comptime,
-            ))
-        } else {
-            Ok(ret)
+            );
         }
+
+        // unary prefix operators (reverse iteration for right-associativity)
+        for x in value.expression02_list.iter().rev() {
+            let op = match x.expression02_op.as_ref() {
+                Expression02Op::UnaryOperator(x) => {
+                    let token = x.unary_operator.unary_operator_token.to_string();
+                    match token.as_str() {
+                        "~&" => Op::BitNand,
+                        "~|" => Op::BitNor,
+                        "~" => Op::BitNot,
+                        "!" => Op::LogicNot,
+                        _ => unreachable!(),
+                    }
+                }
+                Expression02Op::Operator03(_) => Op::BitOr,
+                Expression02Op::Operator04(x) => {
+                    let token = x.operator04.operator04_token.to_string();
+                    match token.as_str() {
+                        "^" => Op::BitXor,
+                        "~^" => Op::BitXnor,
+                        _ => unreachable!(),
+                    }
+                }
+                Expression02Op::Operator05(_) => Op::BitAnd,
+                Expression02Op::Operator06(x) => {
+                    let token = x.operator06.operator06_token.to_string();
+                    match token.as_str() {
+                        "+" => Op::Add,
+                        "-" => Op::Sub,
+                        _ => unreachable!(),
+                    }
+                }
+            };
+
+            let token: TokenRange = value.into();
+            let comptime = Box::new(Comptime::create_unknown(token));
+            ret = ir::Expression::Unary(op, Box::new(ret), comptime);
+        }
+
+        Ok(ret)
     }
 }
 
@@ -486,49 +423,6 @@ impl Conv<&CastingType> for ir::Factor {
             ..Default::default()
         };
         Ok(ir::Factor::Value(ret))
-    }
-}
-
-impl Conv<&Expression13> for ir::Expression {
-    fn conv(context: &mut Context, value: &Expression13) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.factor.as_ref())?;
-        for x in value.expression13_list.iter().rev() {
-            let op = match x.expression13_list_group.as_ref() {
-                Expression13ListGroup::UnaryOperator(x) => {
-                    let token = x.unary_operator.unary_operator_token.to_string();
-                    match token.as_str() {
-                        "~&" => Op::BitNand,
-                        "~|" => Op::BitNor,
-                        "~" => Op::BitNot,
-                        "!" => Op::LogicNot,
-                        _ => unreachable!(),
-                    }
-                }
-                Expression13ListGroup::Operator04(_) => Op::BitOr,
-                Expression13ListGroup::Operator05(x) => {
-                    let token = x.operator05.operator05_token.to_string();
-                    match token.as_str() {
-                        "^" => Op::BitXor,
-                        "~^" => Op::BitXnor,
-                        _ => unreachable!(),
-                    }
-                }
-                Expression13ListGroup::Operator06(_) => Op::BitAnd,
-                Expression13ListGroup::Operator10(x) => {
-                    let token = x.operator10.operator10_token.to_string();
-                    match token.as_str() {
-                        "+" => Op::Add,
-                        "-" => Op::Sub,
-                        _ => unreachable!(),
-                    }
-                }
-            };
-
-            let token: TokenRange = value.into();
-            let comptime = Box::new(Comptime::create_unknown(token));
-            ret = ir::Expression::Unary(op, Box::new(ret), comptime);
-        }
-        Ok(ret)
     }
 }
 
