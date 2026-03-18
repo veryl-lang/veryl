@@ -50,6 +50,16 @@ pub enum SimulatorError {
         token_source: TokenSource,
     },
 
+    #[diagnostic(severity(Error), code(unsupported_description))]
+    #[error("unsupported description")]
+    UnsupportedDescription {
+        #[source_code]
+        input: MultiSources,
+        #[label("this description is not supported by the simulator")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
     #[diagnostic(severity(Error), code(combinational_loop))]
     #[error("combinational loop detected")]
     CombinationalLoop {
@@ -115,6 +125,19 @@ impl SimulatorError {
             sources: vec![Source { path, text }],
         };
         SimulatorError::UnresolvedExpression {
+            input,
+            error_location: (*token).into(),
+            token_source: token.beg.source,
+        }
+    }
+
+    pub fn unsupported_description(token: &TokenRange) -> Self {
+        let path = token.beg.source.to_string();
+        let text = token.beg.source.get_text();
+        let input = MultiSources {
+            sources: vec![Source { path, text }],
+        };
+        SimulatorError::UnsupportedDescription {
             input,
             error_location: (*token).into(),
             token_source: token.beg.source,

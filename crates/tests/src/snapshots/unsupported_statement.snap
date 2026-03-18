@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 317
+expression: out
+---
+unsupported_description
+
+  × unsupported description
+   ╭─[../../testcases/error/unsupported_statement.veryl:7:9]
+ 6 │         c = a;
+ 7 │         $sv::sv_func();
+   ·         ───────┬───────
+   ·                ╰── this description is not supported by the simulator
+ 8 │     }
+   ╰────

@@ -107,7 +107,6 @@ impl Analyzer {
 
     fn create_ir(context: &mut Context, input: &Veryl) -> (Ir, Vec<AnalyzerError>) {
         let ir: IrResult<Ir> = Conv::conv(context, input);
-        context.insert_ir_error(&ir);
 
         if let Ok(ir) = ir {
             ir.eval_assign(context);
@@ -128,7 +127,7 @@ impl Analyzer {
     ) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
-        context.config.use_ir = ir.is_some();
+        context.config.retain_component_body = ir.is_some();
         context.config.instance_depth_limit = self.build_opt.instance_depth_limit;
         context.config.instance_total_limit = self.build_opt.instance_total_limit;
         context.config.evaluate_size_limit = self.build_opt.evaluate_size_limit;

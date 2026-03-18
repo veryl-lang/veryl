@@ -7,6 +7,7 @@ use crate::ir::{
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Default)]
 pub struct DeclarationBlock(pub Vec<Declaration>);
@@ -24,6 +25,7 @@ pub enum Declaration {
     Inst(Box<InstDeclaration>),
     Initial(InitialDeclaration),
     Final(FinalDeclaration),
+    Unsupported(TokenRange),
     Null,
 }
 
@@ -51,6 +53,7 @@ impl Declaration {
             Declaration::Inst(x) => x.eval_assign(context, assign_table),
             Declaration::Initial(x) => x.eval_assign(context, assign_table),
             Declaration::Final(x) => x.eval_assign(context, assign_table),
+            Declaration::Unsupported(_) => (),
             Declaration::Null => (),
         }
         assign_table.refernced.clear();
@@ -71,6 +74,7 @@ impl fmt::Display for Declaration {
             Declaration::Inst(x) => x.fmt(f),
             Declaration::Initial(x) => x.fmt(f),
             Declaration::Final(x) => x.fmt(f),
+            Declaration::Unsupported(_) => "/* unsupported */".fmt(f),
             Declaration::Null => "".fmt(f),
         }
     }

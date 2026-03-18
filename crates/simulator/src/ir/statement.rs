@@ -1559,6 +1559,9 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     method,
                 }]
             }
+            air::Statement::Unsupported(token) => {
+                return Err(SimulatorError::unsupported_description(token));
+            }
             air::Statement::Null => vec![],
         };
 

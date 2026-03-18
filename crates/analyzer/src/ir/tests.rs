@@ -1,6 +1,6 @@
 use crate::conv::Context;
 use crate::ir::Ir;
-use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
+use crate::{Analyzer, attribute_table, symbol_table};
 use similar::{ChangeTag, TextDiff};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
@@ -23,10 +23,6 @@ fn check_ir(code: &str, exp: &str) {
     errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2());
 
-    let errors: Vec<_> = errors
-        .into_iter()
-        .filter(|x| matches!(x, AnalyzerError::UnsupportedByIr { .. }))
-        .collect();
     dbg!(&errors);
 
     let ir = ir.to_string();
@@ -41,7 +37,6 @@ fn check_ir(code: &str, exp: &str) {
     println!("ir\n{}exp\n{}", ir, exp);
 
     assert!(ir.as_str() == exp);
-    assert!(errors.is_empty());
 }
 
 #[test]

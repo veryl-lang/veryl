@@ -16,7 +16,7 @@ use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone)]
 pub struct Config {
-    pub use_ir: bool,
+    pub retain_component_body: bool,
     pub instance_depth_limit: usize,
     pub instance_total_limit: usize,
     pub evaluate_size_limit: usize,
@@ -26,7 +26,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            use_ir: false,
+            retain_component_body: false,
             instance_depth_limit: 1024,
             instance_total_limit: 1024 * 1024,
             evaluate_size_limit: 1024 * 1024,
@@ -191,14 +191,6 @@ impl Context {
 
         if !replaced && !self.errors.contains(&error) {
             self.errors.push(error);
-        }
-    }
-
-    pub fn insert_ir_error<T>(&mut self, error: &IrResult<T>) {
-        if let Err(error) = error
-            && self.config.use_ir
-        {
-            self.insert_error(AnalyzerError::unsupported_by_ir(&error.code, &error.token));
         }
     }
 
@@ -379,13 +371,11 @@ impl Context {
 
     pub fn check_size(&mut self, x: usize, token: TokenRange) -> Option<usize> {
         if x > self.config.evaluate_size_limit {
-            if self.config.use_ir {
-                self.insert_error(AnalyzerError::exceed_limit(
-                    ExceedLimitKind::EvaluateSize,
-                    x,
-                    &token,
-                ));
-            }
+            self.insert_error(AnalyzerError::exceed_limit(
+                ExceedLimitKind::EvaluateSize,
+                x,
+                &token,
+            ));
             None
         } else {
             Some(x)
