@@ -1175,7 +1175,6 @@ pub fn eval_function_call(
             SymbolKind::SystemVerilog => {
                 let mut x = Comptime::create_unknown(token);
                 x.is_const = true;
-                context.insert_ir_error::<()>(&Err(ir_error!(token)));
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             SymbolKind::ProtoFunction(_) => Err(ir_error!(token)),
@@ -1762,8 +1761,7 @@ pub fn get_component(
                 let component: IrResult<ir::Module> = Conv::conv(c, &x);
                 match component {
                     Ok(mut component) => {
-                        // If IR is not used, component body is not necessary
-                        if !c.config.use_ir {
+                        if !c.config.retain_component_body {
                             component.functions.clear();
                             component.declarations.clear();
                         }
@@ -1809,7 +1807,12 @@ pub fn get_component(
 
                 let component: IrResult<ir::Module> = Conv::conv(c, &x);
                 match component {
-                    Ok(component) => {
+                    Ok(mut component) => {
+                        if !c.config.retain_component_body {
+                            component.functions.clear();
+                            component.declarations.clear();
+                        }
+
                         let component = ir::Component::Module(component);
                         c.set_instance_history(sig, component.clone());
                         c.pop_instance_history();
@@ -1861,7 +1864,6 @@ pub fn get_overridden_params(
 
         let target_type = if let Some(x) = target.kind.get_type() {
             let x = x.to_ir_type(context, TypePosition::Variable);
-            context.insert_ir_error(&x);
             if let Ok(x) = x {
                 Some(x)
             } else {

@@ -1,0 +1,9 @@
+module unsupported_statement (
+    a: input  logic<32>,
+    c: output logic<32>,
+) {
+    always_comb {
+        c = a;
+        $sv::sv_func();
+    }
+}

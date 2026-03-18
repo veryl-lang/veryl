@@ -42,14 +42,26 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 context,
                 x.var_declaration.as_ref(),
             )?)),
-            GenerateItem::AlwaysFfDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
-                context,
-                x.always_ff_declaration.as_ref(),
-            )?)),
-            GenerateItem::AlwaysCombDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
-                context,
-                x.always_comb_declaration.as_ref(),
-            )?)),
+            GenerateItem::AlwaysFfDeclaration(x) => {
+                let token: TokenRange = x.always_ff_declaration.as_ref().into();
+                match Conv::conv(context, x.always_ff_declaration.as_ref()) {
+                    Ok(decl) => Ok(ir::DeclarationBlock::new(decl)),
+                    Err(_) if context.in_generic => Ok(ir::DeclarationBlock::default()),
+                    Err(_) => Ok(ir::DeclarationBlock::new(ir::Declaration::Unsupported(
+                        token,
+                    ))),
+                }
+            }
+            GenerateItem::AlwaysCombDeclaration(x) => {
+                let token: TokenRange = x.always_comb_declaration.as_ref().into();
+                match Conv::conv(context, x.always_comb_declaration.as_ref()) {
+                    Ok(decl) => Ok(ir::DeclarationBlock::new(decl)),
+                    Err(_) if context.in_generic => Ok(ir::DeclarationBlock::default()),
+                    Err(_) => Ok(ir::DeclarationBlock::new(ir::Declaration::Unsupported(
+                        token,
+                    ))),
+                }
+            }
             GenerateItem::GenerateIfDeclaration(x) => {
                 Conv::conv(context, x.generate_if_declaration.as_ref())
             }
@@ -64,22 +76,25 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 context,
                 x.const_declaration.as_ref(),
             )?)),
-            GenerateItem::AssignDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
-                context,
-                x.assign_declaration.as_ref(),
-            )?)),
+            GenerateItem::AssignDeclaration(x) => {
+                let token: TokenRange = x.assign_declaration.as_ref().into();
+                match Conv::conv(context, x.assign_declaration.as_ref()) {
+                    Ok(decl) => Ok(ir::DeclarationBlock::new(decl)),
+                    Err(_) if context.in_generic => Ok(ir::DeclarationBlock::default()),
+                    Err(_) => Ok(ir::DeclarationBlock::new(ir::Declaration::Unsupported(
+                        token,
+                    ))),
+                }
+            }
             GenerateItem::FunctionDeclaration(x) => {
-                let use_ir = context.config.use_ir;
                 let in_generic = context.in_generic;
                 if x.function_declaration.function_declaration_opt.is_some() {
-                    context.config.use_ir = false;
                     context.in_generic = true;
                 }
 
                 let ret: IrResult<()> = Conv::conv(context, x.function_declaration.as_ref());
 
                 if x.function_declaration.function_declaration_opt.is_some() {
-                    context.config.use_ir = use_ir;
                     context.in_generic = in_generic;
                 }
 
@@ -87,13 +102,11 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 Ok(ir::DeclarationBlock::default())
             }
             GenerateItem::StructUnionDeclaration(x) => {
-                let use_ir = context.config.use_ir;
                 let in_generic = context.in_generic;
                 if x.struct_union_declaration
                     .struct_union_declaration_opt
                     .is_some()
                 {
-                    context.config.use_ir = false;
                     context.in_generic = true;
                 }
 
@@ -103,7 +116,6 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                     .struct_union_declaration_opt
                     .is_some()
                 {
-                    context.config.use_ir = use_ir;
                     context.in_generic = in_generic;
                 }
 
@@ -114,18 +126,36 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                 let _: () = Conv::conv(context, x.enum_declaration.as_ref())?;
                 Ok(ir::DeclarationBlock::default())
             }
-            GenerateItem::InitialDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
-                context,
-                x.initial_declaration.as_ref(),
-            )?)),
-            GenerateItem::FinalDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
-                context,
-                x.final_declaration.as_ref(),
-            )?)),
-            GenerateItem::InstDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
-                context,
-                x.inst_declaration.as_ref(),
-            )?)),
+            GenerateItem::InitialDeclaration(x) => {
+                let token: TokenRange = x.initial_declaration.as_ref().into();
+                match Conv::conv(context, x.initial_declaration.as_ref()) {
+                    Ok(decl) => Ok(ir::DeclarationBlock::new(decl)),
+                    Err(_) if context.in_generic => Ok(ir::DeclarationBlock::default()),
+                    Err(_) => Ok(ir::DeclarationBlock::new(ir::Declaration::Unsupported(
+                        token,
+                    ))),
+                }
+            }
+            GenerateItem::FinalDeclaration(x) => {
+                let token: TokenRange = x.final_declaration.as_ref().into();
+                match Conv::conv(context, x.final_declaration.as_ref()) {
+                    Ok(decl) => Ok(ir::DeclarationBlock::new(decl)),
+                    Err(_) if context.in_generic => Ok(ir::DeclarationBlock::default()),
+                    Err(_) => Ok(ir::DeclarationBlock::new(ir::Declaration::Unsupported(
+                        token,
+                    ))),
+                }
+            }
+            GenerateItem::InstDeclaration(x) => {
+                let token: TokenRange = x.inst_declaration.as_ref().into();
+                match Conv::conv(context, x.inst_declaration.as_ref()) {
+                    Ok(decl) => Ok(ir::DeclarationBlock::new(decl)),
+                    Err(_) if context.in_generic => Ok(ir::DeclarationBlock::default()),
+                    Err(_) => Ok(ir::DeclarationBlock::new(ir::Declaration::Unsupported(
+                        token,
+                    ))),
+                }
+            }
             GenerateItem::ConnectDeclaration(x) => {
                 Conv::conv(context, x.connect_declaration.as_ref())
             }
@@ -228,7 +258,6 @@ impl Conv<&GenerateNamedBlock> for ir::DeclarationBlock {
             let items: Vec<_> = x.generate_group.as_ref().into();
             for item in items {
                 let item: IrResult<ir::DeclarationBlock> = Conv::conv(context, item);
-                context.insert_ir_error(&item);
 
                 if let Ok(mut item) = item {
                     ret.append(&mut item.0);
@@ -246,7 +275,6 @@ impl Conv<&GenerateOptionalNamedBlock> for ir::DeclarationBlock {
             let items: Vec<_> = x.generate_group.as_ref().into();
             for item in items {
                 let item: IrResult<ir::DeclarationBlock> = Conv::conv(context, item);
-                context.insert_ir_error(&item);
 
                 if let Ok(mut item) = item {
                     ret.append(&mut item.0);
@@ -298,7 +326,6 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
 
                 let block: IrResult<ir::DeclarationBlock> =
                     Conv::conv(c, value.generate_named_block.as_ref());
-                c.insert_ir_error(&block);
                 block
             });
 
@@ -911,8 +938,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                 };
 
                 for item in arg_items {
-                    let ret: IrResult<()> = Conv::conv(c, item);
-                    c.insert_ir_error(&ret);
+                    let _: IrResult<()> = Conv::conv(c, item);
 
                     let name = item.identifier.text();
                     let path = VarPath::new(name);
@@ -994,16 +1020,13 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
 impl Conv<&FunctionDeclaration> for () {
     fn conv(context: &mut Context, value: &FunctionDeclaration) -> IrResult<Self> {
         // ignore IrError of generic function
-        let use_ir = context.config.use_ir;
         if value.function_declaration_opt.is_some() {
-            context.config.use_ir = false;
             context.ignore_var_func = true;
         }
 
         let ret = Conv::conv(context, (value, None));
 
         if value.function_declaration_opt.is_some() {
-            context.config.use_ir = use_ir;
             context.ignore_var_func = false;
             Ok(())
         } else {
@@ -1178,7 +1201,6 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                                 context, &component, port, &path, dst_type, token,
                             );
                             let Ok(connects) = connects else {
-                                context.insert_ir_error(&connects);
                                 continue;
                             };
 
@@ -1381,7 +1403,6 @@ impl Conv<&UnsafeBlock> for ir::DeclarationBlock {
             let items: Vec<_> = x.generate_group.as_ref().into();
             for item in items {
                 let item: IrResult<ir::DeclarationBlock> = Conv::conv(context, item);
-                context.insert_ir_error(&item);
 
                 if let Ok(mut item) = item {
                     ret.append(&mut item.0);

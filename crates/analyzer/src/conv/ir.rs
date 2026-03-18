@@ -19,10 +19,8 @@ impl Conv<&Veryl> for ir::Ir {
             let items: Vec<_> = x.description_group.as_ref().into();
             for item in &items {
                 // ignore IrError of generic top-level components
-                let use_ir = context.config.use_ir;
                 let in_generic = context.in_generic;
                 if item.is_generic() {
-                    context.config.use_ir = false;
                     context.in_generic = true;
                 }
 
@@ -32,7 +30,6 @@ impl Conv<&Veryl> for ir::Ir {
                             PublicDescriptionItem::ModuleDeclaration(x) => {
                                 let ret: IrResult<ir::Module> =
                                     Conv::conv(context, x.module_declaration.as_ref());
-                                context.insert_ir_error(&ret);
 
                                 if let Ok(mut component) = ret {
                                     // suppress unassigned check for modules with unevaluable generic parameters
@@ -46,65 +43,55 @@ impl Conv<&Veryl> for ir::Ir {
                                 }
                             }
                             PublicDescriptionItem::InterfaceDeclaration(x) => {
-                                let ret: IrResult<ir::Interface> =
+                                let _: IrResult<ir::Interface> =
                                     Conv::conv(context, x.interface_declaration.as_ref());
-                                context.insert_ir_error(&ret);
                             }
                             PublicDescriptionItem::PackageDeclaration(x) => {
-                                let ret: IrResult<()> =
+                                let _: IrResult<()> =
                                     Conv::conv(context, x.package_declaration.as_ref());
-                                context.insert_ir_error(&ret);
                             }
                             PublicDescriptionItem::ProtoDeclaration(x) => {
                                 match x.proto_declaration.proto_declaration_group.as_ref() {
                                     ProtoDeclarationGroup::ProtoModuleDeclaration(x) => {
-                                        let ret: IrResult<ir::Module> = Conv::conv(
+                                        let _: IrResult<ir::Module> = Conv::conv(
                                             context,
                                             x.proto_module_declaration.as_ref(),
                                         );
-                                        context.insert_ir_error(&ret);
                                     }
                                     ProtoDeclarationGroup::ProtoInterfaceDeclaration(x) => {
-                                        let ret: IrResult<()> = Conv::conv(
+                                        let _: IrResult<()> = Conv::conv(
                                             context,
                                             x.proto_interface_declaration.as_ref(),
                                         );
-                                        context.insert_ir_error(&ret);
                                     }
                                     ProtoDeclarationGroup::ProtoPackageDeclaration(x) => {
-                                        let ret: IrResult<()> = Conv::conv(
+                                        let _: IrResult<()> = Conv::conv(
                                             context,
                                             x.proto_package_declaration.as_ref(),
                                         );
-                                        context.insert_ir_error(&ret);
                                     }
                                 }
                             }
                             PublicDescriptionItem::AliasDeclaration(x) => {
-                                let ret: IrResult<()> =
+                                let _: IrResult<()> =
                                     Conv::conv(context, x.alias_declaration.as_ref());
-                                context.insert_ir_error(&ret);
                             }
                         }
                     }
                     DescriptionItem::BindDeclaration(x) => {
-                        let ret: IrResult<()> = Conv::conv(context, x.bind_declaration.as_ref());
-                        context.insert_ir_error(&ret);
+                        let _: IrResult<()> = Conv::conv(context, x.bind_declaration.as_ref());
                     }
                     DescriptionItem::EmbedDeclaration(x) => {
-                        let ret: IrResult<()> = Conv::conv(context, x.embed_declaration.as_ref());
-                        context.insert_ir_error(&ret);
+                        let _: IrResult<()> = Conv::conv(context, x.embed_declaration.as_ref());
                     }
                     DescriptionItem::ImportDeclaration(x) => {
-                        let ret: IrResult<ir::DeclarationBlock> =
+                        let _: IrResult<ir::DeclarationBlock> =
                             Conv::conv(context, x.import_declaration.as_ref());
-                        context.insert_ir_error(&ret);
                     }
                     _ => (),
                 }
 
                 if item.is_generic() {
-                    context.config.use_ir = use_ir;
                     context.in_generic = in_generic;
                 }
             }
@@ -151,8 +138,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
                 .as_ref()
                 .into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 
@@ -165,8 +151,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
         {
             let items: Vec<_> = x.with_parameter_list.as_ref().into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 
@@ -175,8 +160,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
         {
             let items: Vec<_> = x.port_declaration_list.as_ref().into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 
@@ -185,7 +169,6 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             for item in &items {
                 let ret: IrResult<ir::DeclarationBlock> =
                     Conv::conv(&mut context, item.generate_item.as_ref());
-                context.insert_ir_error(&ret);
 
                 if let Ok(mut block) = ret {
                     declarations.append(&mut block.0);
@@ -261,8 +244,7 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
                 .as_ref()
                 .into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 
@@ -275,8 +257,7 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
         {
             let items: Vec<_> = x.with_parameter_list.as_ref().into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 
@@ -285,14 +266,12 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
             for item in items {
                 match item {
                     InterfaceItem::GenerateItem(x) => {
-                        let ret: IrResult<ir::DeclarationBlock> =
+                        let _: IrResult<ir::DeclarationBlock> =
                             Conv::conv(&mut context, x.generate_item.as_ref());
-                        context.insert_ir_error(&ret);
                     }
                     InterfaceItem::ModportDeclaration(x) => {
-                        let ret: IrResult<()> =
+                        let _: IrResult<()> =
                             Conv::conv(&mut context, x.modport_declaration.as_ref());
-                        context.insert_ir_error(&ret);
                     }
                 }
             }
@@ -354,19 +333,16 @@ impl Conv<&PackageDeclaration> for () {
             for item in items {
                 match item {
                     PackageItem::ConstDeclaration(x) => {
-                        let ret: IrResult<ir::Declaration> =
+                        let _: IrResult<ir::Declaration> =
                             Conv::conv(&mut context, x.const_declaration.as_ref());
-                        context.insert_ir_error(&ret);
                     }
                     PackageItem::FunctionDeclaration(x) => {
-                        let ret: IrResult<()> =
+                        let _: IrResult<()> =
                             Conv::conv(&mut context, x.function_declaration.as_ref());
-                        context.insert_ir_error(&ret);
                     }
                     PackageItem::StructUnionDeclaration(x) => {
-                        let ret: IrResult<()> =
+                        let _: IrResult<()> =
                             Conv::conv(&mut context, x.struct_union_declaration.as_ref());
-                        context.insert_ir_error(&ret);
                     }
                     _ => (),
                 }
@@ -404,8 +380,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
         {
             let items: Vec<_> = x.with_parameter_list.as_ref().into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 
@@ -414,8 +389,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
         {
             let items: Vec<_> = x.port_declaration_list.as_ref().into();
             for item in items {
-                let ret: IrResult<()> = Conv::conv(&mut context, item);
-                context.insert_ir_error(&ret);
+                let _ret: IrResult<()> = Conv::conv(&mut context, item);
             }
         }
 

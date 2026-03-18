@@ -117,6 +117,9 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     full_internal_comb: None,
                 })
             }
+            air::Declaration::Unsupported(token) => {
+                Err(SimulatorError::unsupported_description(token))
+            }
             air::Declaration::Null => Ok(ProtoDeclaration {
                 event_statements: HashMap::default(),
                 comb_statements: vec![],

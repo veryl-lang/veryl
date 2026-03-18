@@ -61,7 +61,7 @@ fn recursive_function_unresolved() {
     // Direct recursion: analyzer converts the recursive call to Factor::Unknown
     // because the function body is not yet registered in context.functions
     // when processing its own body. The simulator detects this as
-    // UnresolvedExpression during IR conversion.
+    // UnsupportedDescription during IR conversion.
     let code = r#"
     module Top (
         a: input  logic<32>,
@@ -80,6 +80,28 @@ fn recursive_function_unresolved() {
     let result = analyze_top(code, &Config::default(), "Top");
     assert!(matches!(
         result,
-        Err(SimulatorError::UnresolvedExpression { .. })
+        Err(SimulatorError::UnsupportedDescription { .. })
+    ));
+}
+
+#[test]
+fn unsupported_statement() {
+    // SystemVerilog function call produces Statement::Unsupported
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        c: output logic<32>,
+    ) {
+        always_comb {
+            c = a;
+            $sv::sv_func();
+        }
+    }
+    "#;
+
+    let result = analyze_top(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::UnsupportedDescription { .. })
     ));
 }

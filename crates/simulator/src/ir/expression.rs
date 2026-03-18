@@ -3396,7 +3396,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     unreachable!("system function calls are resolved by the analyzer")
                 }
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
-                    Err(SimulatorError::unresolved_expression(&comptime.token))
+                    Err(SimulatorError::unsupported_description(&comptime.token))
                 }
             },
             air::Expression::Unary(op, x, comptime) => {

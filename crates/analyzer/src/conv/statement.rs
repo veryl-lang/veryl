@@ -23,9 +23,15 @@ impl Conv<&StatementBlock> for ir::StatementBlock {
         let mut ret = vec![];
         for s in statements {
             let x: IrResult<ir::StatementBlock> = Conv::conv(context, s);
-            context.insert_ir_error(&x);
-            if let Ok(x) = x {
-                ret.append(&mut x.0.into_iter().filter(|x| !x.is_null()).collect());
+            match x {
+                Ok(x) => {
+                    ret.append(&mut x.0.into_iter().filter(|x| !x.is_null()).collect());
+                }
+                Err(e) => {
+                    if !context.in_generic {
+                        ret.push(ir::Statement::Unsupported(e.token));
+                    }
+                }
             }
         }
         Ok(ir::StatementBlock(ret))
@@ -653,7 +659,6 @@ impl Conv<&ForStatement> for ir::StatementBlock {
 
                 let block: IrResult<ir::StatementBlock> =
                     Conv::conv(c, value.statement_block.as_ref());
-                c.insert_ir_error(&block);
                 block
             });
 

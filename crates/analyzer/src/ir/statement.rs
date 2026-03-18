@@ -24,6 +24,7 @@ pub enum Statement {
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     TbMethodCall(TbMethodCall),
+    Unsupported(TokenRange),
     Null,
 }
 
@@ -55,6 +56,7 @@ impl Statement {
                 x.eval_value(context);
             }
             Statement::TbMethodCall(_) => (),
+            Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
     }
@@ -75,6 +77,7 @@ impl Statement {
             }
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
             Statement::TbMethodCall(_) => (),
+            Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
     }
@@ -85,7 +88,10 @@ impl Statement {
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl),
-            Statement::TbMethodCall(_) | Statement::SystemFunctionCall(_) | Statement::Null => (),
+            Statement::TbMethodCall(_)
+            | Statement::SystemFunctionCall(_)
+            | Statement::Unsupported(_)
+            | Statement::Null => (),
         }
     }
 
@@ -97,6 +103,7 @@ impl Statement {
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
             Statement::TbMethodCall(_) => (),
+            Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
     }
@@ -120,6 +127,7 @@ impl fmt::Display for Statement {
                 }
                 TbMethod::ResetAssert => write!(f, "{}.assert();", x.inst),
             },
+            Statement::Unsupported(_) => "/* unsupported */".fmt(f),
             Statement::Null => "".fmt(f),
         }
     }
