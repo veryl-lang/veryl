@@ -287,51 +287,67 @@ mod error {
                 let file = format!("../../testcases/error/{}.veryl", name);
                 let input = fs::read_to_string(&file).unwrap();
 
-                let ret = Parser::parse(&input, &file).unwrap();
-                let prj = &metadata.project.name;
-
-                let mut context = Context::default();
-                let analyzer = Analyzer::new(&metadata);
-                let mut errors = vec![];
-                let mut ir = Ir::default();
-
-                errors.append(&mut analyzer.analyze_pass1(&prj, &ret.veryl));
-                errors.append(&mut Analyzer::analyze_post_pass1());
-                errors.append(&mut analyzer.analyze_pass2(
-                    &prj,
-                    &ret.veryl,
-                    &mut context,
-                    Some(&mut ir),
-                ));
-                errors.append(&mut Analyzer::analyze_post_pass2());
-
                 let mut out = String::new();
                 let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
                     .with_links(false);
 
-                if !errors.is_empty() {
-                    let err = Report::from(errors.remove(0));
-                    handler.render_report(&mut out, err.as_ref()).unwrap();
-                } else {
-                    // No analyzer errors; try building simulator IR
-                    let top = veryl_parser::resource_table::get_str_id(name.clone())
-                        .unwrap_or_else(|| name.as_str().into());
-                    let config = veryl_simulator::ir::Config::default();
-                    match veryl_simulator::ir::build_ir(ir, top, &config) {
-                        Err(sim_err) => {
-                            handler
-                                .render_report(&mut out, &sim_err as &dyn miette::Diagnostic)
-                                .unwrap();
-                        }
-                        Ok(sim_ir) => {
-                            // build_ir succeeded; try running as testbench
-                            match veryl_simulator::testbench::run_native_testbench(sim_ir, None) {
-                                Err(tb_err) => {
+                let ret = Parser::parse(&input, &file);
+                match ret {
+                    Err(err) => {
+                        let err = Report::from(err);
+                        handler.render_report(&mut out, err.as_ref()).unwrap();
+                    }
+                    Ok(ret) => {
+                        let prj = &metadata.project.name;
+
+                        let mut context = Context::default();
+                        let analyzer = Analyzer::new(&metadata);
+                        let mut errors = vec![];
+                        let mut ir = Ir::default();
+
+                        errors.append(&mut analyzer.analyze_pass1(&prj, &ret.veryl));
+                        errors.append(&mut Analyzer::analyze_post_pass1());
+                        errors.append(&mut analyzer.analyze_pass2(
+                            &prj,
+                            &ret.veryl,
+                            &mut context,
+                            Some(&mut ir),
+                        ));
+                        errors.append(&mut Analyzer::analyze_post_pass2());
+
+                        if !errors.is_empty() {
+                            let err = Report::from(errors.remove(0));
+                            handler.render_report(&mut out, err.as_ref()).unwrap();
+                        } else {
+                            let top = veryl_parser::resource_table::get_str_id(name.clone())
+                                .unwrap_or_else(|| name.as_str().into());
+                            let config = veryl_simulator::ir::Config::default();
+                            match veryl_simulator::ir::build_ir(ir, top, &config) {
+                                Err(sim_err) => {
                                     handler
-                                        .render_report(&mut out, &tb_err as &dyn miette::Diagnostic)
+                                        .render_report(
+                                            &mut out,
+                                            &sim_err as &dyn miette::Diagnostic,
+                                        )
                                         .unwrap();
                                 }
-                                Ok(_) => panic!("expected an error for test case: {name}"),
+                                Ok(sim_ir) => {
+                                    match veryl_simulator::testbench::run_native_testbench(
+                                        sim_ir, None,
+                                    ) {
+                                        Err(tb_err) => {
+                                            handler
+                                                .render_report(
+                                                    &mut out,
+                                                    &tb_err as &dyn miette::Diagnostic,
+                                                )
+                                                .unwrap();
+                                        }
+                                        Ok(_) => {
+                                            panic!("expected an error for test case: {name}")
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
