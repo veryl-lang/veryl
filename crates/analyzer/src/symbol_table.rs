@@ -19,7 +19,7 @@ use log::trace;
 use msb::check_msb;
 use std::cell::RefCell;
 use std::fmt;
-use veryl_parser::resource_table::{PathId, StrId, TokenId};
+use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -941,28 +941,22 @@ impl SymbolTable {
     }
 
     pub fn add_reference(&mut self, target: SymbolId, token: &Token) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.id == target {
-                symbol.references.push(token.to_owned());
-                break;
-            }
+        if let Some(symbol) = self.symbol_table.get_mut(&target) {
+            symbol.references.push(token.to_owned());
         }
     }
 
     pub fn add_generic_instance(&mut self, target: SymbolId, instance: SymbolId) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.id == target && !symbol.generic_instances.contains(&instance) {
-                symbol.generic_instances.push(instance);
-                break;
-            }
+        if let Some(symbol) = self.symbol_table.get_mut(&target)
+            && !symbol.generic_instances.contains(&instance)
+        {
+            symbol.generic_instances.push(instance);
         }
     }
 
-    fn add_imported_item(&mut self, target: TokenId, import: &Import) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.token.id == target {
-                symbol.imported.push(import.to_owned());
-            }
+    fn add_imported_item(&mut self, target: SymbolId, import: &Import) {
+        if let Some(symbol) = self.symbol_table.get_mut(&target) {
+            symbol.imported.push(import.to_owned());
         }
     }
 
@@ -997,7 +991,7 @@ impl SymbolTable {
                     self.add_imported_package(&target, import);
                 }
             } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                self.add_imported_item(symbol.token.id, import);
+                self.add_imported_item(symbol.id, import);
             }
         }
         self.import_list.clear();
