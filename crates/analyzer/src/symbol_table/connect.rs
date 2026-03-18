@@ -25,7 +25,7 @@ fn includes_unemittable_cast(target: &Symbol, driver: Option<&Symbol>) -> bool {
         let user_defined = r#type.unwrap().get_user_defined()?;
         symbol_table::resolve((&user_defined.path.generic_path(), &symbol.namespace))
             .ok()
-            .map(|x| x.found)
+            .map(|x| (*x.found).clone())
     }
 
     let Some(target_type) = get_type_symbol(target) else {

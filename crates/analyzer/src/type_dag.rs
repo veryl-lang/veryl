@@ -238,7 +238,7 @@ impl TypeDag {
             // Need to use the target symbol of the alias instead of it to prevent this situation.
             Self::resolve_symbol_path(&alias_path.generic_path(), &symbol.found.namespace)
         } else {
-            Some(symbol.found)
+            Some((*symbol.found).clone())
         }
     }
 

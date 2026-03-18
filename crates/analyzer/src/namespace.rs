@@ -171,7 +171,7 @@ impl Namespace {
             && namespace.depth() >= 1
         {
             symbol_table::resolve((path, &namespace))
-                .map(|x| x.found)
+                .map(|x| (*x.found).clone())
                 .ok()
         } else {
             None

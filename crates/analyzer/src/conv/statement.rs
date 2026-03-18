@@ -62,7 +62,7 @@ impl Conv<&LetStatement> for ir::StatementBlock {
         let token: TokenRange = value.into();
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::Variable(x) = symbol.found.kind
+            && let SymbolKind::Variable(x) = &symbol.found.kind
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind = VarKind::Let;
@@ -108,7 +108,7 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
                 dst.push(x);
             } else {
                 if let Ok(symbol) = symbol_table::resolve(item.hierarchical_identifier.as_ref())
-                    && let SymbolKind::Variable(x) = symbol.found.kind
+                    && let SymbolKind::Variable(x) = &symbol.found.kind
                     && x.affiliation == Affiliation::Module
                 {
                     let ident_token = ident.identifier.identifier_token.token;
@@ -599,7 +599,7 @@ impl Conv<&ForStatement> for ir::StatementBlock {
             return Err(ir_error!(token));
         };
 
-        let SymbolKind::Variable(x) = symbol.found.kind else {
+        let SymbolKind::Variable(ref x) = symbol.found.kind else {
             unreachable!();
         };
         let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;

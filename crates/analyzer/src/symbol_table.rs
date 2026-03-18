@@ -27,7 +27,7 @@ use veryl_parser::veryl_walker::VerylWalker;
 
 #[derive(Clone, Debug)]
 pub struct ResolveResult {
-    pub found: Symbol,
+    pub found: std::rc::Rc<Symbol>,
     pub full_path: Vec<SymbolId>,
     pub imported: bool,
     pub generic_tables: GenericTables,
@@ -194,12 +194,12 @@ impl SymbolTable {
                     }
                 }
                 SymbolKind::TypeDef(x) => {
-                    context.namespace = symbol.found.namespace;
+                    context.namespace = symbol.found.namespace.clone();
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
                 SymbolKind::ProtoTypeDef(x) => {
                     if let Some(r#type) = &x.r#type {
-                        context.namespace = symbol.found.namespace;
+                        context.namespace = symbol.found.namespace.clone();
                         return self.trace_type_kind(context, &r#type.kind);
                     }
                 }
@@ -235,7 +235,7 @@ impl SymbolTable {
         )?;
         context.generic_tables = symbol.generic_tables.clone();
 
-        match symbol.found.kind {
+        match &symbol.found.kind {
             SymbolKind::AliasModule(x) => self.trace_type_path(context, &x.target),
             SymbolKind::AliasInterface(x) => self.trace_type_path(context, &x.target),
             SymbolKind::AliasPackage(x) => self.trace_type_path(context, &x.target),
@@ -568,7 +568,7 @@ impl SymbolTable {
                     DocComment::default(),
                 );
                 return Ok(ResolveResult {
-                    found: symbol,
+                    found: std::rc::Rc::new(symbol),
                     full_path: context.full_path,
                     imported: context.imported,
                     generic_tables: context.generic_tables,
@@ -766,7 +766,7 @@ impl SymbolTable {
             );
 
             Ok(ResolveResult {
-                found,
+                found: std::rc::Rc::new(found),
                 full_path: context.full_path,
                 imported: context.imported,
                 generic_tables: context.generic_tables,
@@ -978,7 +978,7 @@ impl SymbolTable {
         for import in &self.import_list {
             let context = ResolveContext::new(&import.path.1);
             if let Ok(symbol) = self.resolve(&import.path.0.generic_path(), &[], context) {
-                ret.push((import.clone(), symbol.found));
+                ret.push((import.clone(), (*symbol.found).clone()));
             }
         }
         ret

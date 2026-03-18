@@ -41,12 +41,12 @@ pub fn check_msb(list: Vec<Msb>) -> Vec<AnalyzerError> {
                 }
             });
             let r#type = if !via_interface {
-                match x.found.kind {
-                    SymbolKind::Variable(x) => Some(x.r#type),
-                    SymbolKind::Port(x) => Some(x.r#type),
-                    SymbolKind::Parameter(x) => Some(x.r#type),
-                    SymbolKind::StructMember(x) => Some(x.r#type),
-                    SymbolKind::UnionMember(x) => Some(x.r#type),
+                match &x.found.kind {
+                    SymbolKind::Variable(x) => Some(x.r#type.clone()),
+                    SymbolKind::Port(x) => Some(x.r#type.clone()),
+                    SymbolKind::Parameter(x) => Some(x.r#type.clone()),
+                    SymbolKind::StructMember(x) => Some(x.r#type.clone()),
+                    SymbolKind::UnionMember(x) => Some(x.r#type.clone()),
                     _ => None,
                 }
             } else {

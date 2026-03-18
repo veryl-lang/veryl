@@ -175,9 +175,13 @@ impl CmdBuild {
             }
         }
 
+        debug!("Executed emit ({} milliseconds)", stopwatch.lap());
+
         if !self.opt.check {
             self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
         }
+
+        debug!("Executed filelist ({} milliseconds)", stopwatch.lap());
 
         let _ = check_error.check_err()?;
         Ok(all_pass)

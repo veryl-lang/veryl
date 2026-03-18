@@ -573,10 +573,10 @@ impl ReferenceTable {
                 ReferenceCandidate::NamedArgument { arg, function } => {
                     if let Ok(symbol) = symbol_table::resolve(function) {
                         let func_symbol =
-                            if let SymbolKind::ModportFunctionMember(x) = symbol.found.kind {
+                            if let SymbolKind::ModportFunctionMember(x) = &symbol.found.kind {
                                 symbol_table::get(x.function).unwrap()
                             } else {
-                                symbol.found
+                                (*symbol.found).clone()
                             };
                         let namespace = func_symbol.inner_namespace();
                         let path: SymbolPath = arg.into();

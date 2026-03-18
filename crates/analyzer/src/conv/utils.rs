@@ -2318,7 +2318,7 @@ pub fn check_compatibility(
 
 pub fn check_module_with_unevaluable_generic_parameters(ident: &Identifier) -> bool {
     if let Ok(symbol) = symbol_table::resolve(ident)
-        && let SymbolKind::Module(x) = symbol.found.kind
+        && let SymbolKind::Module(x) = &symbol.found.kind
     {
         let mut ret = false;
 
