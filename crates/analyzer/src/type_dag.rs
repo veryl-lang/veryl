@@ -124,6 +124,7 @@ impl TypeDag {
     }
 
     fn apply(&mut self) -> Vec<AnalyzerError> {
+        symbol_table::suppress_cache_clear();
         let candidates: Vec<_> = self.candidates.drain(..).collect();
 
         // Process symbol declarations at first to construct dag_owned
@@ -173,6 +174,7 @@ impl TypeDag {
             }
         }
 
+        symbol_table::resume_cache_clear();
         self.errors.drain(..).map(|x| x.into()).collect()
     }
 

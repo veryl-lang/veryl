@@ -491,6 +491,7 @@ impl ReferenceTable {
     }
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
+        symbol_table::suppress_cache_clear();
         let candidates: Vec<_> = self.candidates.drain(0..).collect();
 
         for x in &candidates {
@@ -591,6 +592,7 @@ impl ReferenceTable {
             }
         }
 
+        symbol_table::resume_cache_clear();
         self.errors.drain(0..).collect()
     }
 

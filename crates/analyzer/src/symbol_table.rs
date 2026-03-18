@@ -93,6 +93,7 @@ pub struct SymbolTable {
     bind_list: Vec<Bind>,
     msb_list: Vec<Msb>,
     connect_list: Vec<Connect>,
+    suppress_cache_clear: bool,
 }
 
 impl SymbolTable {
@@ -1608,8 +1609,33 @@ pub fn is_sv_keyword(s: &str) -> bool {
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
 thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveResult>> = RefCell::new(HashMap::default()));
 
+/// Suppress SYMBOL_CACHE invalidation for `add_reference` and `add_generic_instance`.
+///
+/// Use this when performing bulk mutations that modify symbol metadata
+/// without affecting name resolution results. Must be paired with
+/// `resume_cache_clear`.
+pub fn suppress_cache_clear() {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().suppress_cache_clear = true);
+}
+
+/// Resume SYMBOL_CACHE invalidation after `suppress_cache_clear`.
+pub fn resume_cache_clear() {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().suppress_cache_clear = false);
+}
+
+fn clear_cache() {
+    let suppress = SYMBOL_TABLE.with(|f| f.borrow().suppress_cache_clear);
+    if !suppress {
+        SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    }
+}
+
 pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
-    SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol))
+    let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol));
+    if ret.is_some() {
+        SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    }
+    ret
 }
 
 pub fn get(id: SymbolId) -> Option<Symbol> {
@@ -1650,12 +1676,12 @@ pub fn drop(file_path: PathId) {
 }
 
 pub fn add_reference(target: SymbolId, token: &Token) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_cache();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
 }
 
 pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_cache();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_generic_instance(target, instance))
 }
 
