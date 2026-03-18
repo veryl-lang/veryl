@@ -2,4 +2,14 @@ module Module27 {
     const a: string = "aaa";
 
     let _b: string = "bbb";
+
+    // string comparison
+    let _c: logic = "abc" == "abc";
+    let _d: logic = "abc" != "def";
+    let _e: logic = "abc" <: "abd";
+    let _f: logic = "b" >= "a";
+
+    // string vs integer comparison
+    let _g: logic = "A" == 8'h41;
+    let _h: logic = "AB" != 16'h4142;
 }

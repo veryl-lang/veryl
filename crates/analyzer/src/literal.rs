@@ -1,7 +1,7 @@
 use crate::ir::{Comptime, Shape, Type, TypeKind, ValueVariant};
-use crate::value::Value;
+use crate::value::{Value, string_to_byte_value};
 use std::fmt;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 
@@ -34,10 +34,12 @@ impl Literal {
                 (ValueVariant::Numeric(value), r#type)
             }
             Literal::String(x) => {
-                let value = Value::new(x.0 as u64, 32, false);
+                let text = resource_table::get_str_value(*x).unwrap_or_default();
+                let value = string_to_byte_value(&text);
+                let width = value.width() as usize;
                 let r#type = Type {
                     kind: TypeKind::String,
-                    width: Shape::new(vec![Some(1)]),
+                    width: Shape::new(vec![Some(width)]),
                     ..Default::default()
                 };
                 (ValueVariant::Numeric(value), r#type)

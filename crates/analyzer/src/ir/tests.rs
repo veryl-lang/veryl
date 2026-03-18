@@ -1632,8 +1632,8 @@ fn string() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(S): string = 32'h00000114;
-  const var1(T): string = 32'h00000117;
+  const var0(S): string = 8'h58;
+  const var1(T): string = 8'h59;
   var var2(g1._a): logic = 1'hx;
   var var3(g2._d): logic = 1'hx;
   var var4(g3._f): logic = 1'hx;

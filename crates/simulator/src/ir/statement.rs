@@ -1469,9 +1469,7 @@ fn extract_string_value(expr: &air::Expression) -> Option<String> {
         && let air::Factor::Value(comptime) = factor.as_ref()
         && let ValueVariant::Numeric(value) = &comptime.value
     {
-        let str_id_raw = value.to_usize()?;
-        let str_id = veryl_parser::resource_table::StrId(str_id_raw);
-        return veryl_parser::resource_table::get_str_value(str_id);
+        return veryl_analyzer::value::byte_value_to_string(value);
     }
     None
 }
