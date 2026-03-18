@@ -107,7 +107,7 @@ impl CmdBuild {
         };
 
         let mut all_pass = true;
-        for context in &contexts {
+        for context in contexts.drain(..) {
             if !context.skip {
                 let path = &context.path;
                 let (dst, map) = if let Some(ref temp_dir) = temp_dir {
@@ -173,11 +173,16 @@ impl CmdBuild {
                     }
                 }
             }
+            // context (including parser AST and input string) is dropped here
         }
+
+        debug!("Executed emit ({} milliseconds)", stopwatch.lap());
 
         if !self.opt.check {
             self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
         }
+
+        debug!("Executed filelist ({} milliseconds)", stopwatch.lap());
 
         let _ = check_error.check_err()?;
         Ok(all_pass)

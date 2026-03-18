@@ -316,7 +316,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
 impl Conv<&WithGenericParameterItem> for () {
     fn conv(context: &mut Context, value: &WithGenericParameterItem) -> IrResult<Self> {
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::GenericParameter(x) = symbol.found.kind
+            && let SymbolKind::GenericParameter(x) = &symbol.found.kind
         {
             if let Some(y) = &value.with_generic_parameter_item_opt {
                 let token: TokenRange = y.with_generic_argument_item.as_ref().into();
@@ -364,7 +364,7 @@ impl Conv<&WithParameterItem> for () {
         }
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::Parameter(x) = symbol.found.kind
+            && let SymbolKind::Parameter(x) = &symbol.found.kind
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind: VarKind = (&x.kind).into();
@@ -595,7 +595,7 @@ impl Conv<&VarDeclaration> for ir::Declaration {
         let token: TokenRange = value.into();
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::Variable(x) = symbol.found.kind
+            && let SymbolKind::Variable(x) = &symbol.found.kind
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind = VarKind::Variable;
@@ -622,7 +622,7 @@ impl Conv<&LetDeclaration> for ir::Declaration {
         let token: TokenRange = value.into();
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::Variable(x) = symbol.found.kind
+            && let SymbolKind::Variable(x) = &symbol.found.kind
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind = VarKind::Let;
@@ -664,7 +664,7 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
         let token: TokenRange = value.into();
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && let SymbolKind::Parameter(x) = symbol.found.kind
+            && let SymbolKind::Parameter(x) = &symbol.found.kind
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind: VarKind = (&x.kind).into();
@@ -733,7 +733,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     Ok(ir::Declaration::new_comb(statements))
                 } else {
                     if let Ok(symbol) = symbol_table::resolve(x.hierarchical_identifier.as_ref())
-                        && let SymbolKind::Variable(x) = symbol.found.kind
+                        && let SymbolKind::Variable(x) = &symbol.found.kind
                         && x.affiliation == Affiliation::Module
                     {
                         let ident_token = ident.identifier.identifier_token.token;
@@ -757,7 +757,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     } else {
                         if let Ok(symbol) =
                             symbol_table::resolve(item.hierarchical_identifier.as_ref())
-                            && let SymbolKind::Variable(x) = symbol.found.kind
+                            && let SymbolKind::Variable(x) = &symbol.found.kind
                             && x.affiliation == Affiliation::Module
                         {
                             let ident_token = ident.identifier.identifier_token.token;
@@ -1127,7 +1127,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
 
         let clock_domain = if let Ok(symbol) =
             symbol_table::resolve(value.component_instantiation.identifier.as_ref())
-            && let SymbolKind::Instance(x) = symbol.found.kind
+            && let SymbolKind::Instance(x) = &symbol.found.kind
         {
             x.clock_domain
         } else {
@@ -1486,7 +1486,7 @@ impl Conv<&ModportDeclaration> for () {
             }
 
             if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-                && let SymbolKind::Modport(x) = symbol.found.kind
+                && let SymbolKind::Modport(x) = &symbol.found.kind
             {
                 let sig = if let Some(x) = c.get_current_signature() {
                     x.clone()
@@ -1506,8 +1506,8 @@ impl Conv<&ModportDeclaration> for () {
                 c.insert_var_path(path, comptime);
 
                 let mut members = vec![];
-                for x in x.members {
-                    let symbol = symbol_table::get(x).unwrap();
+                for x in &x.members {
+                    let symbol = symbol_table::get(*x).unwrap();
                     match &symbol.kind {
                         SymbolKind::ModportVariableMember(x) => {
                             members.push((symbol.token.text, x.direction));

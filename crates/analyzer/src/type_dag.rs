@@ -53,7 +53,7 @@ pub struct TypeDag {
     source: u32,
     candidates: Vec<TypeDagCandidate>,
     errors: Vec<DagError>,
-    dag_owned: HashMap<u32, Vec<u32>>,
+    dag_owned: HashMap<u32, HashSet<u32>>,
     file_dag: Dag<(), (), u32>,
     file_nodes: BiMap<PathId, u32>,
 }
@@ -124,6 +124,7 @@ impl TypeDag {
     }
 
     fn apply(&mut self) -> Vec<AnalyzerError> {
+        symbol_table::suppress_cache_clear();
         let candidates: Vec<_> = self.candidates.drain(..).collect();
 
         // Process symbol declarations at first to construct dag_owned
@@ -173,6 +174,7 @@ impl TypeDag {
             }
         }
 
+        symbol_table::resume_cache_clear();
         self.errors.drain(..).map(|x| x.into()).collect()
     }
 
@@ -236,7 +238,7 @@ impl TypeDag {
             // Need to use the target symbol of the alias instead of it to prevent this situation.
             Self::resolve_symbol_path(&alias_path.generic_path(), &symbol.found.namespace)
         } else {
-            Some(symbol.found)
+            Some((*symbol.found).clone())
         }
     }
 
@@ -322,10 +324,7 @@ impl TypeDag {
         if self.exist_edge(child, parent) {
             self.remove_edge(child, parent);
         }
-        self.dag_owned
-            .entry(parent)
-            .and_modify(|x| x.push(child))
-            .or_insert(vec![child]);
+        self.dag_owned.entry(parent).or_default().insert(child);
     }
 
     fn is_dag_owned(&self, parent: u32, child: u32) -> bool {

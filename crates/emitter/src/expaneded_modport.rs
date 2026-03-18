@@ -540,5 +540,5 @@ fn resolve_interface(
     let (result, _) = resolve_generic_path(&path, namespace, Some(&generic_map.to_vec()));
     result
         .ok()
-        .map(|x| (x.found, x.full_path, x.generic_tables))
+        .map(|x| ((*x.found).clone(), x.full_path, x.generic_tables))
 }

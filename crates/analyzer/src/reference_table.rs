@@ -491,6 +491,7 @@ impl ReferenceTable {
     }
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
+        symbol_table::suppress_cache_clear();
         let candidates: Vec<_> = self.candidates.drain(0..).collect();
 
         for x in &candidates {
@@ -572,10 +573,10 @@ impl ReferenceTable {
                 ReferenceCandidate::NamedArgument { arg, function } => {
                     if let Ok(symbol) = symbol_table::resolve(function) {
                         let func_symbol =
-                            if let SymbolKind::ModportFunctionMember(x) = symbol.found.kind {
+                            if let SymbolKind::ModportFunctionMember(x) = &symbol.found.kind {
                                 symbol_table::get(x.function).unwrap()
                             } else {
-                                symbol.found
+                                (*symbol.found).clone()
                             };
                         let namespace = func_symbol.inner_namespace();
                         let path: SymbolPath = arg.into();
@@ -591,6 +592,7 @@ impl ReferenceTable {
             }
         }
 
+        symbol_table::resume_cache_clear();
         self.errors.drain(0..).collect()
     }
 

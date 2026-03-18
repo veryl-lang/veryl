@@ -516,7 +516,7 @@ impl CreateSymbolTable {
                     let Ok(mp_symbol) = symbol_table::resolve((target, namespace)) else {
                         continue;
                     };
-                    let SymbolKind::Modport(modport) = mp_symbol.found.kind else {
+                    let SymbolKind::Modport(ref modport) = mp_symbol.found.kind else {
                         continue;
                     };
 

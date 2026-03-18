@@ -354,7 +354,7 @@ fn resolve_alias(symbol: &Symbol) -> Option<Symbol> {
     if let Some(proto) = target_symbol.found.proto() {
         Some(proto)
     } else {
-        Some(target_symbol.found)
+        Some((*target_symbol.found).clone())
     }
 }
 

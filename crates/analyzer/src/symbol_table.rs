@@ -13,13 +13,13 @@ use crate::symbol_path::{
     GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
 };
 use crate::tb_component;
-use crate::{AnalyzerError, HashMap, namespace_table};
+use crate::{AnalyzerError, HashMap, SVec, namespace_table};
 use connect::check_connect;
 use log::trace;
 use msb::check_msb;
 use std::cell::RefCell;
 use std::fmt;
-use veryl_parser::resource_table::{PathId, StrId, TokenId};
+use veryl_parser::resource_table::{PathId, StrId};
 use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -27,7 +27,7 @@ use veryl_parser::veryl_walker::VerylWalker;
 
 #[derive(Clone, Debug)]
 pub struct ResolveResult {
-    pub found: Symbol,
+    pub found: std::rc::Rc<Symbol>,
     pub full_path: Vec<SymbolId>,
     pub imported: bool,
     pub generic_tables: GenericTables,
@@ -87,11 +87,13 @@ pub enum Connect {
 pub struct SymbolTable {
     name_table: HashMap<StrId, Vec<SymbolId>>,
     symbol_table: HashMap<SymbolId, Symbol>,
+    namespace_index: HashMap<SVec<StrId>, Vec<SymbolId>>,
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
     import_list: Vec<Import>,
     bind_list: Vec<Bind>,
     msb_list: Vec<Msb>,
     connect_list: Vec<Connect>,
+    suppress_cache_clear: bool,
 }
 
 impl SymbolTable {
@@ -135,8 +137,10 @@ impl SymbolTable {
             }
         }
         let id = symbol.id;
+        let ns_paths = symbol.namespace.paths.clone();
         entry.push(id);
         self.symbol_table.insert(id, symbol);
+        self.namespace_index.entry(ns_paths).or_default().push(id);
         Some(id)
     }
 
@@ -190,12 +194,12 @@ impl SymbolTable {
                     }
                 }
                 SymbolKind::TypeDef(x) => {
-                    context.namespace = symbol.found.namespace;
+                    context.namespace = symbol.found.namespace.clone();
                     return self.trace_type_kind(context, &x.r#type.kind);
                 }
                 SymbolKind::ProtoTypeDef(x) => {
                     if let Some(r#type) = &x.r#type {
-                        context.namespace = symbol.found.namespace;
+                        context.namespace = symbol.found.namespace.clone();
                         return self.trace_type_kind(context, &r#type.kind);
                     }
                 }
@@ -231,7 +235,7 @@ impl SymbolTable {
         )?;
         context.generic_tables = symbol.generic_tables.clone();
 
-        match symbol.found.kind {
+        match &symbol.found.kind {
             SymbolKind::AliasModule(x) => self.trace_type_path(context, &x.target),
             SymbolKind::AliasInterface(x) => self.trace_type_path(context, &x.target),
             SymbolKind::AliasPackage(x) => self.trace_type_path(context, &x.target),
@@ -564,7 +568,7 @@ impl SymbolTable {
                     DocComment::default(),
                 );
                 return Ok(ResolveResult {
-                    found: symbol,
+                    found: std::rc::Rc::new(symbol),
                     full_path: context.full_path,
                     imported: context.imported,
                     generic_tables: context.generic_tables,
@@ -762,7 +766,7 @@ impl SymbolTable {
             );
 
             Ok(ResolveResult {
-                found,
+                found: std::rc::Rc::new(found),
                 full_path: context.full_path,
                 imported: context.imported,
                 generic_tables: context.generic_tables,
@@ -928,6 +932,11 @@ impl SymbolTable {
             .collect();
 
         for id in &drop_list {
+            if let Some(symbol) = self.symbol_table.get(id)
+                && let Some(ids) = self.namespace_index.get_mut(&symbol.namespace.paths)
+            {
+                ids.retain(|x| x != id);
+            }
             self.symbol_table.remove(id);
         }
 
@@ -941,36 +950,22 @@ impl SymbolTable {
     }
 
     pub fn add_reference(&mut self, target: SymbolId, token: &Token) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.id == target {
-                symbol.references.push(token.to_owned());
-                break;
-            }
+        if let Some(symbol) = self.symbol_table.get_mut(&target) {
+            symbol.references.push(token.to_owned());
         }
     }
 
     pub fn add_generic_instance(&mut self, target: SymbolId, instance: SymbolId) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.id == target && !symbol.generic_instances.contains(&instance) {
-                symbol.generic_instances.push(instance);
-                break;
-            }
+        if let Some(symbol) = self.symbol_table.get_mut(&target)
+            && !symbol.generic_instances.contains(&instance)
+        {
+            symbol.generic_instances.push(instance);
         }
     }
 
-    fn add_imported_item(&mut self, target: TokenId, import: &Import) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.token.id == target {
-                symbol.imported.push(import.to_owned());
-            }
-        }
-    }
-
-    fn add_imported_package(&mut self, target: &Namespace, import: &Import) {
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            if symbol.namespace.matched(target) {
-                symbol.imported.push(import.to_owned());
-            }
+    fn add_imported_item(&mut self, target: SymbolId, import: &Import) {
+        if let Some(symbol) = self.symbol_table.get_mut(&target) {
+            symbol.imported.push(import.to_owned());
         }
     }
 
@@ -983,21 +978,42 @@ impl SymbolTable {
         for import in &self.import_list {
             let context = ResolveContext::new(&import.path.1);
             if let Ok(symbol) = self.resolve(&import.path.0.generic_path(), &[], context) {
-                ret.push((import.clone(), symbol.found));
+                ret.push((import.clone(), (*symbol.found).clone()));
             }
         }
         ret
     }
 
     pub fn apply_import(&mut self, symbols: &[(Import, Symbol)]) {
+        // Group wildcard imports by target namespace for batch processing
+        let mut package_imports: HashMap<SVec<StrId>, Vec<(Namespace, &Import)>> =
+            HashMap::default();
         for (import, symbol) in symbols {
             if import.wildcard {
                 if let Some(pkg) = self.get_package(symbol, false) {
                     let target = pkg.inner_namespace();
-                    self.add_imported_package(&target, import);
+                    let paths = target.paths.clone();
+                    package_imports
+                        .entry(paths)
+                        .or_default()
+                        .push((target, import));
                 }
             } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                self.add_imported_item(symbol.token.id, import);
+                self.add_imported_item(symbol.id, import);
+            }
+        }
+        // Batch apply all wildcard imports using namespace_index
+        for (paths, imports) in &package_imports {
+            if let Some(ids) = self.namespace_index.get(paths).cloned() {
+                for id in ids {
+                    if let Some(symbol) = self.symbol_table.get_mut(&id) {
+                        for (target, import) in imports {
+                            if symbol.namespace.matched(target) {
+                                symbol.imported.push((*import).to_owned());
+                            }
+                        }
+                    }
+                }
             }
         }
         self.import_list.clear();
@@ -1593,8 +1609,33 @@ pub fn is_sv_keyword(s: &str) -> bool {
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
 thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveResult>> = RefCell::new(HashMap::default()));
 
+/// Suppress SYMBOL_CACHE invalidation for `add_reference` and `add_generic_instance`.
+///
+/// Use this when performing bulk mutations that modify symbol metadata
+/// without affecting name resolution results. Must be paired with
+/// `resume_cache_clear`.
+pub fn suppress_cache_clear() {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().suppress_cache_clear = true);
+}
+
+/// Resume SYMBOL_CACHE invalidation after `suppress_cache_clear`.
+pub fn resume_cache_clear() {
+    SYMBOL_TABLE.with(|f| f.borrow_mut().suppress_cache_clear = false);
+}
+
+fn clear_cache() {
+    let suppress = SYMBOL_TABLE.with(|f| f.borrow().suppress_cache_clear);
+    if !suppress {
+        SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    }
+}
+
 pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
-    SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol))
+    let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol));
+    if ret.is_some() {
+        SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    }
+    ret
 }
 
 pub fn get(id: SymbolId) -> Option<Symbol> {
@@ -1635,12 +1676,12 @@ pub fn drop(file_path: PathId) {
 }
 
 pub fn add_reference(target: SymbolId, token: &Token) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_cache();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
 }
 
 pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_cache();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_generic_instance(target, instance))
 }
 

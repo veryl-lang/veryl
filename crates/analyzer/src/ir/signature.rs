@@ -47,12 +47,12 @@ impl Signature {
             | SymbolKind::Interface(_)
             | SymbolKind::Modport(_)
             | SymbolKind::Function(_)
-            | SymbolKind::SystemVerilog => symbol.found,
+            | SymbolKind::SystemVerilog => (*symbol.found).clone(),
             SymbolKind::ModportFunctionMember(x) => symbol_table::get(x.function).unwrap(),
             SymbolKind::GenericParameter(_) => {
                 let path = context.resolve_path(path.clone());
                 let symbol = symbol_table::resolve(&path).ok()?;
-                if let SymbolKind::GenericParameter(x) = symbol.found.kind {
+                if let SymbolKind::GenericParameter(x) = &symbol.found.kind {
                     if let GenericBoundKind::Proto(x) = &x.bound {
                         if let TypeKind::UserDefined(x) = &x.kind {
                             let symbol = symbol_table::resolve(&x.path).ok()?;
@@ -64,13 +64,13 @@ impl Signature {
                         return None;
                     }
                 }
-                symbol.found
+                (*symbol.found).clone()
             }
             SymbolKind::ProtoFunction(_) => {
                 let resolved = context.resolve_path(path.clone());
                 let symbol = symbol_table::resolve(&resolved).ok()?;
                 match &symbol.found.kind {
-                    SymbolKind::Function(_) => symbol.found,
+                    SymbolKind::Function(_) => (*symbol.found).clone(),
                     _ => return None,
                 }
             }

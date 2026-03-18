@@ -378,7 +378,7 @@ impl Symbol {
             SymbolKind::Module(x) => {
                 if let Some(proto) = &x.proto {
                     return symbol_table::resolve((&proto.generic_path(), &self.namespace))
-                        .map(|x| x.found)
+                        .map(|x| (*x.found).clone())
                         .ok();
                 }
             }
@@ -390,7 +390,7 @@ impl Symbol {
             SymbolKind::Interface(x) => {
                 if let Some(proto) = &x.proto {
                     return symbol_table::resolve((&proto.generic_path(), &self.namespace))
-                        .map(|x| x.found)
+                        .map(|x| (*x.found).clone())
                         .ok();
                 } else if x.generic_parameters.is_empty() {
                     return Some(self.clone());
@@ -404,7 +404,7 @@ impl Symbol {
             SymbolKind::Package(x) => {
                 if let Some(proto) = &x.proto {
                     return symbol_table::resolve((&proto.generic_path(), &self.namespace))
-                        .map(|x| x.found)
+                        .map(|x| (*x.found).clone())
                         .ok();
                 }
             }
@@ -1160,15 +1160,15 @@ impl Type {
                 let namespace = namespace_table::get(x.path.paths[0].base.id).unwrap();
                 symbol_table::resolve((&x.path.generic_path(), &namespace)).ok()?
             };
-            match symbol.found.kind {
+            match &symbol.found.kind {
                 SymbolKind::TypeDef(x) => {
                     return x.r#type.trace_user_defined(Some(&symbol.found.namespace));
                 }
-                SymbolKind::ProtoTypeDef(ref x) => {
+                SymbolKind::ProtoTypeDef(x) => {
                     if let Some(r#type) = &x.r#type {
                         return r#type.trace_user_defined(Some(&symbol.found.namespace));
                     } else {
-                        return Some((self.clone(), Some(symbol.found)));
+                        return Some((self.clone(), Some((*symbol.found).clone())));
                     }
                 }
                 SymbolKind::Module(_)
@@ -1181,7 +1181,7 @@ impl Type {
                 | SymbolKind::Struct(_)
                 | SymbolKind::Union(_)
                 | SymbolKind::Modport(_) => {
-                    return Some((self.clone(), Some(symbol.found)));
+                    return Some((self.clone(), Some((*symbol.found).clone())));
                 }
                 _ => {}
             }
@@ -2355,7 +2355,7 @@ impl GenericBoundKind {
 
         symbol_table::resolve((path, namespace))
             .ok()
-            .map(|x| x.found)
+            .map(|x| (*x.found).clone())
     }
 
     pub fn resolve_proto_bound(&self, namespace: &Namespace) -> Option<ProtoBound> {

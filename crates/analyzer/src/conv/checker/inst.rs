@@ -20,7 +20,7 @@ enum InstTypeSource {
 fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
     let symbol = match arg {
         InstTypeSource::Id(x) => symbol_table::get(*x)?,
-        InstTypeSource::Path(x) => symbol_table::resolve(x).ok()?.found,
+        InstTypeSource::Path(x) => (*symbol_table::resolve(x).ok()?.found).clone(),
     };
 
     match &symbol.kind {
@@ -52,19 +52,19 @@ fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
         && let Ok(type_symbol) =
             symbol_table::resolve((&x.type_name.mangled_path(), &inst_symbol.namespace))
     {
-        match type_symbol.found.kind {
+        match &type_symbol.found.kind {
             SymbolKind::Module(_)
             | SymbolKind::Interface(_)
             | SymbolKind::SystemVerilog
             | SymbolKind::TbComponent(_) => {
-                return Some(type_symbol.found.kind);
+                return Some(type_symbol.found.kind.clone());
             }
-            SymbolKind::GenericInstance(ref x) => {
+            SymbolKind::GenericInstance(x) => {
                 let base = symbol_table::get(x.base).unwrap();
                 return Some(base.kind);
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace) {
+                if let Some(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace).clone() {
                     return proto.get_symbol().map(|x| x.kind);
                 }
             }

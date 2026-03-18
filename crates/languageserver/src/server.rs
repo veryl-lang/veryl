@@ -1036,9 +1036,9 @@ fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<C
     if let Some(namespace) = current_namespace
         && let Ok(symbol) = symbol_table::resolve((&vec![text], &namespace))
     {
-        match symbol.found.kind {
+        match &symbol.found.kind {
             VerylSymbolKind::Port(x) => {
-                if let TypeKind::UserDefined(ref x) = x.r#type.kind
+                if let TypeKind::UserDefined(x) = &x.r#type.kind
                     && let Some(id) = x.symbol
                 {
                     let symbol = symbol_table::get(id).unwrap();
@@ -1046,7 +1046,7 @@ fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<C
                 }
             }
             VerylSymbolKind::Variable(x) => {
-                if let TypeKind::UserDefined(ref x) = x.r#type.kind
+                if let TypeKind::UserDefined(x) = &x.r#type.kind
                     && let Some(id) = x.symbol
                 {
                     let symbol = symbol_table::get(id).unwrap();

@@ -748,7 +748,7 @@ impl Conv<&Factor> for ir::Expression {
                             };
                             Ok(ir::Expression::Term(Box::new(ir::Factor::Value(comptime))))
                         } else if let Ok(symbol) = symbol_table::resolve(&generic_path)
-                            && let SymbolKind::Parameter(x) = symbol.found.kind
+                            && let SymbolKind::Parameter(x) = &symbol.found.kind
                         {
                             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
                             let dim = context.get_select_dim().unwrap();

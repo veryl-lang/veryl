@@ -914,9 +914,9 @@ impl Emitter {
 
     fn always_ff_reset_exist_in_sensitivity_list(&mut self, arg: &AlwaysFfReset) -> bool {
         if let Ok(found) = symbol_table::resolve(arg.hierarchical_identifier.as_ref()) {
-            let reset_kind = match found.found.kind {
-                SymbolKind::Port(x) => x.r#type.kind,
-                SymbolKind::Variable(x) => x.r#type.kind,
+            let reset_kind = match &found.found.kind {
+                SymbolKind::Port(x) => x.r#type.kind.clone(),
+                SymbolKind::Variable(x) => x.r#type.kind.clone(),
                 SymbolKind::ModportVariableMember(x) => {
                     let symbol = symbol_table::get(x.variable).unwrap();
                     if let SymbolKind::Variable(x) = symbol.kind {
@@ -1397,11 +1397,11 @@ impl Emitter {
 
         let (defined_ports, generic_map, symbol) =
             if let (Ok(symbol), _) = self.resolve_scoped_idnetifier(&arg.scoped_identifier) {
-                match symbol.found.kind {
-                    SymbolKind::Module(ref x) if !allow_missing_port => {
-                        (x.ports.clone(), vec![], symbol.found)
+                match &symbol.found.kind {
+                    SymbolKind::Module(x) if !allow_missing_port => {
+                        (x.ports.clone(), vec![], (*symbol.found).clone())
                     }
-                    SymbolKind::GenericInstance(ref x) => {
+                    SymbolKind::GenericInstance(x) => {
                         let base = symbol_table::get(x.base).unwrap();
                         match base.kind {
                             SymbolKind::Module(ref x) if !allow_missing_port => {
@@ -1410,7 +1410,7 @@ impl Emitter {
                             _ => (vec![], vec![], base),
                         }
                     }
-                    _ => (vec![], vec![], symbol.found),
+                    _ => (vec![], vec![], (*symbol.found).clone()),
                 }
             } else {
                 unreachable!()
@@ -1524,7 +1524,7 @@ impl Emitter {
 
     fn emit_port_identifier(&mut self, identifier: &Identifier) {
         let symbol = symbol_table::resolve((identifier, self.inst_module_namespace.as_ref()))
-            .map(|x| x.found)
+            .map(|x| (*x.found).clone())
             .ok();
         self.emit_identifier(identifier, symbol.as_ref());
     }
@@ -1800,7 +1800,7 @@ impl Emitter {
                 resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
             type_symbol
                 .ok()
-                .map(|x| (x.found, x.full_path, x.generic_tables))
+                .map(|x| ((*x.found).clone(), x.full_path, x.generic_tables))
         }
 
         let Some((target_type, target_path, target_tables)) = get_type_symbol(target, target_map)
@@ -1856,8 +1856,8 @@ impl Emitter {
                     unreachable!()
                 };
 
-            match symbol.kind {
-                SymbolKind::Function(ref x) => (x.ports.clone(), Vec::new(), symbol.namespace),
+            match &symbol.kind {
+                SymbolKind::Function(x) => (x.ports.clone(), Vec::new(), symbol.namespace.clone()),
                 SymbolKind::ModportFunctionMember(x) => {
                     let symbol = symbol_table::get(x.function).unwrap();
                     let SymbolKind::Function(x) = symbol.kind else {
@@ -1865,7 +1865,7 @@ impl Emitter {
                     };
                     (x.ports.clone(), Vec::new(), symbol.namespace)
                 }
-                SymbolKind::GenericInstance(ref x) => {
+                SymbolKind::GenericInstance(x) => {
                     let base = symbol_table::get(x.base).unwrap();
                     match base.kind {
                         SymbolKind::Function(ref x) => {
@@ -1874,7 +1874,7 @@ impl Emitter {
                         _ => (Vec::new(), Vec::new(), base.namespace),
                     }
                 }
-                _ => (Vec::new(), Vec::new(), symbol.namespace),
+                _ => (Vec::new(), Vec::new(), symbol.namespace.clone()),
             }
         };
 
@@ -2007,7 +2007,7 @@ impl Emitter {
 
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
-            if let SymbolKind::Modport(x) = symbol.found.kind {
+            if let SymbolKind::Modport(x) = &symbol.found.kind {
                 for (i, x) in x.members.iter().enumerate() {
                     let symbol = symbol_table::get(*x).unwrap();
                     if !matches!(symbol.token.source, TokenSource::Generated(_)) {
@@ -2438,7 +2438,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+        let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
         self.emit_identifier(arg, symbol.as_ref());
     }
 
@@ -2469,7 +2469,7 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+            let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
             self.emit_identifier(&arg.identifier, symbol.as_ref());
         } else {
             self.identifier(&arg.identifier);
@@ -2491,7 +2491,7 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+                let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
                 self.emit_identifier(&x.identifier, symbol.as_ref());
             } else {
                 self.identifier(&x.identifier);
@@ -2609,7 +2609,7 @@ impl VerylWalker for Emitter {
                 if (i + 1) < arg.expression_identifier_list0.len() {
                     self.emit_identifier(&x.identifier, None);
                 } else {
-                    let symbol = symbol_table::resolve(arg).map(|x| x.found).ok();
+                    let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
                     self.emit_identifier(&x.identifier, symbol.as_ref());
                 }
             }
@@ -3516,7 +3516,7 @@ impl VerylWalker for Emitter {
             false
         } else if let Some(lhs) = &self.assignment_lefthand_side {
             if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
-                match lhs_symbol.found.kind {
+                match &lhs_symbol.found.kind {
                     SymbolKind::Variable(x) => !matches!(
                         x.affiliation,
                         Affiliation::StatementBlock | Affiliation::Function
@@ -4404,7 +4404,7 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EnumDeclaration'
     fn enum_declaration(&mut self, arg: &EnumDeclaration) {
         let enum_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let SymbolKind::Enum(r#enum) = enum_symbol.found.kind else {
+        let SymbolKind::Enum(ref r#enum) = enum_symbol.found.kind else {
             unreachable!();
         };
         self.enum_width = r#enum.width;
@@ -4472,8 +4472,8 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'EnumItem'
     fn enum_item(&mut self, arg: &EnumItem) {
         let member_symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let (prefix, value) = if let SymbolKind::EnumMember(member) = member_symbol.found.kind {
-            (member.prefix, member.value)
+        let (prefix, value) = if let SymbolKind::EnumMember(member) = &member_symbol.found.kind {
+            (member.prefix.clone(), member.value.clone())
         } else {
             unreachable!();
         };
@@ -5865,7 +5865,7 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
 
     symbol_table::resolve((&path.mangled_path(), &symbol.namespace))
         .ok()
-        .map(|x| x.found)
+        .map(|x| (*x.found).clone())
 }
 
 pub fn symbol_string(
