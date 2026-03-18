@@ -242,4 +242,15 @@ fn parse_error_help() {
         &help_message(code),
         "The first arm of generate-if declaration needs label (e.g. 'if x :label {')"
     );
+
+    let code = r#"
+    module ModuleA {
+        var if: logic;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "'if' is a reserved keyword and cannot be used as an identifier"
+    );
 }

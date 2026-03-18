@@ -66,6 +66,10 @@ fn l_brace_instead_of_colon(unexpected_token: TokenType, expected_tokens: &Expec
     unexpected_token == TokenType::LBrace && expected_tokens.any(TokenType::Colon)
 }
 
+fn keyword_as_identifier(unexpected_token: TokenType, expected_tokens: &ExpectedTokens) -> bool {
+    unexpected_token.is_keyword() && expected_tokens.any(TokenType::Identifier)
+}
+
 impl From<parol_runtime::SyntaxError> for SyntaxError {
     fn from(value: parol_runtime::SyntaxError) -> Self {
         let unexpected_tokens: Vec<_> = UnexpectedTokens(value.unexpected_tokens).into();
@@ -86,6 +90,11 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
                 help =
                     "The first arm of generate-if declaration needs label (e.g. 'if x :label {')"
                         .to_string();
+            } else if keyword_as_identifier(token, &expected_tokens) {
+                help = format!(
+                    "'{}' is a reserved keyword and cannot be used as an identifier",
+                    token
+                );
             }
         }
 
@@ -214,6 +223,72 @@ pub enum TokenType {
     Var,
     Identifier,
     Error,
+}
+
+impl TokenType {
+    pub fn is_keyword(&self) -> bool {
+        matches!(
+            self,
+            TokenType::AlwaysComb
+                | TokenType::AlwaysFf
+                | TokenType::Assign
+                | TokenType::AsyncHigh
+                | TokenType::AsyncLow
+                | TokenType::As
+                | TokenType::Bit
+                | TokenType::Case
+                | TokenType::Default
+                | TokenType::Else
+                | TokenType::Enum
+                | TokenType::Export
+                | TokenType::F32
+                | TokenType::F64
+                | TokenType::Final
+                | TokenType::For
+                | TokenType::Function
+                | TokenType::I32
+                | TokenType::I64
+                | TokenType::IfReset
+                | TokenType::If
+                | TokenType::Import
+                | TokenType::Initial
+                | TokenType::Inout
+                | TokenType::Input
+                | TokenType::Inside
+                | TokenType::Inst
+                | TokenType::Interface
+                | TokenType::In
+                | TokenType::Let
+                | TokenType::Local
+                | TokenType::Logic
+                | TokenType::Lsb
+                | TokenType::Modport
+                | TokenType::Module
+                | TokenType::Msb
+                | TokenType::Negedge
+                | TokenType::Output
+                | TokenType::Outside
+                | TokenType::Package
+                | TokenType::Param
+                | TokenType::Posedge
+                | TokenType::Pub
+                | TokenType::Ref
+                | TokenType::Repeat
+                | TokenType::Return
+                | TokenType::Signed
+                | TokenType::Step
+                | TokenType::String
+                | TokenType::Struct
+                | TokenType::SyncHigh
+                | TokenType::SyncLow
+                | TokenType::Tri
+                | TokenType::Type
+                | TokenType::U32
+                | TokenType::U64
+                | TokenType::Union
+                | TokenType::Var
+        )
+    }
 }
 
 impl From<&str> for TokenType {

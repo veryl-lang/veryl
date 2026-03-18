@@ -1,0 +1,13 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+ParserError::SyntaxError
+
+  × Unexpected token: 'if'
+   ╭─[../../testcases/error/keyword_as_identifier.veryl:1:8]
+ 1 │ module if {}
+   ·        ─┬
+   ·         ╰── Error location
+   ╰────
+  help: 'if' is a reserved keyword and cannot be used as an identifier
