@@ -13,3 +13,6 @@
 [submodule "support/tree-sitter"]
 	path = support/tree-sitter
 	url = https://github.com/veryl-lang/tree-sitter-veryl.git
+[submodule "support/discovery"]
+	path = support/discovery
+	url = https://github.com/veryl-lang/discovery.git
