@@ -257,18 +257,14 @@ impl Op {
             return;
         }
 
-        // string and non-string can't be operated
-        if x.r#type.is_string() ^ y.r#type.is_string() {
-            if !x.r#type.is_string() {
-                dst.r#type = self.invalid_operand(context, x);
-                return;
-            } else {
-                dst.r#type = self.invalid_operand(context, y);
-                return;
-            }
-        }
-        if x.r#type.is_string() && !matches!(self, Op::Eq | Op::Ne) {
-            dst.r#type = self.invalid_operand(context, x);
+        // string operands: only comparison operators are allowed
+        if (x.r#type.is_string() || y.r#type.is_string())
+            && !matches!(
+                self,
+                Op::Eq | Op::Ne | Op::Less | Op::Greater | Op::LessEq | Op::GreaterEq
+            )
+        {
+            dst.r#type = self.invalid_operand(context, if x.r#type.is_string() { x } else { y });
             return;
         }
 

@@ -1,0 +1,3 @@
+module invalid_string_operand {
+    let _a: string = "abc" + "def";
+}

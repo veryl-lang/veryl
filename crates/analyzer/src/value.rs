@@ -6,6 +6,112 @@ use std::cell::LazyCell;
 use std::{fmt, str};
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 
+/// Strip surrounding quotes and process escape sequences in a string literal.
+fn unescape_string_literal(s: &str) -> Vec<u8> {
+    let inner = if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    };
+    let mut bytes = Vec::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => bytes.push(0x0a),
+                Some('t') => bytes.push(0x09),
+                Some('r') => bytes.push(0x0d),
+                Some('b') => bytes.push(0x08),
+                Some('f') => bytes.push(0x0c),
+                Some('\\') => bytes.push(b'\\'),
+                Some('"') => bytes.push(b'"'),
+                Some('/') => bytes.push(b'/'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if hex.len() == 4
+                        && let Ok(code) = u32::from_str_radix(&hex, 16)
+                        && let Some(ch) = char::from_u32(code)
+                    {
+                        let mut buf = [0u8; 4];
+                        let encoded = ch.encode_utf8(&mut buf);
+                        bytes.extend_from_slice(encoded.as_bytes());
+                    } else {
+                        // Invalid \uXXXX sequence: preserve as-is
+                        bytes.extend_from_slice(b"\\u");
+                        bytes.extend_from_slice(hex.as_bytes());
+                    }
+                }
+                Some(other) => {
+                    bytes.push(b'\\');
+                    let mut buf = [0u8; 4];
+                    let encoded = other.encode_utf8(&mut buf);
+                    bytes.extend_from_slice(encoded.as_bytes());
+                }
+                None => bytes.push(b'\\'),
+            }
+        } else {
+            let mut buf = [0u8; 4];
+            let encoded = c.encode_utf8(&mut buf);
+            bytes.extend_from_slice(encoded.as_bytes());
+        }
+    }
+    bytes
+}
+
+/// Convert a string literal (with surrounding quotes) to a byte-packed Value.
+/// e.g. "abc" → payload=0x616263, width=24, signed=false
+pub fn string_to_byte_value(s: &str) -> Value {
+    let bytes = unescape_string_literal(s);
+    let width = bytes.len() * 8;
+    if width == 0 {
+        return Value::new(0, 0, false);
+    }
+    if bytes.len() <= 8 {
+        let mut payload: u64 = 0;
+        for &b in &bytes {
+            payload = (payload << 8) | (b as u64);
+        }
+        Value::new(payload, width, false)
+    } else {
+        let mut big = BigUint::zero();
+        for &b in &bytes {
+            big = (big << 8) | BigUint::from(b as u64);
+        }
+        Value::new_biguint(big, width, false)
+    }
+}
+
+/// Convert a byte-packed Value back to a String (inverse of string_to_byte_value).
+pub fn byte_value_to_string(value: &Value) -> Option<String> {
+    let width = value.width();
+    if width == 0 {
+        return Some(String::new());
+    }
+    if !width.is_multiple_of(8) {
+        return None;
+    }
+    let num_bytes = width / 8;
+    let mut bytes = vec![0u8; num_bytes];
+    match value {
+        Value::U64(v) => {
+            let mut payload = v.payload;
+            for i in (0..num_bytes).rev() {
+                bytes[i] = (payload & 0xff) as u8;
+                payload >>= 8;
+            }
+        }
+        Value::BigUint(v) => {
+            let mut big = v.payload().clone();
+            let mask = BigUint::from(0xffu64);
+            for i in (0..num_bytes).rev() {
+                bytes[i] = (&big & &mask).to_u64().unwrap_or(0) as u8;
+                big >>= 8;
+            }
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
 /// Convert a BigUint to u128. Returns the low 128 bits.
 pub fn biguint_to_u128(v: &BigUint) -> u128 {
     let digits = v.to_u64_digits();
@@ -4686,5 +4792,87 @@ mod tests {
         assert_eq!(format!("{:x}", x05), "68'sh000000000000000e1");
         assert_eq!(format!("{:x}", x06), "68'shxxxxxxxxxxxxxxxxx");
         assert_eq!(format!("{:x}", x07), "68'shxxxxxxxxxxxxxxxxx");
+    }
+
+    #[test]
+    fn test_string_to_byte_value_basic() {
+        let v = string_to_byte_value("\"abc\"");
+        assert_eq!(v.width(), 24);
+        assert_eq!(v.payload_u64(), 0x616263);
+        assert!(!v.signed());
+    }
+
+    #[test]
+    fn test_string_to_byte_value_empty() {
+        let v = string_to_byte_value("\"\"");
+        assert_eq!(v.width(), 0);
+        assert_eq!(v.payload_u64(), 0);
+    }
+
+    #[test]
+    fn test_string_to_byte_value_single_char() {
+        let v = string_to_byte_value("\"A\"");
+        assert_eq!(v.width(), 8);
+        assert_eq!(v.payload_u64(), 0x41);
+    }
+
+    #[test]
+    fn test_string_to_byte_value_escape_sequences() {
+        let v = string_to_byte_value("\"\\n\"");
+        assert_eq!(v.width(), 8);
+        assert_eq!(v.payload_u64(), 0x0a);
+
+        let v = string_to_byte_value("\"\\t\"");
+        assert_eq!(v.width(), 8);
+        assert_eq!(v.payload_u64(), 0x09);
+
+        let v = string_to_byte_value("\"a\\nb\"");
+        assert_eq!(v.width(), 24);
+        assert_eq!(v.payload_u64(), 0x610a62);
+    }
+
+    #[test]
+    fn test_string_to_byte_value_8_chars() {
+        let v = string_to_byte_value("\"abcdefgh\"");
+        assert_eq!(v.width(), 64);
+        assert_eq!(v.payload_u64(), 0x6162636465666768);
+    }
+
+    #[test]
+    fn test_string_to_byte_value_over_8_chars() {
+        let v = string_to_byte_value("\"abcdefghi\"");
+        assert_eq!(v.width(), 72);
+        let expected = BigUint::from(0x6162636465666768u64) << 8 | BigUint::from(0x69u64);
+        assert_eq!(*v.payload(), expected);
+    }
+
+    #[test]
+    fn test_byte_value_to_string_basic() {
+        let v = string_to_byte_value("\"abc\"");
+        assert_eq!(byte_value_to_string(&v), Some("abc".to_string()));
+    }
+
+    #[test]
+    fn test_byte_value_to_string_empty() {
+        let v = string_to_byte_value("\"\"");
+        assert_eq!(byte_value_to_string(&v), Some("".to_string()));
+    }
+
+    #[test]
+    fn test_byte_value_to_string_roundtrip_escape() {
+        let v = string_to_byte_value("\"a\\nb\"");
+        assert_eq!(byte_value_to_string(&v), Some("a\nb".to_string()));
+    }
+
+    #[test]
+    fn test_byte_value_to_string_roundtrip_long() {
+        let v = string_to_byte_value("\"abcdefghi\"");
+        assert_eq!(byte_value_to_string(&v), Some("abcdefghi".to_string()));
+    }
+
+    #[test]
+    fn test_byte_value_to_string_non_byte_aligned() {
+        let v = Value::new(0x41, 7, false);
+        assert_eq!(byte_value_to_string(&v), None);
     }
 }

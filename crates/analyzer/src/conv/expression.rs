@@ -10,7 +10,7 @@ use crate::ir::{
 use crate::symbol::SymbolKind;
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
-use crate::value::Value;
+use crate::value::{Value, string_to_byte_value};
 use crate::{ir_error, msb_table};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -587,9 +587,13 @@ impl Conv<&Factor> for ir::Expression {
             }
             Factor::StringLiteral(x) => {
                 let text = x.string_literal.string_literal_token.token.text;
-                let value = Value::new(text.0 as u64, 32, false);
+                let text_str =
+                    veryl_parser::resource_table::get_str_value(text).unwrap_or_default();
+                let value = string_to_byte_value(&text_str);
+                let width = value.width() as usize;
                 let r#type = Type {
                     kind: TypeKind::String,
+                    width: Shape::new(vec![Some(width)]),
                     ..Default::default()
                 };
                 let ret = Comptime {
