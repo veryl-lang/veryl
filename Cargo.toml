@@ -19,6 +19,7 @@ members = [
     "support/highlightgen",
 ]
 exclude = [
+    "support/discovery",
     "support/sourcemap-resolver",
     "support/zed",
 ]
