@@ -168,6 +168,10 @@ pub struct OptTest {
     /// Dump waveform
     #[arg(long)]
     pub wave: bool,
+
+    /// Disable JIT compilation for native tests
+    #[arg(long)]
+    pub disable_jit: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

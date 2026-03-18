@@ -63,7 +63,7 @@ impl CmdTest {
                         veryl_parser::resource_table::get_str_value(*test).unwrap_or_default();
                     info!("Executing test ({test_name})");
 
-                    match run_native_test(&ir, &test_name, &property.top, self.opt.wave) {
+                    match run_native_test(&ir, &test_name, &property.top, &self.opt) {
                         Ok(()) => {
                             info!("Succeeded test ({test_name})");
                             success += 1;
@@ -114,7 +114,7 @@ fn run_native_test(
     ir: &veryl_analyzer::ir::Ir,
     test_name: &str,
     top: &Option<resource_table::StrId>,
-    wave: bool,
+    opt: &OptTest,
 ) -> std::result::Result<(), SimulatorError> {
     let top_name = if let Some(top_str) = top {
         resource_table::get_str_value(*top_str).unwrap_or_default()
@@ -122,7 +122,10 @@ fn run_native_test(
         test_name.to_string()
     };
 
-    let config = Config::default();
+    let config = Config {
+        use_jit: !opt.disable_jit,
+        ..Config::default()
+    };
     let top_str_id = resource_table::get_str_id(top_name.clone()).ok_or_else(|| {
         SimulatorError::TopModuleNotFound {
             module_name: top_name.clone(),
@@ -130,7 +133,7 @@ fn run_native_test(
     })?;
     let sim_ir = build_ir(ir.clone(), top_str_id, &config)?;
 
-    let dump: Option<Box<dyn std::io::Write>> = if wave {
+    let dump: Option<Box<dyn std::io::Write>> = if opt.wave {
         let path = format!("{}.vcd", test_name);
         let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
             message: format!("failed to create VCD file {path}: {e}"),
