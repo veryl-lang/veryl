@@ -31,7 +31,8 @@ miette        = {workspace = true, features = ["fancy"]}
 
 [build-dependencies]
 parol         = {workspace = true, optional = true}
+regex         = {workspace = true, optional = true}
 
 [features]
 default = ["build"]
-build   = ["dep:parol"]
+build   = ["dep:parol", "dep:regex"]
