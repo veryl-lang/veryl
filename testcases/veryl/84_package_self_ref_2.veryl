@@ -1,0 +1,6 @@
+package Package84::<a: u32, b: u32> {
+    const A: u32 = a;
+    const B: u32 = b;
+}
+
+alias package package_84_2 = Package84::<1, 2>;

@@ -143,7 +143,7 @@ impl TypeDag {
                     if let Ok(import) = symbol_table::resolve(x)
                         && let Some(import) = self.insert_symbol(&import.found)
                     {
-                        self.insert_dag_edge(child, import, *context);
+                        self.insert_dag_edge(child, import, *context, false);
                     }
                 }
 
@@ -219,9 +219,21 @@ impl TypeDag {
                     } else {
                         base_symbol
                     };
-                    self.insert_path_symbols(&parent_symbol, parent_context, &base_symbol);
+                    let recursive_ref = namespace.included(&base_symbol.inner_namespace());
+                    self.insert_path_symbols(
+                        &parent_symbol,
+                        parent_context,
+                        &base_symbol,
+                        recursive_ref,
+                    );
                 } else {
-                    self.insert_path_symbols(&parent_symbol, parent_context, &base_symbol);
+                    let recursive_ref = namespace.included(&base_symbol.inner_namespace());
+                    self.insert_path_symbols(
+                        &parent_symbol,
+                        parent_context,
+                        &base_symbol,
+                        recursive_ref,
+                    );
                 }
             } else {
                 self.insert_symbol(&base_symbol);
@@ -247,6 +259,7 @@ impl TypeDag {
         parent_symbol: &Symbol,
         parent_context: Context,
         base_symbol: &Symbol,
+        recursive_ref: bool,
     ) {
         let Some(base) = self.insert_symbol(base_symbol) else {
             return;
@@ -254,7 +267,7 @@ impl TypeDag {
         if let Some(parent) = self.insert_symbol(parent_symbol)
             && !self.is_dag_owned(parent, base)
         {
-            self.insert_dag_edge(parent, base, parent_context);
+            self.insert_dag_edge(parent, base, parent_context, recursive_ref);
         }
     }
 
@@ -302,7 +315,7 @@ impl TypeDag {
                 let parent_context = parent.1;
                 if let Some(parent) = self.insert_symbol(&parent_symbol) {
                     self.insert_dag_owned(parent, child);
-                    self.insert_dag_edge(child, parent, parent_context);
+                    self.insert_dag_edge(child, parent, parent_context, false);
                 }
             }
             Some(child)
@@ -311,9 +324,9 @@ impl TypeDag {
         }
     }
 
-    fn insert_dag_edge(&mut self, parent: u32, child: u32, context: Context) {
+    fn insert_dag_edge(&mut self, parent: u32, child: u32, context: Context, recursive_ref: bool) {
         // Reversing this order to make traversal work
-        if let Err(x) = self.insert_edge(child, parent, context) {
+        if let Err(x) = self.insert_edge(child, parent, context, recursive_ref) {
             self.errors.push(x);
         }
     }
@@ -351,7 +364,7 @@ impl TypeDag {
             }
 
             let node_index = self.dag.add_node(()).index() as u32;
-            self.insert_edge(self.source, node_index, Context::Irrelevant)?;
+            self.insert_edge(self.source, node_index, Context::Irrelevant, false)?;
             self.nodes.insert(symbol_id, node_index);
             self.paths.insert(node_index, trinfo);
             self.symbols.insert(node_index, symbol);
@@ -368,19 +381,31 @@ impl TypeDag {
         }
     }
 
-    fn insert_edge(&mut self, start: u32, end: u32, edge: Context) -> Result<(), DagError> {
+    fn insert_edge(
+        &mut self,
+        start: u32,
+        end: u32,
+        edge: Context,
+        recursive_ref: bool,
+    ) -> Result<(), DagError> {
         match self.dag.add_edge(start.into(), end.into(), edge) {
             Ok(_) => {
                 self.insert_file_edge(start, end);
                 Ok(())
             }
             Err(_) => {
-                // Direct recursion of module/interface/function is allowed
-                let is_allowed_direct_recursion = matches!(
-                    edge,
-                    Context::Module | Context::Interface | Context::Function
-                ) && start == end;
-                if is_allowed_direct_recursion {
+                let is_allowed_direct_reference = match edge {
+                    Context::Module | Context::Interface | Context::Function => {
+                        // Direct recursion of module/interface/function is allowed
+                        start == end
+                    }
+                    Context::Package => {
+                        // Self reference given as generic arg
+                        start == end && !recursive_ref
+                    }
+                    _ => false,
+                };
+                if is_allowed_direct_reference {
                     Ok(())
                 } else {
                     let ssym = self.get_symbol(start);

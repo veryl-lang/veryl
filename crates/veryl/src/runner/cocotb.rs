@@ -52,18 +52,16 @@ impl Cocotb {
         // Check for keyword presence to set line's state
         if force_error {
             self.state = State::Error;
-        } else {
-            if line.contains("DEBUG") {
-                self.state = State::Debug;
-            } else if line.contains("INFO") {
-                self.state = State::Info;
-            } else if line.contains("WARNING") {
-                self.state = State::Warning;
-            } else if line.contains("ERROR") {
-                self.state = State::Error;
-            } else if line.contains("CRTITICAL") {
-                self.state = State::Fatal;
-            }
+        } else if line.contains("DEBUG") {
+            self.state = State::Debug;
+        } else if line.contains("INFO") {
+            self.state = State::Info;
+        } else if line.contains("WARNING") {
+            self.state = State::Warning;
+        } else if line.contains("ERROR") {
+            self.state = State::Error;
+        } else if line.contains("CRTITICAL") {
+            self.state = State::Fatal;
         }
 
         // Display the line

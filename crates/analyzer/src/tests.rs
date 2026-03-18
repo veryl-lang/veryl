@@ -643,6 +643,18 @@ fn cyclic_type_dependency() {
         errors[0],
         AnalyzerError::CyclicTypeDependency { .. }
     ));
+
+    let code = r#"
+    package Pkg::<a: u32, b: u32> {
+        const A: u32 = a;
+        const B: u32 = b;
+    }
+    alias package Pkg0 = Pkg::<1, 2>;
+    alias package Pkg1 = Pkg::<Pkg0::B, Pkg0::A>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
