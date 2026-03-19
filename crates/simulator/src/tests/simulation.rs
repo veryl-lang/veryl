@@ -4555,3 +4555,1081 @@ fn jit_timing_cross_child_forwarding() {
         );
     }
 }
+
+// Regression: child output port mapped to internal var, then used by assign.
+// Tests that mapping a child output to an internal variable (instead of
+// directly to the parent output port) produces the same result.
+#[test]
+fn child_output_to_var_passthrough() {
+    // Direct: child output → parent output
+    let code_direct = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        i_val : input  logic<32>,
+        result: output logic<32>,
+    ) {
+        inst u_child: Child (
+            clk,
+            rst,
+            i_val,
+            o_val: result,
+        );
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        i_val: input  logic<32>,
+        o_val: output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                o_val = 0;
+            } else {
+                o_val = i_val + 1;
+            }
+        }
+    }
+    "#;
+
+    // Indirect: child output → var → assign → parent output
+    let code_indirect = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        i_val : input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var child_out: logic<32>;
+        inst u_child: Child (
+            clk,
+            rst,
+            i_val,
+            o_val: child_out,
+        );
+        assign result = child_out;
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        i_val: input  logic<32>,
+        o_val: output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                o_val = 0;
+            } else {
+                o_val = i_val + 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir_d = analyze(code_direct, &config);
+        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let ir_i = analyze(code_indirect, &config);
+        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+
+        let clk_d = sim_d.get_clock("clk").unwrap();
+        let rst_d = sim_d.get_reset("rst").unwrap();
+        let clk_i = sim_i.get_clock("clk").unwrap();
+        let rst_i = sim_i.get_reset("rst").unwrap();
+
+        sim_d.step(&rst_d);
+        sim_i.step(&rst_i);
+
+        for cycle in 0..10u64 {
+            let input = Value::new(cycle * 10, 32, false);
+            sim_d.set("i_val", input.clone());
+            sim_i.set("i_val", input);
+
+            sim_d.step(&clk_d);
+            sim_i.step(&clk_i);
+
+            let rd = sim_d.get("result").unwrap();
+            let ri = sim_i.get("result").unwrap();
+            assert_eq!(
+                rd, ri,
+                "Mismatch at cycle {} config {:?}: direct={:?} indirect={:?}",
+                cycle, config, rd, ri
+            );
+        }
+    }
+}
+
+// Regression: child output → var → parent output, with external comb feedback.
+// The testbench reads the parent output and feeds it back as input combinationally.
+// This mimics: memory module → dmem_addr → testbench memory → dmem_rdata → memory module.
+#[test]
+fn child_output_var_comb_feedback() {
+    // Direct connection (working)
+    let code_direct = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        o_addr: output logic<32>,
+        i_data: input  logic<32>,
+        o_wen : output logic,
+        o_wdata: output logic<32>,
+        result: output logic<32>,
+    ) {
+        inst u_mem: MemStage (
+            clk,
+            rst,
+            i_data,
+            o_addr,
+            o_wen,
+            o_wdata,
+            o_result: result,
+        );
+    }
+
+    module MemStage (
+        clk     : input  clock,
+        rst     : input  reset,
+        i_data  : input  logic<32>,
+        o_addr  : output logic<32>,
+        o_wen   : output logic,
+        o_wdata : output logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var addr_reg: logic<32>;
+        var phase: logic;
+
+        always_ff {
+            if_reset {
+                addr_reg = 0;
+                phase = 0;
+                o_result = 0;
+            } else {
+                if !phase {
+                    // Write phase: write 42 to addr 0
+                    phase = 1;
+                } else {
+                    // Read phase: latch data from memory
+                    o_result = i_data;
+                }
+            }
+        }
+
+        assign o_addr = 32'd0;
+        assign o_wen = !phase;
+        assign o_wdata = 32'd42;
+    }
+    "#;
+
+    // Indirect connection (potentially broken)
+    let code_indirect = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        o_addr: output logic<32>,
+        i_data: input  logic<32>,
+        o_wen : output logic,
+        o_wdata: output logic<32>,
+        result: output logic<32>,
+    ) {
+        var mem_addr: logic<32>;
+        var mem_wen : logic;
+        var mem_wdata: logic<32>;
+
+        inst u_mem: MemStage (
+            clk,
+            rst,
+            i_data,
+            o_addr  : mem_addr,
+            o_wen   : mem_wen,
+            o_wdata : mem_wdata,
+            o_result: result,
+        );
+
+        assign o_addr  = mem_addr;
+        assign o_wen   = mem_wen;
+        assign o_wdata = mem_wdata;
+    }
+
+    module MemStage (
+        clk     : input  clock,
+        rst     : input  reset,
+        i_data  : input  logic<32>,
+        o_addr  : output logic<32>,
+        o_wen   : output logic,
+        o_wdata : output logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var addr_reg: logic<32>;
+        var phase: logic;
+
+        always_ff {
+            if_reset {
+                addr_reg = 0;
+                phase = 0;
+                o_result = 0;
+            } else {
+                if !phase {
+                    phase = 1;
+                } else {
+                    o_result = i_data;
+                }
+            }
+        }
+
+        assign o_addr = 32'd0;
+        assign o_wen = !phase;
+        assign o_wdata = 32'd42;
+    }
+    "#;
+
+    for config in Config::all() {
+        // Test direct
+        let ir_d = analyze(code_direct, &config);
+        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let clk_d = sim_d.get_clock("clk").unwrap();
+        let rst_d = sim_d.get_reset("rst").unwrap();
+
+        sim_d.step(&rst_d);
+
+        // Simulate external memory: read addr, provide data
+        for _ in 0..5 {
+            // External memory feedback: i_data = 42 if wen wrote it
+            let wen = sim_d.get("o_wen").unwrap();
+            if wen == Value::new(1, 1, false) {
+                // Write happening this cycle
+            }
+            sim_d.set("i_data", Value::new(42, 32, false));
+            sim_d.step(&clk_d);
+        }
+        let rd = sim_d.get("result").unwrap();
+
+        // Test indirect
+        let ir_i = analyze(code_indirect, &config);
+        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let clk_i = sim_i.get_clock("clk").unwrap();
+        let rst_i = sim_i.get_reset("rst").unwrap();
+
+        sim_i.step(&rst_i);
+
+        for _ in 0..5 {
+            sim_i.set("i_data", Value::new(42, 32, false));
+            sim_i.step(&clk_i);
+        }
+        let ri = sim_i.get("result").unwrap();
+
+        assert_eq!(
+            rd, ri,
+            "Direct vs indirect mismatch: config {:?}: direct={:?} indirect={:?}",
+            config, rd, ri
+        );
+        assert_eq!(rd, Value::new(42, 32, false), "Expected 42, config {:?}", config);
+    }
+}
+
+// Regression: 3-level hierarchy with var port redirect.
+// TB → Middle → Inner, where Middle redirects Inner's output through a var.
+// TB has combinational feedback: reads Middle's output, feeds back as input.
+#[test]
+fn three_level_var_port_redirect() {
+    // Direct: Inner output → Middle output (no var)
+    let code_direct = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var addr : logic<32>;
+        var wdata: logic<32>;
+        var wen  : logic;
+        var rdata: logic<32>;
+
+        inst u_mid: Middle (
+            clk,
+            rst,
+            o_addr : addr,
+            o_wdata: wdata,
+            o_wen  : wen,
+            i_rdata: rdata,
+            o_result: result,
+        );
+
+        // Simple memory: combinational feedback from addr/wen/wdata to rdata
+        var mem: logic<32>;
+        always_ff {
+            if_reset {
+                mem = 0;
+            } else if wen {
+                mem = wdata;
+            }
+        }
+        assign rdata = mem;
+    }
+
+    module Middle (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        inst u_inner: Inner (
+            clk,
+            rst,
+            o_addr,
+            o_wdata,
+            o_wen,
+            i_rdata,
+            o_result,
+        );
+    }
+
+    module Inner (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var phase: logic<2>;
+        always_ff {
+            if_reset {
+                phase = 0;
+                o_result = 0;
+            } else {
+                case phase {
+                    2'd0: phase = 1; // write 42
+                    2'd1: phase = 2; // wait
+                    2'd2: {
+                        o_result = i_rdata; // read back
+                        phase = 3;
+                    }
+                    default: {}
+                }
+            }
+        }
+        assign o_addr  = 32'd0;
+        assign o_wdata = 32'd42;
+        assign o_wen   = phase == 2'd0;
+    }
+    "#;
+
+    // Indirect: Inner output → var → Middle output (with var redirect)
+    let code_indirect = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var addr : logic<32>;
+        var wdata: logic<32>;
+        var wen  : logic;
+        var rdata: logic<32>;
+
+        inst u_mid: Middle (
+            clk,
+            rst,
+            o_addr : addr,
+            o_wdata: wdata,
+            o_wen  : wen,
+            i_rdata: rdata,
+            o_result: result,
+        );
+
+        var mem: logic<32>;
+        always_ff {
+            if_reset {
+                mem = 0;
+            } else if wen {
+                mem = wdata;
+            }
+        }
+        assign rdata = mem;
+    }
+
+    module Middle (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        // Redirect inner outputs through vars (the pattern that breaks)
+        var inner_addr : logic<32>;
+        var inner_wdata: logic<32>;
+        var inner_wen  : logic;
+
+        inst u_inner: Inner (
+            clk,
+            rst,
+            o_addr  : inner_addr,
+            o_wdata : inner_wdata,
+            o_wen   : inner_wen,
+            i_rdata,
+            o_result,
+        );
+
+        assign o_addr  = inner_addr;
+        assign o_wdata = inner_wdata;
+        assign o_wen   = inner_wen;
+    }
+
+    module Inner (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var phase: logic<2>;
+        always_ff {
+            if_reset {
+                phase = 0;
+                o_result = 0;
+            } else {
+                case phase {
+                    2'd0: phase = 1;
+                    2'd1: phase = 2;
+                    2'd2: {
+                        o_result = i_rdata;
+                        phase = 3;
+                    }
+                    default: {}
+                }
+            }
+        }
+        assign o_addr  = 32'd0;
+        assign o_wdata = 32'd42;
+        assign o_wen   = phase == 2'd0;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir_d = analyze(code_direct, &config);
+        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let clk_d = sim_d.get_clock("clk").unwrap();
+        let rst_d = sim_d.get_reset("rst").unwrap();
+
+        sim_d.step(&rst_d);
+        for _ in 0..10 {
+            sim_d.step(&clk_d);
+        }
+        let rd = sim_d.get("result").unwrap();
+
+        let ir_i = analyze(code_indirect, &config);
+        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let clk_i = sim_i.get_clock("clk").unwrap();
+        let rst_i = sim_i.get_reset("rst").unwrap();
+
+        sim_i.step(&rst_i);
+        for _ in 0..20 {
+            sim_i.step(&clk_i);
+        }
+        let ri = sim_i.get("result").unwrap();
+
+        assert_eq!(
+            rd, ri,
+            "3-level var redirect mismatch: config {:?}: direct={:?} indirect={:?}",
+            config, rd, ri
+        );
+        assert_eq!(rd, Value::new(42, 32, false), "Expected 42, config {:?}", config);
+    }
+}
+
+// Reproduce heliodor MMU var-redirect issue: deep pipeline with
+// memory stage output redirected through var. Testbench wraps the
+// core and provides combinational memory feedback. Tests both direct
+// and indirect port connections with many pipeline signals.
+#[test]
+fn pipeline_var_redirect_store_load() {
+    // Core: fetch counter, store value, load it back via external memory
+    let make_code = |use_var: bool| -> String {
+        let mid_ports = if use_var {
+            r#"
+        var mem_addr : logic<32>;
+        var mem_wdata: logic<32>;
+        var mem_wen  : logic;
+        var mem_ren  : logic;
+
+        inst u_mem_stage: MemStage (
+            clk, rst,
+            i_do_store,
+            i_do_load,
+            i_store_val,
+            o_addr  : mem_addr,
+            o_wdata : mem_wdata,
+            o_wen   : mem_wen,
+            o_ren   : mem_ren,
+            i_rdata,
+            o_load_val,
+        );
+        assign o_addr  = mem_addr;
+        assign o_wdata = mem_wdata;
+        assign o_wen   = mem_wen;
+        assign o_ren   = mem_ren;
+"#
+        } else {
+            r#"
+        inst u_mem_stage: MemStage (
+            clk, rst,
+            i_do_store,
+            i_do_load,
+            i_store_val,
+            o_addr,
+            o_wdata,
+            o_wen,
+            o_ren,
+            i_rdata,
+            o_load_val,
+        );
+"#
+        };
+
+        format!(r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {{
+        var addr    : logic<32>;
+        var wdata   : logic<32>;
+        var wen     : logic;
+        var ren     : logic;
+        var rdata   : logic<32>;
+        var load_val: logic<32>;
+
+        // Pipeline controller
+        var phase: logic<4>;
+        var do_store: logic;
+        var do_load : logic;
+        var store_val: logic<32>;
+
+        always_ff {{
+            if_reset {{
+                phase = 0;
+                do_store = 0;
+                do_load  = 0;
+                store_val = 0;
+            }} else {{
+                case phase {{
+                    4'd0: {{
+                        do_store = 1;
+                        store_val = 32'd42;
+                        phase = 1;
+                    }}
+                    4'd1: {{
+                        do_store = 0;
+                        phase = 2;
+                    }}
+                    4'd2: phase = 3;
+                    4'd3: phase = 4;
+                    4'd4: {{
+                        do_load = 1;
+                        phase = 5;
+                    }}
+                    4'd5: {{
+                        do_load = 0;
+                        phase = 6;
+                    }}
+                    default: {{}}
+                }}
+            }}
+        }}
+
+        inst u_core: Core (
+            clk, rst,
+            i_do_store: do_store,
+            i_do_load : do_load,
+            i_store_val: store_val,
+            o_addr : addr,
+            o_wdata: wdata,
+            o_wen  : wen,
+            o_ren  : ren,
+            i_rdata: rdata,
+            o_load_val: load_val,
+        );
+
+        // Testbench memory (combinational feedback)
+        var mem: logic<32>;
+        always_ff {{
+            if_reset {{
+                mem = 0;
+            }} else if wen {{
+                mem = wdata;
+            }}
+        }}
+        assign rdata = mem;
+        assign result = load_val;
+    }}
+
+    module Core (
+        clk       : input  clock,
+        rst       : input  reset,
+        i_do_store: input  logic,
+        i_do_load : input  logic,
+        i_store_val: input logic<32>,
+        o_addr    : output logic<32>,
+        o_wdata   : output logic<32>,
+        o_wen     : output logic,
+        o_ren     : output logic,
+        i_rdata   : input  logic<32>,
+        o_load_val: output logic<32>,
+    ) {{
+        {mid_ports}
+    }}
+
+    module MemStage (
+        clk       : input  clock,
+        rst       : input  reset,
+        i_do_store: input  logic,
+        i_do_load : input  logic,
+        i_store_val: input logic<32>,
+        o_addr    : output logic<32>,
+        o_wdata   : output logic<32>,
+        o_wen     : output logic,
+        o_ren     : output logic,
+        i_rdata   : input  logic<32>,
+        o_load_val: output logic<32>,
+    ) {{
+        assign o_addr  = 32'd0;
+        assign o_wdata = i_store_val;
+        assign o_wen   = i_do_store;
+        assign o_ren   = i_do_load;
+
+        always_ff {{
+            if_reset {{
+                o_load_val = 0;
+            }} else if i_do_load {{
+                o_load_val = i_rdata;
+            }}
+        }}
+    }}
+    "#, mid_ports = mid_ports)
+    };
+
+    let code_direct = make_code(false);
+    let code_indirect = make_code(true);
+
+    for config in Config::all() {
+        let ir_d = analyze(&code_direct, &config);
+        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let clk_d = sim_d.get_clock("clk").unwrap();
+        let rst_d = sim_d.get_reset("rst").unwrap();
+        sim_d.step(&rst_d);
+        for _ in 0..20 {
+            sim_d.step(&clk_d);
+        }
+        let rd = sim_d.get("result").unwrap();
+
+        let ir_i = analyze(&code_indirect, &config);
+        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let clk_i = sim_i.get_clock("clk").unwrap();
+        let rst_i = sim_i.get_reset("rst").unwrap();
+        sim_i.step(&rst_i);
+        for _ in 0..20 {
+            sim_i.step(&clk_i);
+        }
+        let ri = sim_i.get("result").unwrap();
+
+        eprintln!("config {:?}: direct={:?} indirect={:?}", config, rd, ri);
+        assert_eq!(
+            rd, ri,
+            "Pipeline var-redirect mismatch: config {:?}: direct={:?} indirect={:?}",
+            config, rd, ri
+        );
+        assert_eq!(
+            rd,
+            Value::new(42, 32, false),
+            "Expected 42, config {:?}",
+            config
+        );
+    }
+}
+
+// More complex: child output → var → mux → parent output.
+// This mimics the MMU integration pattern where child memory outputs
+// go through a var, then a mux selects between the var and another source.
+#[test]
+fn child_output_var_mux() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        i_val : input  logic<32>,
+        i_sel : input  logic,
+        result: output logic<32>,
+    ) {
+        var child_out: logic<32>;
+        inst u_child: Child (
+            clk,
+            rst,
+            i_val,
+            o_val: child_out,
+        );
+        // Mux: select between child output and constant
+        assign result = if i_sel ? 32'd999 : child_out;
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        i_val: input  logic<32>,
+        o_val: output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                o_val = 0;
+            } else {
+                o_val = i_val + 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // sel=0: should get child_out = i_val + 1 (from previous cycle)
+        sim.set("i_val", Value::new(10, 32, false));
+        sim.set("i_sel", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        sim.set("i_val", Value::new(20, 32, false));
+        sim.step(&clk);
+
+        let r = sim.get("result").unwrap();
+        // After 2 clocks: cycle1 latched i_val=10 → o_val=11, cycle2 latched i_val=20 → o_val=21
+        // result should be 21 (child_out from cycle 2)
+        assert_eq!(r, Value::new(21, 32, false), "config {:?}", config);
+
+        // sel=1: should get 999
+        sim.set("i_sel", Value::new(1, 1, false));
+        sim.step(&clk);
+        let r = sim.get("result").unwrap();
+        assert_eq!(r, Value::new(999, 32, false), "config {:?}", config);
+    }
+}
+
+// Faithful reproduction of heliodor var-redirect bug:
+// 4-level hierarchy with store/load through var-redirected ports.
+// TB → Core → MemStage (var redirect here) → internal comb
+// The testbench has sequential memory that reads wdata from the core.
+#[test]
+fn four_level_var_redirect_wdata() {
+    let code_direct = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var addr : logic<32>;
+        var wdata: logic<32>;
+        var wen  : logic;
+        var ren  : logic;
+        var rdata: logic<32>;
+
+        inst u_core: Core (
+            clk, rst,
+            o_addr : addr,
+            o_wdata: wdata,
+            o_wen  : wen,
+            o_ren  : ren,
+            i_rdata: rdata,
+            o_result: result,
+        );
+
+        // Sequential memory + combinational read
+        var mem: logic<32>;
+        always_ff {
+            if_reset {
+                mem = 0;
+            } else if wen {
+                mem = wdata;
+            }
+        }
+        assign rdata = mem;
+    }
+
+    module Core (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        o_ren   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        // Pipeline controller
+        var phase: logic<4>;
+        var do_store: logic;
+        var do_load : logic;
+        var store_val: logic<32>;
+        var rs2_data: logic<32>;
+
+        always_ff {
+            if_reset {
+                phase = 0;
+                do_store = 0;
+                do_load  = 0;
+                store_val = 0;
+                rs2_data = 0;
+            } else {
+                case phase {
+                    4'd0: {
+                        store_val = 32'd42;
+                        rs2_data = 32'd42;
+                        phase = 1;
+                    }
+                    4'd1: {
+                        do_store = 1;
+                        phase = 2;
+                    }
+                    4'd2: {
+                        do_store = 0;
+                        phase = 3;
+                    }
+                    4'd3: phase = 4;
+                    4'd4: {
+                        do_load = 1;
+                        phase = 5;
+                    }
+                    4'd5: {
+                        do_load = 0;
+                        phase = 6;
+                    }
+                    default: {}
+                }
+            }
+        }
+
+        // MemStage child - direct connection
+        inst u_mem: MemStage (
+            clk, rst,
+            i_do_store: do_store,
+            i_do_load : do_load,
+            i_rs2_data: rs2_data,
+            o_addr,
+            o_wdata,
+            o_wen,
+            o_ren,
+            i_rdata,
+            o_result,
+        );
+    }
+
+    module MemStage (
+        clk       : input  clock,
+        rst       : input  reset,
+        i_do_store: input  logic,
+        i_do_load : input  logic,
+        i_rs2_data: input  logic<32>,
+        o_addr    : output logic<32>,
+        o_wdata   : output logic<32>,
+        o_wen     : output logic,
+        o_ren     : output logic,
+        i_rdata   : input  logic<32>,
+        o_result  : output logic<32>,
+    ) {
+        assign o_addr  = 32'd0;
+        assign o_wdata = i_rs2_data;
+        assign o_wen   = i_do_store;
+        assign o_ren   = i_do_load;
+
+        always_ff {
+            if_reset {
+                o_result = 0;
+            } else if i_do_load {
+                o_result = i_rdata;
+            }
+        }
+    }
+    "#;
+
+    // Indirect: MemStage outputs go through vars in Core
+    let code_indirect = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var addr : logic<32>;
+        var wdata: logic<32>;
+        var wen  : logic;
+        var ren  : logic;
+        var rdata: logic<32>;
+
+        inst u_core: Core (
+            clk, rst,
+            o_addr : addr,
+            o_wdata: wdata,
+            o_wen  : wen,
+            o_ren  : ren,
+            i_rdata: rdata,
+            o_result: result,
+        );
+
+        var mem: logic<32>;
+        always_ff {
+            if_reset {
+                mem = 0;
+            } else if wen {
+                mem = wdata;
+            }
+        }
+        assign rdata = mem;
+    }
+
+    module Core (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        o_ren   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var phase: logic<4>;
+        var do_store: logic;
+        var do_load : logic;
+        var store_val: logic<32>;
+        var rs2_data: logic<32>;
+
+        always_ff {
+            if_reset {
+                phase = 0;
+                do_store = 0;
+                do_load  = 0;
+                store_val = 0;
+                rs2_data = 0;
+            } else {
+                case phase {
+                    4'd0: {
+                        store_val = 32'd42;
+                        rs2_data = 32'd42;
+                        phase = 1;
+                    }
+                    4'd1: {
+                        do_store = 1;
+                        phase = 2;
+                    }
+                    4'd2: {
+                        do_store = 0;
+                        phase = 3;
+                    }
+                    4'd3: phase = 4;
+                    4'd4: {
+                        do_load = 1;
+                        phase = 5;
+                    }
+                    4'd5: {
+                        do_load = 0;
+                        phase = 6;
+                    }
+                    default: {}
+                }
+            }
+        }
+
+        // Var redirect: MemStage outputs → vars → assign → Core outputs
+        var mem_wdata: logic<32>;
+        var mem_addr : logic<32>;
+        var mem_wen  : logic;
+        var mem_ren  : logic;
+
+        inst u_mem: MemStage (
+            clk, rst,
+            i_do_store: do_store,
+            i_do_load : do_load,
+            i_rs2_data: rs2_data,
+            o_addr  : mem_addr,
+            o_wdata : mem_wdata,
+            o_wen   : mem_wen,
+            o_ren   : mem_ren,
+            i_rdata,
+            o_result,
+        );
+
+        assign o_addr  = mem_addr;
+        assign o_wdata = mem_wdata;
+        assign o_wen   = mem_wen;
+        assign o_ren   = mem_ren;
+    }
+
+    module MemStage (
+        clk       : input  clock,
+        rst       : input  reset,
+        i_do_store: input  logic,
+        i_do_load : input  logic,
+        i_rs2_data: input  logic<32>,
+        o_addr    : output logic<32>,
+        o_wdata   : output logic<32>,
+        o_wen     : output logic,
+        o_ren     : output logic,
+        i_rdata   : input  logic<32>,
+        o_result  : output logic<32>,
+    ) {
+        assign o_addr  = 32'd0;
+        assign o_wdata = i_rs2_data;
+        assign o_wen   = i_do_store;
+        assign o_ren   = i_do_load;
+
+        always_ff {
+            if_reset {
+                o_result = 0;
+            } else if i_do_load {
+                o_result = i_rdata;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir_d = analyze(code_direct, &config);
+        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let clk_d = sim_d.get_clock("clk").unwrap();
+        let rst_d = sim_d.get_reset("rst").unwrap();
+        sim_d.step(&rst_d);
+        for _ in 0..20 {
+            sim_d.step(&clk_d);
+        }
+        let rd = sim_d.get("result").unwrap();
+
+        let ir_i = analyze(code_indirect, &config);
+        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let clk_i = sim_i.get_clock("clk").unwrap();
+        let rst_i = sim_i.get_reset("rst").unwrap();
+        sim_i.step(&rst_i);
+        for _ in 0..20 {
+            sim_i.step(&clk_i);
+        }
+        let ri = sim_i.get("result").unwrap();
+
+        assert_eq!(
+            rd, ri,
+            "4-level var-redirect wdata mismatch: config {:?}: direct={:?} indirect={:?}",
+            config, rd, ri
+        );
+        assert_eq!(
+            rd,
+            Value::new(42, 32, false),
+            "Expected 42, config {:?}",
+            config
+        );
+    }
+}

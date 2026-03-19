@@ -417,6 +417,7 @@ pub(crate) fn analyze_dependency(
         }
     }
 
+
     Ok(ret)
 }
 
@@ -829,6 +830,7 @@ impl Conv<&air::Module> for ProtoModule {
             context.config.use_jit,
         );
         let sorted_comb = reorder_by_level(sorted_comb);
+
         let comb_statements = try_jit(context, sorted_comb);
 
         // Build full comb statements (including per-core internal comb)

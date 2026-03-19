@@ -174,6 +174,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
+        // Track comb offsets written by Inst declarations (child modules).
+        // Own Comb declarations (assign) that write to offsets NOT in this set
+        // are "new" assigns (e.g., `assign o_port = var`) that need special
+        // handling when merged JIT clears all_comb_statements.
+        let mut inst_written_offsets: HashSet<isize> = HashSet::default();
+        let mut own_new_assigns: Vec<ProtoStatement> = vec![];
 
         for decl in &child_module.declarations {
             let proto_decl: ProtoDeclaration = match Conv::conv(context, decl) {
@@ -186,6 +192,28 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     .entry(event)
                     .and_modify(|v| v.append(&mut stmts))
                     .or_insert(stmts);
+            }
+            // Track which offsets Inst declarations write to
+            if matches!(decl, air::Declaration::Inst(_)) {
+                for s in &proto_decl.comb_statements {
+                    let mut outs = vec![];
+                    let mut ins = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut outs);
+                    for (_, off) in outs {
+                        inst_written_offsets.insert(off);
+                    }
+                }
+            }
+            // Save own Comb assign statements that write to offsets NOT
+            // already written by any child Inst (port connection).
+            if matches!(decl, air::Declaration::Comb(_)) {
+                for s in &proto_decl.comb_statements {
+                    if let ProtoStatement::Assign(a) = s {
+                        if !a.dst_is_ff && !inst_written_offsets.contains(&a.dst_offset) {
+                            own_new_assigns.push(s.clone());
+                        }
+                    }
+                }
             }
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
@@ -242,6 +270,26 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 };
 
                 if !cache_entry.merged_funcs.is_empty() {
+                    // Re-add own assign statements whose dst_offset is NOT
+                    // already handled by the merged JIT (full_internal_comb).
+                    if let Some(ref full) = full_internal_comb {
+                        let mut full_outputs = HashSet::default();
+                        for s in full {
+                            let mut outs = vec![];
+                            let mut ins = vec![];
+                            s.gather_variable_offsets(&mut ins, &mut outs);
+                            for (_, off) in outs {
+                                full_outputs.insert(off);
+                            }
+                        }
+                        for s in &own_new_assigns {
+                            if let ProtoStatement::Assign(a) = s {
+                                if !full_outputs.contains(&a.dst_offset) {
+                                    all_post_comb_fns.push(s.clone());
+                                }
+                            }
+                        }
+                    }
                     // Internal comb already cleared above.
                     // Add comb-only JIT function to post_comb_fns so child comb
                     // is evaluated before events fire (without going through
@@ -256,6 +304,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 output_offsets: adjust(&cached.output_offsets),
                             },
                         ));
+                    } else if let Some(ref full) = full_internal_comb {
+                        // comb_func was None (not all statements JIT-compilable).
+                        // Re-add interpreted comb statements to post_comb_fns.
+                        all_post_comb_fns.extend(full.iter().cloned());
                     }
                 } else if let Some(cached) = &cache_entry.comb_func {
                     all_comb_statements =
@@ -302,9 +354,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
 
                 // Compile comb individually
-                let comb_func = if all_comb_statements.iter().all(|s| s.can_build_binary())
-                    && !all_comb_statements.is_empty()
-                {
+                let all_can_build = all_comb_statements.iter().all(|s| s.can_build_binary());
+                let comb_func = if all_can_build && !all_comb_statements.is_empty() {
                     if let Some(func) =
                         cranelift::build_binary(context, all_comb_statements.clone())
                     {
@@ -440,7 +491,27 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 full_internal_comb = if !merged_funcs.is_empty() {
                     let full = all_comb_statements.clone();
                     all_comb_statements.clear();
-                    // When merged comb+event is used, add the comb-only JIT function
+                    // Re-add own assign statements whose dst_offset is NOT
+                    // already in the full internal comb (merged JIT handles those).
+                    {
+                        let mut full_outputs = HashSet::default();
+                        for s in &full {
+                            let mut outs = vec![];
+                            let mut ins = vec![];
+                            s.gather_variable_offsets(&mut ins, &mut outs);
+                            for (_, off) in outs {
+                                full_outputs.insert(off);
+                            }
+                        }
+                        for s in &own_new_assigns {
+                            if let ProtoStatement::Assign(a) = s {
+                                if !full_outputs.contains(&a.dst_offset) {
+                                    all_post_comb_fns.push(s.clone());
+                                }
+                            }
+                        }
+                    }
+                    // When merged comb+event is used, add the comb-only function
                     // to post_comb_fns so child comb is evaluated before events fire.
                     if let Some(ref cf) = comb_func {
                         all_post_comb_fns.push(ProtoStatement::CompiledBlock(
@@ -452,6 +523,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 output_offsets: cf.output_offsets.clone(),
                             },
                         ));
+                    } else {
+                        // comb_func is None (some statements can't be JIT-compiled).
+                        // Add all comb statements as interpreted to post_comb_fns
+                        // so they still execute after merged event JIT functions.
+                        all_post_comb_fns.extend(full.iter().cloned());
                     }
                     Some(full)
                 } else {
@@ -468,6 +544,36 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         merged_funcs,
                     },
                 );
+            }
+        }
+
+        // When child modules have merged JIT (post_comb_fns non-empty),
+        // parent-level own assigns need to also run after events so that
+        // multi-hop propagation (child output → var → parent output) works.
+        // Without this, the intermediate assign (var → parent output) only
+        // runs in eval_comb (before events) and misses the new values.
+        if !all_post_comb_fns.is_empty() && full_internal_comb.is_none() {
+            // Collect offsets written by post_comb_fns (child output port connections)
+            let mut post_comb_written: HashSet<isize> = HashSet::default();
+            for s in &all_post_comb_fns {
+                let mut outs = vec![];
+                let mut ins = vec![];
+                s.gather_variable_offsets(&mut ins, &mut outs);
+                for (_, off) in outs {
+                    post_comb_written.insert(off);
+                }
+            }
+            // Add own assigns that READ from post_comb-written offsets
+            for s in &own_new_assigns {
+                if let ProtoStatement::Assign(_) = s {
+                    let mut ins = vec![];
+                    let mut outs = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut outs);
+                    let reads_post_comb = ins.iter().any(|(_, off)| post_comb_written.contains(off));
+                    if reads_post_comb {
+                        all_post_comb_fns.push(s.clone());
+                    }
+                }
             }
         }
 
