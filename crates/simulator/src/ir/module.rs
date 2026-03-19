@@ -27,6 +27,10 @@ pub struct Module {
 
     pub event_statements: HashMap<Event, Vec<Statement>>,
     pub comb_statements: Vec<Statement>,
+    /// Post-comb functions: child module comb-only JIT functions that run
+    /// after lite comb (port connections) to compute child comb values
+    /// before events fire. Bypasses analyze_dependency.
+    pub post_comb_fns: Vec<Statement>,
     /// Full comb statements (includes per-core internal comb).
     /// Used by get()/dump() for correctness after FF swap.
     /// When merged events exist, comb_statements is the "lite" version
@@ -47,6 +51,8 @@ pub struct ProtoModule {
 
     pub event_statements: HashMap<Event, ProtoStatements>,
     pub comb_statements: ProtoStatements,
+    /// Post-comb: child comb-only JIT functions for pre-event evaluation.
+    pub post_comb_fns: Vec<ProtoStatement>,
     /// Full comb statements when merged events exist.
     pub full_comb_statements: Option<ProtoStatements>,
     /// FF canonical offsets (current_offset) that need swapping.
@@ -219,6 +225,11 @@ impl ProtoModule {
             self.use_4state,
         ));
 
+        let post_comb_fns = ProtoStatements(vec![ProtoStatementBlock::Interpreted(
+            self.post_comb_fns.clone(),
+        )])
+        .to_statements(ff_ptr, comb_ptr, self.use_4state);
+
         let full_comb_statements = self.full_comb_statements.as_ref().map(|stmts| {
             batch_binary_statements(stmts.to_statements(ff_ptr, comb_ptr, self.use_4state))
         });
@@ -238,6 +249,7 @@ impl ProtoModule {
 
             event_statements,
             comb_statements,
+            post_comb_fns,
             full_comb_statements,
             ff_swap_entries,
         }
@@ -724,6 +736,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
+        let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut has_merged = false;
         // Collect full internal comb for sub-modules that use merged comb+event
@@ -743,6 +756,7 @@ impl Conv<&air::Module> for ProtoModule {
                 full_comb_extra.extend(full_comb);
             }
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
+            all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
         }
 
@@ -837,6 +851,7 @@ impl Conv<&air::Module> for ProtoModule {
             module_variable_meta,
             event_statements,
             comb_statements,
+            post_comb_fns: all_post_comb_fns,
             full_comb_statements,
             ff_swap_offsets,
         })

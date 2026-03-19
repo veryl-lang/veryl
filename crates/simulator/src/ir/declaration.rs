@@ -37,6 +37,8 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
 pub struct ProtoDeclaration {
     pub event_statements: HashMap<Event, Vec<ProtoStatement>>,
     pub comb_statements: Vec<ProtoStatement>,
+    /// Post-comb functions: child comb-only JIT functions for pre-event eval.
+    pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
     /// Full internal comb statements (before merge optimization removed them).
     /// Present only when merged comb+event functions are used.
@@ -55,6 +57,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
                     comb_statements,
+                    post_comb_fns: vec![],
                     child_modules: vec![],
                     full_internal_comb: None,
                 })
@@ -82,6 +85,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 Ok(ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
+                    post_comb_fns: vec![],
                     child_modules: vec![],
                     full_internal_comb: None,
                 })
@@ -98,6 +102,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 Ok(ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
+                    post_comb_fns: vec![],
                     child_modules: vec![],
                     full_internal_comb: None,
                 })
@@ -113,6 +118,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 Ok(ProtoDeclaration {
                     event_statements,
                     comb_statements: vec![],
+                    post_comb_fns: vec![],
                     child_modules: vec![],
                     full_internal_comb: None,
                 })
@@ -123,6 +129,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
             air::Declaration::Null => Ok(ProtoDeclaration {
                 event_statements: HashMap::default(),
                 comb_statements: vec![],
+                post_comb_fns: vec![],
                 child_modules: vec![],
                 full_internal_comb: None,
             }),
@@ -165,6 +172,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
+        let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
 
         for decl in &child_module.declarations {
@@ -180,6 +188,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     .or_insert(stmts);
             }
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
+            all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
         }
 
@@ -233,7 +242,21 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 };
 
                 if !cache_entry.merged_funcs.is_empty() {
-                    // Internal comb already cleared above
+                    // Internal comb already cleared above.
+                    // Add comb-only JIT function to post_comb_fns so child comb
+                    // is evaluated before events fire (without going through
+                    // analyze_dependency on the parent level).
+                    if let Some(cached) = &cache_entry.comb_func {
+                        all_post_comb_fns.push(ProtoStatement::CompiledBlock(
+                            CompiledBlockStatement {
+                                func: cached.func,
+                                ff_delta_bytes: ff_delta,
+                                comb_delta_bytes: comb_delta,
+                                input_offsets: adjust(&cached.input_offsets),
+                                output_offsets: adjust(&cached.output_offsets),
+                            },
+                        ));
+                    }
                 } else if let Some(cached) = &cache_entry.comb_func {
                     all_comb_statements =
                         vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
@@ -417,6 +440,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 full_internal_comb = if !merged_funcs.is_empty() {
                     let full = all_comb_statements.clone();
                     all_comb_statements.clear();
+                    // When merged comb+event is used, add the comb-only JIT function
+                    // to post_comb_fns so child comb is evaluated before events fire.
+                    if let Some(ref cf) = comb_func {
+                        all_post_comb_fns.push(ProtoStatement::CompiledBlock(
+                            CompiledBlockStatement {
+                                func: cf.func,
+                                ff_delta_bytes: 0,
+                                comb_delta_bytes: 0,
+                                input_offsets: cf.input_offsets.clone(),
+                                output_offsets: cf.output_offsets.clone(),
+                            },
+                        ));
+                    }
                     Some(full)
                 } else {
                     None
@@ -456,6 +492,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         }
 
         // Output ports: child port var → parent dst
+        // When merged functions exist, also add output port connections to
+        // post_comb_fns so that child comb values (computed by post_comb)
+        // propagate to parent variables before events fire.
+        let needs_post_comb_propagation =
+            full_internal_comb.is_some() || !all_post_comb_fns.is_empty();
         for output in &src.outputs {
             for (child_var_id, parent_dst) in output.id.iter().zip(output.dst.iter()) {
                 let child_meta = child_variable_meta.get(child_var_id).unwrap();
@@ -504,7 +545,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         (parent_element.current_offset, false)
                     };
 
-                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                    let stmt = ProtoStatement::Assign(ProtoAssignStatement {
                         dst_offset,
                         dst_is_ff,
                         dst_width: parent_meta.width,
@@ -513,7 +554,16 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset,
                         token: TokenRange::default(),
-                    }));
+                    });
+
+                    all_comb_statements.push(stmt.clone());
+
+                    // When this module has merged functions, also add comb
+                    // output port connections to post_comb_fns so that child
+                    // comb values propagate to parent before events fire.
+                    if needs_post_comb_propagation && !dst_is_ff {
+                        all_post_comb_fns.push(stmt);
+                    }
                 }
             }
         }
@@ -564,6 +614,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         Ok(ProtoDeclaration {
             event_statements: remapped_events,
             comb_statements: all_comb_statements,
+            post_comb_fns: all_post_comb_fns,
             child_modules: vec![child_module_meta],
             full_internal_comb,
         })

@@ -144,12 +144,23 @@ impl<T: std::io::Write> Simulator<T> {
     pub fn step(&mut self, event: &Event) {
         if self.comb_dirty {
             self.ir.eval_comb(&mut self.mask_cache);
+            if !self.ir.post_comb_fns.is_empty() {
+                // Evaluate child module comb-only functions after port
+                // connections. Ensures child comb output values are correct
+                // before any FF events fire.
+                self.ir.eval_post_comb(&mut self.mask_cache);
+            }
             self.comb_dirty = false;
         }
 
         if let Some(statements) = self.ir.event_statements.get(event) {
             for x in statements {
                 x.eval_step(&mut self.mask_cache);
+            }
+            if !self.ir.post_comb_ports.is_empty() {
+                // Re-run output port connections after events to propagate
+                // values updated by merged comb+event JIT functions.
+                self.ir.eval_post_comb_ports(&mut self.mask_cache);
             }
         }
 
