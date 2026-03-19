@@ -1,0 +1,16 @@
+/// Module with invalid WaveDrom (unknown wave character 'Q')
+///
+/// ```wavedrom
+/// {signal: [
+///   {name: 'clk', wave: 'p....'},
+///   {name: 'dat', wave: '01Q10'}
+/// ]}
+/// ```
+module invalid_wavedrom (
+    i_clk : input  clock,
+    i_rst : input  reset,
+    i_dat : input  logic,
+    o_dat : output logic,
+) {
+    assign o_dat = i_dat;
+}

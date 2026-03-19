@@ -3,6 +3,7 @@ pub mod ir;
 pub mod simulator;
 pub mod simulator_error;
 pub mod testbench;
+pub mod wavedrom;
 pub mod wide_ops;
 
 pub use ir::Config;

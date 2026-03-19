@@ -147,6 +147,7 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         ret.append(&mut symbol_table::check_unused_variable());
+        ret.append(&mut symbol_table::check_wavedrom());
 
         ret
     }

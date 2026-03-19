@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_wavedrom (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_wavedrom)
+
+  × WaveDrom signal 'dat' contains unknown wave character 'Q'
+   ╭─[../../testcases/error/invalid_wavedrom.veryl:6:1]
+ 5 │ ///   {name: 'clk', wave: 'p....'},
+ 6 │ ///   {name: 'dat', wave: '01Q10'}
+   · ─────────────────┬────────────────
+   ·                  ╰── Error location
+ 7 │ /// ]}
+   ╰────
+  help:
