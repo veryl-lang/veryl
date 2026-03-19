@@ -10901,3 +10901,70 @@ fn invalid_wavedrom() {
         .collect();
     assert!(wavedrom_errors.is_empty());
 }
+
+#[test]
+fn unevaluable_value_for_range() {
+    // non-const variable used as generate for range bound
+    let code = r#"
+    module ModuleA {
+        let a: logic<10> = 0;
+        for i in 0..a :label {
+            assign a[i] = i + 2;
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // const variable used as generate for range bound should be fine
+    let code = r#"
+    module ModuleA {
+        var a: logic<10>;
+        const N: u32 = 10;
+        for i in 0..N :label {
+            assign a[i] = i + 2;
+        }
+    }"#;
+
+    let errors = analyze(code);
+    let unevaluable_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::UnevaluableValue { .. }))
+        .collect();
+    assert!(unevaluable_errors.is_empty());
+}
+
+#[test]
+fn unevaluable_value_parameter_value() {
+    // non-const variable used as parameter override
+    let code = r#"
+    module SubA #(
+        param C: u32 = 1,
+    ) {}
+
+    module ModuleA {
+        let c: u32 = 3;
+        inst u_sub: SubA #( C: c );
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    // const variable used as parameter override should be fine
+    let code = r#"
+    module SubA #(
+        param C: u32 = 1,
+    ) {}
+
+    module ModuleA {
+        const C: u32 = 3;
+        inst u_sub: SubA #( C: C );
+    }"#;
+
+    let errors = analyze(code);
+    let unevaluable_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::UnevaluableValue { .. }))
+        .collect();
+    assert!(unevaluable_errors.is_empty());
+}

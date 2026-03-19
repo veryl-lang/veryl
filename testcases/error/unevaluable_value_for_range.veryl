@@ -1,0 +1,6 @@
+module unevaluable_value_for_range {
+    let a: logic<10> = 0;
+    for i in 0..a :label {
+        assign a[i] = i + 2;
+    }
+}

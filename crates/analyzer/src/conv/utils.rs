@@ -74,14 +74,38 @@ pub fn eval_expr(
 }
 
 pub fn eval_range(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
+    eval_range_inner(context, range, false)
+}
+
+pub fn eval_range_const(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
+    eval_range_inner(context, range, true)
+}
+
+fn eval_range_inner(
+    context: &mut Context,
+    range: &Range,
+    require_const: bool,
+) -> IrResult<(usize, usize)> {
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
-    let beg = beg.eval_comptime(context, None);
-    let beg = beg.get_value()?.to_usize().unwrap_or(0);
+    let beg_comptime = beg.eval_comptime(context, None);
+    if require_const && !beg_comptime.is_const {
+        context.insert_error(AnalyzerError::unevaluable_value(
+            UnevaluableValueKind::ForRange,
+            &range.into(),
+        ));
+    }
+    let beg = beg_comptime.get_value()?.to_usize().unwrap_or(0);
 
     let end = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-        let end = end.eval_comptime(context, None);
-        let end = end.get_value()?.to_usize().unwrap_or(0);
+        let end_comptime = end.eval_comptime(context, None);
+        if require_const && !end_comptime.is_const {
+            context.insert_error(AnalyzerError::unevaluable_value(
+                UnevaluableValueKind::ForRange,
+                &range.into(),
+            ));
+        }
+        let end = end_comptime.get_value()?.to_usize().unwrap_or(0);
 
         if matches!(x.range_operator.as_ref(), RangeOperator::DotDotEqu(_)) {
             end + 1
@@ -1107,7 +1131,32 @@ pub fn eval_for_range(
     step: Option<(&AssignmentOperator, &Expression)>,
     token: TokenRange,
 ) -> IrResult<Vec<usize>> {
-    let (beg, end) = eval_range(context, range)?;
+    eval_for_range_inner(context, range, rev, step, token, false)
+}
+
+pub fn eval_generate_for_range(
+    context: &mut Context,
+    range: &Range,
+    rev: bool,
+    step: Option<(&AssignmentOperator, &Expression)>,
+    token: TokenRange,
+) -> IrResult<Vec<usize>> {
+    eval_for_range_inner(context, range, rev, step, token, true)
+}
+
+fn eval_for_range_inner(
+    context: &mut Context,
+    range: &Range,
+    rev: bool,
+    step: Option<(&AssignmentOperator, &Expression)>,
+    token: TokenRange,
+    require_const: bool,
+) -> IrResult<Vec<usize>> {
+    let (beg, end) = if require_const {
+        eval_range_const(context, range)?
+    } else {
+        eval_range(context, range)?
+    };
 
     if let Some((op, expr)) = step {
         let mut step: ir::Expression = Conv::conv(context, expr)?;
@@ -1879,6 +1928,18 @@ pub fn get_overridden_params(
             let src: Expression = param.identifier.as_ref().into();
             eval_expr(context, target_type, &src, false)?
         };
+
+        let is_type_param = matches!(
+            &target.kind,
+            SymbolKind::Parameter(x) if matches!(x.r#type.kind, TypeKind::Type)
+        );
+        if !is_type_param && !expr.0.is_const {
+            let token: TokenRange = param.identifier.as_ref().into();
+            context.insert_error(AnalyzerError::unevaluable_value(
+                UnevaluableValueKind::ParameterValue,
+                &token,
+            ));
+        }
 
         let path = VarPath::new(name);
         ret.insert(path, expr);

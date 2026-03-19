@@ -1,0 +1,8 @@
+module SubA #(
+    param C: u32 = 1,
+) {}
+
+module unevaluable_value_parameter_value {
+    let c    : u32 = 3;
+    inst u_sub: SubA #( C: c );
+}

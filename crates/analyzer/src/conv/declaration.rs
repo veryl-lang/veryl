@@ -11,10 +11,10 @@ use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
 use crate::conv::utils::{
-    TypePosition, eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_for_range,
-    eval_reset, eval_size, eval_type, eval_variable, expand_connect, expand_connect_const,
-    get_component, get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
-    var_path_to_assign_destination,
+    TypePosition, eval_assign_statement, eval_clock, eval_const_assign, eval_expr,
+    eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
+    expand_connect_const, get_component, get_overridden_params, get_port_connects, get_return_str,
+    insert_port_connect, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
@@ -296,7 +296,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
             .as_ref()
             .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
 
-        let range = eval_for_range(context, &value.range, rev, step, token)?;
+        let range = eval_generate_for_range(context, &value.range, rev, step, token)?;
 
         let mut ret = ir::DeclarationBlock::default();
 
