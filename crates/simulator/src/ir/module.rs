@@ -788,8 +788,12 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
-        let sorted_comb =
-            super::optimize::optimize_comb(sorted_comb, &all_event_statements, &observable_comb);
+        let sorted_comb = super::optimize::optimize_comb(
+            sorted_comb,
+            &all_event_statements,
+            &observable_comb,
+            context.config.use_jit,
+        );
         let sorted_comb = reorder_by_level(sorted_comb);
         let comb_statements = try_jit(context, sorted_comb);
 
@@ -808,6 +812,7 @@ impl Conv<&air::Module> for ProtoModule {
                 full_sorted,
                 &all_event_statements,
                 &observable_comb,
+                context.config.use_jit,
             );
             let full_sorted = reorder_by_level(full_sorted);
             Some(try_jit(context, full_sorted))

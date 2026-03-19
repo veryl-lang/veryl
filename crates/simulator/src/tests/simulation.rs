@@ -3114,3 +3114,181 @@ fn merged_comb_output_write_to_parent_ff() {
         assert_eq!(sim.get("result").unwrap(), Value::new(103, 32, false));
     }
 }
+
+// Regression: optimize_comb inlining can cascade and remove essential
+// comb statements in the non-JIT (interpreted) path.
+//
+// When a child module's comb output is read by a port connection that
+// is the sole reader, the port connection gets inlined into the next
+// consumer. After inlining, the child comb statement's read count
+// drops to zero (stale static count), causing DCE to remove it.
+// The fix disables inlining when JIT is off (allow_inline=false).
+//
+// Pattern: Child comb → port connection (single reader) → parent comb.
+// Without fix, the child comb is removed and the parent reads stale 0.
+#[test]
+fn optimize_comb_no_cascade_inline() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var child_val: logic<32>;
+        inst u_child: Child (
+            clk,
+            rst,
+            o_val: child_val,
+        );
+
+        // This comb chain reads child_val through a port connection.
+        // Without the fix, optimize_comb inlines the port connection
+        // into this expression, then DCEs the child's comb output.
+        var doubled: logic<32>;
+        assign doubled = child_val + child_val;
+
+        // FF latches the computed value
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = doubled;
+            }
+        }
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        // Comb output: this must NOT be DCE'd
+        assign o_val = cnt + 10;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // Run enough cycles for values to stabilize. The key assertion
+        // is that result is non-zero (not stuck at 0 from reset).
+        // A value of 0 after many cycles indicates the child comb was
+        // incorrectly removed by cascading inline + DCE.
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+
+        let result = sim.get("result").unwrap();
+        // cnt=8 or 9, o_val=18 or 19, doubled=36 or 38
+        // Allow ±1 cycle timing difference between JIT and non-JIT
+        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        assert!(val > 0, "result stuck at 0 — child comb DCE'd");
+        assert!(
+            val >= 36 && val <= 38,
+            "expected ~36-38, got {} — child comb incorrect",
+            val
+        );
+    }
+}
+
+// Regression: multi-level port connection chain with single-use
+// intermediate variables. Each level's port connection is a candidate
+// for inlining. Without the fix, cascading inlining removes all
+// intermediate comb computations.
+#[test]
+fn optimize_comb_no_cascade_inline_multi_level() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var mid_val: logic<32>;
+        inst u_mid: Middle (
+            clk,
+            rst,
+            o_val: mid_val,
+        );
+
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = mid_val;
+            }
+        }
+    }
+
+    module Middle (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var inner_val: logic<32>;
+        inst u_inner: Inner (
+            clk,
+            rst,
+            o_val: inner_val,
+        );
+        assign o_val = inner_val + 500;
+    }
+
+    module Inner (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+
+        // cnt=3 or 4, inner o_val=3 or 4, middle o_val=503 or 504
+        let result = sim.get("result").unwrap();
+        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        assert!(val > 0, "result stuck at 0 — child comb DCE'd");
+        assert!(
+            val >= 503 && val <= 504,
+            "expected ~503-504, got {} — child comb incorrect",
+            val
+        );
+    }
+}
