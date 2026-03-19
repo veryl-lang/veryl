@@ -10745,3 +10745,159 @@ fn positive_type_validation() {
     //     .collect();
     // assert_eq!(non_pos_errors.len(), 0);
 }
+
+#[test]
+fn invalid_wavedrom() {
+    // Valid wavedrom (no test attribute) should not produce errors
+    let code = r#"
+    /// ```wavedrom
+    /// {signal: [{name: 'clk', wave: 'p....'}]}
+    /// ```
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert!(wavedrom_errors.is_empty());
+
+    // Invalid JSON in wavedrom block should produce error
+    let code = r#"
+    /// ```wavedrom
+    /// {signal: [BROKEN
+    /// ```
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert_eq!(wavedrom_errors.len(), 1);
+
+    // Invalid wave character should produce error
+    let code = r#"
+    /// ```wavedrom
+    /// {signal: [{name: 'sig', wave: '01Q10'}]}
+    /// ```
+    module ModuleC (
+        clk: input clock,
+        rst: input reset,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert_eq!(wavedrom_errors.len(), 1);
+
+    // wavedrom,test with pipe separator should produce error
+    let code = r#"
+    /// ```wavedrom,test
+    /// {signal: [
+    ///   {name: 'clk', wave: 'p...|..'},
+    ///   {name: 'dat', wave: '010|101'},
+    ///   {name: 'out', wave: '010|101'}
+    /// ]}
+    /// ```
+    module ModuleD (
+        clk: input clock,
+        rst: input reset,
+        dat: input logic,
+        out: output logic,
+    ) {
+        assign out = dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert_eq!(wavedrom_errors.len(), 1);
+
+    // wavedrom,test with no matching ports should produce error
+    let code = r#"
+    /// ```wavedrom,test
+    /// {signal: [
+    ///   {name: 'clk', wave: 'p....'},
+    ///   {name: 'foo', wave: '01010'},
+    ///   {name: 'bar', wave: '10101'}
+    /// ]}
+    /// ```
+    module ModuleE (
+        clk: input clock,
+        rst: input reset,
+        dat: input logic,
+        out: output logic,
+    ) {
+        assign out = dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert_eq!(wavedrom_errors.len(), 1);
+
+    // Valid wavedrom,test should not produce errors
+    let code = r#"
+    /// ```wavedrom,test
+    /// {signal: [
+    ///   {name: 'clk', wave: 'p....'},
+    ///   {name: 'dat', wave: '01010'},
+    ///   {name: 'out', wave: '01010'}
+    /// ]}
+    /// ```
+    module ModuleF (
+        clk: input clock,
+        rst: input reset,
+        dat: input logic,
+        out: output logic,
+    ) {
+        assign out = dat;
+    }
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert!(wavedrom_errors.is_empty());
+
+    // Plain wavedrom with pipe (decorative) should NOT produce error
+    let code = r#"
+    /// ```wavedrom
+    /// {signal: [
+    ///   {name: 'clk', wave: 'p...|..'},
+    ///   {name: 'dat', wave: '010|101'}
+    /// ]}
+    /// ```
+    module ModuleG (
+        clk: input clock,
+        rst: input reset,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert!(wavedrom_errors.is_empty());
+}

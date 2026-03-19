@@ -14,8 +14,8 @@ use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
     Affiliation, AliasInterfaceProperty, AliasModuleProperty, AliasPackageProperty, ConnectTarget,
-    ConnectTargetIdentifier, DocComment, EnumMemberProperty, EnumMemberValue, EnumProperty,
-    FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
+    ConnectTargetIdentifier, DocComment, DocCommentLine, EnumMemberProperty, EnumMemberValue,
+    EnumProperty, FunctionProperty, GenericBoundKind, GenericParameterProperty, InstanceProperty,
     InterfaceProperty, ModportFunctionMemberProperty, ModportProperty,
     ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter, ParameterKind,
     ParameterProperty, Port, PortProperty, ProtoConstProperty, ProtoInterfaceProperty,
@@ -206,7 +206,10 @@ impl CreateSymbolTable {
             if line == 0 {
                 DocComment::default()
             } else if let Some(doc_comment) = doc_comment_table::get(path, line) {
-                DocComment(vec![doc_comment])
+                DocComment(vec![DocCommentLine {
+                    text: doc_comment,
+                    line,
+                }])
             } else {
                 let mut candidate_line = line - 1;
                 while self.attribute_lines.contains(&candidate_line) {
@@ -217,7 +220,10 @@ impl CreateSymbolTable {
                 }
                 let mut ret = Vec::new();
                 while let Some(doc_comment) = doc_comment_table::get(path, candidate_line) {
-                    ret.push(doc_comment);
+                    ret.push(DocCommentLine {
+                        text: doc_comment,
+                        line: candidate_line,
+                    });
                     candidate_line -= 1;
                 }
                 ret.reverse();

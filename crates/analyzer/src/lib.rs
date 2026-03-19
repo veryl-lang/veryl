@@ -25,6 +25,7 @@ pub mod type_dag;
 pub mod r#unsafe;
 pub mod unsafe_table;
 pub mod value;
+pub mod wavedrom;
 pub use analyzer::Analyzer;
 pub use analyzer_error::AnalyzerError;
 pub use conv::Context;

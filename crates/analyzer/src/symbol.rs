@@ -31,14 +31,21 @@ pub fn new_symbol_id() -> SymbolId {
     })
 }
 
+/// A single line of a doc comment with its source line number.
+#[derive(Debug, Clone)]
+pub struct DocCommentLine {
+    pub text: StrId,
+    pub line: u32,
+}
+
 #[derive(Debug, Default, Clone)]
-pub struct DocComment(pub Vec<StrId>);
+pub struct DocComment(pub Vec<DocCommentLine>);
 
 impl DocComment {
     pub fn format(&self, single_line: bool) -> String {
         let mut ret = String::new();
-        for t in &self.0 {
-            let t = format!("{t}");
+        for entry in &self.0 {
+            let t = format!("{}", entry.text);
             let t = t.trim_start_matches("///");
             ret.push_str(t);
             if single_line {
@@ -50,6 +57,85 @@ impl DocComment {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Extract WaveDrom JSON from doc comment fenced code blocks.
+    pub fn extract_wavedrom(&self) -> Option<String> {
+        self.extract_wavedrom_block(false).map(|block| block.json)
+    }
+
+    /// Extract WaveDrom JSON only from ```wavedrom,test blocks.
+    pub fn extract_wavedrom_test(&self) -> Option<String> {
+        self.extract_wavedrom_block(true).map(|block| block.json)
+    }
+
+    /// Extract a WaveDrom block with full source location info.
+    pub fn extract_wavedrom_block(&self, test_only: bool) -> Option<WavedromBlock> {
+        let mut in_wavedrom = false;
+        let mut json_lines = Vec::new();
+        let mut fence_line = 0u32;
+        let mut end_line = 0u32;
+        let mut content_lines: Vec<(String, u32)> = Vec::new();
+
+        for entry in &self.0 {
+            let text = format!("{}", entry.text);
+            let trimmed = text.trim_start_matches("///").trim();
+            if !in_wavedrom {
+                let is_match = if test_only {
+                    if let Some(rest) = trimmed.strip_prefix("```wavedrom")
+                        && let Some(attrs) = rest.trim().strip_prefix(',')
+                    {
+                        attrs.trim() == "test"
+                    } else {
+                        false
+                    }
+                } else {
+                    trimmed.starts_with("```wavedrom")
+                };
+                if is_match {
+                    in_wavedrom = true;
+                    json_lines.clear();
+                    content_lines.clear();
+                    fence_line = entry.line;
+                }
+            } else if trimmed == "```" {
+                end_line = entry.line;
+                let json = json_lines.join("\n");
+                if !json.trim().is_empty() {
+                    return Some(WavedromBlock {
+                        json,
+                        fence_line,
+                        end_line,
+                        content_lines,
+                    });
+                }
+                in_wavedrom = false;
+            } else {
+                json_lines.push(trimmed.to_string());
+                content_lines.push((trimmed.to_string(), entry.line));
+            }
+        }
+
+        None
+    }
+}
+
+/// Extracted WaveDrom block with source location info.
+#[derive(Debug)]
+pub struct WavedromBlock {
+    pub json: String,
+    pub fence_line: u32,
+    pub end_line: u32,
+    pub content_lines: Vec<(String, u32)>,
+}
+
+impl WavedromBlock {
+    /// Find the source line number of a content line that contains the given text.
+    pub fn find_line_containing(&self, needle: &str) -> Option<u32> {
+        self.content_lines
+            .iter()
+            .find(|(text, _)| text.contains(needle))
+            .map(|(_, line)| *line)
     }
 }
 

@@ -7,12 +7,13 @@ use crate::namespace::Namespace;
 use crate::sv_system_function;
 use crate::symbol::{
     ConnectTarget, Direction, DocComment, GenericBoundKind, GenericMap, GenericTable,
-    GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TypeKind,
+    GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TestProperty, TypeKind,
 };
 use crate::symbol_path::{
     GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
 };
 use crate::tb_component;
+use crate::wavedrom::{self, DocTestTarget};
 use crate::{AnalyzerError, HashMap, SVec, namespace_table};
 use connect::check_connect;
 use log::trace;
@@ -1255,6 +1256,77 @@ impl SymbolTable {
         }
         ret
     }
+
+    fn get_tests(&self, project_name: &str) -> Vec<(StrId, TestProperty)> {
+        self.symbol_table
+            .values()
+            .filter(|s| s.namespace.to_string() == project_name)
+            .filter_map(|symbol| match &symbol.kind {
+                SymbolKind::Module(x) if x.test.is_some() => {
+                    Some((symbol.token.text, x.test.clone().unwrap()))
+                }
+                SymbolKind::Test(x) => Some((symbol.token.text, x.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn get_doc_tests(&self, project_name: &str) -> Vec<DocTestTarget> {
+        self.symbol_table
+            .values()
+            .filter(|s| s.namespace.to_string() == project_name)
+            .filter_map(|symbol| {
+                if let SymbolKind::Module(ref module_prop) = symbol.kind {
+                    let wavedrom_json = symbol.doc_comment.extract_wavedrom_test()?;
+                    let ports = module_prop
+                        .ports
+                        .iter()
+                        .map(|p| {
+                            let prop = p.property();
+                            let name = veryl_parser::resource_table::get_str_value(p.name())
+                                .unwrap_or_default();
+                            let dir = match prop.direction {
+                                Direction::Input => "input",
+                                Direction::Output => "output",
+                                Direction::Inout => "inout",
+                                _ => "unknown",
+                            };
+                            (name, dir.to_string())
+                        })
+                        .collect();
+                    Some(DocTestTarget {
+                        module_name: symbol.token.text,
+                        wavedrom_json,
+                        ports,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn check_wavedrom(&self) -> Vec<AnalyzerError> {
+        let mut ret = vec![];
+        for symbol in self.symbol_table.values() {
+            if let SymbolKind::Module(ref module_prop) = symbol.kind {
+                let port_names: Vec<String> = module_prop
+                    .ports
+                    .iter()
+                    .map(|p| {
+                        veryl_parser::resource_table::get_str_value(p.name()).unwrap_or_default()
+                    })
+                    .collect();
+                ret.extend(wavedrom::check_wavedrom(
+                    &symbol.token,
+                    symbol.doc_comment.extract_wavedrom_block(false),
+                    symbol.doc_comment.extract_wavedrom_block(true),
+                    &port_names,
+                ));
+            }
+        }
+        ret
+    }
 }
 
 impl fmt::Display for SymbolTable {
@@ -1760,6 +1832,18 @@ pub fn clear() {
 
 pub fn check_unused_variable() -> Vec<AnalyzerError> {
     SYMBOL_TABLE.with(|f| f.borrow().check_unused_variable())
+}
+
+pub fn get_tests(project_name: &str) -> Vec<(StrId, TestProperty)> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_tests(project_name))
+}
+
+pub fn get_doc_tests(project_name: &str) -> Vec<DocTestTarget> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_doc_tests(project_name))
+}
+
+pub fn check_wavedrom() -> Vec<AnalyzerError> {
+    SYMBOL_TABLE.with(|f| f.borrow().check_wavedrom())
 }
 
 #[cfg(test)]

@@ -1450,6 +1450,22 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         token_source: TokenSource,
     },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_wavedrom),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("{cause}")]
+    InvalidWavedrom {
+        cause: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
 }
 
 fn source(token: &TokenRange) -> MultiSources {
@@ -1586,6 +1602,7 @@ impl AnalyzerError {
             AnalyzerError::UnusedReturn { token_source, .. } => *token_source,
             AnalyzerError::UnusedVariable { token_source, .. } => *token_source,
             AnalyzerError::WrongSeparator { token_source, .. } => *token_source,
+            AnalyzerError::InvalidWavedrom { token_source, .. } => *token_source,
         }
     }
 
@@ -2369,6 +2386,14 @@ impl AnalyzerError {
     pub fn unused_variable(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnusedVariable {
             identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_wavedrom(cause: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidWavedrom {
+            cause: cause.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

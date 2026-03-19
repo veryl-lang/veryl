@@ -1,0 +1,73 @@
+/// Combinational pass-through.
+///
+/// ```wavedrom,test
+/// {signal: [
+///   {name: 'clk', wave: 'p.....'},
+///   {name: 'din', wave: '010101'},
+///   {name: 'dout', wave: '010101'}
+/// ]}
+/// ```
+pub module Module84 (
+    i_clk  : input  'a clock,
+    i_rst_n: input  'a reset,
+    i_din  : input  'a logic,
+    o_dout : output 'a logic,
+) {
+    assign o_dout = i_din;
+}
+
+/// 1-cycle delay register.
+///
+/// ```wavedrom,test
+/// {signal: [
+///   {name: 'clk',   wave: 'p........'},
+///   {name: 'rst_n', wave: '0.1......'},
+///   {name: 'din',   wave: '0.01.0.1.'},
+///   {name: 'dout',  wave: '0...1.0.1'}
+/// ]}
+/// ```
+pub module Module84_delay (
+    i_clk  : input  'a clock,
+    i_rst_n: input  'a reset,
+    i_din  : input  'a logic,
+    o_dout : output 'a logic,
+) {
+    var r_data: 'a logic;
+
+    always_ff {
+        if_reset {
+            r_data = 0;
+        } else {
+            r_data = i_din;
+        }
+    }
+
+    assign o_dout = r_data;
+}
+
+/// 4-bit up counter.
+///
+/// ```wavedrom,test
+/// {signal: [
+///   {name: 'clk',   wave: 'p.......'},
+///   {name: 'rst_n', wave: '0.1.....'},
+///   {name: 'count', wave: '0..=====', data: ['1', '2', '3', '4', '5']}
+/// ]}
+/// ```
+pub module Module84_counter (
+    i_clk  : input  'a clock   ,
+    i_rst_n: input  'a reset   ,
+    o_count: output 'a logic<4>,
+) {
+    var r_count: 'a logic<4>;
+
+    always_ff {
+        if_reset {
+            r_count = 0;
+        } else {
+            r_count = r_count + 1;
+        }
+    }
+
+    assign o_count = r_count;
+}
