@@ -735,7 +735,7 @@ impl Op {
                         if x.is_xz() | y.is_xz() {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
-                            let mut payload = x.payload + y.payload;
+                            let mut payload = x.payload.wrapping_add(y.payload);
                             payload &= ValueU64::gen_mask(width);
                             Value::U64(ValueU64::new(payload, width, signed))
                         }

@@ -3292,3 +3292,447 @@ fn optimize_comb_no_cascade_inline_multi_level() {
         );
     }
 }
+
+// Regression: Op::Add used non-wrapping u64 addition, causing panic on
+// overflow when operands near u64::MAX (e.g., 0xFFFFFFFFFFFFFFFF + 1).
+// This occurs with $signed values like -1 represented as all-ones.
+#[test]
+fn u64_add_no_overflow_panic() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<64>,
+    ) {
+        var a: logic<64>;
+        always_ff {
+            if_reset {
+                a = 64'hFFFFFFFF_FFFFFFFF;
+            } else {
+                a = a + 64'd1;
+            }
+        }
+        assign out = a + 64'd1;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        // a = 0xFFFFFFFFFFFFFFFF, out = a + 1 = 0 (wrapping)
+        let out = sim.get("out").unwrap();
+        assert_eq!(out, Value::new(0, 64, false));
+
+        sim.step(&clk);
+        // a = 0xFFFFFFFFFFFFFFFF + 1 = 0 (wrapping), out = 0 + 1 = 1
+        let out = sim.get("out").unwrap();
+        assert_eq!(out, Value::new(1, 64, false));
+    }
+}
+
+// Debug test: minimal branch comparison with child module.
+// Tests that a child module's comb output (comparison result) correctly
+// propagates to the parent and controls an FF write-enable.
+#[test]
+fn child_comb_eq_comparison() {
+    let code = r#"
+    package MyPkg {
+        enum Op: logic<2> {
+            EQ  = 2'd0,
+            NE  = 2'd1,
+            LT  = 2'd2,
+            GE  = 2'd3,
+        }
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var cmp_result: logic;
+        var a: logic<32>;
+        var b: logic<32>;
+        var op: MyPkg::Op;
+
+        inst u_cmp: Comparator (
+            i_a   : a,
+            i_b   : b,
+            i_op  : op,
+            o_result: cmp_result,
+        );
+
+        var cnt: logic<8>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+                a = 0;
+                b = 0;
+                op = MyPkg::Op::EQ;
+                result = 0;
+            } else {
+                cnt += 1;
+                // Cycle 1: set a=10, b=10, op=EQ
+                if cnt == 8'd0 {
+                    a = 32'd10;
+                    b = 32'd10;
+                    op = MyPkg::Op::EQ;
+                }
+                // Cycle 3+: latch comparison result
+                if cnt >= 8'd2 {
+                    if cmp_result {
+                        result = 32'd42;
+                    }
+                }
+            }
+        }
+    }
+
+    module Comparator (
+        i_a     : input  logic<32>,
+        i_b     : input  logic<32>,
+        i_op    : input  MyPkg::Op,
+        o_result: output logic,
+    ) {
+        import MyPkg::Op;
+        var res: logic;
+        always_comb {
+            case i_op as Op {
+                Op::EQ: res = i_a == i_b;
+                Op::NE: res = i_a != i_b;
+                Op::LT: res = i_a <: i_b;
+                Op::GE: res = i_a >= i_b;
+                default: res = 1'b0;
+            }
+        }
+        assign o_result = res;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+
+        // a=10, b=10, op=EQ → cmp_result should be 1
+        // result should be 42
+        let result = sim.get("result").unwrap();
+        assert_eq!(result, Value::new(42, 32, false));
+    }
+}
+
+// Debug test: minimal pipeline with branch flush.
+// Reproduces the heliodor BEQ/BNE issue where branch_taken=1
+// causes flush but not PC redirect in non-JIT mode.
+//
+// Pipeline: Comparator (child comb) produces taken signal.
+// Parent uses taken to control a flush signal. When flush=1,
+// the valid pipeline register is cleared. The issue is whether
+// the flush signal and the data path see the taken signal
+// consistently.
+#[test]
+fn branch_flush_consistency() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        // Stage 1: produce values and comparison
+        var s1_a     : logic<32>;
+        var s1_b     : logic<32>;
+        var s1_valid : logic;
+        var cmp_taken: logic;
+
+        inst u_cmp: Cmp (
+            i_a   : s1_a,
+            i_b   : s1_b,
+            o_eq  : cmp_taken,
+        );
+
+        // Flush signal: when taken=1 AND valid=1, flush next stage
+        let do_flush: logic = cmp_taken && s1_valid;
+
+        // Stage 2: latches values, can be flushed
+        var s2_data  : logic<32>;
+        var s2_valid : logic;
+
+        always_ff {
+            if_reset {
+                s1_a = 0;
+                s1_b = 0;
+                s1_valid = 0;
+                s2_data = 0;
+                s2_valid = 0;
+                result = 0;
+            } else {
+                // Stage 1: set a=10, b=10 on cycle 1, valid on cycle 2
+                if s1_a == 32'd0 {
+                    s1_a = 32'd10;
+                    s1_b = 32'd10;
+                }
+                if s1_a == 32'd10 && !s1_valid {
+                    s1_valid = 1'b1;
+                }
+
+                // Stage 2: if flushed, clear valid; else latch data
+                if do_flush {
+                    s2_valid = 1'b0;
+                } else {
+                    s2_data = 32'd99;
+                    s2_valid = 1'b1;
+                }
+
+                // Writeback: if stage 2 valid, update result
+                if s2_valid {
+                    result = s2_data;
+                }
+
+                // After flush resolves, disable comparison
+                if s1_valid {
+                    s1_valid = 1'b0;
+                }
+            }
+        }
+    }
+
+    module Cmp (
+        i_a : input  logic<32>,
+        i_b : input  logic<32>,
+        o_eq: output logic,
+    ) {
+        assign o_eq = i_a == i_b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+
+        // After the flush resolves, s2 should eventually become valid
+        // and result should be 99.
+        let result = sim.get("result").unwrap();
+        assert_eq!(result, Value::new(99, 32, false));
+    }
+}
+
+// Debug test: deep hierarchy with forwarding mux + branch comparator.
+// Simulates the execute stage pattern: forwarding selects operands,
+// then branch_comp compares them, then the result controls flush.
+#[test]
+fn deep_forwarding_and_branch() {
+    let code = r#"
+    package BranchPkg {
+        enum Funct3: logic<3> {
+            BEQ  = 3'b000,
+            BNE  = 3'b001,
+            BLT  = 3'b100,
+        }
+        enum FwdSel: logic<2> {
+            NONE   = 2'd0,
+            EX_MEM = 2'd1,
+            MEM_WB = 2'd2,
+        }
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        // Pipeline registers
+        var pipe_data     : logic<32>;
+        var pipe_valid    : logic;
+        var pipe_is_branch: logic;
+        var pipe_funct3   : BranchPkg::Funct3;
+        var pipe_rd       : logic<5>;
+        var pipe_reg_wen  : logic;
+
+        // Forwarding
+        var fwd_sel    : BranchPkg::FwdSel;
+        var fwd_data   : logic<32>;
+        var reg_rs1    : logic<32>;
+
+        // Branch comparison
+        var branch_taken: logic;
+
+        // Flush
+        let flush: logic = branch_taken;
+
+        // Execute module with branch comparator
+        var fwd_rs1: logic<32>;
+        inst u_fwd: FwdMux (
+            i_sel     : fwd_sel,
+            i_reg_data: reg_rs1,
+            i_fwd_data: fwd_data,
+            o_data    : fwd_rs1,
+        );
+
+        var cmp_taken: logic;
+        inst u_cmp: BranchCmp (
+            i_a     : fwd_rs1,
+            i_b     : fwd_rs1,
+            i_funct3: pipe_funct3,
+            o_taken : cmp_taken,
+        );
+
+        assign branch_taken = pipe_valid && pipe_is_branch && cmp_taken;
+
+        // Simple pipeline
+        var cycle_cnt: logic<8>;
+        var wb_data  : logic<32>;
+        var wb_valid : logic;
+
+        always_ff {
+            if_reset {
+                cycle_cnt = 0;
+                pipe_data = 0;
+                pipe_valid = 0;
+                pipe_is_branch = 0;
+                pipe_funct3 = BranchPkg::Funct3::BEQ;
+                pipe_rd = 0;
+                pipe_reg_wen = 0;
+                fwd_sel = BranchPkg::FwdSel::NONE;
+                fwd_data = 0;
+                reg_rs1 = 0;
+                wb_data = 0;
+                wb_valid = 0;
+                result = 0;
+            } else {
+                cycle_cnt += 1;
+
+                // Cycle 1: issue ADDI x1, 42
+                if cycle_cnt == 8'd1 {
+                    pipe_data = 32'd42;
+                    pipe_valid = 1'b1;
+                    pipe_is_branch = 1'b0;
+                    pipe_rd = 5'd1;
+                    pipe_reg_wen = 1'b1;
+                    fwd_sel = BranchPkg::FwdSel::NONE;
+                    reg_rs1 = 32'd0;
+                }
+                // Cycle 2: issue BEQ x1, x1 (forward from prev stage)
+                if cycle_cnt == 8'd2 {
+                    pipe_data = 32'd0;
+                    pipe_valid = 1'b1;
+                    pipe_is_branch = 1'b1;
+                    pipe_funct3 = BranchPkg::Funct3::BEQ;
+                    pipe_rd = 5'd0;
+                    pipe_reg_wen = 1'b0;
+                    fwd_sel = BranchPkg::FwdSel::EX_MEM;
+                    fwd_data = 32'd42;
+                }
+                // Cycle 3: issue ADDI x2, 99 (may be flushed)
+                if cycle_cnt == 8'd3 {
+                    if flush {
+                        pipe_valid = 1'b0;
+                    } else {
+                        pipe_data = 32'd99;
+                        pipe_valid = 1'b1;
+                        pipe_is_branch = 1'b0;
+                        pipe_rd = 5'd2;
+                        pipe_reg_wen = 1'b1;
+                    }
+                    fwd_sel = BranchPkg::FwdSel::NONE;
+                }
+                // Cycle 4+: NOP
+                if cycle_cnt >= 8'd4 {
+                    pipe_valid = 1'b0;
+                    pipe_is_branch = 1'b0;
+                }
+
+                // Writeback
+                wb_data = pipe_data;
+                wb_valid = pipe_valid && pipe_reg_wen;
+
+                if wb_valid {
+                    result = wb_data;
+                }
+            }
+        }
+    }
+
+    module FwdMux (
+        i_sel     : input  BranchPkg::FwdSel,
+        i_reg_data: input  logic<32>,
+        i_fwd_data: input  logic<32>,
+        o_data    : output logic<32>,
+    ) {
+        import BranchPkg::FwdSel;
+        assign o_data = case i_sel {
+            FwdSel::EX_MEM: i_fwd_data,
+            FwdSel::MEM_WB: i_fwd_data,
+            default       : i_reg_data,
+        };
+    }
+
+    module BranchCmp (
+        i_a     : input  logic<32>,
+        i_b     : input  logic<32>,
+        i_funct3: input  BranchPkg::Funct3,
+        o_taken : output logic,
+    ) {
+        import BranchPkg::Funct3;
+        var taken: logic;
+        always_comb {
+            case i_funct3 as Funct3 {
+                Funct3::BEQ: taken = i_a == i_b;
+                Funct3::BNE: taken = i_a != i_b;
+                Funct3::BLT: taken = i_a <: i_b;
+                default    : taken = 1'b0;
+            }
+        }
+        assign o_taken = taken;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+
+        // At cycle 2, BEQ is issued with fwd x1=42. BEQ(42,42)=taken.
+        // At cycle 3, flush=1, so ADDI x2,99 is flushed.
+        // result should be 42 (from ADDI x1 writeback), NOT 99.
+        let result = sim.get("result").unwrap();
+        assert_eq!(result, Value::new(42, 32, false));
+    }
+}
