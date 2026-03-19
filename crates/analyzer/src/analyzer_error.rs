@@ -2655,6 +2655,8 @@ pub enum UnevaluableValueKind {
     CaseCondition,
     ConstValue,
     EnumVariant,
+    ForRange,
+    ParameterValue,
     ResetValue,
 }
 
@@ -2664,6 +2666,8 @@ impl fmt::Display for UnevaluableValueKind {
             UnevaluableValueKind::CaseCondition => "case condition".fmt(f),
             UnevaluableValueKind::ConstValue => "const value".fmt(f),
             UnevaluableValueKind::EnumVariant => "enum variant".fmt(f),
+            UnevaluableValueKind::ForRange => "for range".fmt(f),
+            UnevaluableValueKind::ParameterValue => "parameter value".fmt(f),
             UnevaluableValueKind::ResetValue => "reset value".fmt(f),
         }
     }

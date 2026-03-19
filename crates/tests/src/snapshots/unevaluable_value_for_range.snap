@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 359
+expression: out
+---
+unevaluatable_value (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unevaluatable_value)
+
+  × Value, which is not evaluable at elaboration, can't be used as for range
+   ╭─[../../testcases/error/unevaluable_value_for_range.veryl:3:14]
+ 2 │     let a: logic<10> = 0;
+ 3 │     for i in 0..a :label {
+   ·              ──┬─
+   ·                ╰── Error location
+ 4 │         assign a[i] = i + 2;
+   ╰────
+  help:
