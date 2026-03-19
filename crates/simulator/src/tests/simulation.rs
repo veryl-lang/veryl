@@ -4076,3 +4076,482 @@ fn analyze_dep_self_ref_in_child_module() {
         assert_eq!(sim.get("result").unwrap(), Value::new(99, 32, false));
     }
 }
+
+// ============================================================
+// JIT ON/OFF timing consistency tests
+// ============================================================
+
+// Pipeline register pattern (like heliodor's ifid_pc):
+// Child FF → child comb output → parent pipeline register (always_ff).
+// The parent's pipeline register only references its own always_ff
+// assignment context, so is_ff may be false. Verify that JIT ON
+// and OFF produce identical cycle-by-cycle results.
+#[test]
+fn jit_timing_pipeline_register() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var fetch_pc: logic<32>;
+        inst u_fetch: Fetch (
+            clk,
+            rst,
+            o_pc: fetch_pc,
+        );
+
+        // Pipeline register: latches fetch_pc every cycle
+        var pipe_pc: logic<32>;
+        always_ff {
+            if_reset {
+                pipe_pc = 0;
+            } else {
+                pipe_pc = fetch_pc;
+            }
+        }
+
+        assign result = pipe_pc;
+    }
+
+    module Fetch (
+        clk : input  clock,
+        rst : input  reset,
+        o_pc: output logic<32>,
+    ) {
+        var pc: logic<32>;
+        always_ff {
+            if_reset {
+                pc = 0;
+            } else {
+                pc += 4;
+            }
+        }
+        assign o_pc = pc;
+    }
+    "#;
+
+    let mut all_results: Vec<(Config, Vec<u64>)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        let mut values = vec![];
+        for _ in 0..8 {
+            sim.step(&clk);
+            let v = sim.get("result").unwrap();
+            let val = if let Value::U64(v) = &v { v.payload } else { 0 };
+            values.push(val);
+        }
+        all_results.push((config, values));
+    }
+
+    let first = &all_results[0].1;
+    for (config, vals) in &all_results {
+        assert_eq!(
+            vals, first,
+            "JIT timing mismatch for pipeline register: config {:?} got {:?}, expected {:?}",
+            config, vals, first
+        );
+    }
+    // pipe_pc lags fetch_pc by 1 cycle:
+    // cycle1: pc=0→4, fetch_pc=0, pipe_pc=0
+    // cycle2: pc=4→8, fetch_pc=4, pipe_pc=0
+    // cycle3: pc=8→12, fetch_pc=8, pipe_pc=4
+    // ...after 8 cycles: pipe_pc=28
+    assert_eq!(first[7], 28);
+}
+
+// Conditional FF write with stall pattern (like heliodor's ifid_pc with stall_if):
+// Pipeline register that holds its value when stalled.
+// Variable is assigned in always_ff but only read by comb → is_ff=false.
+#[test]
+fn jit_timing_conditional_ff_stall() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var counter: logic<32>;
+        inst u_counter: Counter (
+            clk,
+            rst,
+            o_val: counter,
+        );
+
+        // Stall every other cycle
+        var stall: logic;
+        assign stall = counter[0:0] == 1'd1;
+
+        // Pipeline register with stall
+        var pipe_val: logic<32>;
+        always_ff {
+            if_reset {
+                pipe_val = 0;
+            } else if !stall {
+                pipe_val = counter;
+            }
+        }
+
+        assign result = pipe_val;
+    }
+
+    module Counter (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt;
+    }
+    "#;
+
+    let mut all_results: Vec<(Config, Vec<u64>)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        let mut values = vec![];
+        for _ in 0..8 {
+            sim.step(&clk);
+            let v = sim.get("result").unwrap();
+            let val = if let Value::U64(v) = &v { v.payload } else { 0 };
+            values.push(val);
+        }
+        all_results.push((config, values));
+    }
+
+    let first = &all_results[0].1;
+    for (config, vals) in &all_results {
+        assert_eq!(
+            vals, first,
+            "JIT timing mismatch for conditional FF stall: config {:?} got {:?}, expected {:?}",
+            config, vals, first
+        );
+    }
+}
+
+// Multi-stage pipeline: ChildA FF → ChildA comb → parent pipe1 FF →
+// parent comb → ChildB input → ChildB FF → ChildB comb → parent pipe2 FF.
+// Mimics a 2-deep pipeline where each stage is a separate child module.
+#[test]
+fn jit_timing_multi_stage_pipeline() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        // Stage 1: counter
+        var stage1_out: logic<32>;
+        inst u_s1: Stage1 (
+            clk,
+            rst,
+            o_val: stage1_out,
+        );
+
+        // Pipeline register 1
+        var pipe1: logic<32>;
+        always_ff {
+            if_reset {
+                pipe1 = 0;
+            } else {
+                pipe1 = stage1_out;
+            }
+        }
+
+        // Stage 2: doubles its input
+        var stage2_out: logic<32>;
+        inst u_s2: Stage2 (
+            clk,
+            rst,
+            i_val : pipe1,
+            o_val : stage2_out,
+        );
+
+        // Pipeline register 2
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = stage2_out;
+            }
+        }
+    }
+
+    module Stage1 (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt;
+    }
+
+    module Stage2 (
+        clk  : input  clock,
+        rst  : input  reset,
+        i_val: input  logic<32>,
+        o_val: output logic<32>,
+    ) {
+        var latched: logic<32>;
+        always_ff {
+            if_reset {
+                latched = 0;
+            } else {
+                latched = i_val;
+            }
+        }
+        assign o_val = latched * 32'd2;
+    }
+    "#;
+
+    let mut all_results: Vec<(Config, Vec<u64>)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        let mut values = vec![];
+        for _ in 0..10 {
+            sim.step(&clk);
+            let v = sim.get("result").unwrap();
+            let val = if let Value::U64(v) = &v { v.payload } else { 0 };
+            values.push(val);
+        }
+        all_results.push((config, values));
+    }
+
+    let first = &all_results[0].1;
+    for (config, vals) in &all_results {
+        assert_eq!(
+            vals, first,
+            "JIT timing mismatch for multi-stage pipeline: config {:?} got {:?}, expected {:?}",
+            config, vals, first
+        );
+    }
+}
+
+// Flush pattern: A control signal (from child comb) causes a pipeline
+// register to be invalidated. This tests the interaction between
+// child comb outputs and parent FF conditional writes with flush.
+#[test]
+fn jit_timing_pipeline_flush() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var counter_val: logic<32>;
+        inst u_cnt: Counter (
+            clk,
+            rst,
+            o_val: counter_val,
+        );
+
+        // Flush when counter hits 3
+        var flush: logic;
+        assign flush = counter_val == 32'd3;
+
+        // Pipeline register with flush
+        var pipe_valid: logic;
+        var pipe_data : logic<32>;
+        always_ff {
+            if_reset {
+                pipe_valid = 0;
+                pipe_data  = 0;
+            } else if flush {
+                pipe_valid = 0;
+                pipe_data  = 0;
+            } else {
+                pipe_valid = 1;
+                pipe_data  = counter_val;
+            }
+        }
+
+        // Output: valid ? data : 0xFFFF
+        assign result = if pipe_valid ? pipe_data : 32'hFFFF;
+    }
+
+    module Counter (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt;
+    }
+    "#;
+
+    let mut all_results: Vec<(Config, Vec<u64>)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        let mut values = vec![];
+        for _ in 0..8 {
+            sim.step(&clk);
+            let v = sim.get("result").unwrap();
+            let val = if let Value::U64(v) = &v { v.payload } else { 0 };
+            values.push(val);
+        }
+        all_results.push((config, values));
+    }
+
+    let first = &all_results[0].1;
+    for (config, vals) in &all_results {
+        assert_eq!(
+            vals, first,
+            "JIT timing mismatch for pipeline flush: config {:?} got {:?}, expected {:?}",
+            config, vals, first
+        );
+    }
+}
+
+// Forwarding pattern: Two child modules where the second uses the
+// first's comb output, and a parent FF captures the forwarded value.
+// Tests that cross-child comb→FF forwarding is consistent.
+#[test]
+fn jit_timing_cross_child_forwarding() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var producer_out: logic<32>;
+        inst u_prod: Producer (
+            clk,
+            rst,
+            o_val: producer_out,
+        );
+
+        // Forwarding mux: select between producer_out and latched value
+        var latched: logic<32>;
+        var forwarded: logic<32>;
+        assign forwarded = if producer_out >: 32'd2 ? producer_out : latched;
+
+        inst u_cons: Consumer (
+            clk,
+            rst,
+            i_val : forwarded,
+            o_val : result,
+        );
+
+        always_ff {
+            if_reset {
+                latched = 0;
+            } else {
+                latched = producer_out;
+            }
+        }
+    }
+
+    module Producer (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt;
+    }
+
+    module Consumer (
+        clk  : input  clock,
+        rst  : input  reset,
+        i_val: input  logic<32>,
+        o_val: output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                o_val = 0;
+            } else {
+                o_val = i_val + 32'd10;
+            }
+        }
+    }
+    "#;
+
+    let mut all_results: Vec<(Config, Vec<u64>)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        let mut values = vec![];
+        for _ in 0..8 {
+            sim.step(&clk);
+            let v = sim.get("result").unwrap();
+            let val = if let Value::U64(v) = &v { v.payload } else { 0 };
+            values.push(val);
+        }
+        all_results.push((config, values));
+    }
+
+    let first = &all_results[0].1;
+    for (config, vals) in &all_results {
+        assert_eq!(
+            vals, first,
+            "JIT timing mismatch for cross-child forwarding: config {:?} got {:?}, expected {:?}",
+            config, vals, first
+        );
+    }
+}
