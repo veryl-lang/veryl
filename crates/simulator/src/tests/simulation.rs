@@ -3917,3 +3917,162 @@ fn post_comb_child_to_parent_comb_chain() {
     // cnt=4, o_val=5, doubled=10, result=10
     assert_eq!(first_val, 10);
 }
+
+// Regression: analyze_dependency self-reference skip.
+//
+// An always_comb block with a default assignment followed by a
+// conditional override creates a self-reference: the variable appears
+// in both inputs (read in the condition branch) and outputs (written
+// by default and branch). Without the self-reference skip in
+// analyze_dependency, this is falsely detected as a combinational loop.
+//
+// Pattern:
+//   always_comb {
+//       out = default_val;
+//       if cond { out = f(out); }  // self-reference
+//   }
+#[test]
+fn analyze_dep_self_ref_not_loop() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var sel: logic<2>;
+        always_ff {
+            if_reset {
+                sel = 0;
+            } else {
+                sel += 1;
+            }
+        }
+
+        var val: logic<32>;
+        always_comb {
+            // Default
+            val = 32'd10;
+            // Conditional self-referencing override
+            case sel {
+                2'd1: val = val + 32'd1;
+                2'd2: val = val + 32'd2;
+                default: {}
+            }
+        }
+
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = val;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // sel cycles: 0, 1, 2, 3, 0, 1, ...
+        // val: sel=0 → 10, sel=1 → 11, sel=2 → 12, sel=3 → 10
+        sim.step(&clk); // sel=0 → val=10
+        assert_eq!(sim.get("result").unwrap(), Value::new(10, 32, false));
+
+        sim.step(&clk); // sel=1 → val=10+1=11
+        assert_eq!(sim.get("result").unwrap(), Value::new(11, 32, false));
+
+        sim.step(&clk); // sel=2 → val=10+2=12
+        assert_eq!(sim.get("result").unwrap(), Value::new(12, 32, false));
+
+        sim.step(&clk); // sel=3 → val=10 (default)
+        assert_eq!(sim.get("result").unwrap(), Value::new(10, 32, false));
+    }
+}
+
+// Regression: self-referencing comb in a child module should not
+// cause combinational loop detection in the parent's flattened comb.
+#[test]
+fn analyze_dep_self_ref_in_child_module() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var child_out: logic<32>;
+        inst u_child: Child (
+            clk,
+            rst,
+            o_val: child_out,
+        );
+
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = child_out;
+            }
+        }
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<8>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+
+        // Self-referencing comb with case statement
+        var decoded: logic<32>;
+        always_comb {
+            decoded = 32'd0;
+            case cnt[1:0] {
+                2'd0: decoded = 32'd100;
+                2'd1: decoded = decoded + 32'd1;
+                2'd2: decoded = decoded + 32'd2;
+                default: decoded = 32'd99;
+            }
+        }
+        assign o_val = decoded;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        sim.step(&clk); // cnt=0 → decoded=100
+        assert_eq!(sim.get("result").unwrap(), Value::new(100, 32, false));
+
+        sim.step(&clk); // cnt=1 → decoded=0+1=1
+        assert_eq!(sim.get("result").unwrap(), Value::new(1, 32, false));
+
+        sim.step(&clk); // cnt=2 → decoded=0+2=2
+        assert_eq!(sim.get("result").unwrap(), Value::new(2, 32, false));
+
+        sim.step(&clk); // cnt=3 → decoded=99
+        assert_eq!(sim.get("result").unwrap(), Value::new(99, 32, false));
+    }
+}

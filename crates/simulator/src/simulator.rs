@@ -145,9 +145,8 @@ impl<T: std::io::Write> Simulator<T> {
         if self.comb_dirty {
             self.ir.eval_comb(&mut self.mask_cache);
             if !self.ir.post_comb_fns.is_empty() {
-                // Evaluate child module comb-only functions after port
-                // connections. Ensures child comb output values are correct
-                // before any FF events fire.
+                // JIT path: evaluate child comb-only functions after port
+                // connections, ensuring child comb outputs are correct.
                 self.ir.eval_post_comb(&mut self.mask_cache);
             }
             self.comb_dirty = false;

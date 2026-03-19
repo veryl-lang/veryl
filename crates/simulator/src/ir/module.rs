@@ -369,7 +369,15 @@ pub(crate) fn analyze_dependency(
         let stmt = dag.add_node(stmt_node);
         dag_nodes.insert(stmt_node, stmt);
 
+        // Skip self-referencing inputs (same offset in both inputs and
+        // outputs). This naturally occurs in conditional comb blocks like
+        // always_comb { a = 0; if cond { a = f(a); } } and is NOT a
+        // combinational loop.
+        let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
         for var_key in inputs {
+            if output_set.contains(&var_key) {
+                continue; // Skip self-reference
+            }
             let var_node = Node::Var(var_key.0, var_key.1);
             let var = *dag_nodes
                 .entry(var_node)
