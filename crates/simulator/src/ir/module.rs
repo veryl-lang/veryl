@@ -760,6 +760,32 @@ impl Conv<&air::Module> for ProtoModule {
             all_child_modules.extend(proto_decl.child_modules);
         }
 
+        // Add comb statements that depend on post_comb output port
+        // destinations. This handles cross-child dependencies:
+        // ChildA comb → output port → parent var → ChildB input port.
+        // Only Assign outputs are tracked (not CompiledBlock internals).
+        if !all_post_comb_fns.is_empty() {
+            let mut port_outputs = HashSet::default();
+            for s in &all_post_comb_fns {
+                if !matches!(s, ProtoStatement::CompiledBlock(_)) {
+                    let mut outputs: Vec<(bool, isize)> = vec![];
+                    let mut inputs: Vec<(bool, isize)> = vec![];
+                    s.gather_variable_offsets(&mut inputs, &mut outputs);
+                    port_outputs.extend(outputs);
+                }
+            }
+            if !port_outputs.is_empty() {
+                for stmt in &all_comb_statements {
+                    let mut inputs: Vec<(bool, isize)> = vec![];
+                    let mut outputs: Vec<(bool, isize)> = vec![];
+                    stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+                    if inputs.iter().any(|i| port_outputs.contains(i)) {
+                        all_post_comb_fns.push(stmt.clone());
+                    }
+                }
+            }
+        }
+
         context.scope_contexts.pop();
 
         // Save lite comb for full_comb construction (before analyze_dependency consumes it)

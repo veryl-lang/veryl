@@ -3736,3 +3736,184 @@ fn deep_forwarding_and_branch() {
         assert_eq!(result, Value::new(42, 32, false));
     }
 }
+
+// Regression: post_comb_fns dependency tracking.
+//
+// When child module A's comb output is connected to a parent variable,
+// and that parent variable feeds child module B's input port, the
+// dependency tracking must add B's input port connection to post_comb_fns.
+// Without this, B's merged event reads stale values from the pre-event
+// eval_comb pass.
+//
+// Chain: ChildA comb → output port → parent var → ChildB input → ChildB merged event
+//
+// This test verifies JIT ON and OFF produce the same result.
+#[test]
+fn post_comb_sibling_dependency() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        // ChildA produces a comb value from its FF state
+        var a_out: logic<32>;
+        inst u_a: ChildA (
+            clk,
+            rst,
+            o_val: a_out,
+        );
+
+        // ChildB reads a_out and latches it into its own FF
+        inst u_b: ChildB (
+            clk,
+            rst,
+            i_val   : a_out,
+            o_result: result,
+        );
+    }
+
+    module ChildA (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt + 100;
+    }
+
+    module ChildB (
+        clk     : input  clock,
+        rst     : input  reset,
+        i_val   : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                o_result = 0;
+            } else {
+                o_result = i_val;
+            }
+        }
+    }
+    "#;
+
+    // Collect results from all configs
+    let mut results: Vec<(Config, u64)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+
+        let result = sim.get("result").unwrap();
+        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        results.push((config, val));
+    }
+
+    // All configs must produce the same value (JIT ON = OFF)
+    let first_val = results[0].1;
+    for (config, val) in &results {
+        assert_eq!(
+            *val, first_val,
+            "JIT timing mismatch: config {:?} got {}, expected {}",
+            config, val, first_val
+        );
+    }
+    // cnt=4 after 5 clocks, o_val=104, result=104
+    assert_eq!(first_val, 104);
+}
+
+// Regression: child comb → parent comb → parent FF chain.
+// Tests that parent comb depending on child comb output gets
+// the correct value in the same cycle (not 1-cycle stale).
+#[test]
+fn post_comb_child_to_parent_comb_chain() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var child_out: logic<32>;
+        inst u_child: Child (
+            clk,
+            rst,
+            o_val: child_out,
+        );
+
+        // Parent comb depends on child comb output
+        var doubled: logic<32>;
+        assign doubled = child_out * 32'd2;
+
+        // Parent FF latches the transformed value
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = doubled;
+            }
+        }
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt + 1;
+    }
+    "#;
+
+    let mut results: Vec<(Config, u64)> = vec![];
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+
+        let result = sim.get("result").unwrap();
+        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        results.push((config, val));
+    }
+
+    let first_val = results[0].1;
+    for (config, val) in &results {
+        assert_eq!(
+            *val, first_val,
+            "JIT timing mismatch: config {:?} got {}, expected {}",
+            config, val, first_val
+        );
+    }
+    // cnt=4, o_val=5, doubled=10, result=10
+    assert_eq!(first_val, 10);
+}
