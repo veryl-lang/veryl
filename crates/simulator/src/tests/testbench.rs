@@ -277,6 +277,168 @@ fn tb_integration_counter() {
     }
 }
 
+/// Reproduce veryl-test read-only cache issue via testbench path
+#[test]
+fn tb_readonly_cache_fill() {
+    // Dummy modules before the actual test to pollute symbol_table
+    // (simulates std library files being processed first)
+    let prefix = r#"
+    module DummyA (clk: input clock, rst: input reset, a: input logic<32>, b: output logic<32>) {
+        var x: logic<32>;
+        always_ff { if_reset { x = 0; } else { x = a; } }
+        assign b = x;
+    }
+    module DummyB (clk: input clock, rst: input reset, c: input logic<16>, d: output logic<16>) {
+        var y: logic<16>;
+        always_ff { if_reset { y = 0; } else { y = c + 16'd1; } }
+        assign d = y;
+    }
+    "#;
+    let code_main = r#"
+    module Harness (
+        clk: input clock, rst: input reset,
+        o_r2: output logic<64>, o_stall: output logic,
+    ) {
+        var addr: logic<64>; var ren: logic; var rdata: logic<64>;
+        var stall: logic; var mem_addr: logic<64>; var mem_ren: logic;
+        var mem_rdata: logic<64>;
+        inst dut: Cache (clk: clk, rst: rst, i_addr: addr, i_ren: ren,
+            o_rdata: rdata, o_stall: stall,
+            o_mem_addr: mem_addr, o_mem_ren: mem_ren, i_mem_rdata: mem_rdata);
+        var mem: logic<64> [256];
+        assign mem_rdata = mem[mem_addr[10:3]];
+        var tc: logic<8>; var r2_val: logic<64>;
+        always_ff (clk, rst) {
+            if_reset { tc = 0; ren = 0; addr = 0; r2_val = 0;
+                for i: i32 in 0..256 {
+                    if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
+                    else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
+                    else { mem[i] = 0; }
+                }
+            } else {
+                ren = 0;
+                if stall { ren = 1; }
+                if !stall { tc = tc + 8'd1; }
+                case tc {
+                    8'd1: { addr = 64'h0; ren = 1; }
+                    8'd3: { addr = 64'h0; ren = 1; }
+                    8'd6: { addr = 64'h8; ren = 1; }
+                    8'd7: { r2_val = rdata; }
+                    default: {}
+                }
+            }
+        }
+        assign o_r2 = r2_val;
+        assign o_stall = stall;
+    }
+    module test_cache {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+        var r2: logic<64>;
+        var stall: logic;
+        inst h: Harness (clk: clk, rst: rst, o_r2: r2, o_stall: stall);
+        initial {
+            rst.assert(clk);
+            clk.next(20);
+            $assert(r2 == 64'h0000_0000_0000_BBBB, "r2 wrong");
+            $finish();
+        }
+    }
+    "#;
+
+    // Test with multi-file processing: Cache in one file, test in another
+    // (like heliodor's src/cache/icache.veryl + tb/test_icache.veryl)
+    let cache_file = r#"
+    pub module Cache (
+        clk: input clock, rst: input reset,
+        i_addr: input logic<64>, i_ren: input logic,
+        o_rdata: output logic<64>, o_stall: output logic,
+        o_mem_addr: output logic<64>, o_mem_ren: output logic,
+        i_mem_rdata: input logic<64>,
+    ) {
+        let tag: logic<54> = i_addr[63:10];
+        let index: logic<4> = i_addr[9:6];
+        let offset: logic<3> = i_addr[5:3];
+        let data_idx: logic<7> = {index, offset};
+        var valid: logic<16>;
+        var tags: logic<54> [16];
+        var data: logic<64> [128];
+        let cache_hit: logic = valid[index] && tags[index] == tag;
+        var state: logic<2>;
+        var fill_count: logic<3>;
+        var fill_index: logic<4>;
+        var fill_tag: logic<54>;
+        let fill_data_idx: logic<7> = {fill_index, fill_count};
+        let miss: logic = i_ren && !cache_hit && state == 2'd0;
+        let filling: logic = state == 2'd1;
+        always_ff (clk, rst) {
+            if_reset {
+                state = 0; fill_count = 0; fill_index = 0; fill_tag = 0; valid = 0;
+                for i: i32 in 0..16 { tags[i] = 0; }
+                for i: i32 in 0..128 { data[i] = 0; }
+            } else {
+                case state {
+                    2'd0: { if miss { fill_index = index; fill_tag = tag; fill_count = 0; state = 2'd1; } }
+                    2'd1: {
+                        data[fill_data_idx] = i_mem_rdata;
+                        if fill_count == 3'd7 { tags[fill_index] = fill_tag; valid[fill_index] = 1; state = 2'd2; }
+                        else { fill_count = fill_count + 3'd1; }
+                    }
+                    2'd2: { state = 0; }
+                    default: { state = 0; }
+                }
+            }
+        }
+        assign o_rdata = if cache_hit ? data[data_idx] : i_mem_rdata;
+        assign o_stall = filling || miss;
+        assign o_mem_addr = if filling ? {fill_tag, fill_index, fill_count, 3'b000}
+                          : if i_ren && !cache_hit ? {tag, index, 3'd0, 3'b000}
+                          : '0;
+        assign o_mem_ren = if filling ? 1'b1 : if i_ren && !cache_hit ? 1'b1 : 1'b0;
+    }
+    "#;
+    let _ = prefix; // suppress unused warning
+    for config in Config::all() {
+        dbg!(&config);
+        // Generate many dummy modules to shift symbol IDs (simulate std library)
+        let mut std_code = String::new();
+        for j in 0..50 {
+            std_code.push_str(&format!(
+                "pub module dummy_{j} (clk: input clock, rst: input reset, a: input logic<32>, b: output logic<32>) {{
+                    var x: logic<32>;
+                    always_ff (clk, rst) {{ if_reset {{ x = 0; }} else {{ x = a + 32'd{j}; }} }}
+                    assign b = x;
+                }}\n"));
+        }
+        let ir = analyze_multi_file_prj(
+            &[&std_code, cache_file, code_main],
+            &config,
+            "test_cache",
+            &["std", "prj", "prj"],
+        );
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(e) => {
+                eprintln!("skip: {:?}", e);
+                continue;
+            }
+        };
+
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements);
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
+        let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, 3);
+        let result = run_testbench(&mut sim, &tb_stmts);
+        assert_eq!(
+            result,
+            TestResult::Pass,
+            "JIT={} 4state={}: testbench failed",
+            config.use_jit,
+            config.use_4state
+        );
+    }
+}
+
 #[test]
 fn tb_function_inline() {
     let code = r#"

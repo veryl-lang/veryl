@@ -6,6 +6,7 @@ use crate::ir::ProtoStatement;
 use crate::ir::VarId;
 use crate::ir::VariableMeta;
 use crate::ir::event::Event;
+use crate::ir::statement::StmtDep;
 use crate::simulator_error::SimulatorError;
 use memmap2::Mmap;
 use veryl_parser::resource_table::StrId;
@@ -21,6 +22,7 @@ pub struct JitCachedFunc {
     pub func: FuncPtr,
     pub input_offsets: Vec<(bool, isize)>,
     pub output_offsets: Vec<(bool, isize)>,
+    pub stmt_deps: Vec<StmtDep>,
 }
 
 /// Cache entry for a module type's JIT-compiled internal logic.

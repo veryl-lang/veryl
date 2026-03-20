@@ -229,6 +229,7 @@ fn exec<T: std::io::Write>(sim: &mut Simulator<T>, stmts: &[TestbenchStatement])
 fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement) -> ExecResult {
     match stmt {
         TestbenchStatement::Stmt(s) => {
+            sim.ensure_comb_updated();
             s.eval_step(&mut sim.mask_cache);
             sim.mark_comb_dirty();
             ExecResult::Continue

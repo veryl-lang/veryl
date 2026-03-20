@@ -42,6 +42,14 @@ pub struct Ir {
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
     pub comb_statements: Vec<Statement>,
+    /// Post-comb functions: child module comb-only JIT functions that run
+    /// after lite comb (port connections) to compute child comb values
+    /// before events fire.
+    pub post_comb_fns: Vec<Statement>,
+    /// Output port connections from post_comb_fns that propagate child
+    /// comb values to parent variables. Subset of post_comb_fns: only
+    /// the non-Binary (Assign) statements. Run after events for propagation.
+    pub post_comb_ports: Vec<Statement>,
     /// Full comb statements (includes per-core internal comb).
     /// Used by get()/dump() when merged comb+event events exist.
     pub full_comb_statements: Option<Vec<Statement>>,
@@ -69,6 +77,8 @@ impl Ir {
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
+            post_comb_ports: module.post_comb_fns.clone(),
+            post_comb_fns: module.post_comb_fns,
             full_comb_statements: module.full_comb_statements,
             ff_swap_entries: module.ff_swap_entries,
             _binary: binary,
@@ -79,6 +89,24 @@ impl Ir {
     /// Used during step() when merged comb+event functions handle per-core comb.
     pub fn eval_comb(&self, mask_cache: &mut MaskCache) {
         for x in &self.comb_statements {
+            x.eval_step(mask_cache);
+        }
+    }
+
+    /// Evaluate post-comb functions: child comb-only JIT functions that
+    /// compute child module comb values after port connections have been
+    /// set by eval_comb. Called between eval_comb and events in step().
+    pub fn eval_post_comb(&self, mask_cache: &mut MaskCache) {
+        for x in &self.post_comb_fns {
+            x.eval_step(mask_cache);
+        }
+    }
+
+    /// Evaluate only the output port connections from post_comb_fns.
+    /// Called after events to propagate merged event comb outputs to
+    /// parent variables without re-running expensive child comb functions.
+    pub fn eval_post_comb_ports(&self, mask_cache: &mut MaskCache) {
+        for x in &self.post_comb_ports {
             x.eval_step(mask_cache);
         }
     }

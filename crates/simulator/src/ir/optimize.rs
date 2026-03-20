@@ -240,6 +240,7 @@ pub fn optimize_comb(
     comb_stmts: Vec<ProtoStatement>,
     event_stmts: &HashMap<super::Event, Vec<ProtoStatement>>,
     observable_comb: &HashSet<isize>,
+    allow_inline: bool,
 ) -> Vec<ProtoStatement> {
     // Step 1: Count reads of each variable across all comb and event statements.
     // Track comb-only reads separately so we only inline within comb.
@@ -303,8 +304,12 @@ pub fn optimize_comb(
                 }
 
                 let comb_reads = comb_only_reads.get(&key).copied().unwrap_or(0);
-                if comb_reads == 1 && count == 1 && !is_observable {
-                    // Single-use within comb, not externally visible: inline
+                if allow_inline && comb_reads == 1 && count == 1 && !is_observable {
+                    // Single-use within comb, not externally visible: inline.
+                    // Only safe when JIT is enabled (merged functions bypass
+                    // the comb path). Without JIT, cascading inlining can
+                    // remove intermediate statements whose outputs are needed
+                    // by the inlined expressions' inputs.
                     inline_map.insert(key, x.expr.clone());
                     continue;
                 }
