@@ -3006,3 +3006,73 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn emit_unbound_function() {
+    let code = r#"
+    function func_ab::<W: u32>(
+        a: input logic<W>,
+        b: input logic<W>,
+    ) -> logic<W> {
+        return a + b;
+    }
+    function func_abc::<W: u32> (
+        a: input logic<W>,
+        b: input logic<W>,
+        c: input logic<W>,
+    ) -> logic<W> {
+        return func_ab::<W>(a, b) + c;
+    }
+    module ModuleA #(
+        param WIDTH: u32 = 8,
+    )(
+        a: input  logic<WIDTH>,
+        b: input  logic<WIDTH>,
+        c: input  logic<WIDTH>,
+        d: output logic<WIDTH>,
+    ) {
+        assign d = func_abc::<WIDTH>(a, b, c);
+    }
+    "#;
+
+    let expect = r#"
+
+
+module prj_ModuleA #(
+    parameter int unsigned WIDTH = 8
+) (
+    input  var logic [WIDTH-1:0] a,
+    input  var logic [WIDTH-1:0] b,
+    input  var logic [WIDTH-1:0] c,
+    output var logic [WIDTH-1:0] d
+);
+    always_comb d = __func_abc__WIDTH(a, b, c);
+
+    function automatic logic [WIDTH-1:0] __func_ab__WIDTH(
+        input var logic [WIDTH-1:0] a,
+        input var logic [WIDTH-1:0] b
+    ) ;
+        return a + b;
+    endfunction
+    function automatic logic [WIDTH-1:0] __func_abc__WIDTH(
+        input var logic [WIDTH-1:0] a,
+        input var logic [WIDTH-1:0] b,
+        input var logic [WIDTH-1:0] c
+    ) ;
+        return __func_ab__WIDTH(a, b) + c;
+    endfunction
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

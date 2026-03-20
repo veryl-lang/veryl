@@ -144,7 +144,9 @@ fn check_generic_type_arg(
         };
 
         if symbol.found.is_variable_type() {
-            if is_referable_generic_arg_symbol(&symbol.found, &base.namespace) {
+            if base.is_unbound_function()
+                || is_referable_generic_arg_symbol(&symbol.found, &base.namespace)
+            {
                 return None;
             }
 
@@ -333,6 +335,7 @@ fn check_generic_proto_arg(
     }
 
     if required.is_variable_type()
+        && !base.is_unbound_function()
         && !arg_symbol
             .map(|x| is_referable_generic_arg(&x.full_path, &base.namespace))
             .unwrap_or(true)
@@ -383,13 +386,25 @@ fn match_fixed_type(arg_type: &SymType, param_type: &SymType) -> bool {
     }
 }
 
-pub fn check_generic_args(context: &mut Context, path: &GenericSymbolPath) {
-    let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
+pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath) {
+    let namespace = namespace_table::get(path.paths[0].base.id).unwrap_or_default();
     for i in 0..path.len() {
         let base_path = path.base_path(i);
         if let Ok(symbol) = symbol_table::resolve((&base_path, &namespace)) {
             let params = symbol.found.generic_parameters();
             let args = &path.paths[i].arguments;
+
+            if context.in_unbound_func.is_some()
+                && !params.is_empty()
+                && !symbol.found.is_unbound_function()
+            {
+                let definition_token = context.in_unbound_func.unwrap();
+                context.insert_error(AnalyzerError::unresolvable_generic_reference(
+                    &path.to_string(),
+                    &path.range,
+                    &definition_token.into(),
+                ));
+            }
 
             for (i, arg) in args.iter().enumerate() {
                 if let Some(param) = params.get(i) {

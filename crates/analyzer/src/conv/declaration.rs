@@ -4,8 +4,8 @@ use crate::attribute_table;
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::bind::check_bind_target;
 use crate::conv::checker::clock_domain::check_clock_domain;
-use crate::conv::checker::generic::check_generic_args;
 use crate::conv::checker::generic::check_generic_bound;
+use crate::conv::checker::generic::check_generic_refereence;
 use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
@@ -1161,7 +1161,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         let token: TokenRange = value.identifier.as_ref().into();
         let generic_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
 
-        check_generic_args(context, &generic_path);
+        check_generic_refereence(context, &generic_path);
 
         let mut sig =
             Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;

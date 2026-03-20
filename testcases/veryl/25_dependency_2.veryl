@@ -70,3 +70,13 @@ module Module25D {
 
     let _a: logic = qux_if.qux.s;
 }
+
+module Module25E #(
+    param WIDTH: u32 = 8,
+) (
+    i_a: input  logic<WIDTH>,
+    i_b: input  logic<WIDTH>,
+    o_c: output logic<WIDTH>,
+) {
+    assign o_c = veryl_sample4::foo_func_1::<WIDTH>(i_a, i_b);
+}
