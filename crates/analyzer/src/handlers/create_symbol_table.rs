@@ -108,6 +108,7 @@ pub struct CreateSymbolTable {
     select_dimension: Vec<usize>,
     in_expression_identifier: Vec<()>,
     in_select: bool,
+    reference_functions: Vec<GenericSymbolPath>,
 }
 
 #[derive(Clone)]
@@ -592,6 +593,11 @@ impl CreateSymbolTable {
         }
     }
 
+    fn insert_reference_functions(&mut self, id: SymbolId) {
+        let funcs = self.reference_functions.drain(..).collect();
+        symbol_table::add_reference_functions(id, funcs);
+    }
+
     fn is_in_expression_identifier(&self) -> bool {
         !self.in_expression_identifier.is_empty()
     }
@@ -793,6 +799,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::Before => {
                 self.identifier_factor_names
                     .push(*arg.expression_identifier.clone());
+                if let Some(x) = arg.identifier_factor_opt.as_ref()
+                    && matches!(
+                        x.identifier_factor_opt_group.as_ref(),
+                        IdentifierFactorOptGroup::FunctionCall(_)
+                    )
+                {
+                    let path: GenericSymbolPath = arg.expression_identifier.as_ref().into();
+                    self.reference_functions.push(path);
+                }
             }
             HandlerPoint::After => {
                 self.identifier_factor_names.pop();
@@ -912,6 +927,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         x.assignment.expression.as_ref().clone(),
                     );
                     symbol_table::add_connect(connect);
+                }
+                if matches!(
+                    arg.identifier_statement_group.as_ref(),
+                    IdentifierStatementGroup::FunctionCall(_)
+                ) {
+                    let path: GenericSymbolPath = arg.expression_identifier.as_ref().into();
+                    self.reference_functions.push(path);
                 }
             }
             HandlerPoint::After => {
@@ -1790,7 +1812,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     return Ok(());
                 }
 
-                let affiliation = self.affiliation.last().cloned().unwrap();
+                let affiliation = self
+                    .affiliation
+                    .last()
+                    .cloned()
+                    .unwrap_or(Affiliation::ProjectNamespace);
 
                 let range = TokenRange::new(
                     &arg.function.function_token,
@@ -1818,8 +1844,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.push_interface_member(&arg.identifier, id);
                     self.push_declaration_item(id);
                     self.pop_type_dag_cand(Some((id, Context::Function, false)));
+                    if affiliation == Affiliation::ProjectNamespace {
+                        self.insert_reference_functions(id);
+                    }
                 } else {
                     self.pop_type_dag_cand(None);
+                    self.reference_functions.clear();
                 }
             }
         }
@@ -1960,8 +1990,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.is_public,
                 ) {
                     self.pop_type_dag_cand(Some((id, Context::Module, true)));
+                    self.insert_reference_functions(id);
                 } else {
                     self.pop_type_dag_cand(None);
+                    self.reference_functions.clear();
                 }
             }
         }
@@ -2084,8 +2116,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.link_modport_members();
                     self.expand_modport_default_member(id);
                     self.pop_type_dag_cand(Some((id, Context::Interface, true)));
+                    self.insert_reference_functions(id);
                 } else {
                     self.pop_type_dag_cand(None);
+                    self.reference_functions.clear();
                 };
             }
         }
@@ -2140,8 +2174,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.is_public,
                 ) {
                     self.pop_type_dag_cand(Some((id, Context::Package, true)));
+                    self.insert_reference_functions(id);
                 } else {
                     self.pop_type_dag_cand(None);
+                    self.reference_functions.clear();
                 }
             }
         }

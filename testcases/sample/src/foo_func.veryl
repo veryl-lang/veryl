@@ -1,0 +1,10 @@
+pub function foo_func_1::<W: u32>(
+    a: input logic<W>,
+    b: input logic<W>,
+) -> logic<W> {
+    return a + b + foo_func_2();
+}
+
+pub function foo_func_2() -> u32 {
+    return 2;
+}

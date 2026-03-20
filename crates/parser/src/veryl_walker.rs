@@ -3543,10 +3543,13 @@ pub trait VerylWalker {
                 self.package_declaration(&x.package_declaration)
             }
             PublicDescriptionItem::AliasDeclaration(x) => {
-                self.alias_declaration(&x.alias_declaration);
+                self.alias_declaration(&x.alias_declaration)
             }
             PublicDescriptionItem::ProtoDeclaration(x) => {
                 self.proto_declaration(&x.proto_declaration)
+            }
+            PublicDescriptionItem::FunctionDeclaration(x) => {
+                self.function_declaration(&x.function_declaration)
             }
         };
         after!(self, public_description_item, arg);

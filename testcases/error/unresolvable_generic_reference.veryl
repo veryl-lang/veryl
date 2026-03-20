@@ -1,0 +1,7 @@
+package unresolvable_generic_reference_pkg::<a: u32> {
+    const A: u32 = a;
+}
+
+function unresolvable_generic_reference_func() -> u32 {
+    return unresolvable_generic_reference_pkg::<8>::A;
+}

@@ -786,6 +786,9 @@ impl PublicDescriptionItem {
                 x.alias_declaration.identifier.identifier_token.clone()
             }
             PublicDescriptionItem::ProtoDeclaration(x) => x.proto_declaration.identifier_token(),
+            PublicDescriptionItem::FunctionDeclaration(x) => {
+                x.function_declaration.identifier.identifier_token.clone()
+            }
         }
     }
 }

@@ -76,6 +76,9 @@ impl Conv<&Veryl> for ir::Ir {
                                 let _: IrResult<()> =
                                     Conv::conv(context, x.alias_declaration.as_ref());
                             }
+                            PublicDescriptionItem::FunctionDeclaration(x) => {
+                                conv_unbound_function(context, x.function_declaration.as_ref());
+                            }
                         }
                     }
                     DescriptionItem::BindDeclaration(x) => {
@@ -99,6 +102,18 @@ impl Conv<&Veryl> for ir::Ir {
 
         Ok(ir::Ir { components })
     }
+}
+
+fn conv_unbound_function(context: &mut Context, value: &FunctionDeclaration) {
+    let upper_context = context;
+    let mut context = Context::default();
+    context.inherit(upper_context);
+
+    context.in_unbound_func = Some(value.identifier.identifier_token.token);
+    let _: IrResult<()> = Conv::conv(&mut context, value);
+    context.in_unbound_func = None;
+
+    upper_context.inherit(&mut context);
 }
 
 impl Conv<&ModuleDeclaration> for ir::Module {
