@@ -21,6 +21,10 @@ use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
+/// Per-statement dependency: (input offsets, output offsets).
+/// Each offset is (is_ff, byte_offset).
+pub type StmtDep = (Vec<(bool, isize)>, Vec<(bool, isize)>);
+
 /// A single block within a ProtoStatements list: either interpreted or JIT-compiled.
 pub enum ProtoStatementBlock {
     Interpreted(Vec<ProtoStatement>),
@@ -493,6 +497,16 @@ pub struct CompiledBlockStatement {
     pub comb_delta_bytes: isize,
     pub input_offsets: Vec<(bool, isize)>,
     pub output_offsets: Vec<(bool, isize)>,
+    /// Per-statement (inputs, outputs) from the original individual
+    /// statements before JIT compilation. Used by analyze_dependency
+    /// for fine-grained DAG analysis that avoids false combinational
+    /// loop detection when independent signal paths are lumped into
+    /// a single CompiledBlock.
+    pub stmt_deps: Vec<StmtDep>,
+    /// Original individual statements before JIT compilation.
+    /// Used by analyze_dependency to expand CompiledBlocks that cause
+    /// false cycles back into individual statements for correct ordering.
+    pub original_stmts: Vec<ProtoStatement>,
 }
 
 #[derive(Clone, Debug)]

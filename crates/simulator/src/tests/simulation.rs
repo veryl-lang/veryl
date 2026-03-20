@@ -3027,7 +3027,11 @@ fn merged_comb_output_multi_level() {
         // delay, result lags by 1 cycle.
         let result = sim.get("result").unwrap();
         // Accept either 1008 or 1009 depending on JIT/non-JIT timing
-        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        let val = if let Value::U64(v) = &result {
+            v.payload
+        } else {
+            0
+        };
         assert!(
             val == 1008 || val == 1009,
             "expected 1008 or 1009, got {:?}",
@@ -3197,7 +3201,11 @@ fn optimize_comb_no_cascade_inline() {
         let result = sim.get("result").unwrap();
         // cnt=8 or 9, o_val=18 or 19, doubled=36 or 38
         // Allow ±1 cycle timing difference between JIT and non-JIT
-        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        let val = if let Value::U64(v) = &result {
+            v.payload
+        } else {
+            0
+        };
         assert!(val > 0, "result stuck at 0 — child comb DCE'd");
         assert!(
             val >= 36 && val <= 38,
@@ -3283,7 +3291,11 @@ fn optimize_comb_no_cascade_inline_multi_level() {
 
         // cnt=3 or 4, inner o_val=3 or 4, middle o_val=503 or 504
         let result = sim.get("result").unwrap();
-        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        let val = if let Value::U64(v) = &result {
+            v.payload
+        } else {
+            0
+        };
         assert!(val > 0, "result stuck at 0 — child comb DCE'd");
         assert!(
             val >= 503 && val <= 504,
@@ -3821,7 +3833,11 @@ fn post_comb_sibling_dependency() {
         }
 
         let result = sim.get("result").unwrap();
-        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        let val = if let Value::U64(v) = &result {
+            v.payload
+        } else {
+            0
+        };
         results.push((config, val));
     }
 
@@ -3902,7 +3918,11 @@ fn post_comb_child_to_parent_comb_chain() {
         }
 
         let result = sim.get("result").unwrap();
-        let val = if let Value::U64(v) = &result { v.payload } else { 0 };
+        let val = if let Value::U64(v) = &result {
+            v.payload
+        } else {
+            0
+        };
         results.push((config, val));
     }
 
@@ -4823,7 +4843,12 @@ fn child_output_var_comb_feedback() {
             "Direct vs indirect mismatch: config {:?}: direct={:?} indirect={:?}",
             config, rd, ri
         );
-        assert_eq!(rd, Value::new(42, 32, false), "Expected 42, config {:?}", config);
+        assert_eq!(
+            rd,
+            Value::new(42, 32, false),
+            "Expected 42, config {:?}",
+            config
+        );
     }
 }
 
@@ -5040,7 +5065,12 @@ fn three_level_var_port_redirect() {
             "3-level var redirect mismatch: config {:?}: direct={:?} indirect={:?}",
             config, rd, ri
         );
-        assert_eq!(rd, Value::new(42, 32, false), "Expected 42, config {:?}", config);
+        assert_eq!(
+            rd,
+            Value::new(42, 32, false),
+            "Expected 42, config {:?}",
+            config
+        );
     }
 }
 
@@ -5093,7 +5123,8 @@ fn pipeline_var_redirect_store_load() {
 "#
         };
 
-        format!(r#"
+        format!(
+            r#"
     module Top (
         clk   : input  clock,
         rst   : input  reset,
@@ -5212,7 +5243,9 @@ fn pipeline_var_redirect_store_load() {
             }}
         }}
     }}
-    "#, mid_ports = mid_ports)
+    "#,
+            mid_ports = mid_ports
+        )
     };
 
     let code_direct = make_code(false);
@@ -5630,6 +5663,722 @@ fn four_level_var_redirect_wdata() {
             Value::new(42, 32, false),
             "Expected 42, config {:?}",
             config
+        );
+    }
+}
+
+// Test: Adding an unused always_ff to a passthrough module should not
+// change behavior. Verifies merged JIT handles passthrough modules
+// with both comb and event statements correctly.
+#[test]
+fn passthrough_with_unused_ff() {
+    let code_comb_only = r#"
+    module Passthrough (
+        clk   : input  clock,
+        rst   : input  reset,
+        i_val : input  logic<32>,
+        o_val : output logic<32>,
+    ) {
+        assign o_val = i_val;
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var child_out: logic<32>;
+        var pt_out: logic<32>;
+
+        inst u_child: Child (clk, rst, o_val: child_out);
+        inst u_pt: Passthrough (clk, rst, i_val: child_out, o_val: pt_out);
+        assign result = pt_out;
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { o_val = 0; }
+            else     { o_val = o_val + 1; }
+        }
+    }
+    "#;
+
+    let code_with_ff = r#"
+    module Passthrough (
+        clk   : input  clock,
+        rst   : input  reset,
+        i_val : input  logic<32>,
+        o_val : output logic<32>,
+    ) {
+        assign o_val = i_val;
+        var dummy: logic;
+        always_ff {
+            if_reset { dummy = 0; }
+            else     { dummy = 0; }
+        }
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var child_out: logic<32>;
+        var pt_out: logic<32>;
+
+        inst u_child: Child (clk, rst, o_val: child_out);
+        inst u_pt: Passthrough (clk, rst, i_val: child_out, o_val: pt_out);
+        assign result = pt_out;
+    }
+
+    module Child (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { o_val = 0; }
+            else     { o_val = o_val + 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir_a = analyze(code_comb_only, &config);
+        let mut sim_a = Simulator::<std::io::Empty>::new(ir_a, None);
+        let ir_b = analyze(code_with_ff, &config);
+        let mut sim_b = Simulator::<std::io::Empty>::new(ir_b, None);
+
+        let clk_a = sim_a.get_clock("clk").unwrap();
+        let rst_a = sim_a.get_reset("rst").unwrap();
+        let clk_b = sim_b.get_clock("clk").unwrap();
+        let rst_b = sim_b.get_reset("rst").unwrap();
+
+        sim_a.step(&rst_a);
+        sim_b.step(&rst_b);
+
+        for cycle in 0..10 {
+            sim_a.step(&clk_a);
+            sim_b.step(&clk_b);
+            let va = sim_a.get("result").unwrap().payload_u64();
+            let vb = sim_b.get("result").unwrap().payload_u64();
+            assert_eq!(
+                va, vb,
+                "JIT={} 4state={} cycle={}: comb_only={} with_ff={} (should match)",
+                config.use_jit, config.use_4state, cycle, va, vb
+            );
+        }
+    }
+}
+
+// Test: Store through passthrough-with-FF, then load back.
+// Verifies that merged JIT on the passthrough doesn't break
+// the store→memory→load chain.
+#[test]
+fn store_load_through_passthrough_with_ff() {
+    let code = r#"
+    module Passthrough (
+        clk      : input  clock,
+        rst      : input  reset,
+        i_addr   : input  logic<32>,
+        i_wdata  : input  logic<32>,
+        i_wen    : input  logic,
+        i_ren    : input  logic,
+        o_addr   : output logic<32>,
+        o_wdata  : output logic<32>,
+        o_wen    : output logic,
+        o_ren    : output logic,
+        i_rdata  : input  logic<32>,
+        o_rdata  : output logic<32>,
+    ) {
+        assign o_addr  = i_addr;
+        assign o_wdata = i_wdata;
+        assign o_wen   = i_wen;
+        assign o_ren   = i_ren;
+        assign o_rdata = i_rdata;
+        // Unused FF that triggers merged JIT
+        var dummy: logic;
+        always_ff {
+            if_reset { dummy = 0; }
+            else     { dummy = 0; }
+        }
+    }
+
+    module Core (
+        clk    : input  clock,
+        rst    : input  reset,
+        o_addr : output logic<32>,
+        o_wdata: output logic<32>,
+        o_wen  : output logic,
+        o_ren  : output logic,
+        i_rdata: input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var phase: logic<4>;
+        var stored_val: logic<32>;
+        always_ff {
+            if_reset {
+                phase = 0;
+                o_addr = 0;
+                o_wdata = 0;
+                o_wen = 0;
+                o_ren = 0;
+                stored_val = 0;
+            } else {
+                o_wen = 0;
+                o_ren = 0;
+                case phase {
+                    4'd0: { o_addr = 32'd0; o_wdata = 32'd42; o_wen = 1; phase = 4'd1; }
+                    4'd1: { phase = 4'd2; }
+                    4'd2: { o_addr = 32'd0; o_wdata = 32'd100; o_wen = 1; phase = 4'd3; }
+                    4'd3: { phase = 4'd4; }
+                    4'd4: { o_addr = 32'd0; o_ren = 1; phase = 4'd5; }
+                    4'd5: { stored_val = i_rdata; phase = 4'd6; }
+                    default: {}
+                }
+            }
+        }
+        assign o_result = stored_val;
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var core_addr : logic<32>;
+        var core_wdata: logic<32>;
+        var core_wen  : logic;
+        var core_ren  : logic;
+        var pt_rdata  : logic<32>;
+
+        inst u_core: Core (
+            clk, rst,
+            o_addr: core_addr, o_wdata: core_wdata,
+            o_wen: core_wen, o_ren: core_ren,
+            i_rdata: pt_rdata,
+            o_result: result,
+        );
+
+        var ext_addr : logic<32>;
+        var ext_wdata: logic<32>;
+        var ext_wen  : logic;
+        var ext_ren  : logic;
+        var ext_rdata: logic<32>;
+
+        inst u_pt: Passthrough (
+            clk, rst,
+            i_addr: core_addr, i_wdata: core_wdata,
+            i_wen: core_wen, i_ren: core_ren,
+            o_addr: ext_addr, o_wdata: ext_wdata,
+            o_wen: ext_wen, o_ren: ext_ren,
+            i_rdata: ext_rdata,
+            o_rdata: pt_rdata,
+        );
+
+        // Simple 1-word memory
+        var mem: logic<32>;
+        always_ff {
+            if_reset { mem = 0; }
+            else if ext_wen { mem = ext_wdata; }
+        }
+        assign ext_rdata = mem;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        let result = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            result, 100,
+            "JIT={} 4state={}: expected 100 (second store), got {}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+// Same as above but with combinational memory read (like heliodor testbenches).
+#[test]
+fn store_load_comb_mem_through_passthrough_with_ff() {
+    let code = r#"
+    module Passthrough (
+        clk      : input  clock,
+        rst      : input  reset,
+        i_addr   : input  logic<32>,
+        i_wdata  : input  logic<32>,
+        i_wen    : input  logic,
+        i_ren    : input  logic,
+        o_addr   : output logic<32>,
+        o_wdata  : output logic<32>,
+        o_wen    : output logic,
+        o_ren    : output logic,
+        i_rdata  : input  logic<32>,
+        o_rdata  : output logic<32>,
+    ) {
+        assign o_addr  = i_addr;
+        assign o_wdata = i_wdata;
+        assign o_wen   = i_wen;
+        assign o_ren   = i_ren;
+        assign o_rdata = i_rdata;
+        var dummy: logic;
+        always_ff {
+            if_reset { dummy = 0; }
+            else     { dummy = 0; }
+        }
+    }
+
+    module Core (
+        clk     : input  clock,
+        rst     : input  reset,
+        o_addr  : output logic<32>,
+        o_wdata : output logic<32>,
+        o_wen   : output logic,
+        o_ren   : output logic,
+        i_rdata : input  logic<32>,
+        o_result: output logic<32>,
+    ) {
+        var phase: logic<4>;
+        var stored_val: logic<32>;
+        always_ff {
+            if_reset {
+                phase = 0;
+                o_addr = 0;
+                o_wdata = 0;
+                o_wen = 0;
+                o_ren = 0;
+                stored_val = 0;
+            } else {
+                o_wen = 0;
+                o_ren = 0;
+                case phase {
+                    4'd0: { o_addr = 32'd0; o_wdata = 32'd42; o_wen = 1; phase = 4'd1; }
+                    4'd1: { phase = 4'd2; }
+                    4'd2: { o_addr = 32'd0; o_wdata = 32'd100; o_wen = 1; phase = 4'd3; }
+                    4'd3: { phase = 4'd4; }
+                    4'd4: { o_addr = 32'd0; o_ren = 1; phase = 4'd5; }
+                    4'd5: { stored_val = i_rdata; phase = 4'd6; }
+                    default: {}
+                }
+            }
+        }
+        assign o_result = stored_val;
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var core_addr : logic<32>;
+        var core_wdata: logic<32>;
+        var core_wen  : logic;
+        var core_ren  : logic;
+        var pt_rdata  : logic<32>;
+
+        inst u_core: Core (
+            clk, rst,
+            o_addr: core_addr, o_wdata: core_wdata,
+            o_wen: core_wen, o_ren: core_ren,
+            i_rdata: pt_rdata,
+            o_result: result,
+        );
+
+        var ext_addr : logic<32>;
+        var ext_wdata: logic<32>;
+        var ext_wen  : logic;
+        var ext_ren  : logic;
+        var ext_rdata: logic<32>;
+
+        inst u_pt: Passthrough (
+            clk, rst,
+            i_addr: core_addr, i_wdata: core_wdata,
+            i_wen: core_wen, i_ren: core_ren,
+            o_addr: ext_addr, o_wdata: ext_wdata,
+            o_wen: ext_wen, o_ren: ext_ren,
+            i_rdata: ext_rdata,
+            o_rdata: pt_rdata,
+        );
+
+        // Combinational memory (read is comb, write is FF)
+        var mem: logic<32>;
+        always_ff {
+            if_reset { mem = 0; }
+            else if ext_wen { mem = ext_wdata; }
+        }
+        // Comb read: rdata reflects current mem value
+        assign ext_rdata = mem;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        let result = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            result, 100,
+            "JIT={} 4state={}: expected 100 (second store), got {}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+#[test]
+fn readonly_cache_fill() {
+    let code = "
+    module Cache (
+        clk: input clock, rst: input reset,
+        i_ren: input logic,
+        o_val: output logic<32>,
+        o_stall: output logic,
+        o_mem_addr: output logic<32>,
+        o_mem_ren: output logic,
+        i_mem_rdata: input logic<32>,
+    ) {
+        var data: logic<32> [8];
+        var valid: logic;
+        var state: logic<2>;
+        var fill_count: logic<3>;
+        let hit: logic = valid;
+        let miss: logic = i_ren && !hit && state == 2'd0;
+        let filling: logic = state == 2'd1;
+        always_ff (clk, rst) {
+            if_reset {
+                state = 0; fill_count = 0; valid = 0;
+                for i: i32 in 0..8 { data[i] = 0; }
+            } else {
+                case state {
+                    2'd0: { if miss { fill_count = 0; state = 2'd1; } }
+                    2'd1: {
+                        data[fill_count] = i_mem_rdata;
+                        if fill_count == 3'd7 { valid = 1; state = 2'd2; }
+                        else { fill_count = fill_count + 3'd1; }
+                    }
+                    2'd2: { state = 0; }
+                    default: { state = 0; }
+                }
+            }
+        }
+        assign o_val = data[1];
+        assign o_stall = filling || miss;
+        assign o_mem_addr = if filling ? {29'd0, fill_count} : 32'd0;
+        assign o_mem_ren = filling;
+    }
+    module Top (clk: input clock, rst: input reset, result: output logic<32>) {
+        var ren: logic; var stall: logic; var val: logic<32>;
+        var mem_addr: logic<32>; var mem_ren: logic; var mem_rdata: logic<32>;
+        inst u: Cache (clk: clk, rst: rst, i_ren: ren,
+            o_val: val, o_stall: stall,
+            o_mem_addr: mem_addr, o_mem_ren: mem_ren, i_mem_rdata: mem_rdata);
+        var mem: logic<32> [8];
+        assign mem_rdata = mem[mem_addr[2:0]];
+        var tc: logic<8>; var stored: logic<32>;
+        always_ff (clk, rst) {
+            if_reset { tc = 0; ren = 0; stored = 0;
+                for i: i32 in 0..8 { mem[i] = {24'd0, i[7:0]} + 32'd10; }
+            } else {
+                ren = 0; if stall { ren = 1; }
+                if !stall { tc = tc + 8'd1; }
+                case tc {
+                    8'd1: { ren = 1; }
+                    8'd3: { stored = val; }
+                    default: {}
+                }
+            }
+        }
+        assign result = stored;
+    }
+    ";
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..15 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            result, 11,
+            "JIT={} 4state={}: expected 11, got {}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+#[test]
+fn ff_comb_let_basic() {
+    // Simplest case: always_ff variable read by a let (comb) declaration
+    let code = "
+    module Top (clk: input clock, rst: input reset, result: output logic<8>) {
+        var cnt: logic<8>;
+        let doubled: logic<8> = cnt + cnt;
+        always_ff (clk, rst) {
+            if_reset { cnt = 0; }
+            else { cnt = cnt + 8'd1; }
+        }
+        assign result = doubled;
+    }
+    ";
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        // After 5 clocks: cnt=5, doubled=10
+        assert_eq!(
+            result, 10,
+            "JIT={} 4state={}: expected 10, got {}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+/// Read-only cache with tag/index address decomposition (like heliodor icache).
+/// Tests that fill_count-driven o_mem_addr propagates through comb to update
+/// i_mem_rdata each fill cycle, so data[0] != data[1].
+#[test]
+fn readonly_cache_fill_with_tags() {
+    let code = "
+    module Cache (
+        clk: input clock, rst: input reset,
+        i_addr: input logic<64>, i_ren: input logic,
+        o_rdata: output logic<64>, o_stall: output logic,
+        o_mem_addr: output logic<64>, o_mem_ren: output logic,
+        i_mem_rdata: input logic<64>,
+    ) {
+        let tag: logic<54> = i_addr[63:10];
+        let index: logic<4> = i_addr[9:6];
+        let offset: logic<3> = i_addr[5:3];
+        let data_idx: logic<7> = {index, offset};
+        var valid: logic<16>;
+        var tags: logic<54> [16];
+        var data: logic<64> [128];
+        let cache_hit: logic = valid[index] && tags[index] == tag;
+        var state: logic<2>;
+        var fill_count: logic<3>;
+        var fill_index: logic<4>;
+        var fill_tag: logic<54>;
+        let fill_data_idx: logic<7> = {fill_index, fill_count};
+        let miss: logic = i_ren && !cache_hit && state == 2'd0;
+        let filling: logic = state == 2'd1;
+        always_ff (clk, rst) {
+            if_reset {
+                state = 0; fill_count = 0; fill_index = 0; fill_tag = 0; valid = 0;
+                for i: i32 in 0..16 { tags[i] = 0; }
+                for i: i32 in 0..128 { data[i] = 0; }
+            } else {
+                case state {
+                    2'd0: { if miss { fill_index = index; fill_tag = tag; fill_count = 0; state = 2'd1; } }
+                    2'd1: {
+                        data[fill_data_idx] = i_mem_rdata;
+                        if fill_count == 3'd7 { tags[fill_index] = fill_tag; valid[fill_index] = 1; state = 2'd2; }
+                        else { fill_count = fill_count + 3'd1; }
+                    }
+                    2'd2: { state = 0; }
+                    default: { state = 0; }
+                }
+            }
+        }
+        assign o_rdata = if cache_hit ? data[data_idx] : i_mem_rdata;
+        assign o_stall = filling || miss;
+        assign o_mem_addr = if filling ? {fill_tag, fill_index, fill_count, 3'b000}
+                          : if i_ren && !cache_hit ? {tag, index, 3'd0, 3'b000}
+                          : '0;
+        assign o_mem_ren = if filling ? 1'b1 : if i_ren && !cache_hit ? 1'b1 : 1'b0;
+    }
+    module Top (clk: input clock, rst: input reset, result: output logic<64>) {
+        var addr: logic<64>; var ren: logic; var rdata: logic<64>;
+        var stall: logic; var mem_addr: logic<64>; var mem_ren: logic;
+        var mem_rdata: logic<64>;
+        inst u: Cache (clk: clk, rst: rst, i_addr: addr, i_ren: ren,
+            o_rdata: rdata, o_stall: stall,
+            o_mem_addr: mem_addr, o_mem_ren: mem_ren, i_mem_rdata: mem_rdata);
+        var mem: logic<64> [256];
+        assign mem_rdata = mem[mem_addr[10:3]];
+        var tc: logic<8>; var r1: logic<64>; var r2: logic<64>;
+        always_ff (clk, rst) {
+            if_reset { tc = 0; ren = 0; addr = 0; r1 = 0; r2 = 0;
+                for i: i32 in 0..256 {
+                    if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
+                    else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
+                    else { mem[i] = 0; }
+                }
+            } else {
+                ren = 0;
+                if stall { ren = 1; }
+                if !stall { tc = tc + 8'd1; }
+                case tc {
+                    8'd1: { addr = 64'h0; ren = 1; }
+                    8'd3: { addr = 64'h0; ren = 1; }
+                    8'd4: { r1 = rdata; }
+                    8'd6: { addr = 64'h8; ren = 1; }
+                    8'd7: { r2 = rdata; }
+                    default: {}
+                }
+            }
+        }
+        assign result = r2;
+    }
+    ";
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..30 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            result, 0xBBBB,
+            "JIT={} 4state={}: expected 0xBBBB, got 0x{:x}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+/// 3-level hierarchy: TestTop → Harness → Cache (like heliodor's test structure)
+#[test]
+fn readonly_cache_fill_3level() {
+    let code = "
+    module Cache (
+        clk: input clock, rst: input reset,
+        i_addr: input logic<64>, i_ren: input logic,
+        o_rdata: output logic<64>, o_stall: output logic,
+        o_mem_addr: output logic<64>, o_mem_ren: output logic,
+        i_mem_rdata: input logic<64>,
+    ) {
+        let tag: logic<54> = i_addr[63:10];
+        let index: logic<4> = i_addr[9:6];
+        let offset: logic<3> = i_addr[5:3];
+        let data_idx: logic<7> = {index, offset};
+        var valid: logic<16>;
+        var tags: logic<54> [16];
+        var data: logic<64> [128];
+        let cache_hit: logic = valid[index] && tags[index] == tag;
+        enum State: logic<2> { IDLE = 2'd0, FILL = 2'd1, DONE = 2'd2 }
+        var state: State;
+        var fill_count: logic<3>;
+        var fill_index: logic<4>;
+        var fill_tag: logic<54>;
+        let fill_data_idx: logic<7> = {fill_index, fill_count};
+        let miss: logic = i_ren && !cache_hit && state == State::IDLE;
+        let filling: logic = state == State::FILL;
+        always_ff (clk, rst) {
+            if_reset {
+                state = State::IDLE; fill_count = 0; fill_index = 0; fill_tag = 0; valid = 0;
+                for i: i32 in 0..16 { tags[i] = 0; }
+                for i: i32 in 0..128 { data[i] = 0; }
+            } else {
+                case state {
+                    State::IDLE: { if miss { fill_index = index; fill_tag = tag; fill_count = 0; state = State::FILL; } }
+                    State::FILL: {
+                        data[fill_data_idx] = i_mem_rdata;
+                        if fill_count == 3'd7 { tags[fill_index] = fill_tag; valid[fill_index] = 1; state = State::DONE; }
+                        else { fill_count = fill_count + 3'd1; }
+                    }
+                    State::DONE: { state = State::IDLE; }
+                    default: { state = State::IDLE; }
+                }
+            }
+        }
+        assign o_rdata = if cache_hit ? data[data_idx] : i_mem_rdata;
+        assign o_stall = filling || miss;
+        assign o_mem_addr = if filling ? {fill_tag, fill_index, fill_count, 3'b000}
+                          : if i_ren && !cache_hit ? {tag, index, 3'd0, 3'b000}
+                          : '0;
+        assign o_mem_ren = if filling ? 1'b1 : if i_ren && !cache_hit ? 1'b1 : 1'b0;
+    }
+    module Harness (
+        clk: input clock, rst: input reset,
+        o_r1: output logic<64>, o_r2: output logic<64>,
+    ) {
+        var addr: logic<64>; var ren: logic; var rdata: logic<64>;
+        var stall: logic; var mem_addr: logic<64>; var mem_ren: logic;
+        var mem_rdata: logic<64>;
+        inst dut: Cache (clk: clk, rst: rst, i_addr: addr, i_ren: ren,
+            o_rdata: rdata, o_stall: stall,
+            o_mem_addr: mem_addr, o_mem_ren: mem_ren, i_mem_rdata: mem_rdata);
+        var mem: logic<64> [256];
+        assign mem_rdata = mem[mem_addr[10:3]];
+        var tc: logic<8>; var r1_val: logic<64>; var r2_val: logic<64>;
+        always_ff (clk, rst) {
+            if_reset { tc = 0; ren = 0; addr = 0; r1_val = 0; r2_val = 0;
+                for i: i32 in 0..256 {
+                    if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
+                    else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
+                    else { mem[i] = 0; }
+                }
+            } else {
+                ren = 0;
+                if stall { ren = 1; }
+                if !stall { tc = tc + 8'd1; }
+                case tc {
+                    8'd1: { addr = 64'h0; ren = 1; }
+                    8'd3: { addr = 64'h0; ren = 1; }
+                    8'd4: { r1_val = rdata; }
+                    8'd6: { addr = 64'h8; ren = 1; }
+                    8'd7: { r2_val = rdata; }
+                    default: {}
+                }
+            }
+        }
+        assign o_r1 = r1_val;
+        assign o_r2 = r2_val;
+    }
+    module Top (clk: input clock, rst: input reset, result: output logic<64>) {
+        var r1: logic<64>; var r2: logic<64>;
+        inst h: Harness (clk: clk, rst: rst, o_r1: r1, o_r2: r2);
+        assign result = r2;
+    }
+    ";
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..30 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            result, 0xBBBB,
+            "JIT={} 4state={}: expected 0xBBBB, got 0x{:x}",
+            config.use_jit, config.use_4state, result
         );
     }
 }

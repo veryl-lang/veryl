@@ -77,12 +77,7 @@ impl Ir {
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
-            post_comb_ports: module
-                .post_comb_fns
-                .iter()
-                .filter(|s| !s.is_binary())
-                .cloned()
-                .collect(),
+            post_comb_ports: module.post_comb_fns.clone(),
             post_comb_fns: module.post_comb_fns,
             full_comb_statements: module.full_comb_statements,
             ff_swap_entries: module.ff_swap_entries,

@@ -337,10 +337,6 @@ pub(crate) fn analyze_dependency(
         table.insert(i, x);
     }
 
-    let mut dag = Dag::<Node, ()>::new();
-    let mut dag_nodes: HashMap<Node, _> = HashMap::default();
-
-    // Closure to collect cycle participant tokens via BFS from a node
     let collect_cycle_tokens = |dag: &Dag<Node, ()>,
                                 table: &HashMap<usize, ProtoStatement>,
                                 from: daggy::NodeIndex,
@@ -360,65 +356,347 @@ pub(crate) fn analyze_dependency(
         tokens
     };
 
-    for (id, x) in &table {
-        let mut inputs = vec![];
-        let mut outputs = vec![];
-        x.gather_variable_offsets(&mut inputs, &mut outputs);
+    // First attempt: standard DAG analysis (CompiledBlocks as single nodes).
+    // Track which statement IDs are involved in the cycle.
+    {
+        let mut dag = Dag::<Node, ()>::new();
+        let mut dag_nodes: HashMap<Node, _> = HashMap::default();
+        let mut failed_id: Option<usize> = None;
 
-        let stmt_node = Node::Statement(*id);
-        let stmt = dag.add_node(stmt_node);
-        dag_nodes.insert(stmt_node, stmt);
+        for (id, x) in &table {
+            let mut inputs = vec![];
+            let mut outputs = vec![];
+            x.gather_variable_offsets(&mut inputs, &mut outputs);
+            let stmt_node = Node::Statement(*id);
+            let stmt = dag.add_node(stmt_node);
+            dag_nodes.insert(stmt_node, stmt);
 
-        // Skip self-referencing inputs (same offset in both inputs and
-        // outputs). This naturally occurs in conditional comb blocks like
-        // always_comb { a = 0; if cond { a = f(a); } } and is NOT a
-        // combinational loop.
-        let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
-        for var_key in inputs {
-            if output_set.contains(&var_key) {
-                continue; // Skip self-reference
+            let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+            let mut ok = true;
+            for var_key in inputs {
+                if output_set.contains(&var_key) {
+                    continue;
+                }
+                let var_node = Node::Var(var_key.0, var_key.1);
+                let var = *dag_nodes
+                    .entry(var_node)
+                    .or_insert_with(|| dag.add_node(var_node));
+                if dag.add_edge(var, stmt, ()).is_err() {
+                    ok = false;
+                    break;
+                }
             }
-            let var_node = Node::Var(var_key.0, var_key.1);
-            let var = *dag_nodes
-                .entry(var_node)
-                .or_insert_with(|| dag.add_node(var_node));
-            if dag.add_edge(var, stmt, ()).is_err() {
-                let participant_tokens = collect_cycle_tokens(&dag, &table, stmt, *id);
-                let trigger_token = table[id].token().unwrap_or_default();
-                return Err(SimulatorError::combinational_loop(
-                    &trigger_token,
-                    &participant_tokens,
-                ));
+            if !ok {
+                failed_id = Some(*id);
+                break;
+            }
+            for var_key in outputs {
+                let var_node = Node::Var(var_key.0, var_key.1);
+                let var = *dag_nodes
+                    .entry(var_node)
+                    .or_insert_with(|| dag.add_node(var_node));
+                if dag.add_edge(stmt, var, ()).is_err() {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok {
+                failed_id = Some(*id);
+                break;
             }
         }
 
-        for var_key in outputs {
-            let var_node = Node::Var(var_key.0, var_key.1);
-            let var = *dag_nodes
-                .entry(var_node)
-                .or_insert_with(|| dag.add_node(var_node));
-            if dag.add_edge(stmt, var, ()).is_err() {
-                let participant_tokens = collect_cycle_tokens(&dag, &table, var, *id);
-                let trigger_token = table[id].token().unwrap_or_default();
-                return Err(SimulatorError::combinational_loop(
-                    &trigger_token,
-                    &participant_tokens,
-                ));
+        if failed_id.is_none() {
+            let nodes = algo::toposort(dag.graph(), None).unwrap();
+            let mut ret = vec![];
+            let mut t = table.clone();
+            for i in nodes {
+                if let Node::Statement(x) = dag[i]
+                    && let Some(s) = t.remove(&x)
+                {
+                    ret.push(s);
+                }
             }
+            return Ok(ret);
+        }
+        // Cycle detected. Check if fine-grained deps are available for retry.
+        let has_expandable = table.values().any(
+            |x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()),
+        );
+        if !has_expandable {
+            // Re-run standard analysis to produce proper error with tokens.
+            // (The first pass broke out early; re-running generates the error.)
+        } else {
+            // Fall through to fine-grained retry below.
+            log::debug!("analyze_dependency: cycle detected, retrying with fine-grained deps ({} CompiledBlocks with stmt_deps)",
+                table.values().filter(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.stmt_deps.is_empty())).count());
+        }
+
+        if !has_expandable {
+            // Re-do the analysis to get the proper error message.
+            let mut dag2 = Dag::<Node, ()>::new();
+            let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+            for (id, x) in &table {
+                let mut inputs = vec![];
+                let mut outputs = vec![];
+                x.gather_variable_offsets(&mut inputs, &mut outputs);
+                let stmt_node = Node::Statement(*id);
+                let stmt = dag2.add_node(stmt_node);
+                dag_nodes2.insert(stmt_node, stmt);
+
+                let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+                for var_key in inputs {
+                    if output_set.contains(&var_key) {
+                        continue;
+                    }
+                    let var_node = Node::Var(var_key.0, var_key.1);
+                    let var = *dag_nodes2
+                        .entry(var_node)
+                        .or_insert_with(|| dag2.add_node(var_node));
+                    if dag2.add_edge(var, stmt, ()).is_err() {
+                        let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
+                        let trigger_token = table[id].token().unwrap_or_default();
+                        return Err(SimulatorError::combinational_loop(
+                            &trigger_token,
+                            &participant_tokens,
+                        ));
+                    }
+                }
+                for var_key in outputs {
+                    let var_node = Node::Var(var_key.0, var_key.1);
+                    let var = *dag_nodes2
+                        .entry(var_node)
+                        .or_insert_with(|| dag2.add_node(var_node));
+                    if dag2.add_edge(stmt, var, ()).is_err() {
+                        let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
+                        let trigger_token = table[id].token().unwrap_or_default();
+                        return Err(SimulatorError::combinational_loop(
+                            &trigger_token,
+                            &participant_tokens,
+                        ));
+                    }
+                }
+            }
+            unreachable!("cycle was detected but re-analysis succeeded");
         }
     }
 
-    let nodes = algo::toposort(dag.graph(), None).unwrap();
+    // Iteratively expand CompiledBlocks that cause cycles until
+    // the DAG analysis succeeds or no more expandable blocks remain.
+    let mut next_id = table.keys().max().copied().unwrap_or(0) + 1;
 
-    let mut ret = vec![];
-    for i in nodes {
-        if let Node::Statement(x) = dag[i] {
-            ret.push(table.remove(&x).unwrap());
+    loop {
+        let mut dag = Dag::<Node, ()>::new();
+        let mut dag_nodes_inner: HashMap<Node, _> = HashMap::default();
+        let mut failed_id: Option<usize> = None;
+
+        for (id, x) in &table {
+            let mut inputs = vec![];
+            let mut outputs = vec![];
+            x.gather_variable_offsets(&mut inputs, &mut outputs);
+
+            let stmt_node = Node::Statement(*id);
+            let stmt = dag.add_node(stmt_node);
+            dag_nodes_inner.insert(stmt_node, stmt);
+
+            let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+            let mut ok = true;
+            for var_key in inputs {
+                if output_set.contains(&var_key) {
+                    continue;
+                }
+                let var_node = Node::Var(var_key.0, var_key.1);
+                let var = *dag_nodes_inner
+                    .entry(var_node)
+                    .or_insert_with(|| dag.add_node(var_node));
+                if dag.add_edge(var, stmt, ()).is_err() {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok {
+                failed_id = Some(*id);
+                break;
+            }
+            for var_key in outputs {
+                let var_node = Node::Var(var_key.0, var_key.1);
+                let var = *dag_nodes_inner
+                    .entry(var_node)
+                    .or_insert_with(|| dag.add_node(var_node));
+                if dag.add_edge(stmt, var, ()).is_err() {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok {
+                failed_id = Some(*id);
+                break;
+            }
         }
+
+        if failed_id.is_none() {
+            // Success: return sorted statements
+            let nodes = algo::toposort(dag.graph(), None).unwrap();
+            let mut ret = vec![];
+            for i in nodes {
+                if let Node::Statement(x) = dag[i]
+                    && let Some(stmt) = table.remove(&x)
+                {
+                    ret.push(stmt);
+                }
+            }
+            return Ok(ret);
+        }
+
+        // Find a CompiledBlock that's part of the cycle.
+        // The cycle involves `failed_id` (the statement whose edge caused
+        // the cycle). Trace the DAG from `failed_id` via BFS to find
+        // any reachable CB with original_stmts.
+        let fid = failed_id.unwrap();
+        let expand_id = if matches!(table.get(&fid), Some(ProtoStatement::CompiledBlock(cb)) if !cb.original_stmts.is_empty())
+        {
+            Some(fid)
+        } else {
+            // BFS both forward and backward from failed_id's node to
+            // find a CB that's part of the cycle path.
+            let mut found = None;
+            if let Some(&fid_idx) = dag_nodes_inner.get(&Node::Statement(fid)) {
+                // Forward BFS (output direction)
+                let bfs = Bfs::new(dag.graph(), fid_idx);
+                for node_idx in bfs.iter(dag.graph()) {
+                    if let Node::Statement(sid) = dag.graph()[node_idx]
+                        && sid != fid
+                        && matches!(table.get(&sid), Some(ProtoStatement::CompiledBlock(cb)) if !cb.original_stmts.is_empty())
+                    {
+                        found = Some(sid);
+                        break;
+                    }
+                }
+                // Reverse BFS (input direction) if forward didn't find
+                if found.is_none() {
+                    use daggy::petgraph::Direction;
+                    let mut visited = HashSet::default();
+                    let mut queue = std::collections::VecDeque::new();
+                    queue.push_back(fid_idx);
+                    visited.insert(fid_idx);
+                    while let Some(node) = queue.pop_front() {
+                        for neighbor in dag.graph().neighbors_directed(node, Direction::Incoming) {
+                            if visited.insert(neighbor) {
+                                if let Node::Statement(sid) = dag.graph()[neighbor]
+                                    && matches!(table.get(&sid), Some(ProtoStatement::CompiledBlock(cb)) if !cb.original_stmts.is_empty())
+                                {
+                                    found = Some(sid);
+                                    break;
+                                }
+                                queue.push_back(neighbor);
+                            }
+                        }
+                        if found.is_some() {
+                            break;
+                        }
+                    }
+                }
+            }
+            // If BFS didn't find one (the CB might be reachable only via
+            // the back-edge direction), search all CBs whose output offsets
+            // overlap with the failed statement's input offsets.
+            if found.is_none() {
+                let mut fid_inputs = HashSet::default();
+                if let Some(s) = table.get(&fid) {
+                    let mut ins = vec![];
+                    let mut outs = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut outs);
+                    for (_, off) in ins {
+                        fid_inputs.insert(off);
+                    }
+                }
+                found = table.iter().find_map(|(id, x)| {
+                    if let ProtoStatement::CompiledBlock(cb) = x
+                        && !cb.original_stmts.is_empty()
+                        && cb
+                            .output_offsets
+                            .iter()
+                            .any(|(_, off)| fid_inputs.contains(off))
+                    {
+                        return Some(*id);
+                    }
+                    None
+                });
+            }
+            found
+        };
+
+        if let Some(eid) = expand_id {
+            if let Some(ProtoStatement::CompiledBlock(cb)) = table.remove(&eid) {
+                for stmt in cb.original_stmts {
+                    table.insert(next_id, stmt);
+                    next_id += 1;
+                }
+            }
+            continue; // Retry DAG analysis with one CB expanded
+        }
+
+        // Can't expand — return proper error
+        // Re-run to get error with tokens
+        let mut dag2 = Dag::<Node, ()>::new();
+        let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+        for (id, x) in &table {
+            let mut inputs = vec![];
+            let mut outputs = vec![];
+            x.gather_variable_offsets(&mut inputs, &mut outputs);
+            let stmt_node = Node::Statement(*id);
+            let stmt = dag2.add_node(stmt_node);
+            dag_nodes2.insert(stmt_node, stmt);
+            let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+            for var_key in inputs {
+                if output_set.contains(&var_key) {
+                    continue;
+                }
+                let var_node = Node::Var(var_key.0, var_key.1);
+                let var = *dag_nodes2
+                    .entry(var_node)
+                    .or_insert_with(|| dag2.add_node(var_node));
+                if dag2.add_edge(var, stmt, ()).is_err() {
+                    let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
+                    let trigger_token = table[id].token().unwrap_or_default();
+                    return Err(SimulatorError::combinational_loop(
+                        &trigger_token,
+                        &participant_tokens,
+                    ));
+                }
+            }
+            for var_key in outputs {
+                let var_node = Node::Var(var_key.0, var_key.1);
+                let var = *dag_nodes2
+                    .entry(var_node)
+                    .or_insert_with(|| dag2.add_node(var_node));
+                if dag2.add_edge(stmt, var, ()).is_err() {
+                    let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
+                    let trigger_token = table[id].token().unwrap_or_default();
+                    return Err(SimulatorError::combinational_loop(
+                        &trigger_token,
+                        &participant_tokens,
+                    ));
+                }
+            }
+        }
+        // No more expandable CompiledBlocks but cycle persists.
+        // Count remaining CompiledBlocks and total statements for debugging.
+        let cb_count = table
+            .values()
+            .filter(|x| matches!(x, ProtoStatement::CompiledBlock(_)))
+            .count();
+        let total = table.len();
+        log::debug!(
+            "analyze_dependency: genuine comb loop ({} stmts, {} CompiledBlocks remaining)",
+            total,
+            cb_count
+        );
+        return Err(SimulatorError::combinational_loop(
+            &TokenRange::default(),
+            &[],
+        ));
     }
-
-
-    Ok(ret)
 }
 
 /// Sort event (FF) statements and determine which FF variables need
@@ -432,7 +710,9 @@ pub(crate) fn analyze_dependency(
 /// Returns (sorted_statements, needs_swap_offsets).
 /// `needs_swap_offsets`: FF current_offsets that need swapping.
 /// For non-swap variables, dst_offset is rewritten from next to current.
-fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashSet<isize>) {
+/// Returns (sorted_statements, needs_swap_offsets, force_all_swap).
+/// force_all_swap=true means ff_swap_offsets should be None.
+fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
         /// Variable node. For FF, offset is the canonical current_offset.
@@ -446,13 +726,14 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
     }
 
     if table.is_empty() {
-        return (vec![], HashSet::default());
+        return (vec![], HashSet::default(), false);
     }
 
     let mut dag = Dag::<Node, ()>::new();
     let mut dag_nodes: HashMap<Node, _> = HashMap::default();
+    // Track self-referencing FF offsets (read + write same variable)
+    let mut self_ref_all: HashSet<isize> = HashSet::default();
 
-    // Collect the canonical offsets for FF outputs from each statement
     for (id, x) in &table {
         let mut inputs = vec![];
         let mut outputs = vec![];
@@ -470,6 +751,7 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
             .intersection(&ff_write_canonical)
             .cloned()
             .collect();
+        self_ref_all.extend(&self_ref);
 
         let stmt_node = Node::Statement(*id);
         let stmt = dag.add_node(stmt_node);
@@ -486,7 +768,7 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
                     .entry(var_node)
                     .or_insert_with(|| dag.add_node(var_node));
                 if dag.add_edge(stmt, var, ()).is_err() {
-                    return fallback_all_swap(table);
+                    return fallback_preserve_order(table);
                 }
             } else {
                 let var_node = Node::Var(false, *offset);
@@ -494,7 +776,7 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
                     .entry(var_node)
                     .or_insert_with(|| dag.add_node(var_node));
                 if dag.add_edge(var, stmt, ()).is_err() {
-                    return fallback_all_swap(table);
+                    return fallback_preserve_order(table);
                 }
             }
         }
@@ -509,7 +791,7 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
                 .entry(var_node)
                 .or_insert_with(|| dag.add_node(var_node));
             if dag.add_edge(var, stmt, ()).is_err() {
-                return fallback_all_swap(table);
+                return fallback_preserve_order(table);
             }
         }
 
@@ -521,7 +803,7 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
                     .entry(var_node)
                     .or_insert_with(|| dag.add_node(var_node));
                 if dag.add_edge(stmt, var, ()).is_err() {
-                    return fallback_all_swap(table);
+                    return fallback_preserve_order(table);
                 }
             }
         }
@@ -536,9 +818,22 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
                 }
             }
 
-            // Walk sorted order to find read-after-write violations.
+            // Self-referencing FF variables always need swap.
+            let mut needs_swap: HashSet<isize> = self_ref_all;
+
+            // CompiledBlock FF writes are opaque: always need swap.
+            for stmt in &sorted {
+                if let ProtoStatement::CompiledBlock(cb) = stmt {
+                    for (is_ff, off) in &cb.output_offsets {
+                        if *is_ff {
+                            needs_swap.insert(*off);
+                        }
+                    }
+                }
+            }
+
+            // Walk sorted order to find additional read-after-write violations.
             let mut written_ff = HashSet::default();
-            let mut needs_swap = HashSet::default();
 
             for stmt in &sorted {
                 let mut inputs = vec![];
@@ -563,24 +858,31 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
                 .map(|stmt| rewrite_ff_direct(stmt, &needs_swap))
                 .collect();
 
-            (sorted, needs_swap)
+            (sorted, needs_swap, false)
         }
-        Err(_) => fallback_all_swap(table),
+        Err(_) => fallback_preserve_order(table),
     }
 }
 
-/// Fallback: all FF variables need swap (no optimization).
-fn fallback_all_swap(
+/// Fallback: all FF variables need swap; preserve original statement order.
+/// Comb cycles (e.g. blocking assignment `tc = tc + 1` when is_ff=false)
+/// cause DAG cycles but are harmless — the statements already execute
+/// sequentially within each always_ff block, so preserving insertion
+/// order (source order) gives correct blocking assignment semantics.
+fn fallback_preserve_order(
     table: HashMap<usize, ProtoStatement>,
-) -> (Vec<ProtoStatement>, HashSet<isize>) {
+) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
     let mut all_ff_offsets = HashSet::default();
     for x in table.values() {
         for off in x.gather_ff_canonical_offsets() {
             all_ff_offsets.insert(off);
         }
     }
-    let stmts: Vec<_> = table.into_values().collect();
-    (stmts, all_ff_offsets)
+    // Sort by key (insertion index) to preserve source order
+    let mut entries: Vec<_> = table.into_iter().collect();
+    entries.sort_by_key(|(k, _)| *k);
+    let stmts: Vec<_> = entries.into_iter().map(|(_, v)| v).collect();
+    (stmts, all_ff_offsets, true)
 }
 
 /// Rewrite a ProtoStatement: for FF assignments whose canonical offset
@@ -838,10 +1140,12 @@ impl Conv<&air::Module> for ProtoModule {
         let full_comb_statements = if has_merged {
             let mut full = full_comb_extra;
             full.extend(lite_comb_copy.unwrap());
-            let full_sorted = match analyze_dependency(full) {
+            let full_sorted = match analyze_dependency(full.clone()) {
                 Ok(sorted) => sorted,
-                Err(err) => {
-                    return Err(err);
+                Err(_) => {
+                    // Full comb may have false cycles from CompiledBlocks.
+                    // Fall back to unsorted order (used only by get()/dump()).
+                    full
                 }
             };
             let full_sorted = super::optimize::optimize_comb(
@@ -858,15 +1162,18 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Sort FF event statements and determine selective swap set
         let mut all_swap_offsets = HashSet::default();
+        let mut force_all_swap = false;
 
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
-                // Initial/Final events should preserve source order (no FF dependency sorting)
                 if matches!(event, Event::Initial | Event::Final) {
                     (event, try_jit(context, stmts))
                 } else {
-                    let (sorted, swap_offsets) = sort_ff_event(stmts);
+                    let (sorted, swap_offsets, all_swap) = sort_ff_event(stmts);
+                    if all_swap {
+                        force_all_swap = true;
+                    }
                     if !swap_offsets.is_empty() {
                         all_swap_offsets.extend(&swap_offsets);
                     }
@@ -875,7 +1182,11 @@ impl Conv<&air::Module> for ProtoModule {
             })
             .collect();
 
-        let ff_swap_offsets = Some(all_swap_offsets);
+        let ff_swap_offsets = if force_all_swap {
+            None // swap all FF variables (CompiledBlocks have opaque internal FF)
+        } else {
+            Some(all_swap_offsets)
+        };
 
         let module_variable_meta = ModuleVariableMeta {
             name: src.name,
@@ -892,7 +1203,8 @@ impl Conv<&air::Module> for ProtoModule {
             module_variable_meta,
             event_statements,
             comb_statements,
-            post_comb_fns: all_post_comb_fns,
+            post_comb_fns: analyze_dependency(all_post_comb_fns.clone())
+                .unwrap_or(all_post_comb_fns),
             full_comb_statements,
             ff_swap_offsets,
         })

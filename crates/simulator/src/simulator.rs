@@ -143,10 +143,14 @@ impl<T: std::io::Write> Simulator<T> {
 
     pub fn step(&mut self, event: &Event) {
         if self.comb_dirty {
+            // Settle comb network: eval_post_comb → eval_comb → eval_post_comb.
+            // 3 passes ensure child comb outputs propagate through port
+            // connections and back to sibling inputs.
+            if !self.ir.post_comb_fns.is_empty() {
+                self.ir.eval_post_comb(&mut self.mask_cache);
+            }
             self.ir.eval_comb(&mut self.mask_cache);
             if !self.ir.post_comb_fns.is_empty() {
-                // JIT path: evaluate child comb-only functions after port
-                // connections, ensuring child comb outputs are correct.
                 self.ir.eval_post_comb(&mut self.mask_cache);
             }
             self.comb_dirty = false;
@@ -157,8 +161,6 @@ impl<T: std::io::Write> Simulator<T> {
                 x.eval_step(&mut self.mask_cache);
             }
             if !self.ir.post_comb_ports.is_empty() {
-                // Re-run output port connections after events to propagate
-                // values updated by merged comb+event JIT functions.
                 self.ir.eval_post_comb_ports(&mut self.mask_cache);
             }
         }

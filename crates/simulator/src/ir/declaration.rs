@@ -208,10 +208,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // already written by any child Inst (port connection).
             if matches!(decl, air::Declaration::Comb(_)) {
                 for s in &proto_decl.comb_statements {
-                    if let ProtoStatement::Assign(a) = s {
-                        if !a.dst_is_ff && !inst_written_offsets.contains(&a.dst_offset) {
-                            own_new_assigns.push(s.clone());
-                        }
+                    if let ProtoStatement::Assign(a) = s
+                        && !a.dst_is_ff
+                        && !inst_written_offsets.contains(&a.dst_offset)
+                    {
+                        own_new_assigns.push(s.clone());
                     }
                 }
             }
@@ -257,6 +258,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             comb_delta_bytes: comb_delta,
                             input_offsets: adjust(&cached.input_offsets),
                             output_offsets: adjust(&cached.output_offsets),
+                            stmt_deps: vec![],
+                            original_stmts: vec![],
                         })];
                     }
                 }
@@ -283,10 +286,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             }
                         }
                         for s in &own_new_assigns {
-                            if let ProtoStatement::Assign(a) = s {
-                                if !full_outputs.contains(&a.dst_offset) {
-                                    all_post_comb_fns.push(s.clone());
-                                }
+                            if let ProtoStatement::Assign(a) = s
+                                && !full_outputs.contains(&a.dst_offset)
+                            {
+                                all_post_comb_fns.push(s.clone());
                             }
                         }
                     }
@@ -295,6 +298,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     // is evaluated before events fire (without going through
                     // analyze_dependency on the parent level).
                     if let Some(cached) = &cache_entry.comb_func {
+                        let adjusted_deps: Vec<_> = cached
+                            .stmt_deps
+                            .iter()
+                            .map(|(ins, outs)| (adjust(ins), adjust(outs)))
+                            .collect();
                         all_post_comb_fns.push(ProtoStatement::CompiledBlock(
                             CompiledBlockStatement {
                                 func: cached.func,
@@ -302,6 +310,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 comb_delta_bytes: comb_delta,
                                 input_offsets: adjust(&cached.input_offsets),
                                 output_offsets: adjust(&cached.output_offsets),
+                                stmt_deps: adjusted_deps,
+                                original_stmts: vec![],
                             },
                         ));
                     } else if let Some(ref full) = full_internal_comb {
@@ -310,6 +320,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         all_post_comb_fns.extend(full.iter().cloned());
                     }
                 } else if let Some(cached) = &cache_entry.comb_func {
+                    let adjusted_deps: Vec<_> = cached
+                        .stmt_deps
+                        .iter()
+                        .map(|(ins, outs)| (adjust(ins), adjust(outs)))
+                        .collect();
                     all_comb_statements =
                         vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
                             func: cached.func,
@@ -317,6 +332,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             comb_delta_bytes: comb_delta,
                             input_offsets: adjust(&cached.input_offsets),
                             output_offsets: adjust(&cached.output_offsets),
+                            stmt_deps: adjusted_deps,
+                            original_stmts: vec![],
                         })];
                 }
             } else {
@@ -340,6 +357,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 func,
                                 input_offsets: input_offsets.clone(),
                                 output_offsets: output_offsets.clone(),
+                                stmt_deps: vec![],
                             },
                         );
 
@@ -349,6 +367,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             comb_delta_bytes: 0,
                             input_offsets,
                             output_offsets,
+                            stmt_deps: vec![],
+                            original_stmts: vec![],
                         })];
                     }
                 }
@@ -362,6 +382,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         let (input_offsets, output_offsets) =
                             gather_external_offsets(&all_comb_statements);
 
+                        let stmt_deps: Vec<_> = all_comb_statements
+                            .iter()
+                            .map(|s| {
+                                let mut ins = vec![];
+                                let mut outs = vec![];
+                                s.gather_variable_offsets(&mut ins, &mut outs);
+                                (ins, outs)
+                            })
+                            .collect();
+
+                        let original_stmts = all_comb_statements.clone();
                         all_comb_statements =
                             vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
                                 func,
@@ -369,12 +400,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 comb_delta_bytes: 0,
                                 input_offsets: input_offsets.clone(),
                                 output_offsets: output_offsets.clone(),
+                                stmt_deps: stmt_deps.clone(),
+                                original_stmts,
                             })];
 
                         Some(JitCachedFunc {
                             func,
                             input_offsets,
                             output_offsets,
+                            stmt_deps,
                         })
                     } else {
                         None
@@ -469,6 +503,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     comb_delta_bytes: 0,
                                     input_offsets: input_offsets.clone(),
                                     output_offsets: output_offsets.clone(),
+                                    stmt_deps: vec![],
+                                    original_stmts: vec![],
                                 })],
                             );
 
@@ -478,6 +514,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     func,
                                     input_offsets,
                                     output_offsets,
+                                    stmt_deps: vec![],
                                 },
                             );
                         }
@@ -504,10 +541,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             }
                         }
                         for s in &own_new_assigns {
-                            if let ProtoStatement::Assign(a) = s {
-                                if !full_outputs.contains(&a.dst_offset) {
-                                    all_post_comb_fns.push(s.clone());
-                                }
+                            if let ProtoStatement::Assign(a) = s
+                                && !full_outputs.contains(&a.dst_offset)
+                            {
+                                all_post_comb_fns.push(s.clone());
                             }
                         }
                     }
@@ -521,6 +558,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 comb_delta_bytes: 0,
                                 input_offsets: cf.input_offsets.clone(),
                                 output_offsets: cf.output_offsets.clone(),
+                                stmt_deps: cf.stmt_deps.clone(),
+                                original_stmts: vec![],
                             },
                         ));
                     } else {
@@ -553,7 +592,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // Without this, the intermediate assign (var → parent output) only
         // runs in eval_comb (before events) and misses the new values.
         if !all_post_comb_fns.is_empty() && full_internal_comb.is_none() {
-            // Collect offsets written by post_comb_fns (child output port connections)
             let mut post_comb_written: HashSet<isize> = HashSet::default();
             for s in &all_post_comb_fns {
                 let mut outs = vec![];
@@ -569,10 +607,27 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let mut ins = vec![];
                     let mut outs = vec![];
                     s.gather_variable_offsets(&mut ins, &mut outs);
-                    let reads_post_comb = ins.iter().any(|(_, off)| post_comb_written.contains(off));
+                    let reads_post_comb =
+                        ins.iter().any(|(_, off)| post_comb_written.contains(off));
                     if reads_post_comb {
                         all_post_comb_fns.push(s.clone());
                     }
+                }
+            }
+            // Add comb statements that read from post_comb-written offsets.
+            for s in &all_comb_statements {
+                let mut ins = vec![];
+                let mut outs = vec![];
+                s.gather_variable_offsets(&mut ins, &mut outs);
+                let reads_post_comb = ins.iter().any(|(_, off)| post_comb_written.contains(off));
+                if reads_post_comb {
+                    if let ProtoStatement::CompiledBlock(cb) = s
+                        && !cb.original_stmts.is_empty()
+                    {
+                        all_post_comb_fns.extend(cb.original_stmts.iter().cloned());
+                        continue;
+                    }
+                    all_post_comb_fns.push(s.clone());
                 }
             }
         }
