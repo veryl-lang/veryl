@@ -92,10 +92,24 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
             air::Declaration::Initial(x) => {
+                context.in_initial = true;
                 let mut initial_statements = vec![];
+                let mut conv_err = None;
                 for stmt in &x.statements {
-                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
-                    initial_statements.extend(stmts);
+                    match Conv::conv(context, stmt) {
+                        Ok(stmts) => {
+                            let stmts: Vec<ProtoStatement> = stmts;
+                            initial_statements.extend(stmts);
+                        }
+                        Err(e) => {
+                            conv_err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                context.in_initial = false;
+                if let Some(e) = conv_err {
+                    return Err(e);
                 }
                 let mut event_statements = HashMap::default();
                 event_statements.insert(Event::Initial, initial_statements);

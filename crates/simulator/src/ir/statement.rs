@@ -1590,6 +1590,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
 
 impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
+        let in_initial = context.in_initial;
         if matches!(src.expr, air::Expression::ArrayLiteral(..)) {
             let dst = &src.dst[0];
             let scope = context.scope();
@@ -1623,12 +1624,19 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
                 result.push(ProtoStatement::Assign(proto));
             }
+            if in_initial {
+                append_ff_next_copies(&mut result);
+            }
             return Ok(result);
         }
 
         if src.dst.len() <= 1 {
             let stmt: ProtoStatement = Conv::conv(context, src)?;
-            return Ok(vec![stmt]);
+            let mut result = vec![stmt];
+            if in_initial {
+                append_ff_next_copies(&mut result);
+            }
+            return Ok(result);
         }
 
         let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
@@ -1668,8 +1676,13 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 let element = &meta.elements[index];
                 let dst_is_ff = element.is_ff;
                 let dst_width = meta.width;
+                // FF assignment writes to next, but in initial block writes to current
                 let dst_offset = if dst_is_ff {
-                    element.next_offset
+                    if in_initial {
+                        element.current_offset
+                    } else {
+                        element.next_offset
+                    }
                 } else {
                     element.current_offset
                 };
@@ -1689,7 +1702,12 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 let dyn_info = meta.dynamic_index_info().unwrap();
                 let num_elements = meta.elements.len();
                 let (base_current, base_next, stride, is_ff) = dyn_info;
-                let dst_base_offset = if is_ff { base_next } else { base_current };
+                // FF assignment writes to next, but in initial block writes to current
+                let dst_base_offset = if is_ff {
+                    if in_initial { base_current } else { base_next }
+                } else {
+                    base_current
+                };
                 let dst_width = meta.width;
 
                 let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
@@ -1709,8 +1727,43 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             }
         }
 
+        if in_initial {
+            append_ff_next_copies(&mut result);
+        }
         Ok(result)
     }
+}
+
+/// For initial block assignments to FF variables, append duplicate statements
+/// that also write to the `next` offset. This ensures the value persists across
+/// ff_swap (same pattern as $readmemh dual write).
+fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
+    let mut extras = Vec::new();
+    for s in stmts.iter() {
+        match s {
+            ProtoStatement::Assign(a) if a.dst_is_ff => {
+                // FF layout: [current][next] contiguously, each calc_native_bytes wide.
+                // next_offset = current_offset + native_bytes.
+                let nb = calc_native_bytes(a.dst_width) as isize;
+                let next_offset = a.dst_ff_current_offset + nb;
+                extras.push(ProtoStatement::Assign(ProtoAssignStatement {
+                    dst_offset: next_offset,
+                    ..a.clone()
+                }));
+            }
+            ProtoStatement::AssignDynamic(a) if a.dst_is_ff => {
+                // For dynamic index FF: base_next = base_current + native_bytes
+                let nb = calc_native_bytes(a.dst_width) as isize;
+                let next_base = a.dst_ff_current_base_offset + nb;
+                extras.push(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+                    dst_base_offset: next_base,
+                    ..a.clone()
+                }));
+            }
+            _ => {}
+        }
+    }
+    stmts.extend(extras);
 }
 
 impl Conv<&air::AssignStatement> for ProtoStatement {
@@ -1718,6 +1771,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         // TODO multiple dst
         let dst = &src.dst[0];
         let id = dst.id;
+        let in_initial = context.in_initial;
 
         let scope = context.scope();
         let meta = scope.variable_meta.get(&id).unwrap();
@@ -1739,9 +1793,13 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let element = &meta.elements[index];
             let dst_is_ff = element.is_ff;
             let current_offset = element.current_offset;
-            // FF assignment writes to next
+            // FF assignment writes to next, but in initial block writes to current
             let dst_offset = if dst_is_ff {
-                element.next_offset
+                if in_initial {
+                    current_offset
+                } else {
+                    element.next_offset
+                }
             } else {
                 current_offset
             };
@@ -1764,8 +1822,12 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let dyn_info = meta.dynamic_index_info().unwrap();
             let num_elements = meta.elements.len();
             let (base_current, base_next, stride, is_ff) = dyn_info;
-            // FF assignment writes to next
-            let dst_base_offset = if is_ff { base_next } else { base_current };
+            // FF assignment writes to next, but in initial block writes to current
+            let dst_base_offset = if is_ff {
+                if in_initial { base_current } else { base_next }
+            } else {
+                base_current
+            };
 
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
             let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
@@ -1788,6 +1850,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 
 impl Conv<&air::AssignStatement> for ProtoAssignStatement {
     fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
+        let in_initial = context.in_initial;
         let scope = context.scope();
 
         // TODO multiple dst
@@ -1810,9 +1873,13 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
         let dst_is_ff = element.is_ff;
         let current_offset = element.current_offset;
         let dst_width = meta.width;
-        // FF assignment writes to next
+        // FF assignment writes to next, but in initial block writes to current
         let dst_offset = if dst_is_ff {
-            element.next_offset
+            if in_initial {
+                current_offset
+            } else {
+                element.next_offset
+            }
         } else {
             current_offset
         };

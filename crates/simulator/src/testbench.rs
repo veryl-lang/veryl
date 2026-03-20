@@ -2,6 +2,7 @@ use crate::HashMap;
 use crate::ir::{Event, Expression, Ir, Statement, SystemFunctionCall, TbMethodKind};
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
+use veryl_analyzer::ir::VarId;
 use veryl_parser::resource_table::StrId;
 
 pub enum TestbenchStatement {
@@ -71,6 +72,8 @@ impl From<ExecResult> for TestResult {
 ///
 /// Scans event_statements for TbMethodCall entries to determine which instance
 /// corresponds to clock_gen (Event::Clock) or reset_gen (Event::Reset).
+/// When no DUT-driven clock/reset events exist (e.g., purely combinational DUT),
+/// synthetic events are created so that clk.next()/rst.assert() still work.
 pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> HashMap<StrId, Event> {
     let clk_event = event_statements
         .keys()
@@ -82,6 +85,8 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
         .cloned();
 
     let mut event_map = HashMap::default();
+    let mut clock_insts = Vec::new();
+    let mut reset_insts = Vec::new();
     for stmts in event_statements.values() {
         for stmt in stmts {
             if let Statement::TbMethodCall { inst, method } = stmt {
@@ -89,17 +94,38 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
                     TbMethodKind::ClockNext { .. } => {
                         if let Some(ref evt) = clk_event {
                             event_map.entry(*inst).or_insert(evt.clone());
+                        } else {
+                            clock_insts.push(*inst);
                         }
                     }
                     TbMethodKind::ResetAssert => {
                         if let Some(ref evt) = rst_event {
                             event_map.entry(*inst).or_insert(evt.clone());
+                        } else {
+                            reset_insts.push(*inst);
                         }
                     }
                 }
             }
         }
     }
+
+    // Create synthetic events for $tb instances when no DUT-driven events exist.
+    // These events have no statements in event_statements, so sim.step() will
+    // only perform ff_swap and mark comb dirty — correct for purely comb DUTs.
+    if clk_event.is_none() && !clock_insts.is_empty() {
+        let synthetic_clk = Event::Clock(VarId::default());
+        for inst in clock_insts {
+            event_map.entry(inst).or_insert(synthetic_clk.clone());
+        }
+    }
+    if rst_event.is_none() && !reset_insts.is_empty() {
+        let synthetic_rst = Event::Reset(VarId::default());
+        for inst in reset_insts {
+            event_map.entry(inst).or_insert(synthetic_rst.clone());
+        }
+    }
+
     event_map
 }
 
