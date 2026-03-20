@@ -1,4 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::attribute::Attribute;
+use crate::attribute_table;
 use veryl_parser::ParolError;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
@@ -12,6 +14,7 @@ pub struct CheckStatement {
     in_non_void_function: bool,
     in_initial: bool,
     in_final: bool,
+    in_test_module: bool,
     statement_depth_in_always_ff: usize,
     statement_depth_in_loop: usize,
 }
@@ -36,9 +39,22 @@ impl VerylGrammarTrait for CheckStatement {
         Ok(())
     }
 
+    fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                let attrs = attribute_table::get(&arg.module.module_token.token);
+                self.in_test_module = attrs.iter().any(|a| matches!(a, Attribute::Test(..)));
+            }
+            HandlerPoint::After => {
+                self.in_test_module = false;
+            }
+        }
+        Ok(())
+    }
+
     fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point
-            && (self.in_initial || self.in_final)
+            && ((self.in_initial && !self.in_test_module) || self.in_final)
         {
             let (kind, token) = match &*arg.assignment_group {
                 AssignmentGroup::Equ(x) => ("assignment", &x.equ.equ_token.token),

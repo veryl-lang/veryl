@@ -49,6 +49,7 @@ pub struct Context {
     pub pending_statements: Vec<ProtoStatement>,
     pub jit_cache: HashMap<StrId, JitCacheEntry>,
     pub expanding_functions: HashSet<VarId>,
+    pub in_initial: bool,
 }
 
 impl Context {

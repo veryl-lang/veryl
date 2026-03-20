@@ -505,3 +505,177 @@ fn tb_function_inline() {
         }
     }
 }
+
+#[test]
+fn tb_initial_assign_comb() {
+    // Test that comb variable assignment in initial block propagates
+    // through a purely combinational (assign) DUT.
+    let code = r#"
+    module Doubler (
+        clk: input clock,
+        rst: input reset,
+        val: input logic<8>,
+        doubled: output logic<8>,
+    ) {
+        assign doubled = val + val;
+    }
+
+    #[test(test_comb_assign)]
+    module test_comb_assign {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        var input_val: logic<8>;
+        var output_doubled: logic<8>;
+
+        inst dut: Doubler (
+            clk: clk,
+            rst: rst,
+            val: input_val,
+            doubled: output_doubled,
+        );
+
+        initial {
+            rst.assert(clk);
+            input_val = 21;
+            clk.next(1);
+            $assert(output_doubled == 42, "comb assign failed");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_comb_assign");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let result = run_native_testbench(ir, None);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_initial_assign_comb failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn tb_initial_assign_ff() {
+    // Test FF variable assignment in initial + clock step
+    let code = r#"
+    module Accumulator (
+        clk: input clock,
+        rst: input reset,
+        val: input logic<8>,
+        sum: output logic<8>,
+    ) {
+        always_ff {
+            if_reset { sum = 0; }
+            else { sum = sum + val; }
+        }
+    }
+
+    #[test(test_ff_assign)]
+    module test_ff_assign {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        var input_val: logic<8>;
+        var output_sum: logic<8>;
+
+        inst dut: Accumulator (
+            clk: clk,
+            rst: rst,
+            val: input_val,
+            sum: output_sum,
+        );
+
+        initial {
+            rst.assert(clk);
+            input_val = 10;
+            clk.next(3);
+            $assert(output_sum == 30, "ff assign failed");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_ff_assign");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let result = run_native_testbench(ir, None);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_initial_assign_ff failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn tb_initial_assign_multiple() {
+    // Test multiple variable assignments in initial block.
+    // Purely combinational DUT verifies both inputs propagate correctly.
+    let code = r#"
+    module Adder (
+        clk: input clock,
+        rst: input reset,
+        a: input logic<8>,
+        b: input logic<8>,
+        sum: output logic<8>,
+    ) {
+        assign sum = a + b;
+    }
+
+    #[test(test_multi_assign)]
+    module test_multi_assign {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        var in_a: logic<8>;
+        var in_b: logic<8>;
+        var out_sum: logic<8>;
+
+        inst dut: Adder (
+            clk: clk,
+            rst: rst,
+            a: in_a,
+            b: in_b,
+            sum: out_sum,
+        );
+
+        initial {
+            rst.assert(clk);
+            in_a = 20;
+            in_b = 22;
+            clk.next(1);
+            $assert(out_sum == 42, "multi assign failed");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_multi_assign");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let result = run_native_testbench(ir, None);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_initial_assign_multiple failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
