@@ -444,6 +444,45 @@ fn system_function() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+module ModuleA {
+    const A: bit<65> = 65'h00000000000000000;
+    const B: bit<65> = 65'h00000000000000001;
+    const C: bit<65> = $signed(A + B);
+
+    const D: bit<64> = 64'h0000000000000000;
+    const E: bit<65> = 65'h00000000000000001;
+    const F: bit<65> = $signed(D + E);
+
+    const G: bit<64> = 64'h0000000000000000;
+    const H: bit<64> = 64'h0000000000000001;
+    const I: bit<65> = $signed(D + E);
+
+    const J: bit<65> = 65'h00000000000000000;
+    const K: bit<65> = 65'h00000000000000001;
+    const L: bit<64> = $signed(A + B);
+}
+"#;
+
+    let exp = r#"module ModuleA {
+  const var0(A): bit<65> = 65'h00000000000000000;
+  const var1(B): bit<65> = 65'h00000000000000001;
+  const var2(C): bit<65> = 65'h00000000000000001;
+  const var3(D): bit<64> = 64'h0000000000000000;
+  const var4(E): bit<65> = 65'h00000000000000001;
+  const var5(F): bit<65> = 65'h00000000000000001;
+  const var6(G): bit<64> = 64'h0000000000000000;
+  const var7(H): bit<64> = 64'h0000000000000001;
+  const var8(I): bit<65> = 65'h00000000000000001;
+  const var9(J): bit<65> = 65'h00000000000000000;
+  const var10(K): bit<65> = 65'h00000000000000001;
+  const var11(L): bit<64> = 64'h0000000000000001;
+
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]

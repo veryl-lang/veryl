@@ -224,8 +224,13 @@ impl SystemFunctionCall {
                 if args.len() != 1 {
                     return Err(ir_error!(token));
                 }
-                let arg0 = create_input(context, name, None, args.remove(0));
+
+                let mut arg = args.remove(0);
+                arg.0.eval_comptime(context, None);
+
+                let arg0 = create_input(context, name, None, arg);
                 comptime.expr_context.signed = true;
+
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Signed(arg0),
                     comptime,
@@ -235,8 +240,13 @@ impl SystemFunctionCall {
                 if args.len() != 1 {
                     return Err(ir_error!(token));
                 }
-                let arg0 = create_input(context, name, None, args.remove(0));
+
+                let mut arg = args.remove(0);
+                arg.0.eval_comptime(context, None);
+
+                let arg0 = create_input(context, name, None, arg);
                 comptime.expr_context.signed = false;
+
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Unsigned(arg0),
                     comptime,
