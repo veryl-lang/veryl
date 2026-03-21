@@ -12,7 +12,7 @@ edition.workspace     = true
 
 [dependencies]
 clap           = {workspace = true}
-cranelift      = "0.129.1"
+cranelift      = "0.130.0"
 daggy          = {workspace = true}
 fxhash         = {workspace = true}
 indent         = {workspace = true}
