@@ -893,7 +893,15 @@ impl ProtoExpression {
                     expr_context,
                     ..
                 } => {
-                    let nb = calc_native_bytes(*width);
+                    // When select is present, width is the select output width
+                    // (e.g., 1 for x[63]). But native_bytes must cover the FULL
+                    // variable so that read_native_value reads all bytes needed
+                    // for the bit-select to work correctly.
+                    let read_width = match select {
+                        Some((beg, _)) => std::cmp::max(*width, *beg + 1),
+                        None => *width,
+                    };
+                    let nb = calc_native_bytes(read_width);
                     let value = if *is_ff {
                         (ff_values_ptr as *const u8).add(*offset as usize)
                     } else {
@@ -1040,10 +1048,16 @@ impl ProtoExpression {
                     return Some((ptr, mask_xz));
                 }
 
-                let nb = calc_native_bytes(*width);
+                // When select is present, width is the select output width.
+                // native_bytes must cover the full variable for correct bit-select.
+                let read_width = match select {
+                    Some((beg, _)) => std::cmp::max(*width, *beg + 1),
+                    None => *width,
+                };
+                let nb = calc_native_bytes(read_width);
                 let offset = *offset as i32;
                 let cache_key = (*is_ff, offset);
-                let wide = *width > 64;
+                let wide = read_width > 64;
 
                 // Load CSE: reuse previously loaded values for the same address
                 let (mut payload, mut mask_xz) = if let Some(&(cached_payload, cached_mask_xz)) =

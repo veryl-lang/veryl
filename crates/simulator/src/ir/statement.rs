@@ -497,6 +497,10 @@ pub struct CompiledBlockStatement {
     pub comb_delta_bytes: isize,
     pub input_offsets: Vec<(bool, isize)>,
     pub output_offsets: Vec<(bool, isize)>,
+    /// Canonical (current) offsets for FF variables written by this block.
+    /// output_offsets stores actual dst_offset (next for FF), but ff_swap
+    /// and needs_swap logic require canonical (current) offsets.
+    pub ff_canonical_offsets: Vec<isize>,
     /// Per-statement (inputs, outputs) from the original individual
     /// statements before JIT compilation. Used by analyze_dependency
     /// for fine-grained DAG analysis that avoids false combinational
@@ -629,10 +633,8 @@ impl ProtoStatement {
             }
             ProtoStatement::SystemFunctionCall(_) => {}
             ProtoStatement::CompiledBlock(x) => {
-                for (is_ff, off) in &x.output_offsets {
-                    if *is_ff {
-                        result.insert(*off);
-                    }
+                for off in &x.ff_canonical_offsets {
+                    result.insert(*off);
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}

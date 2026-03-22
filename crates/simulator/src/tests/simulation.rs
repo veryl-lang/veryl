@@ -6382,3 +6382,1162 @@ fn readonly_cache_fill_3level() {
         );
     }
 }
+
+/// Bit select on a wide FF variable used in ternary: `if pc[1] ? data[31:16] : data[15:0]`
+/// Tests that pc[1] correctly selects upper/lower halfword as pc increments by 2.
+/// The result is captured by an FF so we observe the pre-event comb value.
+#[test]
+fn bit_select_ternary_wide_var() {
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, result: output logic<64>) {
+        var pc: logic<64>;
+        var data: logic<32>;
+
+        always_ff (clk, rst) {
+            if_reset {
+                pc = 0;
+                data = 32'hBBBBAAAA;
+            } else {
+                pc = pc + 64'd2;
+            }
+        }
+
+        // Select halfword based on pc[1]
+        let half: logic<16> = if pc[1] ? data[31:16] : data[15:0];
+
+        // Capture sequence: r0=half@pc=0, r1=half@pc=2, r2=half@pc=4
+        var r0: logic<16>;
+        var r1: logic<16>;
+        var r2: logic<16>;
+        var cycle: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r0 = 0; r1 = 0; r2 = 0; cycle = 0; }
+            else {
+                case cycle {
+                    8'd0: { r0 = half; }
+                    8'd1: { r1 = half; }
+                    8'd2: { r2 = half; }
+                    default: {}
+                }
+                cycle = cycle + 8'd1;
+            }
+        }
+
+        // Pack into result: {r2, r1, r0} with padding
+        assign result = {16'd0, r2, r1, r0};
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        let r0 = (result >> 0) & 0xFFFF;
+        let r1 = (result >> 16) & 0xFFFF;
+        let r2 = (result >> 32) & 0xFFFF;
+        // pc=0: pc[1]=0 → lower=0xAAAA. pc=2: pc[1]=1 → upper=0xBBBB. pc=4: pc[1]=0 → lower=0xAAAA
+        assert_eq!(
+            r0, 0xAAAA,
+            "JIT={} 4st={}: pc=0 expected 0xAAAA got 0x{:x}",
+            config.use_jit, config.use_4state, r0
+        );
+        assert_eq!(
+            r1, 0xBBBB,
+            "JIT={} 4st={}: pc=2 expected 0xBBBB got 0x{:x}",
+            config.use_jit, config.use_4state, r1
+        );
+        assert_eq!(
+            r2, 0xAAAA,
+            "JIT={} 4st={}: pc=4 expected 0xAAAA got 0x{:x}",
+            config.use_jit, config.use_4state, r2
+        );
+    }
+}
+
+/// Same as above but halfword select is on a child module's comb output.
+/// Reproduces the heliodor pattern: icache.o_rdata → parent bit select → pipeline.
+#[test]
+fn bit_select_child_output() {
+    let code = r#"
+    module Child (
+        clk: input clock, rst: input reset,
+        i_addr: input logic<64>,
+        o_data: output logic<32>,
+    ) {
+        var store: logic<32>;
+        always_ff (clk, rst) {
+            if_reset { store = 32'hBBBBAAAA; }
+        }
+        assign o_data = store;
+    }
+    module Top (clk: input clock, rst: input reset, result: output logic<64>) {
+        var pc: logic<64>;
+        always_ff (clk, rst) {
+            if_reset { pc = 0; }
+            else { pc = pc + 64'd2; }
+        }
+
+        var child_data: logic<32>;
+        inst u_child: Child (clk, rst, i_addr: pc, o_data: child_data);
+
+        // Select halfword based on pc[1] from child output
+        let half: logic<16> = if pc[1] ? child_data[31:16] : child_data[15:0];
+
+        var r0: logic<16>;
+        var r1: logic<16>;
+        var r2: logic<16>;
+        var cycle: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r0 = 0; r1 = 0; r2 = 0; cycle = 0; }
+            else {
+                case cycle {
+                    8'd0: { r0 = half; }
+                    8'd1: { r1 = half; }
+                    8'd2: { r2 = half; }
+                    default: {}
+                }
+                cycle = cycle + 8'd1;
+            }
+        }
+        assign result = {16'd0, r2, r1, r0};
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        let r0 = (result >> 0) & 0xFFFF;
+        let r1 = (result >> 16) & 0xFFFF;
+        let r2 = (result >> 32) & 0xFFFF;
+        assert_eq!(
+            r0, 0xAAAA,
+            "JIT={} 4st={}: pc=0 expected 0xAAAA got 0x{:x}",
+            config.use_jit, config.use_4state, r0
+        );
+        assert_eq!(
+            r1, 0xBBBB,
+            "JIT={} 4st={}: pc=2 expected 0xBBBB got 0x{:x}",
+            config.use_jit, config.use_4state, r1
+        );
+        assert_eq!(
+            r2, 0xAAAA,
+            "JIT={} 4st={}: pc=4 expected 0xAAAA got 0x{:x}",
+            config.use_jit, config.use_4state, r2
+        );
+    }
+}
+
+/// Cache + halfword select + stall: reproduces heliodor compressed instruction issue.
+/// icache stalls for fill, then parent selects halfword based on pc[1].
+#[test]
+fn cache_halfword_select_with_stall() {
+    let code = r#"
+    module Cache32 (
+        clk: input clock, rst: input reset,
+        i_addr: input logic<64>, i_ren: input logic,
+        o_rdata: output logic<32>, o_stall: output logic,
+        o_mem_addr: output logic<64>, i_mem_rdata: input logic<32>, o_mem_ren: output logic,
+    ) {
+        let index: logic<4> = i_addr[9:6];
+        let offset: logic<4> = i_addr[5:2];
+        let data_idx: logic<8> = {index, offset};
+        var valid: logic [16];
+        var data: logic<32> [256];
+        let cache_hit: logic = valid[index];
+        var filling: logic;
+        var fill_count: logic<4>;
+        var fill_index: logic<4>;
+        let fill_data_idx: logic<8> = {fill_index, fill_count};
+        let miss: logic = i_ren && !cache_hit && !filling;
+        always_ff (clk, rst) {
+            if_reset {
+                filling = 0; fill_count = 0; fill_index = 0;
+                for i: i32 in 0..16 { valid[i] = 0; }
+                for i: i32 in 0..256 { data[i] = 0; }
+            } else if filling {
+                data[fill_data_idx] = i_mem_rdata;
+                if fill_count == 4'd15 {
+                    valid[fill_index] = 1; filling = 0;
+                } else { fill_count = fill_count + 4'd1; }
+            } else if miss {
+                fill_index = index; fill_count = 0; filling = 1;
+            }
+        }
+        assign o_rdata = if cache_hit ? data[data_idx] : i_mem_rdata;
+        assign o_stall = filling || miss;
+        assign o_mem_addr = if filling ? {50'd0, fill_index, fill_count, 2'b00} : i_addr;
+        assign o_mem_ren = i_ren || filling;
+    }
+    module Top (clk: input clock, rst: input reset, result: output logic<64>) {
+        var stall: logic;
+        var cache_rdata: logic<32>;
+        var mem_addr: logic<64>;
+        var mem_ren: logic;
+
+        // Instruction ROM: 32-bit words containing two 16-bit halves
+        var mem_rdata: logic<32>;
+        always_comb {
+            case mem_addr[7:0] {
+                // Word at 0x00: lower=0x1111 upper=0x2222
+                8'h00: mem_rdata = 32'h22221111;
+                // Word at 0x04: lower=0x3333 upper=0x4444
+                8'h04: mem_rdata = 32'h44443333;
+                // Word at 0x08: lower=0x5555 upper=0x6666
+                8'h08: mem_rdata = 32'h66665555;
+                default: mem_rdata = 32'h00000000;
+            }
+        }
+
+        // PC: increments by 2 (halfword) when not stalled
+        var pc: logic<64>;
+        always_ff (clk, rst) {
+            if_reset { pc = 0; }
+            else if !stall { pc = pc + 64'd2; }
+        }
+
+        inst u_cache: Cache32 (clk, rst,
+            i_addr: pc, i_ren: 1'b1,
+            o_rdata: cache_rdata, o_stall: stall,
+            o_mem_addr: mem_addr, i_mem_rdata: mem_rdata, o_mem_ren: mem_ren);
+
+        // Halfword select based on pc[1]
+        let half: logic<16> = if pc[1] ? cache_rdata[31:16] : cache_rdata[15:0];
+
+        // Capture first 4 halfwords into r0-r3
+        var r0: logic<16>; var r1: logic<16>;
+        var r2: logic<16>; var r3: logic<16>;
+        var tc: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r0 = 0; r1 = 0; r2 = 0; r3 = 0; tc = 0; }
+            else if !stall {
+                case tc {
+                    8'd0: { r0 = half; }
+                    8'd1: { r1 = half; }
+                    8'd2: { r2 = half; }
+                    8'd3: { r3 = half; }
+                    default: {}
+                }
+                tc = tc + 8'd1;
+            }
+        }
+        assign result = {r3, r2, r1, r0};
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..40 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        let r0 = (result >> 0) & 0xFFFF;
+        let r1 = (result >> 16) & 0xFFFF;
+        let r2 = (result >> 32) & 0xFFFF;
+        let r3 = (result >> 48) & 0xFFFF;
+        // PC increments by 2: 0x00→0x02→0x04→0x06
+        // pc=0: word@0x00[15:0]=0x1111, pc=2: word@0x00[31:16]=0x2222
+        // pc=4: word@0x04[15:0]=0x3333, pc=6: word@0x04[31:16]=0x4444
+        assert_eq!(
+            r0, 0x1111,
+            "JIT={} 4st={}: pc=0 expected 0x1111 got 0x{:x}",
+            config.use_jit, config.use_4state, r0
+        );
+        assert_eq!(
+            r1, 0x2222,
+            "JIT={} 4st={}: pc=2 expected 0x2222 got 0x{:x}",
+            config.use_jit, config.use_4state, r1
+        );
+        assert_eq!(
+            r2, 0x3333,
+            "JIT={} 4st={}: pc=4 expected 0x3333 got 0x{:x}",
+            config.use_jit, config.use_4state, r2
+        );
+        assert_eq!(
+            r3, 0x4444,
+            "JIT={} 4st={}: pc=6 expected 0x4444 got 0x{:x}",
+            config.use_jit, config.use_4state, r3
+        );
+    }
+}
+
+/// Reproduces JIT bug: halfword select with cache + expander child modules.
+/// The `let curr_halfword` in parent changes merged JIT function behavior
+/// for child modules (c_expander), causing incorrect results.
+/// Non-idempotent: accumulator detects double-execution or missing execution.
+#[test]
+fn halfword_select_with_expander_child() {
+    let code = r#"
+    // Simplified icache: returns stored 32-bit word
+    module SimpleCache (
+        clk: input clock, rst: input reset,
+        i_addr: input logic<64>,
+        o_data: output logic<32>,
+        o_stall: output logic,
+    ) {
+        var store: logic<32> [4];
+        var ready: logic;
+        always_ff (clk, rst) {
+            if_reset {
+                ready = 0;
+                store[0] = 32'hBBBBAAAA; // word at addr 0: lower=0xAAAA, upper=0xBBBB
+                store[1] = 32'hDDDDCCCC; // word at addr 4: lower=0xCCCC, upper=0xDDDD
+                store[2] = 32'h00000000;
+                store[3] = 32'h00000000;
+            } else {
+                ready = 1;
+            }
+        }
+        let idx: logic<2> = i_addr[3:2];
+        assign o_data = store[idx];
+        assign o_stall = !ready;
+    }
+
+    // Simplified expander: zero-extends the 16-bit input to 32 bits
+    module Expander (
+        i_half: input logic<16>,
+        o_full: output logic<32>,
+    ) {
+        assign o_full = {16'd0, i_half};
+    }
+
+    module Top (clk: input clock, rst: input reset, result: output logic<64>) {
+        var pc: logic<64>;
+        var stall: logic;
+        always_ff (clk, rst) {
+            if_reset { pc = 0; }
+            else if !stall { pc = pc + 64'd2; }
+        }
+
+        var cache_data: logic<32>;
+        inst u_cache: SimpleCache (clk, rst,
+            i_addr: pc, o_data: cache_data, o_stall: stall);
+
+        // Halfword select based on pc[1] -- this is the problematic pattern
+        let curr_half: logic<16> = if pc[1] ? cache_data[31:16] : cache_data[15:0];
+
+        var expanded: logic<32>;
+        inst u_exp: Expander (i_half: curr_half, o_full: expanded);
+
+        // Non-idempotent: accumulate expanded values
+        var sum: logic<32>;
+        var count: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { sum = 0; count = 0; }
+            else if !stall {
+                if count <: 8'd4 {
+                    sum = sum + expanded;
+                    count = count + 8'd1;
+                }
+            }
+        }
+        // Expected: sum of first 4 halfwords
+        // pc=0: half=0xAAAA, pc=2: half=0xBBBB, pc=4: half=0xCCCC, pc=6: half=0xDDDD
+        // sum = 0xAAAA + 0xBBBB + 0xCCCC + 0xDDDD = 0x3110E
+        assign result = {24'd0, count, sum};
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..20 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let result = sim.get("result").unwrap().payload_u64();
+        let count = (result >> 32) & 0xFF;
+        let sum = result & 0xFFFFFFFF;
+        let expected_sum: u64 = 0xAAAA + 0xBBBB + 0xCCCC + 0xDDDD;
+        assert_eq!(
+            count, 4,
+            "JIT={} 4st={}: count expected 4 got {}",
+            config.use_jit, config.use_4state, count
+        );
+        assert_eq!(
+            sum, expected_sum,
+            "JIT={} 4st={}: sum expected 0x{:x} got 0x{:x}",
+            config.use_jit, config.use_4state, expected_sum, sum
+        );
+    }
+}
+
+// Regression: D-Cache write-through with parent-child hierarchy and comb feedback.
+// Parent provides address to child (cache), child returns data.
+// Tests that dynamic array index is correct across module boundary with JIT.
+#[test]
+fn dcache_write_through_hierarchy() {
+    let code = r#"
+    module Cache (
+        clk: input clock,
+        rst: input reset,
+        i_addr: input logic<64>,
+        i_wdata: input logic<64>,
+        i_wen: input logic,
+        i_ren: input logic,
+        o_rdata: output logic<64>,
+    ) {
+        let data_idx: logic<4> = i_addr[6:3];
+
+        var data: logic<64> [16];
+        var valid: logic;
+
+        always_ff (clk, rst) {
+            if_reset {
+                valid = 1'b0;
+                for i: i32 in 0..16 { data[i] = 64'd0; }
+            } else if i_wen {
+                data[data_idx] = i_wdata;
+                valid = 1'b1;
+            }
+        }
+
+        assign o_rdata = if valid ? data[data_idx] : 64'd0;
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        i_cmd: input logic<3>,     // 0=nop, 1=write, 2=read
+        i_addr: input logic<64>,
+        i_wdata: input logic<64>,
+        o_rdata: output logic<64>,
+    ) {
+        var cache_rdata: logic<64>;
+
+        inst u_cache: Cache (
+            clk, rst,
+            i_addr  : i_addr,
+            i_wdata : i_wdata,
+            i_wen   : i_cmd == 3'd1,
+            i_ren   : i_cmd == 3'd2,
+            o_rdata : cache_rdata,
+        );
+
+        // Comb feedback: cache output → parent output
+        assign o_rdata = cache_rdata;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // Write 42 to addr 0x00 (data_idx=0)
+        sim.set("i_cmd", Value::new(1, 3, false));
+        sim.set("i_addr", Value::new(0x00, 64, false));
+        sim.set("i_wdata", Value::new(42, 64, false));
+        sim.step(&clk);
+
+        // Write 99 to addr 0x08 (data_idx=1)
+        sim.set("i_cmd", Value::new(1, 3, false));
+        sim.set("i_addr", Value::new(0x08, 64, false));
+        sim.set("i_wdata", Value::new(99, 64, false));
+        sim.step(&clk);
+
+        // Read from addr 0x08 (data_idx=1)
+        sim.set("i_cmd", Value::new(2, 3, false));
+        sim.set("i_addr", Value::new(0x08, 64, false));
+        sim.step(&clk);
+
+        let rdata = sim.get("o_rdata").unwrap().payload_u64();
+        assert_eq!(
+            rdata, 99,
+            "JIT={} 4st={}: expected 99 at addr 0x08, got {} — wrong index or stale data",
+            config.use_jit, config.use_4state, rdata
+        );
+
+        // Read from addr 0x00 (data_idx=0)
+        sim.set("i_addr", Value::new(0x00, 64, false));
+        sim.step(&clk);
+
+        let rdata = sim.get("o_rdata").unwrap().payload_u64();
+        assert_eq!(
+            rdata, 42,
+            "JIT={} 4st={}: expected 42 at addr 0x00, got {}",
+            config.use_jit, config.use_4state, rdata
+        );
+    }
+}
+
+// Regression: non-FF array in always_ff with comb read via DynamicVariable.
+// The FF table marks these as non-FF (only written in always_ff, never read there),
+// placing them in the comb buffer. Tests that the JIT merged function handles
+// this correctly for large arrays in deep module hierarchies.
+#[test]
+fn nonff_dynamic_array_deep_hierarchy() {
+    // 3-level hierarchy: Top → Pipeline → Cache
+    // Cache has a large array (128 elements) written in always_ff and read in comb
+    // Pipeline adds sibling logic that increases comb buffer size
+    let code = r#"
+    module Cache (
+        clk: input clock,
+        rst: input reset,
+        i_addr: input logic<64>,
+        i_wdata: input logic<64>,
+        i_wen: input logic,
+        i_ren: input logic,
+        o_rdata: output logic<64>,
+        o_stall: output logic,
+    ) {
+        // Mirror heliodor D-Cache structure
+        let tag      : logic<54> = i_addr[63:10];
+        let index    : logic<4>  = i_addr[9:6];
+        let offset_w : logic<3>  = i_addr[5:3];
+        let data_idx : logic<7>  = {index, offset_w};
+
+        var valid: logic [16];
+        var tags : logic<54> [16];
+        var data : logic<64> [128];
+
+        let cache_hit: logic = valid[index] && tags[index] == tag;
+
+        enum State: logic<2> {
+            IDLE = 2'd0,
+            FILL = 2'd1,
+            DONE = 2'd2,
+        }
+        var state: State;
+        var fill_count: logic<3>;
+        var fill_index: logic<4>;
+        var fill_tag  : logic<54>;
+        let fill_data_idx: logic<7> = {fill_index, fill_count};
+        let miss: logic = i_ren && !cache_hit && state == State::IDLE;
+
+        always_ff (clk, rst) {
+            if_reset {
+                state = State::IDLE;
+                fill_count = 3'd0;
+                fill_index = 4'd0;
+                fill_tag   = '0;
+                for i: i32 in 0..16 {
+                    valid[i] = 1'b0;
+                    tags[i]  = 54'd0;
+                }
+                for i: i32 in 0..128 {
+                    data[i] = 64'd0;
+                }
+            } else {
+                case state {
+                    State::IDLE: {
+                        if miss {
+                            fill_index = index;
+                            fill_tag   = tag;
+                            fill_count = 3'd0;
+                            state = State::FILL;
+                        }
+                        if i_wen && cache_hit {
+                            data[data_idx] = i_wdata;
+                        }
+                    }
+                    State::FILL: {
+                        data[fill_data_idx] = i_wdata;
+                        if fill_count == 3'd7 {
+                            tags[fill_index]  = fill_tag;
+                            valid[fill_index] = 1'b1;
+                            state = State::DONE;
+                        } else {
+                            fill_count = fill_count + 3'd1;
+                        }
+                    }
+                    State::DONE: {
+                        state = State::IDLE;
+                    }
+                    default: {
+                        state = State::IDLE;
+                    }
+                }
+            }
+        }
+
+        assign o_rdata = if cache_hit ? data[data_idx] : 64'd0;
+        assign o_stall = (state == State::FILL) || miss;
+    }
+
+    // Pipeline module with many variables to inflate comb buffer
+    module Pipeline (
+        clk: input clock,
+        rst: input reset,
+        i_addr: input logic<7>,
+        i_wdata: input logic<64>,
+        i_wen: input logic,
+        o_rdata: output logic<64>,
+    ) {
+        // Padding variables to shift cache offsets
+        var pad_a: logic<64>;
+        var pad_b: logic<64>;
+        var pad_c: logic<64>;
+        var pad_d: logic<64>;
+        var pad_e: logic<64>;
+        var pad_f: logic<64>;
+        var pad_g: logic<64>;
+        var pad_h: logic<64>;
+
+        always_ff (clk, rst) {
+            if_reset {
+                pad_a = 64'd0; pad_b = 64'd0; pad_c = 64'd0; pad_d = 64'd0;
+                pad_e = 64'd0; pad_f = 64'd0; pad_g = 64'd0; pad_h = 64'd0;
+            } else {
+                pad_a = pad_a + 64'd1;
+                pad_b = pad_b + 64'd2;
+                pad_c = pad_c + 64'd3;
+                pad_d = pad_d + 64'd4;
+                pad_e = pad_e + 64'd5;
+                pad_f = pad_f + 64'd6;
+                pad_g = pad_g + 64'd7;
+                pad_h = pad_h + 64'd8;
+            }
+        }
+
+        var cache_rdata: logic<64>;
+        var cache_stall: logic;
+        inst u_cache: Cache (
+            clk, rst,
+            i_addr  : {57'd0, i_addr},
+            i_wdata : i_wdata,
+            i_wen   : i_wen,
+            i_ren   : !i_wen,
+            o_rdata : cache_rdata,
+            o_stall : cache_stall,
+        );
+
+        assign o_rdata = cache_rdata;
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        i_addr: input logic<7>,
+        i_wdata: input logic<64>,
+        i_wen: input logic,
+        o_rdata: output logic<64>,
+    ) {
+        var pipeline_rdata: logic<64>;
+
+        inst u_pipeline: Pipeline (
+            clk, rst,
+            i_addr  : i_addr,
+            i_wdata : i_wdata,
+            i_wen   : i_wen,
+            o_rdata : pipeline_rdata,
+        );
+
+        assign o_rdata = pipeline_rdata;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // addr layout: i_addr[6:3]=index(4bit), i_addr[2:0]=000 (byte aligned)
+        // For cache index 4, offset 0: addr = (4<<6)|(0<<3) = 0x100 → i_addr bits[6:0] = 0b1000000 = 0x40
+        // For cache index 4, offset 1: addr = (4<<6)|(1<<3) = 0x108 → i_addr bits[6:0] = 0b1001000 = 0x48
+
+        // Step 1: Read from addr 0x40 (index 4, offset 0) → cache miss → triggers fill
+        sim.set("i_addr", Value::new(0x40, 7, false));
+        sim.set("i_wdata", Value::new(42, 64, false)); // fill data for all 8 words
+        sim.set("i_wen", Value::new(0, 1, false));
+        sim.step(&clk); // miss detected
+        // Fill takes 8 cycles (fill_count 0..7)
+        for _ in 0..9 {
+            sim.step(&clk);
+        }
+        // State should be IDLE now, valid[4]=1
+
+        // Step 2: Write 42 to addr 0x40 (cache hit, write-through)
+        sim.set("i_addr", Value::new(0x40, 7, false));
+        sim.set("i_wdata", Value::new(42, 64, false));
+        sim.set("i_wen", Value::new(1, 1, false));
+        sim.step(&clk);
+
+        // Step 3: Write 99 to addr 0x48 (cache hit, write-through, different offset)
+        sim.set("i_addr", Value::new(0x48, 7, false));
+        sim.set("i_wdata", Value::new(99, 64, false));
+        sim.set("i_wen", Value::new(1, 1, false));
+        sim.step(&clk);
+
+        // Step 4: Read from addr 0x48 → should get 99
+        sim.set("i_addr", Value::new(0x48, 7, false));
+        sim.set("i_wen", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        let rdata = sim.get("o_rdata").unwrap().payload_u64();
+        assert_eq!(
+            rdata, 99,
+            "JIT={} 4st={}: expected 99 at addr 0x48, got {} (wrong cache offset?)",
+            config.use_jit, config.use_4state, rdata
+        );
+
+        // Step 5: Read from addr 0x40 → should get 42
+        sim.set("i_addr", Value::new(0x40, 7, false));
+        sim.step(&clk);
+
+        let rdata = sim.get("o_rdata").unwrap().payload_u64();
+        assert_eq!(
+            rdata, 42,
+            "JIT={} 4st={}: expected 42 at addr 0x40, got {}",
+            config.use_jit, config.use_4state, rdata
+        );
+    }
+}
+
+// Regression: child module with always_comb reading 64-bit input port bit-select.
+// Tests that bit 63 of a 64-bit input is correctly read inside always_comb
+// of a child module, even when the child is instantiated alongside other logic.
+#[test]
+fn child_always_comb_bit_select_64() {
+    let code = r#"
+    module Adder (
+        i_a: input logic<64>,
+        i_b: input logic<64>,
+        o_result: output logic<64>,
+        o_b_raw: output logic<64>,
+    ) {
+        var sa: logic;
+        var sb: logic;
+        var result: logic<64>;
+        always_comb {
+            sa = i_a[63];
+            sb = i_b[63];
+            // Simple test: output sign bits and input values
+            result = {sa, sb, 62'd0};
+        }
+        assign o_result = result;
+        assign o_b_raw = i_b;  // pass-through i_b for verification
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        i_op: input logic,
+        i_a: input logic<64>,
+        i_b: input logic<64>,
+        o_result: output logic<64>,
+        o_b_raw: output logic<64>,
+    ) {
+        // Some padding logic (like ALU) to make comb_statements more complex
+        var alu_result: logic<64>;
+        always_comb {
+            if i_op {
+                alu_result = i_a + i_b;
+            } else {
+                alu_result = i_a - i_b;
+            }
+        }
+
+        var add_result: logic<64>;
+        var b_raw: logic<64>;
+        inst u_adder: Adder (
+            i_a: i_a,
+            i_b: i_b,
+            o_result: add_result,
+            o_b_raw: b_raw,
+        );
+
+        // Use both results to prevent DCE
+        assign o_result = if i_op ? add_result : alu_result;
+        assign o_b_raw = b_raw;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        // Test: i_a = +5.0 (bit63=0), i_b = -5.0 (bit63=1)
+        sim.set("i_op", Value::new(1, 1, false));
+        sim.set("i_a", Value::new(0x4014000000000000, 64, false)); // +5.0
+        sim.set("i_b", Value::new(0xC014000000000000, 64, false)); // -5.0
+        sim.step(&clk);
+
+        let result = sim.get("o_result").unwrap().payload_u64();
+        let sa = (result >> 63) & 1;
+        let sb = (result >> 62) & 1;
+        let b_raw = sim.get("o_b_raw").unwrap().payload_u64();
+        if sa != 0 || sb != 1 {
+            panic!(
+                "JIT={} 4st={}: sa={} (expected 0), sb={} (expected 1), result=0x{:016x}, b_raw=0x{:016x}",
+                config.use_jit, config.use_4state, sa, sb, result, b_raw
+            );
+        }
+    }
+}
+
+// Regression: D-Cache write-through pattern. Array fill + conditional write
+// to different offset + read back. JIT ON was reading from wrong array index
+// because the merged comb+event function miscomputed the dynamic index.
+#[test]
+fn dcache_write_through_pattern() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        i_addr: input logic<7>,
+        i_wdata: input logic<64>,
+        i_wen: input logic,
+        i_ren: input logic,
+        o_rdata: output logic<64>,
+        o_hit: output logic,
+    ) {
+        // Simplified cache: 8 entries, indexed by i_addr[2:0]
+        var data: logic<64> [8];
+        var valid: logic;
+
+        let index: logic<3> = i_addr[2:0];
+
+        always_ff (clk, rst) {
+            if_reset {
+                valid = 1'b0;
+                for i: i32 in 0..8 { data[i] = 64'd0; }
+            } else {
+                // Fill: write all entries on first write
+                if i_wen && !valid {
+                    data[index] = i_wdata;
+                    valid = 1'b1;
+                }
+                // Write-through: update on write when valid
+                if i_wen && valid {
+                    data[index] = i_wdata;
+                }
+            }
+        }
+
+        let hit: logic = valid;
+        assign o_hit = hit;
+        assign o_rdata = if hit ? data[index] : 64'd0;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // Write 42 to index 0
+        sim.set("i_addr", Value::new(0, 7, false));
+        sim.set("i_wdata", Value::new(42, 64, false));
+        sim.set("i_wen", Value::new(1, 1, false));
+        sim.set("i_ren", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        // Write 99 to index 1
+        sim.set("i_addr", Value::new(1, 7, false));
+        sim.set("i_wdata", Value::new(99, 64, false));
+        sim.set("i_wen", Value::new(1, 1, false));
+        sim.step(&clk);
+
+        // Read from index 1
+        sim.set("i_addr", Value::new(1, 7, false));
+        sim.set("i_wen", Value::new(0, 1, false));
+        sim.set("i_ren", Value::new(1, 1, false));
+        sim.step(&clk);
+
+        let rdata = sim.get("o_rdata").unwrap().payload_u64();
+        let hit = sim.get("o_hit").unwrap().payload_u64();
+        assert_eq!(
+            hit, 1,
+            "JIT={} 4st={}: cache should be valid",
+            config.use_jit, config.use_4state
+        );
+        assert_eq!(
+            rdata, 99,
+            "JIT={} 4st={}: expected 99 at index 1, got {} (wrong index?)",
+            config.use_jit, config.use_4state, rdata
+        );
+
+        // Read from index 0
+        sim.set("i_addr", Value::new(0, 7, false));
+        sim.step(&clk);
+
+        let rdata = sim.get("o_rdata").unwrap().payload_u64();
+        assert_eq!(
+            rdata, 42,
+            "JIT={} 4st={}: expected 42 at index 0, got {}",
+            config.use_jit, config.use_4state, rdata
+        );
+    }
+}
+
+// Regression: dynamic array with 2 read ports reading different elements
+#[test]
+fn dynamic_array_two_read_ports() {
+    let code = r#"
+    module RegFile (
+        clk       : input  clock    ,
+        rst       : input  reset    ,
+        i_rs1_addr: input  logic<5> ,
+        i_rs2_addr: input  logic<5> ,
+        o_rs1_data: output logic<64>,
+        o_rs2_data: output logic<64>,
+        i_wd_addr : input  logic<5> ,
+        i_wd_data : input  logic<64>,
+        i_wen     : input  logic    ,
+    ) {
+        var regs: logic<64> [32];
+
+        always_comb {
+            o_rs1_data = if i_wen && i_rs1_addr == i_wd_addr ? i_wd_data : regs[i_rs1_addr];
+            o_rs2_data = if i_wen && i_rs2_addr == i_wd_addr ? i_wd_data : regs[i_rs2_addr];
+        }
+
+        always_ff (clk, rst) {
+            if_reset {
+                for i: i32 in 0..32 { regs[i] = 64'd0; }
+            } else if i_wen {
+                regs[i_wd_addr] = i_wd_data;
+            }
+        }
+    }
+
+    // Middle module that captures regfile outputs in pipeline registers
+    module Decode (
+        clk       : input  clock    ,
+        rst       : input  reset    ,
+        i_rs1_addr: input  logic<5> ,
+        i_rs2_addr: input  logic<5> ,
+        o_rs1_data: output logic<64>,
+        o_rs2_data: output logic<64>,
+        i_wd_addr : input  logic<5> ,
+        i_wd_data : input  logic<64>,
+        i_wen     : input  logic    ,
+    ) {
+        var rf_rs1: logic<64>;
+        var rf_rs2: logic<64>;
+        inst u_rf: RegFile (
+            clk, rst,
+            i_rs1_addr, i_rs2_addr,
+            o_rs1_data: rf_rs1,
+            o_rs2_data: rf_rs2,
+            i_wd_addr, i_wd_data, i_wen,
+        );
+
+        // Pipeline register captures
+        always_ff (clk, rst) {
+            if_reset {
+                o_rs1_data = 64'd0;
+                o_rs2_data = 64'd0;
+            } else {
+                o_rs1_data = rf_rs1;
+                o_rs2_data = rf_rs2;
+            }
+        }
+    }
+
+    // Top module
+    module Top (
+        clk       : input  clock    ,
+        rst       : input  reset    ,
+        i_rs1_addr: input  logic<5> ,
+        i_rs2_addr: input  logic<5> ,
+        o_rs1_data: output logic<64>,
+        o_rs2_data: output logic<64>,
+        i_wd_addr : input  logic<5> ,
+        i_wd_data : input  logic<64>,
+        i_wen     : input  logic    ,
+    ) {
+        inst u_dec: Decode (
+            clk, rst,
+            i_rs1_addr, i_rs2_addr,
+            o_rs1_data, o_rs2_data,
+            i_wd_addr, i_wd_data, i_wen,
+        );
+    }
+    "#;
+
+    for mut config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        // Write 0xAA to reg[1]
+        sim.set("i_wd_addr", Value::new(1, 5, false));
+        sim.set("i_wd_data", Value::new(0xAA, 64, false));
+        sim.set("i_wen", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("i_wen", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        // Write 0xBB to reg[2]
+        sim.set("i_wd_addr", Value::new(2, 5, false));
+        sim.set("i_wd_data", Value::new(0xBB, 64, false));
+        sim.set("i_wen", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("i_wen", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        // Read reg[1] via rs1 and reg[2] via rs2
+        sim.set("i_rs1_addr", Value::new(1, 5, false));
+        sim.set("i_rs2_addr", Value::new(2, 5, false));
+        sim.step(&clk); // comb evaluates
+        sim.step(&clk); // pipeline register captures
+        sim.ensure_comb_updated();
+
+        let rs1 = sim.get("o_rs1_data").unwrap().payload_u64();
+        let rs2 = sim.get("o_rs2_data").unwrap().payload_u64();
+        assert_eq!(
+            rs1, 0xAA,
+            "JIT={} 4st={}: rs1 expected 0xAA got 0x{:x}",
+            config.use_jit, config.use_4state, rs1
+        );
+        assert_eq!(
+            rs2, 0xBB,
+            "JIT={} 4st={}: rs2 expected 0xBB got 0x{:x}",
+            config.use_jit, config.use_4state, rs2
+        );
+    }
+}
+
+/// Same as dynamic_array_harness_driven but with 3-level hierarchy:
+/// Outer → Harness → RegFile (matches testbench structure).
+#[test]
+fn dynamic_array_three_level_hierarchy() {
+    let code = r#"
+    module RegFile (
+        clk       : input  clock    ,
+        rst       : input  reset    ,
+        i_rs1_addr: input  logic<5> ,
+        i_rs2_addr: input  logic<5> ,
+        o_rs1_data: output logic<64>,
+        o_rs2_data: output logic<64>,
+        i_wd_addr : input  logic<5> ,
+        i_wd_data : input  logic<64>,
+        i_wen     : input  logic    ,
+    ) {
+        var regs: logic<64> [32];
+
+        always_comb {
+            o_rs1_data = if i_wen && i_rs1_addr == i_wd_addr ? i_wd_data : regs[i_rs1_addr];
+            o_rs2_data = if i_wen && i_rs2_addr == i_wd_addr ? i_wd_data : regs[i_rs2_addr];
+        }
+
+        always_ff {
+            if_reset {
+                for i: i32 in 0..32 { regs[i] = 64'd0; }
+            } else if i_wen {
+                regs[i_wd_addr] = i_wd_data;
+            }
+        }
+    }
+
+    module Harness (
+        clk : input  clock   ,
+        rst : input  reset   ,
+        r1  : output logic<64>,
+        r2  : output logic<64>,
+    ) {
+        var cycle: logic<8>;
+        always_ff {
+            if_reset { cycle = 8'd0; }
+            else     { cycle = cycle + 8'd1; }
+        }
+
+        var rs1_addr: logic<5>;
+        var rs2_addr: logic<5>;
+        var wd_addr : logic<5>;
+        var wd_data : logic<64>;
+        var wen     : logic;
+        always_comb {
+            rs1_addr = 5'd0;
+            rs2_addr = 5'd0;
+            wd_addr  = 5'd0;
+            wd_data  = 64'd0;
+            wen      = 1'b0;
+            case cycle {
+                8'd1: { wd_addr = 5'd1; wd_data = 64'hAA; wen = 1'b1; }
+                8'd3: { wd_addr = 5'd2; wd_data = 64'hBB; wen = 1'b1; }
+                default: { rs1_addr = 5'd1; rs2_addr = 5'd2; }
+            }
+        }
+
+        var rs1_data: logic<64>;
+        var rs2_data: logic<64>;
+        inst u_rf: RegFile (
+            clk, rst,
+            i_rs1_addr: rs1_addr, i_rs2_addr: rs2_addr,
+            o_rs1_data: rs1_data, o_rs2_data: rs2_data,
+            i_wd_addr: wd_addr, i_wd_data: wd_data, i_wen: wen,
+        );
+
+        assign r1 = rs1_data;
+        assign r2 = rs2_data;
+    }
+
+    module Top (
+        clk : input  clock   ,
+        rst : input  reset   ,
+        r1  : output logic<64>,
+        r2  : output logic<64>,
+    ) {
+        inst u_harness: Harness (
+            clk, rst, r1, r2,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..20u32 {
+            sim.step(&clk);
+        }
+        sim.ensure_comb_updated();
+        let r1 = sim.get("r1").unwrap().payload_u64();
+        let r2 = sim.get("r2").unwrap().payload_u64();
+        assert_eq!(
+            r1, 0xAA,
+            "JIT={} 4st={}: r1 expected 0xAA got 0x{:x}",
+            config.use_jit, config.use_4state, r1
+        );
+        assert_eq!(
+            r2, 0xBB,
+            "JIT={} 4st={}: r2 expected 0xBB got 0x{:x}",
+            config.use_jit, config.use_4state, r2
+        );
+    }
+}

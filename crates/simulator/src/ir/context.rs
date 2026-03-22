@@ -22,6 +22,8 @@ pub struct JitCachedFunc {
     pub func: FuncPtr,
     pub input_offsets: Vec<(bool, isize)>,
     pub output_offsets: Vec<(bool, isize)>,
+    /// Canonical (current) offsets for FF variables written by this function.
+    pub ff_canonical_offsets: Vec<isize>,
     pub stmt_deps: Vec<StmtDep>,
 }
 
