@@ -898,6 +898,60 @@ fn function() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    function func_ab::<W: u32>(
+        a: input logic<W>,
+        b: input logic<W>,
+    ) -> logic<W> {
+        return a + b;
+    }
+    function func_abc::<W: u32> (
+        a: input logic<W>,
+        b: input logic<W>,
+        c: input logic<W>,
+    ) -> logic<W> {
+        return func_ab::<W>(a, b) + c;
+    }
+    module ModuleA #(
+        param W: u32 = 8,
+    )(
+        a: input  logic<W>,
+        b: input  logic<W>,
+        c: input  logic<W>,
+        d: output logic<W>,
+    ) {
+        assign d = func_abc::<W>(a, b, c);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  param var0(W): bit<32> = 32'sh00000008;
+  input var1(a): logic<8> = 8'hxx;
+  input var2(b): logic<8> = 8'hxx;
+  input var3(c): logic<8> = 8'hxx;
+  output var4(d): logic<8> = 8'hxx;
+  var var6(func_abc::<W>.return): logic<8> = 8'hxx;
+  input var7(func_abc::<W>.a): logic<8> = 8'hxx;
+  input var8(func_abc::<W>.b): logic<8> = 8'hxx;
+  input var9(func_abc::<W>.c): logic<8> = 8'hxx;
+  var var11(func_ab::<W>.return): logic<8> = 8'hxx;
+  input var12(func_ab::<W>.a): logic<8> = 8'hxx;
+  input var13(func_ab::<W>.b): logic<8> = 8'hxx;
+  func var5(func_abc::<W>) -> var6 {
+    var6 = (var10(a: var7, b: var8) + var9);
+  }
+  func var10(func_ab::<W>) -> var11 {
+    var11 = (var12 + var13);
+  }
+
+  comb {
+    var4 = var5(c: var3, a: var1, b: var2);
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]

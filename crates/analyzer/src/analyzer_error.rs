@@ -1388,6 +1388,24 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(unresolvable_generic_reference),
+        help(""),
+        url("")
+    )]
+    #[error("\"{identifier}\" can't be resolved from the definition of generics")]
+    UnresolvableGenericReference {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label("Definition")]
+        definition_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(unsigned_loop_variable_in_descending_order_for_loop),
         help("use singed type as loop variable"),
@@ -1596,6 +1614,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownPort { token_source, .. } => *token_source,
             AnalyzerError::UnknownUnsafe { token_source, .. } => *token_source,
             AnalyzerError::UnresolvableGenericArgument { token_source, .. } => *token_source,
+            AnalyzerError::UnresolvableGenericReference { token_source, .. } => *token_source,
             AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
                 token_source, ..
             } => *token_source,
@@ -2361,6 +2380,19 @@ impl AnalyzerError {
         definition_token: &TokenRange,
     ) -> Self {
         AnalyzerError::UnresolvableGenericArgument {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            definition_location: definition_token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn unresolvable_generic_reference(
+        identifier: &str,
+        token: &TokenRange,
+        definition_token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::UnresolvableGenericReference {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),

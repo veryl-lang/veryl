@@ -5921,6 +5921,17 @@ pub struct PublicDescriptionItemProtoDeclaration {
     pub proto_declaration: Box<ProtoDeclaration>,
 }
 
+///
+/// Type derived for production 1145
+///
+/// `PublicDescriptionItem: FunctionDeclaration;`
+///
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct PublicDescriptionItemFunctionDeclaration {
+    pub function_declaration: Box<FunctionDeclaration>,
+}
+
 // -------------------------------------------------------------------------------------------------
 //
 // Types of non-terminals deduced from the structure of the transformed grammar
@@ -11712,6 +11723,7 @@ pub enum PublicDescriptionItem {
     PackageDeclaration(PublicDescriptionItemPackageDeclaration),
     AliasDeclaration(PublicDescriptionItemAliasDeclaration),
     ProtoDeclaration(PublicDescriptionItemProtoDeclaration),
+    FunctionDeclaration(PublicDescriptionItemFunctionDeclaration),
 }
 
 ///
@@ -40647,6 +40659,34 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 1145:
     ///
+    /// `PublicDescriptionItem: FunctionDeclaration;`
+    ///
+    #[parol_runtime::function_name::named]
+    fn public_description_item_5(
+        &mut self,
+        _function_declaration: &ParseTreeType<'t>,
+    ) -> Result<()> {
+        let context = function_name!();
+        trace!("{}", self.trace_item_stack(context));
+        let function_declaration =
+            pop_item!(self, function_declaration, FunctionDeclaration, context);
+        let public_description_item_5_built = PublicDescriptionItemFunctionDeclaration {
+            function_declaration: Box::new(function_declaration),
+        };
+        let public_description_item_5_built =
+            PublicDescriptionItem::FunctionDeclaration(public_description_item_5_built);
+        // Calling user action here
+        self.user_grammar
+            .public_description_item(&public_description_item_5_built)?;
+        self.push(
+            ASTType::PublicDescriptionItem(public_description_item_5_built),
+            context,
+        );
+        Ok(())
+    }
+
+    /// Semantic action for production 1146:
+    ///
     /// `Veryl: Start VerylList /* Vec */;`
     ///
     #[parol_runtime::function_name::named]
@@ -40665,7 +40705,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1146:
+    /// Semantic action for production 1147:
     ///
     /// `VerylList /* Vec<T>::Push */: DescriptionGroup VerylList;`
     ///
@@ -40688,7 +40728,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         Ok(())
     }
 
-    /// Semantic action for production 1147:
+    /// Semantic action for production 1148:
     ///
     /// `VerylList /* Vec<T>::New */: ;`
     ///
@@ -42224,9 +42264,10 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
             1142 => self.public_description_item_2(&children[0]),
             1143 => self.public_description_item_3(&children[0]),
             1144 => self.public_description_item_4(&children[0]),
-            1145 => self.veryl(&children[0], &children[1]),
-            1146 => self.veryl_list_0(&children[0], &children[1]),
-            1147 => self.veryl_list_1(),
+            1145 => self.public_description_item_5(&children[0]),
+            1146 => self.veryl(&children[0], &children[1]),
+            1147 => self.veryl_list_0(&children[0], &children[1]),
+            1148 => self.veryl_list_1(),
             _ => Err(ParserError::InternalError(format!(
                 "Unhandled production number: {prod_num}"
             ))

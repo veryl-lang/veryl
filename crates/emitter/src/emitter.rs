@@ -7,6 +7,7 @@ use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncoding
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::conv::{Context, Conv};
+use veryl_analyzer::definition_table::{self, Definition};
 use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::namespace::Namespace;
@@ -93,6 +94,7 @@ pub struct Emitter {
     modport_connections_tables: Vec<ExpandModportConnectionsTable>,
     modport_ports_table: Option<ExpandedModportPortTable>,
     inst_module_namespace: Option<Namespace>,
+    bound_namespace: Option<Namespace>,
     skip_comment: bool,
 }
 
@@ -147,6 +149,7 @@ impl Default for Emitter {
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
             inst_module_namespace: None,
+            bound_namespace: None,
             skip_comment: false,
         }
     }
@@ -571,13 +574,30 @@ impl Emitter {
             self.align_start(align_kind::IDENTIFIER);
         }
 
-        let text = emitting_identifier_token(&arg.identifier_token, symbol);
+        let text = if let Some(symbol) = symbol
+            && symbol.is_unbound_function()
+        {
+            self.unbound_function_identifier_token(&arg.identifier_token, symbol)
+        } else {
+            emitting_identifier_token(&arg.identifier_token, symbol)
+        };
         self.veryl_token(&text);
         self.push_resolved_identifier(&text.to_string());
 
         if align {
             self.align_finish(align_kind::IDENTIFIER);
         }
+    }
+
+    fn unbound_function_identifier_token(&self, token: &VerylToken, symbol: &Symbol) -> VerylToken {
+        let prefix = if let Some(bound_namespace) = self.bound_namespace.as_ref()
+            && !bound_namespace.included(&symbol.namespace)
+        {
+            format!("{}_", symbol.namespace)
+        } else {
+            "".to_string()
+        };
+        identifier_token_with_prefix_suffix(token, &Some(prefix), &None)
     }
 
     fn emit_case_statement(&mut self, arg: &CaseStatement) {
@@ -1821,6 +1841,7 @@ impl Emitter {
             in_import: false,
             in_direction_modport: false,
             generic_map: target_map.clone(),
+            bound_namespace: self.bound_namespace.clone(),
         };
         let text = symbol_string(
             token,
@@ -1835,6 +1856,86 @@ impl Emitter {
         self.str("'(");
 
         true
+    }
+
+    fn emit_unbound_functions(&mut self, component_symbol: &Symbol) {
+        let Some(func_paths) = symbol_table::get_reference_functions(component_symbol.id) else {
+            unreachable!()
+        };
+        if func_paths.is_empty() {
+            return;
+        }
+
+        let src_line = self.src_line;
+        self.bound_namespace = Some(component_symbol.inner_namespace());
+
+        let mut emitted_functions = Vec::new();
+        for path in &func_paths {
+            self.emit_unbound_function(path, &mut emitted_functions);
+        }
+
+        self.bound_namespace = None;
+        self.src_line = src_line;
+    }
+
+    fn emit_unbound_function(
+        &mut self,
+        path: &GenericSymbolPath,
+        emitted_functions: &mut Vec<SymbolId>,
+    ) {
+        let (Ok(func_symbol), _) = self.resolve_generic_path(path, None) else {
+            return;
+        };
+
+        if !func_symbol.found.is_unbound_function() {
+            return;
+        }
+
+        if emitted_functions.contains(&func_symbol.found.id) {
+            // The given function has already been emitted.
+            // Nothing to do.
+            return;
+        }
+
+        if emitted_functions.is_empty() {
+            self.newline();
+        }
+
+        emitted_functions.push(func_symbol.found.id);
+        let (func_id, definition, generic_map) = match &func_symbol.found.kind {
+            SymbolKind::Function(x) => (func_symbol.found.id, x.definition, vec![]),
+            SymbolKind::GenericInstance(x) => {
+                if let Some(base_symbol) = symbol_table::get(x.base)
+                    && let SymbolKind::Function(base_func) = &base_symbol.kind
+                {
+                    (
+                        base_symbol.id,
+                        base_func.definition,
+                        func_symbol.found.generic_maps(),
+                    )
+                } else {
+                    return;
+                }
+            }
+            _ => return,
+        };
+
+        if let Some(func_paths) = &symbol_table::get_reference_functions(func_id) {
+            self.generic_map.push(generic_map);
+            for func_path in func_paths {
+                self.emit_unbound_function(func_path, emitted_functions);
+            }
+            self.generic_map.pop();
+        }
+
+        let definition = definition_table::get(definition.unwrap()).unwrap();
+        let Definition::Function(definition) = definition else {
+            unreachable!();
+        };
+
+        self.newline();
+        self.clear_adjust_line();
+        self.function_declaration(&definition);
     }
 
     fn emit_function_call(
@@ -2049,7 +2150,14 @@ impl Emitter {
         arg: &ScopedIdentifier,
     ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
         let path: GenericSymbolPath = arg.into();
-        self.resolve_generic_path(&path, None)
+
+        let (result, path) = self.resolve_generic_path(&path, None);
+        if result.is_ok() || self.bound_namespace.is_none() {
+            return (result, path);
+        }
+
+        // For unbound function, resolved generic params are in the binding (caller) namespace.
+        self.resolve_generic_path(&path, self.bound_namespace.as_ref())
     }
 
     fn resolve_generic_path(
@@ -2092,7 +2200,7 @@ impl Emitter {
             .filter(|x| {
                 if let Some(id) = x.id {
                     let symbol = symbol_table::get(id).unwrap();
-                    if let SymbolKind::GenericInstance(x) = symbol.kind
+                    if let SymbolKind::GenericInstance(x) = &symbol.kind
                         && let Some(affiliation_symbol) = x.affiliation_symbol
                     {
                         affiliation_symbol == parent_id
@@ -5133,6 +5241,7 @@ impl VerylWalker for Emitter {
                 }
                 self.module_group(&x.module_group);
             }
+            self.emit_unbound_functions(&symbol.found);
             self.newline_list_post(arg.module_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
 
@@ -5222,6 +5331,7 @@ impl VerylWalker for Emitter {
                 }
                 self.interface_group(&x.interface_group);
             }
+            self.emit_unbound_functions(&symbol.found);
             self.newline_list_post(arg.interface_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
 
@@ -5437,6 +5547,7 @@ impl VerylWalker for Emitter {
                 }
                 self.package_group(&x.package_group);
             }
+            self.emit_unbound_functions(&symbol.found);
             self.newline_list_post(arg.package_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
 
@@ -5579,9 +5690,10 @@ impl VerylWalker for Emitter {
             PublicDescriptionItem::PackageDeclaration(x) => {
                 self.package_declaration(&x.package_declaration)
             }
-            // alias and proto are not emitted at SystemVerilog
+            // alias, proto and unbound function are not emitted at SystemVerilog
             PublicDescriptionItem::AliasDeclaration(_)
-            | PublicDescriptionItem::ProtoDeclaration(_) => (),
+            | PublicDescriptionItem::ProtoDeclaration(_)
+            | PublicDescriptionItem::FunctionDeclaration(_) => (),
         };
     }
 
@@ -5635,6 +5747,7 @@ pub struct SymbolContext {
     pub in_import: bool,
     pub in_direction_modport: bool,
     pub generic_map: Vec<GenericMap>,
+    pub bound_namespace: Option<Namespace>,
 }
 
 impl From<&mut Emitter> for SymbolContext {
@@ -5650,6 +5763,7 @@ impl From<&mut Emitter> for SymbolContext {
             in_import: value.in_import,
             in_direction_modport: value.in_direction_modport,
             generic_map,
+            bound_namespace: value.bound_namespace.clone(),
         }
     }
 }
@@ -5798,8 +5912,13 @@ pub fn symbol_string(
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible = namespace.included(symbol_namespace)
-                || symbol.imported.iter().any(|x| x.namespace == namespace);
+            let visible = if let Some(bound_namespace) = &context.bound_namespace {
+                bound_namespace.included(symbol_namespace)
+                    || symbol.imported.iter().any(|x| x.namespace == namespace)
+            } else {
+                namespace.included(symbol_namespace)
+                    || symbol.imported.iter().any(|x| x.namespace == namespace)
+            };
             if (scope_depth == 1) & visible & !context.in_import {
                 ret.push_str(&token_text);
             } else {
@@ -5843,6 +5962,7 @@ pub fn symbol_string(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
+
             let add_namespace = (scope_depth >= 2) | !visible | top_level;
             if add_namespace {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));

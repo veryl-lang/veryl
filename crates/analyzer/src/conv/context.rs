@@ -13,6 +13,7 @@ use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
+use veryl_parser::veryl_token::Token;
 
 #[derive(Clone)]
 pub struct Config {
@@ -54,6 +55,7 @@ pub struct Context {
     pub ignore_var_func: bool,
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
+    pub in_unbound_func: Option<Token>,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
     pub mask_cache: MaskCache,

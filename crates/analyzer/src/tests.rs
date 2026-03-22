@@ -9481,6 +9481,167 @@ fn unresolvable_generic_argument() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    function func::<W: u32>(
+        a: input logic<W>,
+        b: input logic<W>,
+    ) -> logic<W> {
+        return a + b;
+    }
+    module ModuleA #(
+        param W: u32 = 8,
+    )(
+        a: input  logic<W>,
+        b: input  logic<W>,
+        c: output logic<W>,
+    ) {
+        assign c = func::<W>(a, b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    function func::<T: type>(
+        a: input T,
+        b: input T,
+    ) -> T {
+        return a + b;
+    }
+    module ModuleA #(
+        param W: u32 = 8,
+    )(
+        a: input  logic<W>,
+        b: input  logic<W>,
+        c: output logic<W>,
+    ) {
+        type T = logic<W>;
+        assign c = func::<T>(a, b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn unresolvable_generic_reference() {
+    let code = r#"
+    package Pkg::<a: u32> {
+        const A: u32 = a;
+    }
+    function func() -> u32 {
+        return Pkg::<8>::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericReference { .. }
+    ));
+
+    let code = r#"
+    package Pkg::<W: u32> {
+        type T = logic<W>;
+    }
+    function func() -> Pkg::<8>::T {
+        var a: Pkg::<8>::T;
+        a = 0 as Pkg::<8>::T;
+        return a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericReference { .. }
+    ));
+    assert!(matches!(
+        errors[1],
+        AnalyzerError::UnresolvableGenericReference { .. }
+    ));
+    assert!(matches!(
+        errors[2],
+        AnalyzerError::UnresolvableGenericReference { .. }
+    ));
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericReference { .. }
+    ));
+
+    let code = r#"
+    package Pkg {
+        function func::<a: u32>() -> u32 {
+            return a;
+        }
+    }
+    function func() -> u32 {
+        return Pkg::func::<8>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericReference { .. }
+    ));
+
+    let code = r#"
+    package Pkg {
+        const A: u32 = 8;
+    }
+    function func() -> u32 {
+        return Pkg::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package Pkg {
+        type T = logic<8>;
+    }
+    function func() -> Pkg::T {
+        var a: Pkg::T;
+        a = 0 as Pkg::T;
+        return a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package Pkg {
+        function func() -> u32 {
+            return 8;
+        }
+    }
+    function func() -> u32 {
+        return Pkg::func();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    function func_a::<a: u32> -> u32 {
+        return a;
+    }
+    function func_b() -> u32 {
+        return func_a::<8>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

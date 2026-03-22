@@ -1180,6 +1180,7 @@
 /* 1142 */ PublicDescriptionItem: PackageDeclaration;
 /* 1143 */ PublicDescriptionItem: AliasDeclaration;
 /* 1144 */ PublicDescriptionItem: ProtoDeclaration;
-/* 1145 */ Veryl: Start VerylList /* Vec */;
-/* 1146 */ VerylList /* Vec<T>::Push */: DescriptionGroup VerylList;
-/* 1147 */ VerylList /* Vec<T>::New */: ;
+/* 1145 */ PublicDescriptionItem: FunctionDeclaration;
+/* 1146 */ Veryl: Start VerylList /* Vec */;
+/* 1147 */ VerylList /* Vec<T>::Push */: DescriptionGroup VerylList;
+/* 1148 */ VerylList /* Vec<T>::New */: ;

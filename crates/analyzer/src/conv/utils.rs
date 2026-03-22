@@ -1,7 +1,7 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, UnevaluableValueKind};
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
-use crate::conv::checker::generic::check_generic_args;
+use crate::conv::checker::generic::check_generic_refereence;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -697,8 +697,9 @@ pub fn eval_type(
         }
     } else {
         let mut path = context.resolve_path(path.clone());
-        let map = path.to_generic_maps();
+        check_generic_refereence(context, &path);
 
+        let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
             let type_error = match pos {
                 TypePosition::Variable => !symbol.found.is_variable_type(),
@@ -1308,7 +1309,9 @@ pub fn eval_factor_path(
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
     let (path, select, _) = var_path.into();
+
     let generic_path = context.resolve_path(symbol_path);
+    check_generic_refereence(context, &generic_path);
 
     let found = if let Some(path) = generic_path.to_var_path()
         && let Some((var_id, comptime)) = context.find_path(&path)
@@ -2224,14 +2227,14 @@ pub fn var_path_to_assign_destination(
 fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> IrResult<FuncProto> {
     if !context.func_paths.contains_key(path) {
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
-        let definition = match &symbol.kind {
-            SymbolKind::Function(x) => x.definition.unwrap(),
+        let (definition, is_unbound) = match &symbol.kind {
+            SymbolKind::Function(x) => (x.definition.unwrap(), x.is_unbound()),
             SymbolKind::ModportFunctionMember(x) => {
                 let symbol = symbol_table::get(x.function).unwrap();
                 let SymbolKind::Function(x) = symbol.kind else {
                     unreachable!();
                 };
-                x.definition.unwrap()
+                (x.definition.unwrap(), false)
             }
             _ => return Err(ir_error!(token)),
         };
@@ -2255,12 +2258,33 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let ret: IrResult<()> = Conv::conv(context, (&definition, Some(path)));
             ret?;
         } else {
+            let generic_arg_paths = if is_unbound {
+                path.sig
+                    .generic_parameters
+                    .iter()
+                    .filter_map(|(_, x)| x.to_var_path())
+                    .collect()
+            } else {
+                vec![]
+            };
+
             let mut local_context = Context::default();
             local_context.var_id = context.var_id;
             local_context.inherit(context);
             local_context.extract_var_paths(context, &path.path, &array);
 
+            for path in &generic_arg_paths {
+                // Copy var path referenced as resolved generic arg from the given context
+                if let Some(x) = context.find_path(path) {
+                    local_context.var_paths.insert(path.clone(), x);
+                }
+            }
+
             let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
+
+            for path in &generic_arg_paths {
+                local_context.var_paths.remove(path);
+            }
 
             context.extract_function(&mut local_context, &path.path, &array);
             context.inherit(&mut local_context);
@@ -2288,7 +2312,7 @@ pub fn function_call(
 ) -> IrResult<ir::FunctionCall> {
     let generic_path: GenericSymbolPath = path.into();
 
-    check_generic_args(context, &generic_path);
+    check_generic_refereence(context, &generic_path);
 
     let mut parent_path = generic_path.clone();
     parent_path.paths.pop();
