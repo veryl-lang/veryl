@@ -299,7 +299,6 @@ pub fn optimize_comb(
                 let count = read_counts.get(&key).copied().unwrap_or(0);
 
                 if count == 0 && !is_observable {
-                    // Dead code: output never read and not externally visible
                     continue;
                 }
 
@@ -343,6 +342,27 @@ pub fn optimize_merged(
         count_stmt_reads(stmt, &mut read_counts);
     }
 
+    // Collect comb offsets that are written by non-Assign statements
+    // (If/Case blocks). These offsets must not be inlined because an
+    // Assign to the same offset is a "default" that gets overridden
+    // by the conditional statement at runtime.
+    let mut multi_write_offsets: HashSet<isize> = HashSet::default();
+    for stmt in &comb_stmts {
+        match stmt {
+            ProtoStatement::Assign(_) => {}
+            _ => {
+                let mut outs = vec![];
+                let mut ins = vec![];
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                for (is_ff, off) in outs {
+                    if !is_ff {
+                        multi_write_offsets.insert(off);
+                    }
+                }
+            }
+        }
+    }
+
     // Process comb statements: DCE + inline
     let mut inline_map: HashMap<CombKey, ProtoExpression> = HashMap::default();
     let mut result_comb: Vec<ProtoStatement> = Vec::new();
@@ -356,14 +376,15 @@ pub fn optimize_merged(
             ProtoStatement::Assign(x) if !x.dst_is_ff && x.select.is_none() => {
                 let key: CombKey = (false, x.dst_offset);
                 let is_external = external_reads.contains(&x.dst_offset);
+                let has_override = multi_write_offsets.contains(&x.dst_offset);
                 let count = read_counts.get(&key).copied().unwrap_or(0);
 
-                if count == 0 && !is_external {
+                if count == 0 && !is_external && !has_override {
                     dce_count += 1;
                     continue;
                 }
 
-                if count == 1 && !is_external {
+                if count == 1 && !is_external && !has_override {
                     inline_map.insert(key, x.expr.clone());
                     inline_count += 1;
                     continue;

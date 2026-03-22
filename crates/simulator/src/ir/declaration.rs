@@ -7,6 +7,7 @@ use crate::ir::statement::{CompiledBlockStatement, ProtoAssignStatement};
 use crate::ir::variable::{ModuleVariableMeta, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use crate::simulator_error::SimulatorError;
+use std::collections::VecDeque;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
 
@@ -14,6 +15,15 @@ use veryl_parser::token_range::TokenRange;
 /// (those that appear in both inputs and outputs) to avoid dependency cycles
 /// when the compiled block is used in analyze_dependency.
 type VarOffsets = Vec<(bool, isize)>;
+
+/// Collect canonical (current) FF offsets written by these statements.
+fn gather_ff_canonical(stmts: &[ProtoStatement]) -> Vec<isize> {
+    let mut result = HashSet::default();
+    for s in stmts {
+        result.extend(s.gather_ff_canonical_offsets());
+    }
+    result.into_iter().collect()
+}
 
 fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets) {
     let mut all_inputs = vec![];
@@ -32,6 +42,98 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
     all_outputs.dedup();
 
     (all_inputs, all_outputs)
+}
+
+/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
+///
+/// Builds Read-After-Write (RAW) dependency edges: for each variable written by
+/// statement A and read by statement B (where B != A), add edge A → B.
+/// Self-references (a statement that both reads and writes the same variable)
+/// are skipped to avoid false cycles.
+///
+/// Falls back to source order if a cycle is detected.
+fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
+    let n = statements.len();
+    if n <= 1 {
+        return statements;
+    }
+
+    // Gather per-statement inputs and outputs (variable offsets).
+    let mut stmt_inputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
+    for s in &statements {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        stmt_inputs.push(ins);
+        stmt_outputs.push(outs);
+    }
+
+    // Build a map: variable → set of statement indices that write it.
+    // Key: (is_ff, offset)
+    let mut writers: HashMap<(bool, isize), Vec<usize>> = HashMap::default();
+    for (i, outs) in stmt_outputs.iter().enumerate() {
+        for &key in outs {
+            writers.entry(key).or_default().push(i);
+        }
+    }
+
+    // Build adjacency list and in-degree count for Kahn's algorithm.
+    // Edge: writer_stmt → reader_stmt (RAW dependency).
+    // Skip self-referencing edges (same statement index).
+    let mut adj: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    let mut in_degree: Vec<usize> = vec![0; n];
+
+    for (reader_idx, ins) in stmt_inputs.iter().enumerate() {
+        for key in ins {
+            if let Some(writer_indices) = writers.get(key) {
+                for &writer_idx in writer_indices {
+                    if writer_idx == reader_idx {
+                        // Skip self-reference to avoid false cycle
+                        continue;
+                    }
+                    if adj[writer_idx].insert(reader_idx) {
+                        in_degree[reader_idx] += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Kahn's algorithm with FIFO queue (VecDeque) for stable ordering.
+    // Initialize queue with zero-in-degree nodes in source order.
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    for (i, &deg) in in_degree.iter().enumerate() {
+        if deg == 0 {
+            queue.push_back(i);
+        }
+    }
+
+    let mut sorted_indices: Vec<usize> = Vec::with_capacity(n);
+    while let Some(idx) = queue.pop_front() {
+        sorted_indices.push(idx);
+        // Collect successors in index order for determinism
+        let mut successors: Vec<usize> = adj[idx].iter().cloned().collect();
+        successors.sort_unstable();
+        for succ in successors {
+            in_degree[succ] -= 1;
+            if in_degree[succ] == 0 {
+                queue.push_back(succ);
+            }
+        }
+    }
+
+    // If not all nodes were processed, a cycle was detected — fall back to source order.
+    if sorted_indices.len() != n {
+        return statements;
+    }
+
+    // Reconstruct statement list in sorted order.
+    let mut result: Vec<Option<ProtoStatement>> = statements.into_iter().map(Some).collect();
+    sorted_indices
+        .into_iter()
+        .map(|i| result[i].take().unwrap())
+        .collect()
 }
 
 pub struct ProtoDeclaration {
@@ -266,12 +368,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         .get(event)
                         .or_else(|| cache_entry.event_funcs.get(event));
                     if let Some(cached) = cached {
+                        let adjusted_canonical: Vec<isize> = cached
+                            .ff_canonical_offsets
+                            .iter()
+                            .map(|off| off + ff_delta)
+                            .collect();
                         *stmts = vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
                             func: cached.func,
                             ff_delta_bytes: ff_delta,
                             comb_delta_bytes: comb_delta,
                             input_offsets: adjust(&cached.input_offsets),
                             output_offsets: adjust(&cached.output_offsets),
+                            ff_canonical_offsets: adjusted_canonical,
                             stmt_deps: vec![],
                             original_stmts: vec![],
                         })];
@@ -324,6 +432,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 comb_delta_bytes: comb_delta,
                                 input_offsets: adjust(&cached.input_offsets),
                                 output_offsets: adjust(&cached.output_offsets),
+                                ff_canonical_offsets: vec![],
                                 stmt_deps: adjusted_deps,
                                 original_stmts: vec![],
                             },
@@ -346,6 +455,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             comb_delta_bytes: comb_delta,
                             input_offsets: adjust(&cached.input_offsets),
                             output_offsets: adjust(&cached.output_offsets),
+                            ff_canonical_offsets: vec![],
                             stmt_deps: adjusted_deps,
                             original_stmts: vec![],
                         })];
@@ -364,6 +474,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         && let Some(func) = cranelift::build_binary(context, stmts.clone())
                     {
                         let (input_offsets, output_offsets) = gather_external_offsets(stmts);
+                        let ff_canonical = gather_ff_canonical(stmts);
 
                         event_funcs.insert(
                             event.clone(),
@@ -371,6 +482,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 func,
                                 input_offsets: input_offsets.clone(),
                                 output_offsets: output_offsets.clone(),
+                                ff_canonical_offsets: ff_canonical.clone(),
                                 stmt_deps: vec![],
                             },
                         );
@@ -381,6 +493,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             comb_delta_bytes: 0,
                             input_offsets,
                             output_offsets,
+                            ff_canonical_offsets: ff_canonical,
                             stmt_deps: vec![],
                             original_stmts: vec![],
                         })];
@@ -390,13 +503,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 // Compile comb individually
                 let all_can_build = all_comb_statements.iter().all(|s| s.can_build_binary());
                 let comb_func = if all_can_build && !all_comb_statements.is_empty() {
+                    // Sort statements topologically (RAW dependencies) so that
+                    // output port connections run before assigns that read them.
+                    let sorted_comb_for_func = stable_topo_sort(all_comb_statements.clone());
+
                     if let Some(func) =
-                        cranelift::build_binary(context, all_comb_statements.clone())
+                        cranelift::build_binary(context, sorted_comb_for_func.clone())
                     {
                         let (input_offsets, output_offsets) =
-                            gather_external_offsets(&all_comb_statements);
+                            gather_external_offsets(&sorted_comb_for_func);
 
-                        let stmt_deps: Vec<_> = all_comb_statements
+                        let stmt_deps: Vec<_> = sorted_comb_for_func
                             .iter()
                             .map(|s| {
                                 let mut ins = vec![];
@@ -406,7 +523,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             })
                             .collect();
 
-                        let original_stmts = all_comb_statements.clone();
+                        let original_stmts = sorted_comb_for_func.clone();
                         all_comb_statements =
                             vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
                                 func,
@@ -414,6 +531,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 comb_delta_bytes: 0,
                                 input_offsets: input_offsets.clone(),
                                 output_offsets: output_offsets.clone(),
+                                ff_canonical_offsets: vec![],
                                 stmt_deps: stmt_deps.clone(),
                                 original_stmts,
                             })];
@@ -422,6 +540,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             func,
                             input_offsets,
                             output_offsets,
+                            ff_canonical_offsets: vec![],
                             stmt_deps,
                         })
                     } else {
@@ -485,14 +604,30 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             continue;
                         }
 
+                        // Collect comb offsets read by embedded CompiledBlocks
+                        // (child module merged functions in the event part).
+                        // These must NOT be store-eliminated because the
+                        // CompiledBlock reads from memory, not load_cache.
+                        let mut event_reads = HashSet::default();
+                        for s in &opt_events {
+                            let mut ins = vec![];
+                            let mut outs = vec![];
+                            s.gather_variable_offsets(&mut ins, &mut outs);
+                            for (_, off) in ins {
+                                event_reads.insert(off);
+                            }
+                        }
+
                         // Compute store elimination set: internal comb offsets
                         // that are not externally read (port connections, etc.)
+                        // and not read by embedded CompiledBlocks.
                         let mut store_elim = HashSet::default();
                         for s in &opt_comb {
                             if let ProtoStatement::Assign(a) = s
                                 && !a.dst_is_ff
                                 && a.select.is_none()
                                 && !external_reads.contains(&a.dst_offset)
+                                && !event_reads.contains(&a.dst_offset)
                             {
                                 store_elim.insert((a.dst_is_ff, a.dst_offset as i32));
                             }
@@ -507,6 +642,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             store_elim,
                         ) {
                             let (input_offsets, output_offsets) = gather_external_offsets(&merged);
+                            let ff_canonical = gather_ff_canonical(&merged);
 
                             // Replace event_statements with merged CompiledBlock
                             all_event_statements.insert(
@@ -517,6 +653,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     comb_delta_bytes: 0,
                                     input_offsets: input_offsets.clone(),
                                     output_offsets: output_offsets.clone(),
+                                    ff_canonical_offsets: ff_canonical.clone(),
                                     stmt_deps: vec![],
                                     original_stmts: vec![],
                                 })],
@@ -528,6 +665,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     func,
                                     input_offsets,
                                     output_offsets,
+                                    ff_canonical_offsets: ff_canonical,
                                     stmt_deps: vec![],
                                 },
                             );
@@ -572,6 +710,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 comb_delta_bytes: 0,
                                 input_offsets: cf.input_offsets.clone(),
                                 output_offsets: cf.output_offsets.clone(),
+                                ff_canonical_offsets: vec![],
                                 stmt_deps: cf.stmt_deps.clone(),
                                 original_stmts: vec![],
                             },

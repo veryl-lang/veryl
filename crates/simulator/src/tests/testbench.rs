@@ -297,7 +297,7 @@ fn tb_readonly_cache_fill() {
     let code_main = r#"
     module Harness (
         clk: input clock, rst: input reset,
-        o_r2: output logic<64>, o_stall: output logic,
+        o_r1: output logic<64>, o_r2: output logic<64>, o_stall: output logic,
     ) {
         var addr: logic<64>; var ren: logic; var rdata: logic<64>;
         var stall: logic; var mem_addr: logic<64>; var mem_ren: logic;
@@ -307,9 +307,9 @@ fn tb_readonly_cache_fill() {
             o_mem_addr: mem_addr, o_mem_ren: mem_ren, i_mem_rdata: mem_rdata);
         var mem: logic<64> [256];
         assign mem_rdata = mem[mem_addr[10:3]];
-        var tc: logic<8>; var r2_val: logic<64>;
+        var tc: logic<8>; var r1_val: logic<64>; var r2_val: logic<64>;
         always_ff (clk, rst) {
-            if_reset { tc = 0; ren = 0; addr = 0; r2_val = 0;
+            if_reset { tc = 0; ren = 0; addr = 0; r1_val = 0; r2_val = 0;
                 for i: i32 in 0..256 {
                     if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
                     else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
@@ -322,21 +322,23 @@ fn tb_readonly_cache_fill() {
                 case tc {
                     8'd1: { addr = 64'h0; ren = 1; }
                     8'd3: { addr = 64'h0; ren = 1; }
+                    8'd4: { r1_val = rdata; }
                     8'd6: { addr = 64'h8; ren = 1; }
                     8'd7: { r2_val = rdata; }
                     default: {}
                 }
             }
         }
+        assign o_r1 = r1_val;
         assign o_r2 = r2_val;
         assign o_stall = stall;
     }
     module test_cache {
         inst clk: $tb::clock_gen;
         inst rst: $tb::reset_gen;
-        var r2: logic<64>;
+        var r1: logic<64>; var r2: logic<64>;
         var stall: logic;
-        inst h: Harness (clk: clk, rst: rst, o_r2: r2, o_stall: stall);
+        inst h: Harness (clk: clk, rst: rst, o_r1: r1, o_r2: r2, o_stall: stall);
         initial {
             rst.assert(clk);
             clk.next(20);

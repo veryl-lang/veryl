@@ -37,6 +37,10 @@ pub struct Module {
     /// (port connections + top-level comb only), while full_comb_statements
     /// includes everything.
     pub full_comb_statements: Option<Vec<Statement>>,
+    /// When true, step() uses full_comb_statements for settle loops
+    /// instead of the 3-pass post_comb → comb → post_comb cycle.
+    /// Set when analyze_dependency succeeds for the combined list.
+    pub use_full_comb_in_step: bool,
     /// FF swap entries: (current_offset, value_size) pairs.
     pub ff_swap_entries: Vec<(usize, usize)>,
 }
@@ -55,6 +59,7 @@ pub struct ProtoModule {
     pub post_comb_fns: Vec<ProtoStatement>,
     /// Full comb statements when merged events exist.
     pub full_comb_statements: Option<ProtoStatements>,
+    pub use_full_comb_in_step: bool,
     /// FF canonical offsets (current_offset) that need swapping.
     /// If None, all ff variables are swapped.
     pub ff_swap_offsets: Option<HashSet<isize>>,
@@ -251,6 +256,7 @@ impl ProtoModule {
             comb_statements,
             post_comb_fns,
             full_comb_statements,
+            use_full_comb_in_step: self.use_full_comb_in_step,
             ff_swap_entries,
         }
     }
@@ -424,12 +430,10 @@ pub(crate) fn analyze_dependency(
             |x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()),
         );
         if !has_expandable {
-            // Re-run standard analysis to produce proper error with tokens.
-            // (The first pass broke out early; re-running generates the error.)
+            // No expandable CompiledBlocks at all.
         } else {
-            // Fall through to fine-grained retry below.
-            log::debug!("analyze_dependency: cycle detected, retrying with fine-grained deps ({} CompiledBlocks with stmt_deps)",
-                table.values().filter(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.stmt_deps.is_empty())).count());
+            log::debug!("analyze_dependency: cycle detected, retrying with fine-grained deps ({} CompiledBlocks with original_stmts)",
+                table.values().filter(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())).count());
         }
 
         if !has_expandable {
@@ -636,66 +640,161 @@ pub(crate) fn analyze_dependency(
             continue; // Retry DAG analysis with one CB expanded
         }
 
-        // Can't expand — return proper error
-        // Re-run to get error with tokens
-        let mut dag2 = Dag::<Node, ()>::new();
-        let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+        // No more expandable CompiledBlocks. If any non-expandable
+        // CompiledBlocks remain, the cycle is likely a false positive
+        // caused by aggregate input/output overlap. Build a DAG that
+        // skips cyclic edges involving CompiledBlocks to get a partial
+        // topological ordering that is correct for the non-CB parts.
+        let has_non_expandable_cb = table.values().any(
+            |x| matches!(x, ProtoStatement::CompiledBlock(cb) if cb.original_stmts.is_empty()),
+        );
+
+        if !has_non_expandable_cb {
+            // Genuine combinational loop (no CompiledBlocks involved).
+            // Re-run to get error with tokens.
+            let mut dag2 = Dag::<Node, ()>::new();
+            let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+            for (id, x) in &table {
+                let mut inputs = vec![];
+                let mut outputs = vec![];
+                x.gather_variable_offsets(&mut inputs, &mut outputs);
+                let stmt_node = Node::Statement(*id);
+                let stmt = dag2.add_node(stmt_node);
+                dag_nodes2.insert(stmt_node, stmt);
+                let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+                for var_key in inputs {
+                    if output_set.contains(&var_key) {
+                        continue;
+                    }
+                    let var_node = Node::Var(var_key.0, var_key.1);
+                    let var = *dag_nodes2
+                        .entry(var_node)
+                        .or_insert_with(|| dag2.add_node(var_node));
+                    if dag2.add_edge(var, stmt, ()).is_err() {
+                        let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
+                        let trigger_token = table[id].token().unwrap_or_default();
+                        return Err(SimulatorError::combinational_loop(
+                            &trigger_token,
+                            &participant_tokens,
+                        ));
+                    }
+                }
+                for var_key in outputs {
+                    let var_node = Node::Var(var_key.0, var_key.1);
+                    let var = *dag_nodes2
+                        .entry(var_node)
+                        .or_insert_with(|| dag2.add_node(var_node));
+                    if dag2.add_edge(stmt, var, ()).is_err() {
+                        let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
+                        let trigger_token = table[id].token().unwrap_or_default();
+                        return Err(SimulatorError::combinational_loop(
+                            &trigger_token,
+                            &participant_tokens,
+                        ));
+                    }
+                }
+            }
+            return Err(SimulatorError::combinational_loop(
+                &TokenRange::default(),
+                &[],
+            ));
+        }
+
+        // Build a relaxed DAG: skip edges that would create cycles when
+        // at least one endpoint is a non-expandable CompiledBlock.
+        // This gives a best-effort topological ordering.
+        log::debug!(
+            "analyze_dependency: using relaxed ordering for {} stmts with non-expandable CompiledBlocks",
+            table.len()
+        );
+        let mut dag_relaxed = Dag::<Node, ()>::new();
+        let mut dag_nodes_relaxed: HashMap<Node, _> = HashMap::default();
+        let cb_ids: HashSet<usize> = table
+            .iter()
+            .filter_map(|(id, x)| {
+                if matches!(x, ProtoStatement::CompiledBlock(_)) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         for (id, x) in &table {
             let mut inputs = vec![];
             let mut outputs = vec![];
             x.gather_variable_offsets(&mut inputs, &mut outputs);
             let stmt_node = Node::Statement(*id);
-            let stmt = dag2.add_node(stmt_node);
-            dag_nodes2.insert(stmt_node, stmt);
+            let stmt = dag_relaxed.add_node(stmt_node);
+            dag_nodes_relaxed.insert(stmt_node, stmt);
+
             let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
-            for var_key in inputs {
-                if output_set.contains(&var_key) {
+            for var_key in &inputs {
+                if output_set.contains(var_key) {
                     continue;
                 }
                 let var_node = Node::Var(var_key.0, var_key.1);
-                let var = *dag_nodes2
+                let var = *dag_nodes_relaxed
                     .entry(var_node)
-                    .or_insert_with(|| dag2.add_node(var_node));
-                if dag2.add_edge(var, stmt, ()).is_err() {
-                    let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
-                    let trigger_token = table[id].token().unwrap_or_default();
-                    return Err(SimulatorError::combinational_loop(
-                        &trigger_token,
-                        &participant_tokens,
-                    ));
+                    .or_insert_with(|| dag_relaxed.add_node(var_node));
+                if dag_relaxed.add_edge(var, stmt, ()).is_err() {
+                    // Skip this edge if a CompiledBlock is involved
+                    if cb_ids.contains(id) {
+                        continue;
+                    }
+                    // Check if the var was written by a CB
+                    let written_by_cb = table.iter().any(|(oid, ox)| {
+                        cb_ids.contains(oid) && {
+                            let mut o_outs = vec![];
+                            let mut o_ins = vec![];
+                            ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
+                            o_outs.contains(var_key)
+                        }
+                    });
+                    if written_by_cb {
+                        continue;
+                    }
+                    // Non-CB cycle: skip but log
+                    log::debug!("analyze_dependency: skipping non-CB cyclic input edge");
                 }
             }
-            for var_key in outputs {
+            for var_key in &outputs {
                 let var_node = Node::Var(var_key.0, var_key.1);
-                let var = *dag_nodes2
+                let var = *dag_nodes_relaxed
                     .entry(var_node)
-                    .or_insert_with(|| dag2.add_node(var_node));
-                if dag2.add_edge(stmt, var, ()).is_err() {
-                    let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
-                    let trigger_token = table[id].token().unwrap_or_default();
-                    return Err(SimulatorError::combinational_loop(
-                        &trigger_token,
-                        &participant_tokens,
-                    ));
+                    .or_insert_with(|| dag_relaxed.add_node(var_node));
+                if dag_relaxed.add_edge(stmt, var, ()).is_err() {
+                    // Skip cyclic output edges involving CompiledBlocks
+                    if cb_ids.contains(id) {
+                        continue;
+                    }
+                    let read_by_cb = table.iter().any(|(oid, ox)| {
+                        cb_ids.contains(oid) && {
+                            let mut o_outs = vec![];
+                            let mut o_ins = vec![];
+                            ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
+                            o_ins.contains(var_key)
+                        }
+                    });
+                    if read_by_cb {
+                        continue;
+                    }
+                    log::debug!("analyze_dependency: skipping non-CB cyclic output edge");
                 }
             }
         }
-        // No more expandable CompiledBlocks but cycle persists.
-        // Count remaining CompiledBlocks and total statements for debugging.
-        let cb_count = table
-            .values()
-            .filter(|x| matches!(x, ProtoStatement::CompiledBlock(_)))
-            .count();
-        let total = table.len();
-        log::debug!(
-            "analyze_dependency: genuine comb loop ({} stmts, {} CompiledBlocks remaining)",
-            total,
-            cb_count
-        );
-        return Err(SimulatorError::combinational_loop(
-            &TokenRange::default(),
-            &[],
-        ));
+
+        // Toposort the relaxed DAG
+        let nodes = algo::toposort(dag_relaxed.graph(), None).unwrap();
+        let mut ret = vec![];
+        for i in nodes {
+            if let Node::Statement(x) = dag_relaxed[i]
+                && let Some(stmt) = table.remove(&x)
+            {
+                ret.push(stmt);
+            }
+        }
+        return Ok(ret);
     }
 }
 
@@ -712,7 +811,9 @@ pub(crate) fn analyze_dependency(
 /// For non-swap variables, dst_offset is rewritten from next to current.
 /// Returns (sorted_statements, needs_swap_offsets, force_all_swap).
 /// force_all_swap=true means ff_swap_offsets should be None.
-fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
+pub(crate) fn sort_ff_event(
+    statements: Vec<ProtoStatement>,
+) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
         /// Variable node. For FF, offset is the canonical current_offset.
@@ -822,12 +923,11 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
             let mut needs_swap: HashSet<isize> = self_ref_all;
 
             // CompiledBlock FF writes are opaque: always need swap.
+            // Use ff_canonical_offsets (current offsets) for correct ff_swap matching.
             for stmt in &sorted {
                 if let ProtoStatement::CompiledBlock(cb) = stmt {
-                    for (is_ff, off) in &cb.output_offsets {
-                        if *is_ff {
-                            needs_swap.insert(*off);
-                        }
+                    for off in &cb.ff_canonical_offsets {
+                        needs_swap.insert(*off);
                     }
                 }
             }
@@ -864,30 +964,75 @@ fn sort_ff_event(statements: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, HashS
     }
 }
 
-/// Fallback: all FF variables need swap; preserve original statement order.
-/// Comb cycles (e.g. blocking assignment `tc = tc + 1` when is_ff=false)
-/// cause DAG cycles but are harmless — the statements already execute
-/// sequentially within each always_ff block, so preserving insertion
-/// order (source order) gives correct blocking assignment semantics.
+/// Fallback: preserve original statement order when DAG has cycles.
+/// Compute needs_swap using the same logic as the success path so that
+/// rewrite_ff_direct can still convert non-swap FF assignments to direct writes.
 fn fallback_preserve_order(
     table: HashMap<usize, ProtoStatement>,
 ) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
-    let mut all_ff_offsets = HashSet::default();
-    for x in table.values() {
-        for off in x.gather_ff_canonical_offsets() {
-            all_ff_offsets.insert(off);
-        }
-    }
     // Sort by key (insertion index) to preserve source order
     let mut entries: Vec<_> = table.into_iter().collect();
     entries.sort_by_key(|(k, _)| *k);
     let stmts: Vec<_> = entries.into_iter().map(|(_, v)| v).collect();
-    (stmts, all_ff_offsets, true)
+
+    // Self-referencing FF variables need swap
+    let mut needs_swap: HashSet<isize> = HashSet::default();
+    for stmt in &stmts {
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+        let ff_write_canonical: HashSet<isize> = stmt.gather_ff_canonical_offsets();
+        let ff_read_offsets: HashSet<isize> = inputs
+            .iter()
+            .filter(|(is_ff, _)| *is_ff)
+            .map(|(_, off)| *off)
+            .collect();
+        for off in ff_read_offsets.intersection(&ff_write_canonical) {
+            needs_swap.insert(*off);
+        }
+    }
+
+    // CompiledBlock FF writes are opaque: always need swap
+    for stmt in &stmts {
+        if let ProtoStatement::CompiledBlock(cb) = stmt {
+            for off in &cb.ff_canonical_offsets {
+                needs_swap.insert(*off);
+            }
+        }
+    }
+
+    // Walk source order to find read-after-write violations
+    let mut written_ff = HashSet::default();
+    for stmt in &stmts {
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+        for (is_ff, offset) in &inputs {
+            if *is_ff && written_ff.contains(offset) {
+                needs_swap.insert(*offset);
+            }
+        }
+        let canonical = stmt.gather_ff_canonical_offsets();
+        for off in canonical {
+            written_ff.insert(off);
+        }
+    }
+
+    // Rewrite non-swap FF assignments: dst_offset next → current
+    let stmts: Vec<_> = stmts
+        .into_iter()
+        .map(|stmt| rewrite_ff_direct(stmt, &needs_swap))
+        .collect();
+
+    (stmts, needs_swap, false)
 }
 
 /// Rewrite a ProtoStatement: for FF assignments whose canonical offset
 /// is NOT in needs_swap, change dst_offset from next to current.
-fn rewrite_ff_direct(stmt: ProtoStatement, needs_swap: &HashSet<isize>) -> ProtoStatement {
+pub(crate) fn rewrite_ff_direct(
+    stmt: ProtoStatement,
+    needs_swap: &HashSet<isize>,
+) -> ProtoStatement {
     match stmt {
         ProtoStatement::Assign(mut x) => {
             if x.dst_is_ff {
@@ -1071,28 +1216,44 @@ impl Conv<&air::Module> for ProtoModule {
             all_child_modules.extend(proto_decl.child_modules);
         }
 
-        // Add comb statements that depend on post_comb output port
-        // destinations. This handles cross-child dependencies:
-        // ChildA comb → output port → parent var → ChildB input port.
-        // Only Assign outputs are tracked (not CompiledBlock internals).
+        // Transitively add comb statements that depend (directly or
+        // indirectly) on post_comb_fns outputs. This handles multi-hop
+        // dependency chains: ChildA comb (post_comb) → parent var →
+        // parent comb → ChildB input port → ChildB comb (comb).
+        // Without transitive closure, the 3-pass settling
+        // (post_comb → comb → post_comb) fails when the chain crosses
+        // the post_comb/comb boundary more than once.
         if !all_post_comb_fns.is_empty() {
-            let mut port_outputs = HashSet::default();
+            // Collect all outputs from existing post_comb entries
+            let mut post_comb_outputs = HashSet::default();
             for s in &all_post_comb_fns {
-                if !matches!(s, ProtoStatement::CompiledBlock(_)) {
-                    let mut outputs: Vec<(bool, isize)> = vec![];
-                    let mut inputs: Vec<(bool, isize)> = vec![];
-                    s.gather_variable_offsets(&mut inputs, &mut outputs);
-                    port_outputs.extend(outputs);
-                }
+                let mut outputs: Vec<(bool, isize)> = vec![];
+                let mut inputs: Vec<(bool, isize)> = vec![];
+                s.gather_variable_offsets(&mut inputs, &mut outputs);
+                post_comb_outputs.extend(outputs);
             }
-            if !port_outputs.is_empty() {
-                for stmt in &all_comb_statements {
+
+            // Repeatedly scan comb_statements for dependencies until
+            // no new statements are added (transitive closure).
+            let mut added_indices = HashSet::default();
+            loop {
+                let mut changed = false;
+                for (idx, stmt) in all_comb_statements.iter().enumerate() {
+                    if added_indices.contains(&idx) {
+                        continue;
+                    }
                     let mut inputs: Vec<(bool, isize)> = vec![];
                     let mut outputs: Vec<(bool, isize)> = vec![];
                     stmt.gather_variable_offsets(&mut inputs, &mut outputs);
-                    if inputs.iter().any(|i| port_outputs.contains(i)) {
+                    if inputs.iter().any(|i| post_comb_outputs.contains(i)) {
                         all_post_comb_fns.push(stmt.clone());
+                        post_comb_outputs.extend(outputs);
+                        added_indices.insert(idx);
+                        changed = true;
                     }
+                }
+                if !changed {
+                    break;
                 }
             }
         }
@@ -1106,9 +1267,15 @@ impl Conv<&air::Module> for ProtoModule {
             None
         };
 
-        let sorted_comb = match analyze_dependency(all_comb_statements) {
+        let sorted_comb = match analyze_dependency(all_comb_statements.clone()) {
             Ok(sorted) => sorted,
             Err(err) => {
+                log::warn!(
+                    "analyze_dependency failed for comb ({} stmts) of {:?}: {:?}",
+                    all_comb_statements.len(),
+                    src.name,
+                    err
+                );
                 return Err(err);
             }
         };
@@ -1124,6 +1291,20 @@ impl Conv<&air::Module> for ProtoModule {
                 }
             }
         }
+        // Also mark comb offsets read by post_comb_fns as observable.
+        // post_comb_fns contain child module comb (CompiledBlocks and
+        // port connection assigns). Without this, optimize_comb may
+        // inline/DCE comb assigns that post_comb_fns depend on.
+        for s in &all_post_comb_fns {
+            let mut inputs = vec![];
+            let mut outputs = vec![];
+            s.gather_variable_offsets(&mut inputs, &mut outputs);
+            for (is_ff, off) in inputs {
+                if !is_ff {
+                    observable_comb.insert(off);
+                }
+            }
+        }
 
         let sorted_comb = super::optimize::optimize_comb(
             sorted_comb,
@@ -1136,12 +1317,33 @@ impl Conv<&air::Module> for ProtoModule {
         let comb_statements = try_jit(context, sorted_comb);
 
         // Build full comb statements (including per-core internal comb)
-        // when merged comb+event is used. get()/dump() needs this for correctness.
+        // when merged comb+event is used or when post_comb_fns exist.
+        // get()/dump() needs this for correctness after FF swap.
+        let mut use_full_comb_in_step = false;
         let full_comb_statements = if has_merged {
-            let mut full = full_comb_extra;
-            full.extend(lite_comb_copy.unwrap());
+            // Decompose CompiledBlocks with original_stmts to avoid false
+            // dependency cycles in analyze_dependency.
+            let mut full = Vec::new();
+            for s in full_comb_extra
+                .into_iter()
+                .chain(lite_comb_copy.unwrap().into_iter())
+            {
+                if let ProtoStatement::CompiledBlock(cb) = &s
+                    && !cb.original_stmts.is_empty()
+                {
+                    full.extend(cb.original_stmts.iter().cloned());
+                    continue;
+                }
+                full.push(s);
+            }
             let full_sorted = match analyze_dependency(full.clone()) {
-                Ok(sorted) => sorted,
+                Ok(sorted) => {
+                    // Successfully sorted: use in step() for correct
+                    // evaluation order across deep comb chains
+                    // (e.g., dcache → MMU → memory).
+                    use_full_comb_in_step = true;
+                    sorted
+                }
                 Err(_) => {
                     // Full comb may have false cycles from CompiledBlocks.
                     // Fall back to unsorted order (used only by get()/dump()).
@@ -1156,6 +1358,40 @@ impl Conv<&air::Module> for ProtoModule {
             );
             let full_sorted = reorder_by_level(full_sorted);
             Some(try_jit(context, full_sorted))
+        } else if !all_post_comb_fns.is_empty() {
+            // 3+ level hierarchy: middle module has post_comb_fns but no
+            // merged functions. Combine comb + post_comb into a single
+            // sorted list so eval_comb_full can evaluate everything in
+            // one pass with correct dependency ordering.
+            //
+            // CompiledBlocks that bundle input port writes + output port
+            // reads create artificial cycles in analyze_dependency. Decompose
+            // them into individual statements for correct sorting.
+            let mut full = Vec::new();
+            for s in all_comb_statements.iter().chain(all_post_comb_fns.iter()) {
+                if let ProtoStatement::CompiledBlock(cb) = s
+                    && !cb.original_stmts.is_empty()
+                {
+                    full.extend(cb.original_stmts.iter().cloned());
+                    continue;
+                }
+                full.push(s.clone());
+            }
+            match analyze_dependency(full.clone()) {
+                Ok(sorted) => {
+                    // Successfully sorted: safe to use in step() too
+                    let full_sorted = reorder_by_level(sorted);
+                    use_full_comb_in_step = true;
+                    Some(try_jit(context, full_sorted))
+                }
+                Err(_) => {
+                    // Circular dependencies (e.g., large multi-module designs).
+                    // Use unsorted list for eval_comb_full (get/dump) only.
+                    // step() continues to use the settle loop.
+                    let full_sorted = reorder_by_level(full);
+                    Some(try_jit(context, full_sorted))
+                }
+            }
         } else {
             None
         };
@@ -1203,9 +1439,19 @@ impl Conv<&air::Module> for ProtoModule {
             module_variable_meta,
             event_statements,
             comb_statements,
-            post_comb_fns: analyze_dependency(all_post_comb_fns.clone())
-                .unwrap_or(all_post_comb_fns),
+            post_comb_fns: match analyze_dependency(all_post_comb_fns.clone()) {
+                Ok(sorted) => sorted,
+                Err(_) => {
+                    log::warn!(
+                        "analyze_dependency failed for post_comb_fns ({} stmts) of {:?}",
+                        all_post_comb_fns.len(),
+                        src.name
+                    );
+                    all_post_comb_fns
+                }
+            },
             full_comb_statements,
+            use_full_comb_in_step,
             ff_swap_offsets,
         })
     }

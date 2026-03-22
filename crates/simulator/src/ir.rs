@@ -53,6 +53,8 @@ pub struct Ir {
     /// Full comb statements (includes per-core internal comb).
     /// Used by get()/dump() when merged comb+event events exist.
     pub full_comb_statements: Option<Vec<Statement>>,
+    /// When true, step() should use full_comb_statements for settle.
+    pub use_full_comb_in_step: bool,
     /// FF swap entries: (current_offset, value_size) pairs.
     /// Swap value_size bytes between current_offset and current_offset + value_size.
     pub ff_swap_entries: Vec<(usize, usize)>,
@@ -80,6 +82,7 @@ impl Ir {
             post_comb_ports: module.post_comb_fns.clone(),
             post_comb_fns: module.post_comb_fns,
             full_comb_statements: module.full_comb_statements,
+            use_full_comb_in_step: module.use_full_comb_in_step,
             ff_swap_entries: module.ff_swap_entries,
             _binary: binary,
         }
@@ -114,12 +117,18 @@ impl Ir {
     /// Evaluate full comb (including per-core internal comb).
     /// Used by get()/dump() for correctness after FF swap.
     pub fn eval_comb_full(&self, mask_cache: &mut MaskCache) {
-        let stmts = self
-            .full_comb_statements
-            .as_ref()
-            .unwrap_or(&self.comb_statements);
-        for x in stmts {
-            x.eval_step(mask_cache);
+        if let Some(stmts) = &self.full_comb_statements {
+            for x in stmts {
+                x.eval_step(mask_cache);
+            }
+        } else if !self.post_comb_fns.is_empty() {
+            // 3+ level hierarchy: full_comb_statements should have been
+            // built. If somehow it wasn't, fall back to settle loop.
+            self.eval_comb(mask_cache);
+            self.eval_post_comb(mask_cache);
+            self.eval_comb(mask_cache);
+        } else {
+            self.eval_comb(mask_cache);
         }
     }
 
