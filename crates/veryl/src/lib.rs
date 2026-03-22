@@ -161,6 +161,10 @@ pub struct OptTest {
     /// Target files
     pub files: Vec<PathBuf>,
 
+    /// Test name filter (substring match)
+    #[arg(short = 't', long = "test")]
+    pub test: Option<String>,
+
     /// Simulator
     #[arg(long, value_enum)]
     pub sim: Option<SimType>,

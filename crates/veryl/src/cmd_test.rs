@@ -1,7 +1,7 @@
 use crate::cmd_build::CmdBuild;
 use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{OptBuild, OptTest};
-use log::{error, info};
+use log::{error, info, warn};
 use miette::Result;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
@@ -36,6 +36,33 @@ impl CmdTest {
 
         let tests = symbol_table::get_tests(&metadata.project.name);
         let doc_tests = symbol_table::get_doc_tests(&metadata.project.name);
+
+        let (tests, doc_tests) = if let Some(ref filter) = self.opt.test {
+            let tests: Vec<_> = tests
+                .into_iter()
+                .filter(|(test, _)| {
+                    let name =
+                        veryl_parser::resource_table::get_str_value(*test).unwrap_or_default();
+                    name.contains(filter.as_str())
+                })
+                .collect();
+
+            let doc_tests: Vec<_> = doc_tests
+                .into_iter()
+                .filter(|dt| {
+                    let name = resource_table::get_str_value(dt.module_name).unwrap_or_default();
+                    name.contains(filter.as_str())
+                })
+                .collect();
+
+            if tests.is_empty() && doc_tests.is_empty() {
+                warn!("No tests matched filter '{filter}'");
+            }
+
+            (tests, doc_tests)
+        } else {
+            (tests, doc_tests)
+        };
 
         let sim_type = if let Some(x) = self.opt.sim {
             x.into()
