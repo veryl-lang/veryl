@@ -7,3 +7,12 @@ pub enum Event {
     Initial,
     Final,
 }
+
+impl Event {
+    pub fn var_id(&self) -> Option<VarId> {
+        match self {
+            Event::Clock(id) | Event::Reset(id) if *id != VarId::SYNTHETIC => Some(*id),
+            _ => None,
+        }
+    }
+}

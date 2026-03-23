@@ -29,7 +29,7 @@ fn simple_comb() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -289,7 +289,7 @@ fn wide_bit_ops_256() {
 
         sim.set("a", a);
         sim.set("b", b);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let c = Value::new(0x0f000f, 256, false);
         let d = Value::new(0xff0fff, 256, false);
@@ -326,7 +326,7 @@ fn wide_256_arithmetic() {
 
         sim.set("a", a);
         sim.set("b", b);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("sum").unwrap(), Value::new(142, 256, false));
         assert_eq!(sim.get("diff").unwrap(), Value::new(58, 256, false));
@@ -362,7 +362,7 @@ fn wide_256_comparison() {
 
         sim.set("a", a);
         sim.set("b", b);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(
             sim.get("eq").unwrap(),
@@ -415,7 +415,7 @@ fn wide_256_shift() {
 
         sim.set("a", a);
         sim.set("s", s);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(
             sim.get("left").unwrap(),
@@ -456,12 +456,12 @@ fn wide_256_ternary() {
         sim.set("sel", Value::new(1, 1, false));
         sim.set("a", a.clone());
         sim.set("b", b.clone());
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("c").unwrap(), a, "config: {:?}", config);
 
         sim.set("sel", Value::new(0, 1, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("c").unwrap(), b, "config: {:?}", config);
     }
@@ -556,7 +556,7 @@ fn wide_bit_ops() {
 
         sim.set("a", a);
         sim.set("b", b);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let c = Value::new(0x0f000f, 96, false);
         let d = Value::new(0xff0fff, 96, false);
@@ -591,11 +591,11 @@ fn wide_ternary() {
         sim.set("sel", Value::new(1, 1, false));
         sim.set("a", a.clone());
         sim.set("b", b.clone());
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("c").unwrap(), a);
 
         sim.set("sel", Value::new(0, 1, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("c").unwrap(), b);
     }
 }
@@ -636,7 +636,7 @@ fn select() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -697,7 +697,7 @@ fn inst() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -894,7 +894,7 @@ fn binary_op() {
         sim.set("c", c);
         sim.set("d", d);
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -955,7 +955,7 @@ fn comb_dependency() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -993,7 +993,7 @@ fn dump_vcd() {
         sim.set("a", a);
         sim.set("b", b);
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let a = Value::new(30, 32, false);
         let b = Value::new(10, 32, false);
@@ -1001,7 +1001,7 @@ fn dump_vcd() {
         sim.set("a", a);
         sim.set("b", b);
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let a = Value::new(50, 32, false);
         let b = Value::new(20, 32, false);
@@ -1009,7 +1009,7 @@ fn dump_vcd() {
         sim.set("a", a);
         sim.set("b", b);
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let dump = String::from_utf8(dump).unwrap();
         let exp = r#"$timescale 1 us $end
@@ -1070,7 +1070,7 @@ fn unary_test(op: &str, x: &str, dst_width: usize, dst: &str, only_4state: bool)
 
         sim.set("x", x.clone());
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1216,7 +1216,7 @@ fn binary_test(x: &str, op: &str, y: &str, dst_width: usize, dst: &str, only_4st
         sim.set("x", x.clone());
         sim.set("y", y.clone());
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1495,7 +1495,7 @@ fn partial_jit() {
         sim.set("b", Value::new(20, 32, false));
         sim.set("d", Value::new(2, 3, false));
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("x").unwrap(), Value::new(30, 32, false));
         assert_eq!(sim.get("z").unwrap(), Value::new(100, 32, false));
@@ -1525,7 +1525,7 @@ fn concatenation() {
         sim.set("a", Value::new(0xABCD_1234, 32, false));
         sim.set("b", Value::new(0x5678_9ABC, 32, false));
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1555,7 +1555,7 @@ fn concatenation_repeat() {
 
         sim.set("a", Value::new(0xAB, 32, false));
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1592,7 +1592,7 @@ fn concatenation_4state() {
         sim.set("a", Value::from_str("8'hx3").unwrap());
         sim.set("b", Value::new(0xFF, 8, false));
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1624,7 +1624,7 @@ fn lhs_concatenation() {
         // a = upper 20 bits = 0xABCDE
         // b = lower 12 bits = 0x123
         sim.set("x", Value::new(0xABCDE123, 32, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1654,7 +1654,7 @@ fn lhs_concatenation_equal_split() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         sim.set("x", Value::new(0xDEAD_BEEF, 32, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let a = sim.get("a").unwrap();
         let b = sim.get("b").unwrap();
@@ -1680,7 +1680,7 @@ fn lhs_concatenation_small_value() {
         let ir = analyze(code, &config);
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         let a = sim.get("a").unwrap();
         let b = sim.get("b").unwrap();
@@ -1716,7 +1716,7 @@ fn function_call_expr() {
 
         sim.set("a", Value::new(10, 32, false));
         sim.set("b", Value::new(20, 32, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("c").unwrap(), Value::new(30, 32, false));
     }
@@ -1749,7 +1749,7 @@ fn function_call_void() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         sim.set("a", Value::new(7, 32, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("b").unwrap(), Value::new(14, 32, false));
     }
@@ -1782,7 +1782,7 @@ fn function_call_with_output() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         sim.set("a", Value::new(5, 32, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("c").unwrap(), Value::new(6, 32, false));
         assert_eq!(sim.get("d").unwrap(), Value::new(10, 32, false));
@@ -1822,7 +1822,7 @@ fn function_call_nested() {
 
         sim.set("a", Value::new(3, 32, false));
         sim.set("b", Value::new(4, 32, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         // double(3) = 6, add(6, 4) = 10
         assert_eq!(sim.get("c").unwrap(), Value::new(10, 32, false));
@@ -1896,11 +1896,11 @@ fn if_expression() {
         sim.set("sel", Value::new(1, 1, false));
         sim.set("a", Value::new(42, 8, false));
         sim.set("b", Value::new(99, 8, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(42, 8, false));
 
         sim.set("sel", Value::new(0, 1, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(99, 8, false));
     }
 }
@@ -1925,15 +1925,15 @@ fn if_expression_chained() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         sim.set("sel", Value::new(2, 2, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(10, 8, false));
 
         sim.set("sel", Value::new(1, 2, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(20, 8, false));
 
         sim.set("sel", Value::new(0, 2, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(30, 8, false));
     }
 }
@@ -1962,11 +1962,11 @@ fn if_expression_nested() {
         sim.set("sel", Value::new(1, 1, false));
         sim.set("a", Value::new(30, 8, false));
         sim.set("b", Value::new(12, 8, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(42, 8, false));
 
         sim.set("sel", Value::new(0, 1, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(18, 8, false));
     }
 }
@@ -2000,27 +2000,27 @@ fn if_expression_4state() {
 
         // 4'bxxxx -> false (all unknown)
         sim.set("sel", Value::from_str("4'bxxxx").unwrap());
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(99, 8, false));
 
         // 4'bzzzz -> false (all hi-Z)
         sim.set("sel", Value::from_str("4'bzzzz").unwrap());
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(99, 8, false));
 
         // 4'bx000 -> false (known bits are all zero)
         sim.set("sel", Value::from_str("4'bx000").unwrap());
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(99, 8, false));
 
         // 4'b1x00 -> true (has a known nonzero bit)
         sim.set("sel", Value::from_str("4'b1x00").unwrap());
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(42, 8, false));
 
         // 4'b0001 -> true (nonzero, no X/Z)
         sim.set("sel", Value::new(1, 4, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("y").unwrap(), Value::new(42, 8, false));
     }
 }
@@ -2190,7 +2190,7 @@ fn interface_inst() {
         let ir = analyze(code, &config);
         println!("{}", ir.dump_variables());
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         println!("{}", sim.ir.dump_variables());
         let out = sim.get("out").unwrap();
         let exp = Value::new(42, 8, false);
@@ -2263,7 +2263,7 @@ fn interface_modport() {
         let ir = analyze(code, &config);
         println!("{}", ir.dump_variables());
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         println!("{}", sim.ir.dump_variables());
         let data = sim.get("out_data").unwrap();
         let valid = sim.get("out_valid").unwrap();
@@ -2299,7 +2299,7 @@ fn interface_function() {
         let ir = analyze(code, &config);
         println!("{}", ir.dump_variables());
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         println!("{}", sim.ir.dump_variables());
         let out = sim.get("out").unwrap();
         let exp = Value::new(42, 8, false);
@@ -2332,7 +2332,7 @@ fn array_literal_comb() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         sim.set("a", Value::new(40, 8, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         println!("{}", sim.ir.dump_variables());
 
@@ -2411,7 +2411,7 @@ fn struct_constructor() {
         sim.set("a", Value::new(0xAB, 8, false));
         sim.set("b", Value::new(0xCD, 8, false));
 
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         // Struct is packed MSB-first: {hi, lo} = {0xAB, 0xCD} = 0xABCD
         assert_eq!(sim.get("c").unwrap(), Value::new(0xABCD, 16, false));
@@ -2489,7 +2489,7 @@ fn array_dynamic_index_read() {
 
         for idx in 0..4u64 {
             sim.set("idx", Value::new(idx, 2, false));
-            sim.step(&Event::Clock(VarId::default()));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
             let expected = (idx + 1) * 10;
             assert_eq!(sim.get("o").unwrap(), Value::new(expected, 8, false));
         }
@@ -2593,7 +2593,7 @@ fn array_dynamic_index_write_comb() {
 
         sim.set("idx", Value::new(1, 2, false));
         sim.set("val", Value::new(77, 8, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("o").unwrap(), Value::new(77, 8, false));
     }
@@ -2706,15 +2706,15 @@ fn case_as_enum_cast() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         sim.set("sel", Value::new(0, 2, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("out").unwrap(), Value::new(10, 8, false));
 
         sim.set("sel", Value::new(1, 2, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("out").unwrap(), Value::new(20, 8, false));
 
         sim.set("sel", Value::new(2, 2, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("out").unwrap(), Value::new(30, 8, false));
     }
 }
@@ -2745,7 +2745,7 @@ fn signed_unsigned_in_expr() {
 
         sim.set("a", Value::new(3, 8, false));
         sim.set("b", Value::new(5, 8, false));
-        sim.step(&Event::Clock(VarId::default()));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("out").unwrap(), Value::new(8, 8, false));
     }
 }
