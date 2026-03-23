@@ -1553,7 +1553,8 @@ impl_token_range_enum!(
     interface_declaration,
     package_declaration,
     alias_declaration,
-    proto_declaration
+    proto_declaration,
+    function_declaration
 );
 
 // ----------------------------------------------------------------------------

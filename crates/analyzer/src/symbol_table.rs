@@ -94,6 +94,7 @@ pub struct SymbolTable {
     bind_list: Vec<Bind>,
     msb_list: Vec<Msb>,
     connect_list: Vec<Connect>,
+    reference_func_table: HashMap<SymbolId, Vec<GenericSymbolPath>>,
     suppress_cache_clear: bool,
 }
 
@@ -500,8 +501,12 @@ impl SymbolTable {
             | SymbolKind::AliasPackage(_)
             | SymbolKind::ProtoAliasPackage(_)
             | SymbolKind::ProtoFunction(_) => via_pacakge,
-            SymbolKind::Function(_) => {
-                via_modport || via_interface_instance || via_pacakge || via_tb_component
+            SymbolKind::Function(x) => {
+                via_modport
+                    || via_interface_instance
+                    || via_pacakge
+                    || via_tb_component
+                    || via_namespace && x.is_unbound()
             }
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
             SymbolKind::Modport(_) => via_interface || via_interface_instance,
@@ -1234,6 +1239,14 @@ impl SymbolTable {
         self.project_local_table.get(&prj).cloned()
     }
 
+    pub fn add_reference_functions(&mut self, id: SymbolId, functions: Vec<GenericSymbolPath>) {
+        self.reference_func_table.insert(id, functions);
+    }
+
+    pub fn get_reference_functions(&self, id: SymbolId) -> Option<Vec<GenericSymbolPath>> {
+        self.reference_func_table.get(&id).cloned()
+    }
+
     pub fn clear(&mut self) {
         self.clone_from(&Self::new());
     }
@@ -1823,6 +1836,15 @@ pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
 
 pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
+}
+
+pub fn add_reference_functions(id: SymbolId, functions: Vec<GenericSymbolPath>) {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference_functions(id, functions))
+}
+
+pub fn get_reference_functions(id: SymbolId) -> Option<Vec<GenericSymbolPath>> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_reference_functions(id))
 }
 
 pub fn clear() {

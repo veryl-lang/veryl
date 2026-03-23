@@ -181,12 +181,14 @@ impl GenericMap {
     }
 
     fn get_name_prefix(&self, symbol: &Symbol, include_namspace_prefix: bool) -> String {
-        if include_namspace_prefix
-            && matches!(
-                symbol.kind,
-                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
-            )
-        {
+        let emit_namespace_preffix = match &symbol.kind {
+            SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
+                include_namspace_prefix
+            }
+            SymbolKind::Function(x) => include_namspace_prefix && x.is_unbound(),
+            _ => false,
+        };
+        if emit_namespace_preffix {
             format!("{}_", symbol.namespace)
         } else {
             "".to_string()
@@ -750,6 +752,17 @@ impl Symbol {
                 } else {
                     false
                 }
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_unbound_function(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Function(x) => x.is_unbound(),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                symbol.is_unbound_function()
             }
             _ => false,
         }
@@ -1966,6 +1979,7 @@ pub struct VariableProperty {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Affiliation {
+    ProjectNamespace,
     Module,
     Interface,
     Package,
@@ -2149,6 +2163,12 @@ pub struct FunctionProperty {
     pub reference_paths: Vec<GenericSymbolPath>,
     pub constantable: Option<bool>,
     pub definition: Option<DefinitionId>,
+}
+
+impl FunctionProperty {
+    pub fn is_unbound(&self) -> bool {
+        self.affiliation == Affiliation::ProjectNamespace
+    }
 }
 
 #[derive(Debug, Clone)]

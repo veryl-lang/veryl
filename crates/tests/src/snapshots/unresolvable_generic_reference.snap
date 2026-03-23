@@ -1,0 +1,18 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unresolvable_generic_reference ()
+
+  × "__unresolvable_generic_reference_pkg__8 A" can't be resolved from the definition of generics
+   ╭─[../../testcases/error/unresolvable_generic_reference.veryl:5:10]
+ 4 │ 
+ 5 │ function unresolvable_generic_reference_func() -> u32 {
+   ·          ─────────────────┬─────────────────
+   ·                           ╰── Definition
+ 6 │     return unresolvable_generic_reference_pkg::<8>::A;
+   ·            ─────────────────────┬────────────────────
+   ·                                 ╰── Error location
+ 7 │ }
+   ╰────
+  help:
