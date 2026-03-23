@@ -117,6 +117,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             && let SymbolKind::Module(x) = &symbol.found.kind
         {
             context.push_namespace(symbol.found.inner_namespace());
+            context.in_test_module = x.test.is_some();
             if let Some(x) = x.default_clock {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_clock(path, x);

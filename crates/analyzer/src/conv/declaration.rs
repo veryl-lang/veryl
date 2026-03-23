@@ -1107,7 +1107,6 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         let token = value.inst.inst_token.token;
         check_inst(context, in_module, &token, &value.component_instantiation);
 
-        // Generate clock/reset variable for $tb component instances
         let path: SymbolPathNamespace = value
             .component_instantiation
             .scoped_identifier
@@ -1116,6 +1115,17 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         if let Ok(symbol) = symbol_table::resolve(&path)
             && let SymbolKind::TbComponent(ref tb_prop) = symbol.found.kind
         {
+            if !context.in_test_module {
+                let token: TokenRange = value
+                    .component_instantiation
+                    .scoped_identifier
+                    .as_ref()
+                    .into();
+                context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+                return Ok(ir::Declaration::Null);
+            }
+
+            // Generate clock/reset variable for $tb component instances
             let inst_token: TokenRange = value.component_instantiation.identifier.as_ref().into();
             let inst_name = value
                 .component_instantiation

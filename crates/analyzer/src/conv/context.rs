@@ -54,6 +54,7 @@ pub struct Context {
     pub ignore_var_func: bool,
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
+    pub in_test_module: bool,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
     pub mask_cache: MaskCache,

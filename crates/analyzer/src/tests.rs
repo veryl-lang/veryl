@@ -8875,6 +8875,36 @@ fn invalid_test() {
 }
 
 #[test]
+fn tb_component_outside_test() {
+    let code = r#"
+    module ModuleA {
+        inst clk: $tb::clock_gen;
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidTbUsage { .. }));
+
+    // Inside a test module should be fine
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        initial {
+            rst.assert(clk);
+            clk.next(10);
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn invalid_select() {
     let code = r#"
     module ModuleA {
