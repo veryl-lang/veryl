@@ -55,7 +55,7 @@ parol           = "4.3"
 parol_runtime   = "4.3"
 paste           = "1.0"
 pprof           = {version = "0.15.0", features = ["flamegraph"]}
-pulldown-cmark  = "0.13.1"
+pulldown-cmark  = "0.13.3"
 regex           = "1.12.3"
 scnr2           = "0.5.1"
 semver          = {version = "1.0", features = ["serde"]}
