@@ -580,9 +580,14 @@ impl ProtoStatement {
             ProtoStatement::AssignDynamic(x) => {
                 x.dst_index_expr.gather_variable_offsets(inputs);
                 x.expr.gather_variable_offsets(inputs);
-                for i in 0..x.dst_num_elements {
-                    let offset = x.dst_base_offset + x.dst_stride * i as isize;
-                    outputs.push((x.dst_is_ff, offset));
+                // Emit only base + last offset to represent the entire array as
+                // a single dependency unit.  Per-element expansion caused O(N²)
+                // blowup in analyze_dependency / sort_ff_event for large arrays.
+                outputs.push((x.dst_is_ff, x.dst_base_offset));
+                if x.dst_num_elements > 1 {
+                    let last_offset =
+                        x.dst_base_offset + x.dst_stride * (x.dst_num_elements as isize - 1);
+                    outputs.push((x.dst_is_ff, last_offset));
                 }
             }
             ProtoStatement::If(x) => {
@@ -609,8 +614,38 @@ impl ProtoStatement {
                 ProtoSystemFunctionCall::Finish => {}
             },
             ProtoStatement::CompiledBlock(x) => {
-                inputs.extend_from_slice(&x.input_offsets);
-                outputs.extend_from_slice(&x.output_offsets);
+                // Only include comb (non-FF) offsets for dependency analysis.
+                // FF reads/writes go through the current/next buffer swap and
+                // don't participate in combinational dependency chains.
+                // Including FF offsets creates false CombinationalLoop errors
+                // in analyze_dependency (e.g., hazard_unit stall → pipeline FF
+                // → hazard_unit input appears as a comb cycle).
+                if !x.stmt_deps.is_empty() {
+                    // Use fine-grained per-statement deps if available
+                    for (ins, outs) in &x.stmt_deps {
+                        for &(is_ff, off) in ins {
+                            if !is_ff {
+                                inputs.push((false, off));
+                            }
+                        }
+                        for &(is_ff, off) in outs {
+                            if !is_ff {
+                                outputs.push((false, off));
+                            }
+                        }
+                    }
+                } else {
+                    for &(is_ff, off) in &x.input_offsets {
+                        if !is_ff {
+                            inputs.push((false, off));
+                        }
+                    }
+                    for &(is_ff, off) in &x.output_offsets {
+                        if !is_ff {
+                            outputs.push((false, off));
+                        }
+                    }
+                }
             }
             ProtoStatement::TbMethodCall { .. } => {}
         }
@@ -627,9 +662,14 @@ impl ProtoStatement {
             }
             ProtoStatement::AssignDynamic(x) => {
                 if x.dst_is_ff {
-                    for i in 0..x.dst_num_elements {
-                        let current_stride = x.dst_stride;
-                        result.insert(x.dst_ff_current_base_offset + current_stride * i as isize);
+                    // Emit only base + last canonical offset to represent the
+                    // array.  Per-element expansion caused O(N) blowup for
+                    // large arrays.
+                    result.insert(x.dst_ff_current_base_offset);
+                    if x.dst_num_elements > 1 {
+                        let last = x.dst_ff_current_base_offset
+                            + x.dst_stride * (x.dst_num_elements as isize - 1);
+                        result.insert(last);
                     }
                 }
             }
