@@ -181,9 +181,10 @@ fn testbench_finish_stops_execution() {
 
 #[test]
 fn tb_clock_reset_analyze() {
-    // Verify that $tb::clock_gen/$tb::reset_gen and method calls pass analyzer
+    // Verify that $tb::clock_gen/$tb::reset_gen and method calls pass analyzer in test module
     symbol_table::clear();
     let code = r#"
+    #[test(test_counter)]
     module test_counter {
         inst clk: $tb::clock_gen;
         inst rst: $tb::reset_gen;
@@ -229,6 +230,7 @@ fn tb_integration_counter() {
         }
     }
 
+    #[test(test_counter)]
     module test_counter {
         inst clk: $tb::clock_gen;
         inst rst: $tb::reset_gen;
@@ -333,6 +335,7 @@ fn tb_readonly_cache_fill() {
         assign o_r2 = r2_val;
         assign o_stall = stall;
     }
+    #[test(test_cache)]
     module test_cache {
         inst clk: $tb::clock_gen;
         inst rst: $tb::reset_gen;
@@ -455,6 +458,7 @@ fn tb_function_inline() {
         }
     }
 
+    #[test(test_inline)]
     module test_inline {
         inst clk: $tb::clock_gen;
         inst rst: $tb::reset_gen;

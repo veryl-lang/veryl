@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_tb_usage (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_tb_usage)
+
+  × $tb component can only be used inside a test module
+   ╭─[../../testcases/error/tb_component_outside_test.veryl:2:15]
+ 1 │ module ModuleA {
+ 2 │     inst clk: $tb::clock_gen;
+   ·               ───────┬──────
+   ·                      ╰── Error location
+ 3 │ }
+   ╰────
+  help:

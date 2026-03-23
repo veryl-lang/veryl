@@ -1,0 +1,3 @@
+module ModuleA {
+    inst clk: $tb::clock_gen;
+}
