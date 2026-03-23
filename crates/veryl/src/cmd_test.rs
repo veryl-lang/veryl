@@ -7,7 +7,7 @@ use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
 use veryl_metadata::{FilelistType, Metadata, SimType};
 use veryl_parser::resource_table;
-use veryl_simulator::ir::{Config, build_ir};
+use veryl_simulator::ir::{Config, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
 use veryl_simulator::testbench::{TestResult, run_native_testbench};
@@ -70,6 +70,12 @@ impl CmdTest {
             metadata.test.simulator
         };
 
+        let config = Config {
+            use_jit: !self.opt.disable_jit,
+            ..Config::default()
+        };
+        let mut proto_cache = ProtoModuleCache::default();
+
         let mut success = 0;
         let mut failure = 0;
         for (test, property) in &tests {
@@ -79,7 +85,14 @@ impl CmdTest {
                         veryl_parser::resource_table::get_str_value(*test).unwrap_or_default();
                     info!("Executing test ({test_name})");
 
-                    match run_native_test(&ir, &test_name, &property.top, &self.opt) {
+                    match run_native_test(
+                        &ir,
+                        &test_name,
+                        &property.top,
+                        &self.opt,
+                        &config,
+                        &mut proto_cache,
+                    ) {
                         Ok(()) => {
                             info!("Succeeded test ({test_name})");
                             success += 1;
@@ -127,6 +140,8 @@ impl CmdTest {
                 &dt.wavedrom_json,
                 &dt.ports,
                 self.opt.wave,
+                &config,
+                &mut proto_cache,
             ) {
                 Ok(()) => {
                     info!("Succeeded doc test ({module_name})");
@@ -154,6 +169,8 @@ fn run_native_test(
     test_name: &str,
     top: &Option<resource_table::StrId>,
     opt: &OptTest,
+    config: &Config,
+    cache: &mut ProtoModuleCache,
 ) -> std::result::Result<(), SimulatorError> {
     let top_name = if let Some(top_str) = top {
         resource_table::get_str_value(*top_str).unwrap_or_default()
@@ -161,16 +178,12 @@ fn run_native_test(
         test_name.to_string()
     };
 
-    let config = Config {
-        use_jit: !opt.disable_jit,
-        ..Config::default()
-    };
     let top_str_id = resource_table::get_str_id(top_name.clone()).ok_or_else(|| {
         SimulatorError::TopModuleNotFound {
             module_name: top_name.clone(),
         }
     })?;
-    let sim_ir = build_ir(ir.clone(), top_str_id, &config)?;
+    let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
 
     let dump: Option<Box<dyn std::io::Write>> = if opt.wave {
         let path = format!("{}.vcd", test_name);
@@ -195,19 +208,20 @@ fn run_doc_test(
     wavedrom_json: &str,
     ports: &[(String, String)],
     wave: bool,
+    config: &Config,
+    cache: &mut ProtoModuleCache,
 ) -> std::result::Result<(), SimulatorError> {
     let mut scenario = parse_wavedrom(wavedrom_json).map_err(|e| SimulatorError::TestFailed {
         message: format!("WaveDrom parse error in {module_name}: {e}"),
     })?;
 
     classify_signals(&mut scenario, ports);
-    let config = Config::default();
     let top_str_id = resource_table::get_str_id(module_name.to_string()).ok_or_else(|| {
         SimulatorError::TopModuleNotFound {
             module_name: module_name.to_string(),
         }
     })?;
-    let sim_ir = build_ir(ir.clone(), top_str_id, &config)?;
+    let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
 
     let dump: Option<Box<dyn std::io::Write>> = if wave {
         let path = format!("{}_doc.vcd", module_name);

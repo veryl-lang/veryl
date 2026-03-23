@@ -27,6 +27,7 @@ pub use veryl_analyzer::value::Value;
 use crate::HashMap;
 use crate::simulator_error::SimulatorError;
 use memmap2::Mmap;
+use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
@@ -58,14 +59,24 @@ pub struct Ir {
     /// FF swap entries: (current_offset, value_size) pairs.
     /// Swap value_size bytes between current_offset and current_offset + value_size.
     pub ff_swap_entries: Vec<(usize, usize)>,
-    /// Keeps JIT-compiled code alive as long as the Ir instance is alive.
-    _binary: Vec<Mmap>,
+    /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
+    /// instances created from the same cached `ProtoModule` can share the binary.
+    _binary: Arc<Vec<Mmap>>,
 }
 
 impl Ir {
     pub fn from_module(
         module: Module,
         binary: Vec<Mmap>,
+        use_4state: bool,
+        token: TokenRange,
+    ) -> Ir {
+        Ir::from_module_arc(module, Arc::new(binary), use_4state, token)
+    }
+
+    pub fn from_module_arc(
+        module: Module,
+        binary: Arc<Vec<Mmap>>,
         use_4state: bool,
         token: TokenRange,
     ) -> Ir {
@@ -183,7 +194,7 @@ impl Ir {
     }
 }
 
-pub fn build_ir(ir: air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
+pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
     for x in &ir.components {
         if let air::Component::Module(x) = x
             && top == x.name
@@ -201,6 +212,71 @@ pub fn build_ir(ir: air::Ir, top: StrId, config: &Config) -> Result<Ir, Simulato
                 config.use_4state,
                 token,
             ));
+        }
+    }
+    Err(SimulatorError::TopModuleNotFound {
+        module_name: top.to_string(),
+    })
+}
+
+struct CacheEntry {
+    proto: ProtoModule,
+    binary: Arc<Vec<Mmap>>,
+    token: TokenRange,
+}
+
+/// Cache for `ProtoModule` and JIT binaries keyed by top module name.
+/// Reuses `Conv::conv` results across tests that share the same top module,
+/// only calling the cheap `instantiate()` on cache hits.
+#[derive(Default)]
+pub struct ProtoModuleCache {
+    entries: HashMap<StrId, CacheEntry>,
+}
+
+pub fn build_ir_cached(
+    ir: &air::Ir,
+    top: StrId,
+    config: &Config,
+    cache: &mut ProtoModuleCache,
+) -> Result<Ir, SimulatorError> {
+    // Cache hit: reuse ProtoModule, just instantiate with fresh buffers
+    if let Some(entry) = cache.entries.get(&top) {
+        let module = entry.proto.instantiate();
+        return Ok(Ir::from_module_arc(
+            module,
+            Arc::clone(&entry.binary),
+            config.use_4state,
+            entry.token,
+        ));
+    }
+
+    // Cache miss: run Conv::conv
+    for x in &ir.components {
+        if let air::Component::Module(x) = x
+            && top == x.name
+        {
+            let token = x.token;
+            let mut context = context::Context {
+                config: config.clone(),
+                ..Default::default()
+            };
+
+            let proto: ProtoModule = Conv::conv(&mut context, x)?;
+            let module = proto.instantiate();
+            let binary = Arc::new(context.binary);
+
+            let result = Ir::from_module_arc(module, Arc::clone(&binary), config.use_4state, token);
+
+            cache.entries.insert(
+                top,
+                CacheEntry {
+                    proto,
+                    binary,
+                    token,
+                },
+            );
+
+            return Ok(result);
         }
     }
     Err(SimulatorError::TopModuleNotFound {
