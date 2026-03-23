@@ -42,14 +42,7 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
         .collect();
     assert!(errors.is_empty());
 
-    build_ir(ir, top.into(), config)
-}
-
-/// Analyze multiple code strings as separate files (like cmd_build does).
-/// Each string is parsed and pass1'd separately, then post_pass1, then pass2.
-#[track_caller]
-fn analyze_multi_file(files: &[&str], config: &Config, top: &str) -> Result<Ir, SimulatorError> {
-    analyze_multi_file_prj(files, config, top, &["prj"])
+    build_ir(&ir, top.into(), config)
 }
 
 /// Analyze with per-file project names (simulates different prj for std vs user code)
@@ -105,7 +98,7 @@ fn analyze_multi_file_prj(
         .collect();
     assert!(errors.is_empty());
 
-    build_ir(ir, top.into(), config)
+    build_ir(&ir, top.into(), config)
 }
 
 mod error;

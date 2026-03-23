@@ -7383,7 +7383,7 @@ fn dynamic_array_two_read_ports() {
     }
     "#;
 
-    for mut config in Config::all() {
+    for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);

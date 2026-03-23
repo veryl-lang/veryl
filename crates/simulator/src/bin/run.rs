@@ -44,7 +44,7 @@ fn build(code: &str, top: &str, config: &Config) -> Ir {
     Analyzer::analyze_post_pass1();
     analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
 
-    ir::build_ir(ir, top.into(), config).expect("Failed to build IR")
+    ir::build_ir(&ir, top.into(), config).expect("Failed to build IR")
 }
 
 fn main() {

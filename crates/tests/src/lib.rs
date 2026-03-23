@@ -322,7 +322,7 @@ mod error {
                             let top = veryl_parser::resource_table::get_str_id(name.clone())
                                 .unwrap_or_else(|| name.as_str().into());
                             let config = veryl_simulator::ir::Config::default();
-                            match veryl_simulator::ir::build_ir(ir, top, &config) {
+                            match veryl_simulator::ir::build_ir(&ir, top, &config) {
                                 Err(sim_err) => {
                                     handler
                                         .render_report(
@@ -722,7 +722,7 @@ mod native_test {
             for config in Config::all() {
                 let top_str_id =
                     resource_table::get_str_id(top_name.clone()).expect("top module not found");
-                let sim_ir = build_ir(ir.clone(), top_str_id, &config)
+                let sim_ir = build_ir(&ir, top_str_id, &config)
                     .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
                 let result = run_native_testbench(sim_ir, None)
                     .unwrap_or_else(|e| panic!("testbench error for {test_str}: {e}"));
