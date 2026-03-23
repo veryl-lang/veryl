@@ -68,10 +68,6 @@ endmodule
             end
         endmodule
     `endif
-module veryl_testcase_test4;
-    initial begin
-        $display("test4");
-    end
-endmodule
+
 `endif
 //# sourceMappingURL=../map/48_test.sv.map

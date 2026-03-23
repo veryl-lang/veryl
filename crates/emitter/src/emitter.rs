@@ -13,7 +13,7 @@ use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
-    Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TypeKind,
+    Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TestType, TypeKind,
 };
 use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
@@ -5050,6 +5050,10 @@ impl VerylWalker for Emitter {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
         let ports = if let SymbolKind::Module(ref x) = symbol.found.kind {
+            // Native test modules don't need SV output (simulator runs them directly via IR)
+            if matches!(&x.test, Some(test) if matches!(test.r#type, TestType::Native)) {
+                return;
+            }
             self.default_clock = x.default_clock;
             self.default_reset = x.default_reset;
             x.ports.clone()
