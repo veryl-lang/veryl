@@ -653,3 +653,86 @@ mod filelist {
         check_order(&paths, "20_module_p.veryl", "21_alias_q.veryl");
     }
 }
+
+#[cfg(test)]
+mod native_test {
+    use std::fs;
+    use std::path::PathBuf;
+    use veryl_analyzer::ir::Ir;
+    use veryl_analyzer::symbol::TestType;
+    use veryl_analyzer::symbol_table;
+    use veryl_analyzer::{Analyzer, Context};
+    use veryl_metadata::Metadata;
+    use veryl_parser::Parser;
+    use veryl_parser::resource_table;
+    use veryl_simulator::ir::{Config, build_ir};
+    use veryl_simulator::testbench::{TestResult, run_native_testbench};
+
+    #[test]
+    fn test() {
+        let path = std::env::current_dir().unwrap();
+        let path = path.join("../../testcases/native_test");
+        let metadata_path = Metadata::search_from(path).unwrap();
+        let mut metadata = Metadata::load(&metadata_path).unwrap();
+        let paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
+
+        let mut contexts = Vec::new();
+        let mut ir = Ir::default();
+
+        for path in &paths {
+            let input = fs::read_to_string(&path.src).unwrap();
+            let parser = Parser::parse(&input, &path.src).unwrap();
+            let analyzer = Analyzer::new(&metadata);
+            let errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
+            assert!(errors.is_empty(), "pass1 errors: {errors:?}");
+            contexts.push((path, parser, analyzer));
+        }
+
+        let errors = Analyzer::analyze_post_pass1();
+        assert!(errors.is_empty(), "post_pass1 errors: {errors:?}");
+
+        let mut context = Context::default();
+        for (path, parser, analyzer) in &contexts {
+            let errors =
+                analyzer.analyze_pass2(&path.prj, &parser.veryl, &mut context, Some(&mut ir));
+            assert!(errors.is_empty(), "pass2 errors: {errors:?}");
+        }
+
+        let errors = Analyzer::analyze_post_pass2();
+        assert!(errors.is_empty(), "post_pass2 errors: {errors:?}");
+
+        let tests = symbol_table::get_tests(&metadata.project.name);
+        let native_tests: Vec<_> = tests
+            .iter()
+            .filter(|(_, prop)| matches!(prop.r#type, TestType::Native))
+            .collect();
+        assert!(
+            !native_tests.is_empty(),
+            "no native tests found in native_test project"
+        );
+
+        for (test_name, test_prop) in &native_tests {
+            let test_str = resource_table::get_str_value(*test_name).unwrap_or_default();
+            let top_name = if let Some(top) = &test_prop.top {
+                resource_table::get_str_value(*top).unwrap_or_default()
+            } else {
+                test_str.clone()
+            };
+
+            for config in Config::all() {
+                let top_str_id =
+                    resource_table::get_str_id(top_name.clone()).expect("top module not found");
+                let sim_ir = build_ir(ir.clone(), top_str_id, &config)
+                    .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
+                let result = run_native_testbench(sim_ir, None)
+                    .unwrap_or_else(|e| panic!("testbench error for {test_str}: {e}"));
+                assert_eq!(
+                    result,
+                    TestResult::Pass,
+                    "native test {test_str} failed (jit={})",
+                    config.use_jit
+                );
+            }
+        }
+    }
+}

@@ -2511,7 +2511,24 @@ pub fn tb_method_call(
             };
             TbMethod::ClockNext { count }
         }
-        (TbComponentKind::ResetGen, "assert") => TbMethod::ResetAssert,
+        (TbComponentKind::ResetGen, "assert") => {
+            let (clock, duration) = if let Some(ir::Arguments::Positional(ref positional)) = args
+                && let Some(arg) = positional.first()
+                && let ir::Expression::Term(factor) = &arg.0
+                && let ir::Factor::Variable(var_id, _, _, _) = factor.as_ref()
+                && let Some(var) = context.variables.get(var_id)
+                && let Some(clock_name) = var.path.0.first().copied()
+            {
+                let duration = positional
+                    .get(1)
+                    .map(|a| a.0.clone())
+                    .or_else(|| context.tb_reset_cycles.get(&inst_name).cloned());
+                (clock_name, duration)
+            } else {
+                return Err(ir_error!(token));
+            };
+            TbMethod::ResetAssert { clock, duration }
+        }
         _ => return Err(ir_error!(token)),
     };
 

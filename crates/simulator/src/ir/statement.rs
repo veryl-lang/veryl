@@ -104,14 +104,24 @@ pub struct AssignDynamicStatement {
 
 #[derive(Clone, Debug)]
 pub enum ProtoTbMethodKind {
-    ClockNext { count: Option<ProtoExpression> },
-    ResetAssert,
+    ClockNext {
+        count: Option<ProtoExpression>,
+    },
+    ResetAssert {
+        clock: StrId,
+        duration: Option<ProtoExpression>,
+    },
 }
 
 #[derive(Clone)]
 pub enum TbMethodKind {
-    ClockNext { count: Option<Expression> },
-    ResetAssert,
+    ClockNext {
+        count: Option<Expression>,
+    },
+    ResetAssert {
+        clock: StrId,
+        duration: Option<Expression>,
+    },
 }
 
 #[derive(Clone)]
@@ -748,7 +758,15 @@ impl ProtoStatement {
                             });
                             TbMethodKind::ClockNext { count }
                         }
-                        ProtoTbMethodKind::ResetAssert => TbMethodKind::ResetAssert,
+                        ProtoTbMethodKind::ResetAssert { clock, duration } => {
+                            let duration = duration.as_ref().map(|e| {
+                                e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
+                            });
+                            TbMethodKind::ResetAssert {
+                                clock: *clock,
+                                duration,
+                            }
+                        }
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -1566,7 +1584,17 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         };
                         ProtoTbMethodKind::ClockNext { count }
                     }
-                    air::TbMethod::ResetAssert => ProtoTbMethodKind::ResetAssert,
+                    air::TbMethod::ResetAssert { clock, duration } => {
+                        let duration = if let Some(expr) = duration {
+                            Some(Conv::conv(context, expr)?)
+                        } else {
+                            None
+                        };
+                        ProtoTbMethodKind::ResetAssert {
+                            clock: *clock,
+                            duration,
+                        }
+                    }
                 };
                 vec![ProtoStatement::TbMethodCall {
                     inst: x.inst,
