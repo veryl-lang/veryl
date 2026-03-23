@@ -214,6 +214,30 @@ impl<T: std::io::Write> Simulator<T> {
         }
     }
 
+    /// Set a variable value by VarId. Used to write clock/reset signal values
+    /// into the variable storage so they appear in VCD dumps.
+    pub fn set_var_by_id(&mut self, var_id: &VarId, val: Value) {
+        if let Some(x) = self.ir.module_variables.variables.get_mut(var_id) {
+            let mut val = val;
+            val.trunc(x.width);
+            unsafe {
+                write_native_value(
+                    x.current_values[0],
+                    x.native_bytes,
+                    self.ir.use_4state,
+                    &val,
+                );
+            }
+        }
+    }
+
+    /// Emit an additional VCD timestamp with the current variable state.
+    /// Does NOT execute events or FF swap — used for negedge dump points.
+    pub fn dump_and_advance_time(&mut self) {
+        self.dump_variables();
+        self.time += 1;
+    }
+
     pub fn dump_start(&mut self) {
         if let Some(dump) = &mut self.dump {
             dump.begin(SimulationCommand::Dumpvars).unwrap();

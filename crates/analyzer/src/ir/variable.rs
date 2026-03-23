@@ -15,6 +15,9 @@ use veryl_parser::token_range::TokenRange;
 pub struct VarId(u32);
 
 impl VarId {
+    /// Sentinel value for synthetic events (no corresponding variable in storage).
+    pub const SYNTHETIC: VarId = VarId(u32::MAX);
+
     pub fn inc(&mut self) {
         self.0 += 1;
     }

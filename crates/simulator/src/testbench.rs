@@ -1,5 +1,5 @@
 use crate::HashMap;
-use crate::ir::{Event, Expression, Ir, Statement, SystemFunctionCall, TbMethodKind};
+use crate::ir::{Event, Expression, Ir, Statement, SystemFunctionCall, TbMethodKind, Value};
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use veryl_analyzer::ir::VarId;
@@ -115,13 +115,13 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
     // These events have no statements in event_statements, so sim.step() will
     // only perform ff_swap and mark comb dirty — correct for purely comb DUTs.
     if clk_event.is_none() && !clock_insts.is_empty() {
-        let synthetic_clk = Event::Clock(VarId::default());
+        let synthetic_clk = Event::Clock(VarId::SYNTHETIC);
         for inst in clock_insts {
             event_map.entry(inst).or_insert(synthetic_clk.clone());
         }
     }
     if rst_event.is_none() && !reset_insts.is_empty() {
-        let synthetic_rst = Event::Reset(VarId::default());
+        let synthetic_rst = Event::Reset(VarId::SYNTHETIC);
         for inst in reset_insts {
             event_map.entry(inst).or_insert(synthetic_rst.clone());
         }
@@ -270,21 +270,47 @@ fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement
             } else {
                 1
             };
+            let has_dump = sim.dump.is_some();
             for _ in 0..n {
+                if has_dump && let Some(id) = clock.var_id() {
+                    sim.set_var_by_id(&id, Value::new(1, 1, false));
+                }
                 sim.step(clock);
+                if has_dump {
+                    if let Some(id) = clock.var_id() {
+                        sim.set_var_by_id(&id, Value::new(0, 1, false));
+                    }
+                    sim.dump_and_advance_time();
+                }
             }
             ExecResult::Continue
         }
         TestbenchStatement::ResetAssert {
             reset,
-            clock: _,
+            clock,
             duration,
         } => {
             // Step reset event for `duration` cycles.
             // In this simulator, Event::Reset represents a clock edge
             // with reset asserted (executes the if_reset branch of always_ff).
+            let has_dump = sim.dump.is_some();
+            if has_dump && let Some(id) = reset.var_id() {
+                sim.set_var_by_id(&id, Value::new(1, 1, false));
+            }
             for _ in 0..*duration {
+                if has_dump && let Some(id) = clock.var_id() {
+                    sim.set_var_by_id(&id, Value::new(1, 1, false));
+                }
                 sim.step(reset);
+                if has_dump {
+                    if let Some(id) = clock.var_id() {
+                        sim.set_var_by_id(&id, Value::new(0, 1, false));
+                    }
+                    sim.dump_and_advance_time();
+                }
+            }
+            if has_dump && let Some(id) = reset.var_id() {
+                sim.set_var_by_id(&id, Value::new(0, 1, false));
             }
             ExecResult::Continue
         }

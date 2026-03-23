@@ -1,4 +1,4 @@
-use crate::ir::{Event, Value};
+use crate::ir::{Event, Value, VarId};
 use crate::simulator::Simulator;
 use crate::testbench::TestResult;
 use veryl_analyzer::wavedrom::preprocess_json5;
@@ -235,11 +235,30 @@ pub fn run_wavedrom_test<T: std::io::Write>(
     let reset_active_low =
         reset_signal_idx.is_some_and(|idx| is_active_low_reset(&scenario.signals[idx].name));
 
+    let has_dump = sim.dump.is_some();
+    let clock_var_id: Option<VarId> = clock_event.var_id();
+    let reset_var_id: Option<VarId> = reset_event.as_ref().and_then(|e| e.var_id());
+
     if reset_signal_idx.is_none()
         && let Some(rst_event) = reset_event
     {
+        if has_dump && let Some(ref id) = reset_var_id {
+            sim.set_var_by_id(id, Value::new(1, 1, false));
+        }
         for _ in 0..default_reset_cycles {
+            if has_dump && let Some(ref id) = clock_var_id {
+                sim.set_var_by_id(id, Value::new(1, 1, false));
+            }
             sim.step(rst_event);
+            if has_dump {
+                if let Some(ref id) = clock_var_id {
+                    sim.set_var_by_id(id, Value::new(0, 1, false));
+                }
+                sim.dump_and_advance_time();
+            }
+        }
+        if has_dump && let Some(ref id) = reset_var_id {
+            sim.set_var_by_id(id, Value::new(0, 1, false));
         }
     }
 
@@ -304,12 +323,31 @@ pub fn run_wavedrom_test<T: std::io::Write>(
         {
             let rst_asserted =
                 is_reset_asserted(&scenario.signals[rst_idx].wave[t], reset_active_low);
-            if rst_asserted { rst_event } else { clock_event }
+            if rst_asserted {
+                if has_dump && let Some(ref id) = reset_var_id {
+                    sim.set_var_by_id(id, Value::new(1, 1, false));
+                }
+                rst_event
+            } else {
+                if has_dump && let Some(ref id) = reset_var_id {
+                    sim.set_var_by_id(id, Value::new(0, 1, false));
+                }
+                clock_event
+            }
         } else {
             clock_event
         };
 
+        if has_dump && let Some(ref id) = clock_var_id {
+            sim.set_var_by_id(id, Value::new(1, 1, false));
+        }
         sim.step(step_event);
+        if has_dump {
+            if let Some(ref id) = clock_var_id {
+                sim.set_var_by_id(id, Value::new(0, 1, false));
+            }
+            sim.dump_and_advance_time();
+        }
     }
 
     TestResult::Pass

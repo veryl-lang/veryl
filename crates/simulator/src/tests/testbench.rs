@@ -685,3 +685,130 @@ fn tb_initial_assign_multiple() {
         );
     }
 }
+
+#[test]
+fn testbench_vcd_clock_reset_waveform() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        let mut dump = Vec::new();
+        let mut sim = Simulator::new(ir, Some(&mut dump));
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        // Reset for 2 cycles, then clock 3 cycles
+        let stmts = vec![
+            TestbenchStatement::ResetAssert {
+                reset: rst.clone(),
+                clock: clk.clone(),
+                duration: 2,
+            },
+            TestbenchStatement::For {
+                count: 3,
+                body: vec![TestbenchStatement::ClockNext {
+                    clock: clk.clone(),
+                    count: None,
+                }],
+            },
+        ];
+
+        let result = run_testbench(&mut sim, &stmts);
+        assert_eq!(result, TestResult::Pass);
+        assert_eq!(sim.get("cnt").unwrap(), Value::new(3, 32, false));
+
+        // Parse VCD with the vcd crate
+        let mut parser = vcd::Parser::new(dump.as_slice());
+        let header = parser.parse_header().unwrap();
+
+        let clk_var = header
+            .find_var(&["Top", "clk"])
+            .expect("clk not found in VCD");
+        let rst_var = header
+            .find_var(&["Top", "rst"])
+            .expect("rst not found in VCD");
+        let clk_code = clk_var.code;
+        let rst_code = rst_var.code;
+
+        // Collect per-signal value changes from the VCD body
+        let mut clk_values: Vec<(u64, bool)> = Vec::new();
+        let mut rst_values: Vec<(u64, bool)> = Vec::new();
+        let mut current_time: u64 = 0;
+        for cmd in parser {
+            match cmd.unwrap() {
+                vcd::Command::Timestamp(t) => current_time = t,
+                vcd::Command::ChangeVector(code, vec) => {
+                    let bit = vec.get(0) == Some(vcd::Value::V1);
+                    if code == clk_code {
+                        clk_values.push((current_time, bit));
+                    } else if code == rst_code {
+                        rst_values.push((current_time, bit));
+                    }
+                }
+                vcd::Command::ChangeScalar(code, val) => {
+                    let bit = val == vcd::Value::V1;
+                    if code == clk_code {
+                        clk_values.push((current_time, bit));
+                    } else if code == rst_code {
+                        rst_values.push((current_time, bit));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Clock should toggle: 1 (posedge) -> 0 (negedge) in every cycle
+        // ResetAssert: 2 cycles = 4 timestamps (posedge+negedge each)
+        // ClockNext: 3 cycles = 6 timestamps
+        // Total: 10 timestamps
+        assert!(
+            clk_values.len() >= 10,
+            "expected >= 10 clock transitions, got {} (jit={}, 4state={})",
+            clk_values.len(),
+            config.use_jit,
+            config.use_4state,
+        );
+
+        // Verify clock toggles: even indices = 1 (posedge), odd indices = 0 (negedge)
+        for (i, &(_, val)) in clk_values.iter().enumerate() {
+            let expected = i % 2 == 0;
+            assert_eq!(
+                val, expected,
+                "clock value at index {i} should be {expected}, got {val} (jit={}, 4state={})",
+                config.use_jit, config.use_4state,
+            );
+        }
+
+        // Reset should be asserted during reset phase and deasserted after
+        assert!(
+            !rst_values.is_empty(),
+            "expected reset signal changes in VCD (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert!(
+            rst_values[0].1,
+            "reset should be asserted initially (jit={}, 4state={})",
+            config.use_jit, config.use_4state,
+        );
+        assert!(
+            !rst_values.last().unwrap().1,
+            "reset should be deasserted after reset phase (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
