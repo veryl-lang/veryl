@@ -36,8 +36,13 @@ pub struct TbMethodCall {
 
 #[derive(Clone)]
 pub enum TbMethod {
-    ClockNext { count: Option<Expression> },
-    ResetAssert,
+    ClockNext {
+        count: Option<Expression>,
+    },
+    ResetAssert {
+        clock: StrId,
+        duration: Option<Expression>,
+    },
 }
 
 impl Statement {
@@ -125,7 +130,13 @@ impl fmt::Display for Statement {
                         write!(f, "{}.next();", x.inst)
                     }
                 }
-                TbMethod::ResetAssert => write!(f, "{}.assert();", x.inst),
+                TbMethod::ResetAssert { clock, duration } => {
+                    if let Some(d) = duration {
+                        write!(f, "{}.assert({clock}, {d});", x.inst)
+                    } else {
+                        write!(f, "{}.assert({clock});", x.inst)
+                    }
+                }
             },
             Statement::Unsupported(_) => "/* unsupported */".fmt(f),
             Statement::Null => "".fmt(f),

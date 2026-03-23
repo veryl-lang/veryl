@@ -3,6 +3,7 @@ use crate::ir::{Event, Expression, Ir, Statement, SystemFunctionCall, TbMethodKi
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use veryl_analyzer::ir::VarId;
+use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
 pub enum TestbenchStatement {
@@ -98,7 +99,7 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
                             clock_insts.push(*inst);
                         }
                     }
-                    TbMethodKind::ResetAssert => {
+                    TbMethodKind::ResetAssert { .. } => {
                         if let Some(ref evt) = rst_event {
                             event_map.entry(*inst).or_insert(evt.clone());
                         } else {
@@ -160,18 +161,19 @@ fn convert_stmt(
                     count: count.clone(),
                 }
             }
-            TbMethodKind::ResetAssert => {
+            TbMethodKind::ResetAssert { clock, duration } => {
                 let reset = event_map.get(inst).cloned().unwrap_or(Event::Initial);
-                // Find the clock event (first clock_gen in the map)
-                let clock = event_map
-                    .values()
-                    .find(|e| matches!(e, Event::Clock(_)))
-                    .cloned()
-                    .unwrap_or(Event::Initial);
+                let clock_event = event_map.get(clock).cloned().unwrap_or(Event::Initial);
+                let dur = if let Some(expr) = duration {
+                    let val = expr.eval(&mut MaskCache::default());
+                    val.payload_u64().max(1)
+                } else {
+                    default_reset_duration
+                };
                 TestbenchStatement::ResetAssert {
                     reset,
-                    clock,
-                    duration: default_reset_duration,
+                    clock: clock_event,
+                    duration: dur,
                 }
             }
         },

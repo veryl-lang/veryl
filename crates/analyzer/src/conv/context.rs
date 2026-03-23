@@ -58,6 +58,7 @@ pub struct Context {
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,
     pub mask_cache: MaskCache,
+    pub tb_reset_cycles: HashMap<StrId, Expression>,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,
