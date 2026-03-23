@@ -253,7 +253,7 @@ pub fn eval_array_literal(
 
         if let Some(Some(target_len)) = array_width.get(0) {
             if let Some(x) = default {
-                let remaining = target_len.checked_sub(x.len() - 1);
+                let remaining = target_len.checked_sub(len);
                 if let Some(remaining) = remaining {
                     for _ in 0..remaining {
                         let mut exprs = x.clone();
