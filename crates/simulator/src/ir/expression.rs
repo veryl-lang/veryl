@@ -649,9 +649,15 @@ impl ProtoExpression {
                 ..
             } => {
                 index_expr.gather_variable_offsets(inputs);
-                for i in 0..*num_elements {
-                    let offset = *base_offset + *stride * i as isize;
-                    inputs.push((*is_ff, offset));
+                // Emit only the base offset to represent the entire array as a
+                // single dependency unit.  Per-element expansion caused O(N²)
+                // blowup in analyze_dependency / sort_ff_event for large arrays.
+                inputs.push((*is_ff, *base_offset));
+                // Also emit the last element offset so that static accesses to
+                // any element of the same array create a dependency edge.
+                if *num_elements > 1 {
+                    let last_offset = *base_offset + *stride * (*num_elements as isize - 1);
+                    inputs.push((*is_ff, last_offset));
                 }
             }
         }

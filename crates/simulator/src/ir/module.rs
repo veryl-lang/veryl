@@ -37,10 +37,12 @@ pub struct Module {
     /// (port connections + top-level comb only), while full_comb_statements
     /// includes everything.
     pub full_comb_statements: Option<Vec<Statement>>,
-    /// When true, step() uses full_comb_statements for settle loops
-    /// instead of the 3-pass post_comb → comb → post_comb cycle.
-    /// Set when analyze_dependency succeeds for the combined list.
+    /// When true, settle_comb() uses full_comb_statements (the combined
+    /// comb + post_comb list) instead of lite comb_statements alone.
     pub use_full_comb_in_step: bool,
+    /// Number of eval_comb passes needed for full convergence.
+    /// Pre-computed from backward edges in the sorted comb statement list.
+    pub required_comb_passes: usize,
     /// FF swap entries: (current_offset, value_size) pairs.
     pub ff_swap_entries: Vec<(usize, usize)>,
 }
@@ -60,6 +62,8 @@ pub struct ProtoModule {
     /// Full comb statements when merged events exist.
     pub full_comb_statements: Option<ProtoStatements>,
     pub use_full_comb_in_step: bool,
+    /// Number of eval_comb passes needed for full convergence.
+    pub required_comb_passes: usize,
     /// FF canonical offsets (current_offset) that need swapping.
     /// If None, all ff variables are swapped.
     pub ff_swap_offsets: Option<HashSet<isize>>,
@@ -257,6 +261,7 @@ impl ProtoModule {
             post_comb_fns,
             full_comb_statements,
             use_full_comb_in_step: self.use_full_comb_in_step,
+            required_comb_passes: self.required_comb_passes,
             ff_swap_entries,
         }
     }
@@ -1069,6 +1074,69 @@ pub(crate) fn rewrite_ff_direct(
     }
 }
 
+/// Compute the number of eval_comb passes required for convergence.
+///
+/// After topological sorting, some dependency edges may be "backward"
+/// (a statement reads a variable written by a later statement in the
+/// sorted order). Each backward edge requires an additional eval pass
+/// to propagate the correct value. The required number of passes is
+/// the longest chain of backward edges + 1.
+///
+/// Since backward edges always point from higher positions to lower
+/// positions, they form a DAG. A single reverse scan computes the
+/// longest chain in O(N) time.
+fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
+    let n = sorted.len();
+    if n == 0 {
+        return 1;
+    }
+
+    // For each comb variable, record the position of its last writer.
+    let mut var_last_writer: HashMap<(bool, isize), usize> = HashMap::default();
+    for (pos, stmt) in sorted.iter().enumerate() {
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+        for key in outputs {
+            var_last_writer.insert(key, pos);
+        }
+    }
+
+    // Reverse scan: for each statement, compute the maximum backward
+    // chain depth. Because backward edges point from higher to lower
+    // positions, delay[writer_pos] is already computed when we visit pos.
+    let mut delay = vec![0usize; n];
+    for pos in (0..n).rev() {
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+        sorted[pos].gather_variable_offsets(&mut inputs, &mut outputs);
+        let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+
+        for key in &inputs {
+            if output_set.contains(key) {
+                continue; // self-reference within same statement
+            }
+            if let Some(&writer_pos) = var_last_writer.get(key)
+                && writer_pos > pos
+            {
+                delay[pos] = delay[pos].max(delay[writer_pos] + 1);
+            }
+        }
+    }
+
+    let max_delay = delay.iter().copied().max().unwrap_or(0);
+    let passes = max_delay + 1;
+    if passes > 1 {
+        log::info!(
+            "compute_required_passes: {} passes needed ({} stmts, {} backward edge chain depth)",
+            passes,
+            n,
+            max_delay
+        );
+    }
+    passes
+}
+
 /// Compute dependency levels for sorted ProtoStatements and reorder within
 /// each level so that CompiledBlocks with the same func pointer are adjacent.
 /// This enables batching of same-function JIT calls.
@@ -1320,6 +1388,7 @@ impl Conv<&air::Module> for ProtoModule {
         // when merged comb+event is used or when post_comb_fns exist.
         // get()/dump() needs this for correctness after FF swap.
         let mut use_full_comb_in_step = false;
+        let mut required_comb_passes = 1usize;
         let full_comb_statements = if has_merged {
             // Decompose CompiledBlocks with original_stmts to avoid false
             // dependency cycles in analyze_dependency.
@@ -1345,18 +1414,18 @@ impl Conv<&air::Module> for ProtoModule {
                     sorted
                 }
                 Err(_) => {
-                    // Full comb may have false cycles from CompiledBlocks.
-                    // Fall back to unsorted order (used only by get()/dump()).
+                    // False cycle detected (often from CompiledBlocks bundling
+                    // FF and comb offsets). Use the unsorted list in step()
+                    // anyway — iterative evaluation will converge for designs
+                    // without genuine comb loops.
+                    use_full_comb_in_step = true;
                     full
                 }
             };
-            let full_sorted = super::optimize::optimize_comb(
-                full_sorted,
-                &all_event_statements,
-                &observable_comb,
-                context.config.use_jit,
-            );
+            // Skip optimize_comb: the full list includes internal comb
+            // from merged functions that DCE would incorrectly remove.
             let full_sorted = reorder_by_level(full_sorted);
+            required_comb_passes = compute_required_passes(&full_sorted);
             Some(try_jit(context, full_sorted))
         } else if !all_post_comb_fns.is_empty() {
             // 3+ level hierarchy: middle module has post_comb_fns but no
@@ -1381,15 +1450,54 @@ impl Conv<&air::Module> for ProtoModule {
                 Ok(sorted) => {
                     // Successfully sorted: safe to use in step() too
                     let full_sorted = reorder_by_level(sorted);
+                    required_comb_passes = compute_required_passes(&full_sorted);
                     use_full_comb_in_step = true;
                     Some(try_jit(context, full_sorted))
                 }
                 Err(_) => {
-                    // Circular dependencies (e.g., large multi-module designs).
-                    // Use unsorted list for eval_comb_full (get/dump) only.
-                    // step() continues to use the settle loop.
-                    let full_sorted = reorder_by_level(full);
-                    Some(try_jit(context, full_sorted))
+                    // Circular dependency detected. Decompose CompiledBlocks
+                    // into per-statement deps to avoid false cycles from
+                    // bundled input/output offsets.
+                    let mut decomposed = Vec::new();
+                    for s in &full {
+                        if let ProtoStatement::CompiledBlock(cb) = s {
+                            if !cb.stmt_deps.is_empty() {
+                                // Split CompiledBlock into individual
+                                // dependency entries for finer-grained sorting.
+                                for (ins, outs) in &cb.stmt_deps {
+                                    // Create a thin wrapper that represents
+                                    // just one statement's deps.
+                                    let mut thin = cb.clone();
+                                    thin.input_offsets = ins.clone();
+                                    thin.output_offsets = outs.clone();
+                                    thin.stmt_deps = vec![];
+                                    decomposed.push(ProtoStatement::CompiledBlock(thin));
+                                }
+                            } else if !cb.original_stmts.is_empty() {
+                                decomposed.extend(cb.original_stmts.iter().cloned());
+                            } else {
+                                decomposed.push(s.clone());
+                            }
+                        } else {
+                            decomposed.push(s.clone());
+                        }
+                    }
+                    match analyze_dependency(decomposed) {
+                        Ok(sorted) => {
+                            use_full_comb_in_step = true;
+                            let full_sorted = reorder_by_level(sorted);
+                            required_comb_passes = compute_required_passes(&full_sorted);
+                            Some(try_jit(context, full_sorted))
+                        }
+                        Err(_) => {
+                            // All sorting attempts failed. Use unsorted list
+                            // with level-based reordering; convergence relies
+                            // on required_comb_passes > 1.
+                            let full_sorted = reorder_by_level(full);
+                            required_comb_passes = compute_required_passes(&full_sorted);
+                            Some(try_jit(context, full_sorted))
+                        }
+                    }
                 }
             }
         } else {
@@ -1452,6 +1560,7 @@ impl Conv<&air::Module> for ProtoModule {
             },
             full_comb_statements,
             use_full_comb_in_step,
+            required_comb_passes,
             ff_swap_offsets,
         })
     }

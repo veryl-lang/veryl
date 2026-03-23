@@ -54,8 +54,11 @@ pub struct Ir {
     /// Full comb statements (includes per-core internal comb).
     /// Used by get()/dump() when merged comb+event events exist.
     pub full_comb_statements: Option<Vec<Statement>>,
-    /// When true, step() should use full_comb_statements for settle.
+    /// When true, settle_comb() uses full_comb_statements.
     pub use_full_comb_in_step: bool,
+    /// Number of eval_comb passes needed for full convergence.
+    /// Pre-computed from backward edges in the sorted comb statement list.
+    pub required_comb_passes: usize,
     /// FF swap entries: (current_offset, value_size) pairs.
     /// Swap value_size bytes between current_offset and current_offset + value_size.
     pub ff_swap_entries: Vec<(usize, usize)>,
@@ -94,6 +97,7 @@ impl Ir {
             post_comb_fns: module.post_comb_fns,
             full_comb_statements: module.full_comb_statements,
             use_full_comb_in_step: module.use_full_comb_in_step,
+            required_comb_passes: module.required_comb_passes,
             ff_swap_entries: module.ff_swap_entries,
             _binary: binary,
         }
@@ -125,8 +129,16 @@ impl Ir {
         }
     }
 
-    /// Evaluate full comb (including per-core internal comb).
-    /// Used by get()/dump() for correctness after FF swap.
+    /// Settle the comb network: evaluate full comb the pre-computed
+    /// number of passes needed for convergence.
+    pub fn settle_comb(&self, mask_cache: &mut MaskCache) {
+        for _ in 0..self.required_comb_passes {
+            self.eval_comb_full(mask_cache);
+        }
+    }
+
+    /// Evaluate full comb once (including per-core internal comb).
+    /// Called by settle_comb() for each required pass.
     pub fn eval_comb_full(&self, mask_cache: &mut MaskCache) {
         if let Some(stmts) = &self.full_comb_statements {
             for x in stmts {

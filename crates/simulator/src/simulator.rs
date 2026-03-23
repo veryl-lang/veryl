@@ -122,7 +122,7 @@ impl<T: std::io::Write> Simulator<T> {
 
     pub fn ensure_comb_updated(&mut self) {
         if self.comb_dirty {
-            self.ir.eval_comb_full(&mut self.mask_cache);
+            self.ir.settle_comb(&mut self.mask_cache);
             self.comb_dirty = false;
         }
     }
@@ -143,22 +143,7 @@ impl<T: std::io::Write> Simulator<T> {
 
     pub fn step(&mut self, event: &Event) {
         if self.comb_dirty {
-            if self.ir.use_full_comb_in_step {
-                // 3+ level hierarchy: use combined comb+post_comb list
-                // for correct evaluation order across module boundaries.
-                self.ir.eval_comb_full(&mut self.mask_cache);
-            } else {
-                // Settle comb network: eval_post_comb → eval_comb → eval_post_comb.
-                // 3 passes ensure child comb outputs propagate through port
-                // connections and back to sibling inputs.
-                if !self.ir.post_comb_fns.is_empty() {
-                    self.ir.eval_post_comb(&mut self.mask_cache);
-                }
-                self.ir.eval_comb(&mut self.mask_cache);
-                if !self.ir.post_comb_fns.is_empty() {
-                    self.ir.eval_post_comb(&mut self.mask_cache);
-                }
-            }
+            self.ir.settle_comb(&mut self.mask_cache);
             self.comb_dirty = false;
         }
 
@@ -166,14 +151,12 @@ impl<T: std::io::Write> Simulator<T> {
             for x in statements {
                 x.eval_step(&mut self.mask_cache);
             }
-            // After events, re-settle comb to propagate merged function outputs
-            // through port connections.
-            if self.ir.use_full_comb_in_step {
-                self.ir.eval_comb_full(&mut self.mask_cache);
-            } else if !self.ir.post_comb_fns.is_empty() {
-                self.ir.eval_post_comb(&mut self.mask_cache);
-                self.ir.eval_comb(&mut self.mask_cache);
-                self.ir.eval_post_comb(&mut self.mask_cache);
+            // After events, re-settle comb when merged comb+event functions
+            // or multi-level hierarchies need their outputs propagated through
+            // port connections before ff_swap. Simple designs skip this —
+            // comb will be re-evaluated at the start of the next step().
+            if self.ir.use_full_comb_in_step || !self.ir.post_comb_fns.is_empty() {
+                self.ir.settle_comb(&mut self.mask_cache);
             }
         }
 
@@ -254,7 +237,7 @@ impl<T: std::io::Write> Simulator<T> {
     fn dump_variables(&mut self) {
         if let Some(dump) = &mut self.dump {
             if self.comb_dirty {
-                self.ir.eval_comb_full(&mut self.mask_cache);
+                self.ir.settle_comb(&mut self.mask_cache);
                 self.comb_dirty = false;
             }
             dump.timestamp(self.time).unwrap();
