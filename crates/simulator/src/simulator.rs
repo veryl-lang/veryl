@@ -1,4 +1,3 @@
-use crate::HashMap;
 use crate::ir::{
     Event, Ir, ModuleVariables, Value, VarId, VarPath, read_native_value, write_native_value,
 };
@@ -6,11 +5,20 @@ use std::str::FromStr;
 use vcd::{self, IdCode, SimulationCommand, TimescaleUnit};
 use veryl_analyzer::value::MaskCache;
 
+/// A single variable entry for VCD dump, collected during header setup
+/// and replayed on every timestamp.
+struct DumpVar {
+    code: IdCode,
+    ptr: *const u8,
+    native_bytes: usize,
+    width: usize,
+}
+
 pub struct Simulator<T: std::io::Write> {
     pub ir: Ir,
     pub time: u64,
     pub dump: Option<vcd::Writer<T>>,
-    pub dump_code: HashMap<VarId, IdCode>,
+    dump_vars: Vec<DumpVar>,
     pub mask_cache: MaskCache,
     comb_dirty: bool,
 }
@@ -21,7 +29,7 @@ impl<T: std::io::Write> Simulator<T> {
             ir,
             time: 0,
             dump: None,
-            dump_code: HashMap::default(),
+            dump_vars: Vec::new(),
             mask_cache: MaskCache::default(),
             comb_dirty: true,
         };
@@ -211,6 +219,7 @@ impl<T: std::io::Write> Simulator<T> {
                     &val,
                 );
             }
+            self.comb_dirty = true;
         }
     }
 
@@ -224,12 +233,7 @@ impl<T: std::io::Write> Simulator<T> {
     pub fn dump_start(&mut self) {
         if let Some(dump) = &mut self.dump {
             dump.begin(SimulationCommand::Dumpvars).unwrap();
-            Self::dump_module_variables_values(
-                &self.ir.module_variables,
-                &self.dump_code,
-                dump,
-                self.ir.use_4state,
-            );
+            Self::dump_all_vars(&self.dump_vars, dump, self.ir.use_4state);
             dump.end().unwrap();
         }
     }
@@ -241,37 +245,25 @@ impl<T: std::io::Write> Simulator<T> {
                 self.comb_dirty = false;
             }
             dump.timestamp(self.time).unwrap();
-            Self::dump_module_variables_values(
-                &self.ir.module_variables,
-                &self.dump_code,
-                dump,
-                self.ir.use_4state,
-            );
+            Self::dump_all_vars(&self.dump_vars, dump, self.ir.use_4state);
         }
     }
 
-    fn dump_module_variables_values(
-        module_vars: &ModuleVariables,
-        dump_code: &HashMap<VarId, IdCode>,
-        dump: &mut vcd::Writer<T>,
-        use_4state: bool,
-    ) {
-        for (id, x) in &module_vars.variables {
-            if let Some(code) = dump_code.get(id) {
-                let value = unsafe {
-                    read_native_value(
-                        x.current_values[0],
-                        x.native_bytes,
-                        use_4state,
-                        x.width as u32,
-                        false,
-                    )
-                };
-                dump.change_vector(*code, &value).unwrap();
-            }
-        }
-        for child in &module_vars.children {
-            Self::dump_module_variables_values(child, dump_code, dump, use_4state);
+    fn dump_all_vars(dump_vars: &[DumpVar], dump: &mut vcd::Writer<T>, use_4state: bool) {
+        for entry in dump_vars {
+            let mut value = unsafe {
+                read_native_value(
+                    entry.ptr,
+                    entry.native_bytes,
+                    use_4state,
+                    entry.width as u32,
+                    false,
+                )
+            };
+            // Mask off upper bits beyond declared width so VCD output
+            // matches the $var header.
+            value.trunc(entry.width);
+            dump.change_vector(entry.code, &value).unwrap();
         }
     }
 
@@ -280,7 +272,7 @@ impl<T: std::io::Write> Simulator<T> {
 
         dump.timescale(1, TimescaleUnit::US).unwrap();
 
-        Self::setup_dump_module(&self.ir.module_variables, &mut dump, &mut self.dump_code);
+        Self::setup_dump_module(&self.ir.module_variables, &mut dump, &mut self.dump_vars);
 
         dump.enddefinitions().unwrap();
 
@@ -290,19 +282,24 @@ impl<T: std::io::Write> Simulator<T> {
     fn setup_dump_module(
         module_vars: &ModuleVariables,
         dump: &mut vcd::Writer<T>,
-        dump_code: &mut HashMap<VarId, IdCode>,
+        dump_vars: &mut Vec<DumpVar>,
     ) {
         dump.add_module(&module_vars.name.to_string()).unwrap();
 
-        for (id, x) in &module_vars.variables {
+        for x in module_vars.variables.values() {
             let name = x.path.to_string();
             let width = x.width as u32;
             let code = dump.add_wire(width, &name).unwrap();
-            dump_code.insert(*id, code);
+            dump_vars.push(DumpVar {
+                code,
+                ptr: x.current_values[0],
+                native_bytes: x.native_bytes,
+                width: x.width,
+            });
         }
 
         for child in &module_vars.children {
-            Self::setup_dump_module(child, dump, dump_code);
+            Self::setup_dump_module(child, dump, dump_vars);
         }
 
         dump.upscope().unwrap();
