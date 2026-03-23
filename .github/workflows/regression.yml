@@ -6,6 +6,9 @@ on:
       - master
   pull_request:
 
+env:
+  CARGO_INCREMENTAL: 0
+
 jobs:
   build:
     strategy:
