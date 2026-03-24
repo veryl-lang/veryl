@@ -708,6 +708,122 @@ fn inst() {
 }
 
 #[test]
+fn inst_array_input_port() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        c:   output logic<32>,
+    ) {
+        var arr: logic<32> [2];
+        always_ff {
+            if_reset {
+                arr[0] = 0;
+                arr[1] = 0;
+            } else {
+                arr[0] += 1;
+                arr[1] += 2;
+            }
+        }
+
+        inst u: Sub (
+            clk,
+            rst,
+            i_x: arr,
+            c,
+        );
+    }
+
+    module Sub (
+        clk: input  clock,
+        rst: input  reset,
+        i_x: input  logic<32> [2],
+        c:   output logic<32>,
+    ) {
+        assign c = i_x[0] + i_x[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // After 3 clock cycles: arr[0]=3, arr[1]=6, c=9
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+
+        assert_eq!(sim.get("c").unwrap(), Value::new(9, 32, false));
+    }
+}
+
+#[test]
+fn inst_array_input_port_shorthand() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        c:   output logic<32>,
+    ) {
+        var i_x: logic<32> [2];
+        always_ff {
+            if_reset {
+                i_x[0] = 0;
+                i_x[1] = 0;
+            } else {
+                i_x[0] += 10;
+                i_x[1] += 20;
+            }
+        }
+
+        inst u: Sub (
+            clk,
+            rst,
+            i_x,
+            c,
+        );
+    }
+
+    module Sub (
+        clk: input  clock,
+        rst: input  reset,
+        i_x: input  logic<32> [2],
+        c:   output logic<32>,
+    ) {
+        assign c = i_x[0] + i_x[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // After 2 clock cycles: i_x[0]=20, i_x[1]=40, c=60
+        for _ in 0..2 {
+            sim.step(&clk);
+        }
+
+        assert_eq!(sim.get("c").unwrap(), Value::new(60, 32, false));
+    }
+}
+
+#[test]
 fn inst_ff() {
     let code = r#"
     module Top (

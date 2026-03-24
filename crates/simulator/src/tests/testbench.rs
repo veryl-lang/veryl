@@ -835,3 +835,74 @@ fn testbench_vcd_clock_reset_waveform() {
         );
     }
 }
+
+#[test]
+fn testbench_array_input_port() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        cnt: output logic<32>,
+    ) {
+        var arr: logic<32> [2];
+        always_ff {
+            if_reset {
+                arr[0] = 0;
+                arr[1] = 0;
+            } else {
+                arr[0] += 1;
+                arr[1] += 2;
+            }
+        }
+
+        inst u: ArraySub (
+            clk,
+            rst,
+            i_x: arr,
+            cnt,
+        );
+    }
+
+    module ArraySub (
+        clk: input  clock,
+        rst: input  reset,
+        i_x: input  logic<32> [2],
+        cnt: output logic<32>,
+    ) {
+        assign cnt = i_x[0] + i_x[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        let stmts = vec![
+            TestbenchStatement::ResetAssert {
+                reset: rst.clone(),
+                clock: clk.clone(),
+                duration: 3,
+                high_time: 1,
+                low_time: 1,
+            },
+            TestbenchStatement::For {
+                count: 5,
+                body: vec![TestbenchStatement::ClockNext {
+                    clock: clk.clone(),
+                    count: None,
+                    high_time: 1,
+                    low_time: 1,
+                }],
+            },
+            TestbenchStatement::Finish,
+        ];
+
+        let result = run_testbench(&mut sim, &stmts);
+        assert_eq!(result, TestResult::Pass);
+        // After 5 cycles: arr[0]=5, arr[1]=10, cnt=15
+        assert_eq!(sim.get("cnt").unwrap(), Value::new(15, 32, false));
+    }
+}
