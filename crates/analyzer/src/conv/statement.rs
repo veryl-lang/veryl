@@ -81,7 +81,7 @@ impl Conv<&LetStatement> for ir::StatementBlock {
 
             let (id, comptime) = context.find_path(&path).ok_or_else(|| ir_error!(token))?;
 
-            let dst = ir::AssignDestination {
+            let mut dst = ir::AssignDestination {
                 id,
                 path,
                 index: VarIndex::default(),
@@ -92,7 +92,7 @@ impl Conv<&LetStatement> for ir::StatementBlock {
 
             let mut expr = eval_expr(context, Some(r#type.clone()), &value.expression, false)?;
 
-            let statements = eval_assign_statement(context, &dst, &mut expr, token)?;
+            let statements = eval_assign_statement(context, &mut dst, &mut expr, token)?;
             Ok(ir::StatementBlock(statements))
         } else {
             Err(ir_error!(token))
@@ -196,7 +196,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                     AssignmentGroup::Equ(_) => {
                         let dst: VarPathSelect = Conv::conv(context, expr)?;
 
-                        if let Some(dst) = dst.to_assign_destination(context, false) {
+                        if let Some(mut dst) = dst.to_assign_destination(context, false) {
                             let mut expr = eval_expr(
                                 context,
                                 Some(dst.comptime.r#type.clone()),
@@ -205,7 +205,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             )?;
 
                             let statements =
-                                eval_assign_statement(context, &dst, &mut expr, token)?;
+                                eval_assign_statement(context, &mut dst, &mut expr, token)?;
                             Ok(ir::StatementBlock(statements))
                         } else {
                             // check expression even if dst can't be determined
