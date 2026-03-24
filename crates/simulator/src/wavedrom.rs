@@ -250,12 +250,14 @@ pub fn run_wavedrom_test<T: std::io::Write>(
                 sim.set_var_by_id(id, Value::new(1, 1, false));
             }
             sim.step(rst_event);
+            sim.time += 1;
             if has_dump {
                 if let Some(ref id) = clock_var_id {
                     sim.set_var_by_id(id, Value::new(0, 1, false));
                 }
-                sim.dump_and_advance_time();
+                sim.dump_variables();
             }
+            sim.time += 1;
         }
         if has_dump && let Some(ref id) = reset_var_id {
             sim.set_var_by_id(id, Value::new(0, 1, false));
@@ -342,12 +344,14 @@ pub fn run_wavedrom_test<T: std::io::Write>(
             sim.set_var_by_id(id, Value::new(1, 1, false));
         }
         sim.step(step_event);
+        sim.time += 1;
         if has_dump {
             if let Some(ref id) = clock_var_id {
                 sim.set_var_by_id(id, Value::new(0, 1, false));
             }
-            sim.dump_and_advance_time();
+            sim.dump_variables();
         }
+        sim.time += 1;
     }
 
     TestResult::Pass

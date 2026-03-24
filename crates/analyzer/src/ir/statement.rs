@@ -38,6 +38,7 @@ pub struct TbMethodCall {
 pub enum TbMethod {
     ClockNext {
         count: Option<Expression>,
+        period: Option<Expression>,
     },
     ResetAssert {
         clock: StrId,
@@ -123,7 +124,7 @@ impl fmt::Display for Statement {
             Statement::SystemFunctionCall(x) => format!("{x};").fmt(f),
             Statement::FunctionCall(x) => format!("{x};").fmt(f),
             Statement::TbMethodCall(x) => match &x.method {
-                TbMethod::ClockNext { count } => {
+                TbMethod::ClockNext { count, .. } => {
                     if let Some(c) = count {
                         write!(f, "{}.next({c});", x.inst)
                     } else {

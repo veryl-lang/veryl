@@ -4,8 +4,8 @@ use crate::ir::{Event, Value};
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::testbench::{
-    TestResult, TestbenchStatement, build_event_map, convert_initial_to_testbench,
-    run_native_testbench, run_testbench,
+    TestResult, TestbenchStatement, build_clock_periods, build_event_map,
+    convert_initial_to_testbench, run_native_testbench, run_testbench,
 };
 use std::str::FromStr;
 use veryl_analyzer::ir as air;

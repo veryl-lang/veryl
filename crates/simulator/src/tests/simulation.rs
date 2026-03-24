@@ -994,6 +994,7 @@ fn dump_vcd() {
         sim.set("b", b);
 
         sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
 
         let a = Value::new(30, 32, false);
         let b = Value::new(10, 32, false);
@@ -1002,6 +1003,7 @@ fn dump_vcd() {
         sim.set("b", b);
 
         sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
 
         let a = Value::new(50, 32, false);
         let b = Value::new(20, 32, false);
@@ -1010,6 +1012,7 @@ fn dump_vcd() {
         sim.set("b", b);
 
         sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
 
         let dump = String::from_utf8(dump).unwrap();
         let exp = r#"$timescale 1 us $end

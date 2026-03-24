@@ -106,6 +106,7 @@ pub struct AssignDynamicStatement {
 pub enum ProtoTbMethodKind {
     ClockNext {
         count: Option<ProtoExpression>,
+        period: Option<ProtoExpression>,
     },
     ResetAssert {
         clock: StrId,
@@ -117,6 +118,7 @@ pub enum ProtoTbMethodKind {
 pub enum TbMethodKind {
     ClockNext {
         count: Option<Expression>,
+        period: Option<Expression>,
     },
     ResetAssert {
         clock: StrId,
@@ -792,11 +794,14 @@ impl ProtoStatement {
                 }
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
-                        ProtoTbMethodKind::ClockNext { count } => {
+                        ProtoTbMethodKind::ClockNext { count, period } => {
                             let count = count.as_ref().map(|e| {
                                 e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
                             });
-                            TbMethodKind::ClockNext { count }
+                            let period = period.as_ref().map(|e| {
+                                e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
+                            });
+                            TbMethodKind::ClockNext { count, period }
                         }
                         ProtoTbMethodKind::ResetAssert { clock, duration } => {
                             let duration = duration.as_ref().map(|e| {
@@ -1616,13 +1621,18 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
             },
             air::Statement::TbMethodCall(x) => {
                 let method = match &x.method {
-                    air::TbMethod::ClockNext { count } => {
+                    air::TbMethod::ClockNext { count, period } => {
                         let count = if let Some(expr) = count {
                             Some(Conv::conv(context, expr)?)
                         } else {
                             None
                         };
-                        ProtoTbMethodKind::ClockNext { count }
+                        let period = if let Some(expr) = period {
+                            Some(Conv::conv(context, expr)?)
+                        } else {
+                            None
+                        };
+                        ProtoTbMethodKind::ClockNext { count, period }
                     }
                     air::TbMethod::ResetAssert { clock, duration } => {
                         let duration = if let Some(expr) = duration {
