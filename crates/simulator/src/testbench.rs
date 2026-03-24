@@ -13,12 +13,16 @@ pub enum TestbenchStatement {
     ClockNext {
         clock: Event,
         count: Option<Expression>,
+        high_time: u64,
+        low_time: u64,
     },
     /// rst.assert(clk, N)
     ResetAssert {
         reset: Event,
         clock: Event,
         duration: u64,
+        high_time: u64,
+        low_time: u64,
     },
     /// $assert(cond, msg)
     Assert {
@@ -130,6 +134,30 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
     event_map
 }
 
+/// period < 2 is clamped to 2. Remainder goes to high (posedge) phase.
+fn compute_half_periods(period: u64) -> (u64, u64) {
+    let p = period.max(2);
+    (p.div_ceil(2), p / 2)
+}
+
+pub fn build_clock_periods(
+    event_statements: &HashMap<Event, Vec<Statement>>,
+) -> HashMap<StrId, u64> {
+    let mut periods = HashMap::default();
+    for stmts in event_statements.values() {
+        for stmt in stmts {
+            if let Statement::TbMethodCall { inst, method } = stmt
+                && let TbMethodKind::ClockNext { period, .. } = method
+                && let Some(expr) = period
+            {
+                let val = expr.eval(&mut MaskCache::default());
+                periods.entry(*inst).or_insert(val.payload_u64());
+            }
+        }
+    }
+    periods
+}
+
 /// Convert a list of simulator Statements (from initial block) into TestbenchStatements.
 ///
 /// `event_map` maps $tb instance names (StrId) to their corresponding Events.
@@ -138,11 +166,17 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
 pub fn convert_initial_to_testbench(
     stmts: &[Statement],
     event_map: &HashMap<StrId, Event>,
+    clock_periods: &HashMap<StrId, u64>,
     default_reset_duration: u64,
 ) -> Vec<TestbenchStatement> {
     let mut result = Vec::new();
     for stmt in stmts {
-        result.push(convert_stmt(stmt, event_map, default_reset_duration));
+        result.push(convert_stmt(
+            stmt,
+            event_map,
+            clock_periods,
+            default_reset_duration,
+        ));
     }
     result
 }
@@ -150,15 +184,25 @@ pub fn convert_initial_to_testbench(
 fn convert_stmt(
     stmt: &Statement,
     event_map: &HashMap<StrId, Event>,
+    clock_periods: &HashMap<StrId, u64>,
     default_reset_duration: u64,
 ) -> TestbenchStatement {
     match stmt {
         Statement::TbMethodCall { inst, method } => match method {
-            TbMethodKind::ClockNext { count } => {
+            TbMethodKind::ClockNext { count, period } => {
                 let clock = event_map.get(inst).cloned().unwrap_or(Event::Initial);
+                let p = if let Some(expr) = period {
+                    let val = expr.eval(&mut MaskCache::default());
+                    val.payload_u64()
+                } else {
+                    2
+                };
+                let (high_time, low_time) = compute_half_periods(p);
                 TestbenchStatement::ClockNext {
                     clock,
                     count: count.clone(),
+                    high_time,
+                    low_time,
                 }
             }
             TbMethodKind::ResetAssert { clock, duration } => {
@@ -170,10 +214,14 @@ fn convert_stmt(
                 } else {
                     default_reset_duration
                 };
+                let clock_period = clock_periods.get(clock).copied().unwrap_or(2);
+                let (high_time, low_time) = compute_half_periods(clock_period);
                 TestbenchStatement::ResetAssert {
                     reset,
                     clock: clock_event,
                     duration: dur,
+                    high_time,
+                    low_time,
                 }
             }
         },
@@ -185,8 +233,18 @@ fn convert_stmt(
         }
         Statement::SystemFunctionCall(SystemFunctionCall::Finish) => TestbenchStatement::Finish,
         Statement::If(if_stmt) => {
-            let then_block = convert_stmts(&if_stmt.true_side, event_map, default_reset_duration);
-            let else_block = convert_stmts(&if_stmt.false_side, event_map, default_reset_duration);
+            let then_block = convert_stmts(
+                &if_stmt.true_side,
+                event_map,
+                clock_periods,
+                default_reset_duration,
+            );
+            let else_block = convert_stmts(
+                &if_stmt.false_side,
+                event_map,
+                clock_periods,
+                default_reset_duration,
+            );
             if let Some(cond) = &if_stmt.cond {
                 TestbenchStatement::If {
                     condition: cond.clone(),
@@ -205,11 +263,12 @@ fn convert_stmt(
 fn convert_stmts(
     stmts: &[Statement],
     event_map: &HashMap<StrId, Event>,
+    clock_periods: &HashMap<StrId, u64>,
     default_reset_duration: u64,
 ) -> Vec<TestbenchStatement> {
     stmts
         .iter()
-        .map(|s| convert_stmt(s, event_map, default_reset_duration))
+        .map(|s| convert_stmt(s, event_map, clock_periods, default_reset_duration))
         .collect()
 }
 
@@ -231,6 +290,7 @@ pub fn run_native_testbench(
 ) -> Result<TestResult, SimulatorError> {
     let mut sim = Simulator::new(ir, dump);
     let event_map = build_event_map(&sim.ir.event_statements);
+    let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
     let module_name = sim.ir.name.to_string();
     let token = sim.ir.token;
@@ -240,7 +300,7 @@ pub fn run_native_testbench(
         .get(&Event::Initial)
         .ok_or_else(|| SimulatorError::no_initial_block(&module_name, &token))?;
 
-    let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, 3);
+    let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
     Ok(run_testbench(&mut sim, &tb_stmts))
 }
 
@@ -262,7 +322,12 @@ fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement
             sim.mark_comb_dirty();
             ExecResult::Continue
         }
-        TestbenchStatement::ClockNext { clock, count } => {
+        TestbenchStatement::ClockNext {
+            clock,
+            count,
+            high_time,
+            low_time,
+        } => {
             let n = if let Some(expr) = count {
                 sim.ensure_comb_updated();
                 let val = expr.eval(&mut sim.mask_cache);
@@ -276,12 +341,14 @@ fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement
                     sim.set_var_by_id(&id, Value::new(1, 1, false));
                 }
                 sim.step(clock);
+                sim.time += high_time;
                 if has_dump {
                     if let Some(id) = clock.var_id() {
                         sim.set_var_by_id(&id, Value::new(0, 1, false));
                     }
-                    sim.dump_and_advance_time();
+                    sim.dump_variables();
                 }
+                sim.time += low_time;
             }
             ExecResult::Continue
         }
@@ -289,6 +356,8 @@ fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement
             reset,
             clock,
             duration,
+            high_time,
+            low_time,
         } => {
             // Step reset event for `duration` cycles.
             // In this simulator, Event::Reset represents a clock edge
@@ -302,12 +371,14 @@ fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement
                     sim.set_var_by_id(&id, Value::new(1, 1, false));
                 }
                 sim.step(reset);
+                sim.time += high_time;
                 if has_dump {
                     if let Some(id) = clock.var_id() {
                         sim.set_var_by_id(&id, Value::new(0, 1, false));
                     }
-                    sim.dump_and_advance_time();
+                    sim.dump_variables();
                 }
+                sim.time += low_time;
             }
             if has_dump && let Some(id) = reset.var_id() {
                 sim.set_var_by_id(&id, Value::new(0, 1, false));

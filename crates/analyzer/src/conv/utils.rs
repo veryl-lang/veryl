@@ -2533,7 +2533,8 @@ pub fn tb_method_call(
             } else {
                 None
             };
-            TbMethod::ClockNext { count }
+            let period = context.tb_clock_period.get(&inst_name).cloned();
+            TbMethod::ClockNext { count, period }
         }
         (TbComponentKind::ResetGen, "assert") => {
             let (clock, duration) = if let Some(ir::Arguments::Positional(ref positional)) = args

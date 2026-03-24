@@ -1155,19 +1155,26 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             // Suppress UnassignVariable for $tb component variables
             attribute_table::insert(inst_token, Attribute::Allow(AllowItem::UnassignVariable));
 
-            if matches!(tb_prop.kind, TbComponentKind::ResetGen)
-                && let Some(ref opt1) = value.component_instantiation.component_instantiation_opt1
+            if let Some(ref opt1) = value.component_instantiation.component_instantiation_opt1
                 && let Some(ref param_opt) = opt1.inst_parameter.inst_parameter_opt
             {
                 let items: Vec<_> = param_opt.inst_parameter_list.as_ref().into();
                 for item in items {
-                    if resource_table::get_str_value(item.identifier.identifier_token.token.text)
-                        .as_deref()
-                        == Some("cycles")
-                        && let Some(ref opt) = item.inst_parameter_item_opt
-                    {
-                        let (_, expr) = eval_expr(context, None, &opt.expression, false)?;
-                        context.tb_reset_cycles.insert(inst_name, expr);
+                    let param_name = item.identifier.identifier_token.token.text.to_string();
+                    match (&tb_prop.kind, param_name.as_str()) {
+                        (TbComponentKind::ResetGen, "cycles") => {
+                            if let Some(ref opt) = item.inst_parameter_item_opt {
+                                let (_, expr) = eval_expr(context, None, &opt.expression, false)?;
+                                context.tb_reset_cycles.insert(inst_name, expr);
+                            }
+                        }
+                        (TbComponentKind::ClockGen, "period") => {
+                            if let Some(ref opt) = item.inst_parameter_item_opt {
+                                let (_, expr) = eval_expr(context, None, &opt.expression, false)?;
+                                context.tb_clock_period.insert(inst_name, expr);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

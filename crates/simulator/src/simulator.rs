@@ -173,7 +173,6 @@ impl<T: std::io::Write> Simulator<T> {
         self.comb_dirty = true;
 
         self.dump_variables();
-        self.time += 1;
     }
 
     #[inline(always)]
@@ -223,13 +222,6 @@ impl<T: std::io::Write> Simulator<T> {
         }
     }
 
-    /// Emit an additional VCD timestamp with the current variable state.
-    /// Does NOT execute events or FF swap — used for negedge dump points.
-    pub fn dump_and_advance_time(&mut self) {
-        self.dump_variables();
-        self.time += 1;
-    }
-
     pub fn dump_start(&mut self) {
         if let Some(dump) = &mut self.dump {
             dump.begin(SimulationCommand::Dumpvars).unwrap();
@@ -238,7 +230,7 @@ impl<T: std::io::Write> Simulator<T> {
         }
     }
 
-    fn dump_variables(&mut self) {
+    pub fn dump_variables(&mut self) {
         if let Some(dump) = &mut self.dump {
             if self.comb_dirty {
                 self.ir.settle_comb(&mut self.mask_cache);

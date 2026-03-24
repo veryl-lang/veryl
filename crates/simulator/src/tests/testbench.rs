@@ -27,12 +27,16 @@ fn testbench_counter_clock_next() {
                 reset: rst.clone(),
                 clock: clk.clone(),
                 duration: 3,
+                high_time: 1,
+                low_time: 1,
             },
             TestbenchStatement::For {
                 count: 10,
                 body: vec![TestbenchStatement::ClockNext {
                     clock: clk.clone(),
                     count: None,
+                    high_time: 1,
+                    low_time: 1,
                 }],
             },
             TestbenchStatement::Finish,
@@ -71,6 +75,8 @@ fn testbench_reset_clears_counter() {
                 reset: rst.clone(),
                 clock: clk.clone(),
                 duration: 5,
+                high_time: 1,
+                low_time: 1,
             },
             TestbenchStatement::Finish,
         ];
@@ -108,6 +114,8 @@ fn testbench_for_loop() {
                 reset: rst.clone(),
                 clock: clk.clone(),
                 duration: 1,
+                high_time: 1,
+                low_time: 1,
             },
             // Step 5 times using For loop (each iteration steps 1 clock)
             TestbenchStatement::For {
@@ -115,6 +123,8 @@ fn testbench_for_loop() {
                 body: vec![TestbenchStatement::ClockNext {
                     clock: clk.clone(),
                     count: None,
+                    high_time: 1,
+                    low_time: 1,
                 }],
             },
             TestbenchStatement::Finish,
@@ -153,12 +163,16 @@ fn testbench_finish_stops_execution() {
                 reset: rst.clone(),
                 clock: clk.clone(),
                 duration: 1,
+                high_time: 1,
+                low_time: 1,
             },
             TestbenchStatement::For {
                 count: 5,
                 body: vec![TestbenchStatement::ClockNext {
                     clock: clk.clone(),
                     count: None,
+                    high_time: 1,
+                    low_time: 1,
                 }],
             },
             TestbenchStatement::Finish,
@@ -168,6 +182,8 @@ fn testbench_finish_stops_execution() {
                 body: vec![TestbenchStatement::ClockNext {
                     clock: clk.clone(),
                     count: None,
+                    high_time: 1,
+                    low_time: 1,
                 }],
             },
         ];
@@ -261,11 +277,12 @@ fn tb_integration_counter() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         let event_map = build_event_map(&sim.ir.event_statements);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         // Get initial block statements and convert to testbench
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
         if let Some(stmts) = initial_stmts {
-            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, 3);
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
             let result = run_testbench(&mut sim, &tb_stmts);
             assert_eq!(result, TestResult::Pass);
             let cnt = sim
@@ -431,8 +448,9 @@ fn tb_readonly_cache_fill() {
 
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
         let event_map = build_event_map(&sim.ir.event_statements);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
-        let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, 3);
+        let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
         let result = run_testbench(&mut sim, &tb_stmts);
         assert_eq!(
             result,
@@ -494,10 +512,11 @@ fn tb_function_inline() {
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
         let event_map = build_event_map(&sim.ir.event_statements);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
         if let Some(stmts) = initial_stmts {
-            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, 3);
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
             let result = run_testbench(&mut sim, &tb_stmts);
             assert_eq!(result, TestResult::Pass);
             let cnt = sim
@@ -716,12 +735,16 @@ fn testbench_vcd_clock_reset_waveform() {
                 reset: rst.clone(),
                 clock: clk.clone(),
                 duration: 2,
+                high_time: 1,
+                low_time: 1,
             },
             TestbenchStatement::For {
                 count: 3,
                 body: vec![TestbenchStatement::ClockNext {
                     clock: clk.clone(),
                     count: None,
+                    high_time: 1,
+                    low_time: 1,
                 }],
             },
         ];
