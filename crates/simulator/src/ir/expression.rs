@@ -475,6 +475,9 @@ pub enum Expression {
     },
 }
 
+// SAFETY: Same as Statement — see statement.rs.
+unsafe impl Send for Expression {}
+
 impl Expression {
     pub fn eval(&self, mask_cache: &mut MaskCache) -> Value {
         match self {

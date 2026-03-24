@@ -224,6 +224,13 @@ impl Ir {
     }
 }
 
+// SAFETY: Each Ir exclusively owns its ff_values/comb_values buffers.
+// Raw pointers in Statements point into these buffers — no cross-Ir aliasing.
+// _binary (Arc<Vec<Mmap>>) keeps JIT code pages alive.
+// NOTE: Ir is intentionally NOT Sync. Sharing &Ir across threads would allow
+// concurrent mutation of ff_values/comb_values via interior raw pointers.
+unsafe impl Send for Ir {}
+
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
     for x in &ir.components {
         if let air::Component::Module(x) = x
@@ -256,11 +263,13 @@ struct CacheEntry {
 }
 
 /// Cache for `ProtoModule` and JIT binaries keyed by top module name.
-/// Reuses `Conv::conv` results across tests that share the same top module,
-/// only calling the cheap `instantiate()` on cache hits.
+/// `shared_jit_cache` persists sub-module JIT results across different top modules.
 #[derive(Default)]
 pub struct ProtoModuleCache {
     entries: HashMap<StrId, CacheEntry>,
+    shared_jit_cache: HashMap<StrId, context::JitCacheEntry>,
+    /// Keeps Mmap pages alive so function pointers in shared_jit_cache remain valid.
+    shared_binaries: Vec<Arc<Vec<Mmap>>>,
 }
 
 pub fn build_ir_cached(
@@ -288,6 +297,7 @@ pub fn build_ir_cached(
             let token = x.token;
             let mut context = context::Context {
                 config: config.clone(),
+                jit_cache: std::mem::take(&mut cache.shared_jit_cache),
                 ..Default::default()
             };
 
@@ -296,6 +306,9 @@ pub fn build_ir_cached(
             let binary = Arc::new(context.binary);
 
             let result = Ir::from_module_arc(module, Arc::clone(&binary), config.use_4state, token);
+
+            cache.shared_jit_cache = context.jit_cache;
+            cache.shared_binaries.push(Arc::clone(&binary));
 
             cache.entries.insert(
                 top,

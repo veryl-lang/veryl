@@ -1,5 +1,6 @@
 pub mod cranelift;
 pub mod ir;
+pub mod output_buffer;
 pub mod simulator;
 pub mod simulator_error;
 pub mod testbench;

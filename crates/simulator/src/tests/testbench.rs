@@ -576,7 +576,8 @@ fn tb_initial_assign_comb() {
             Ok(ir) => ir,
             Err(_) => continue,
         };
-        let result = run_native_testbench(ir, None);
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
         assert_eq!(
             result.unwrap(),
             TestResult::Pass,
@@ -634,7 +635,8 @@ fn tb_initial_assign_ff() {
             Ok(ir) => ir,
             Err(_) => continue,
         };
-        let result = run_native_testbench(ir, None);
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
         assert_eq!(
             result.unwrap(),
             TestResult::Pass,
@@ -694,7 +696,8 @@ fn tb_initial_assign_multiple() {
             Ok(ir) => ir,
             Err(_) => continue,
         };
-        let result = run_native_testbench(ir, None);
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
         assert_eq!(
             result.unwrap(),
             TestResult::Pass,
@@ -1259,7 +1262,8 @@ fn tb_dual_clock() {
             Ok(ir) => ir,
             Err(_) => continue,
         };
-        let result = run_native_testbench(ir, None);
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
         assert_eq!(
             result.unwrap(),
             TestResult::Pass,

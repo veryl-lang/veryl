@@ -276,17 +276,17 @@ pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestR
 
 /// Run a native testbench from a simulator IR.
 ///
-/// Builds a Simulator, extracts the initial block, converts it to testbench
-/// statements, and executes them.
+/// `module_name` must be pre-resolved from `ir.name` on the main thread
+/// because resource_table is thread-local.
 pub fn run_native_testbench(
     ir: Ir,
     dump: Option<WaveDumper>,
+    module_name: String,
 ) -> Result<TestResult, SimulatorError> {
     let mut sim = Simulator::new(ir, dump);
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
-    let module_name = sim.ir.name.to_string();
     let token = sim.ir.token;
     let initial_stmts = sim
         .ir
