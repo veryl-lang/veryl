@@ -276,7 +276,7 @@ fn tb_integration_counter() {
 
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         // Get initial block statements and convert to testbench
@@ -447,7 +447,7 @@ fn tb_readonly_cache_fill() {
         };
 
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
-        let event_map = build_event_map(&sim.ir.event_statements);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
         let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
@@ -511,7 +511,7 @@ fn tb_function_inline() {
 
         let mut sim = Simulator::<std::io::Empty>::new(ir, None);
 
-        let event_map = build_event_map(&sim.ir.event_statements);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
@@ -904,5 +904,148 @@ fn testbench_array_input_port() {
         assert_eq!(result, TestResult::Pass);
         // After 5 cycles: arr[0]=5, arr[1]=10, cnt=15
         assert_eq!(sim.get("cnt").unwrap(), Value::new(15, 32, false));
+    }
+}
+
+#[test]
+fn testbench_vcd_comb_only_clock_reset() {
+    let code = r#"
+    module CombOnly (
+        clk: input clock,
+        rst: input reset,
+        a: input logic<8>,
+        b: output logic<8>,
+    ) {
+        assign b = a + 8'd1;
+    }
+
+    #[test(test_comb)]
+    module test_comb {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        var b: logic<8>;
+
+        inst dut: CombOnly (
+            clk: clk,
+            rst: rst,
+            a: 8'd42,
+            b: b,
+        );
+
+        initial {
+            rst.assert(clk);
+            clk.next(3);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_comb");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+
+        let mut dump = Vec::new();
+        let mut sim = Simulator::new(ir, Some(&mut dump));
+
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        assert!(initial_stmts.is_some(), "No initial block found");
+        let tb_stmts =
+            convert_initial_to_testbench(initial_stmts.unwrap(), &event_map, &clock_periods, 3);
+        let result = run_testbench(&mut sim, &tb_stmts);
+        assert_eq!(result, TestResult::Pass);
+        drop(sim);
+
+        let mut parser = vcd::Parser::new(dump.as_slice());
+        let header = parser.parse_header().unwrap();
+
+        let clk_var = header.find_var(&["test_comb", "clk"]);
+        let rst_var = header.find_var(&["test_comb", "rst"]);
+
+        assert!(
+            clk_var.is_some(),
+            "clk not found in VCD (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert!(
+            rst_var.is_some(),
+            "rst not found in VCD (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        let clk_code = clk_var.unwrap().code;
+        let rst_code = rst_var.unwrap().code;
+
+        let mut clk_values: Vec<(u64, bool)> = Vec::new();
+        let mut rst_values: Vec<(u64, bool)> = Vec::new();
+        let mut current_time: u64 = 0;
+        for cmd in parser {
+            match cmd.unwrap() {
+                vcd::Command::Timestamp(t) => current_time = t,
+                vcd::Command::ChangeVector(code, vec) => {
+                    let bit = vec.get(0) == Some(vcd::Value::V1);
+                    if code == clk_code {
+                        clk_values.push((current_time, bit));
+                    } else if code == rst_code {
+                        rst_values.push((current_time, bit));
+                    }
+                }
+                vcd::Command::ChangeScalar(code, val) => {
+                    let bit = val == vcd::Value::V1;
+                    if code == clk_code {
+                        clk_values.push((current_time, bit));
+                    } else if code == rst_code {
+                        rst_values.push((current_time, bit));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // rst.assert(clk) = 3 cycles (default duration) + clk.next(3) = 3 cycles
+        // Each cycle: posedge(1) + negedge(0) = 2 transitions
+        // Total clock transitions >= 12
+        assert!(
+            clk_values.len() >= 12,
+            "expected >= 12 clock transitions for comb-only DUT, got {} (jit={}, 4state={})",
+            clk_values.len(),
+            config.use_jit,
+            config.use_4state,
+        );
+
+        for (i, &(_, val)) in clk_values.iter().enumerate() {
+            let expected = i % 2 == 0;
+            assert_eq!(
+                val, expected,
+                "clock value at index {i} should be {expected}, got {val} (jit={}, 4state={})",
+                config.use_jit, config.use_4state,
+            );
+        }
+
+        assert!(
+            !rst_values.is_empty(),
+            "expected reset signal changes in VCD for comb-only DUT (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert!(
+            rst_values[0].1,
+            "reset should be asserted initially (jit={}, 4state={})",
+            config.use_jit, config.use_4state,
+        );
+        assert!(
+            !rst_values.last().unwrap().1,
+            "reset should be deasserted after reset phase (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
     }
 }

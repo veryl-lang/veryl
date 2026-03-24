@@ -1,8 +1,10 @@
 use crate::HashMap;
-use crate::ir::{Event, Expression, Ir, Statement, SystemFunctionCall, TbMethodKind, Value};
+use crate::ir::{
+    Event, Expression, Ir, ModuleVariables, Statement, SystemFunctionCall, TbMethodKind, Value,
+    VarId, VarPath,
+};
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
-use veryl_analyzer::ir::VarId;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
@@ -73,13 +75,31 @@ impl From<ExecResult> for TestResult {
     }
 }
 
+fn find_var_id_by_name(module_variables: &ModuleVariables, name: StrId) -> Option<VarId> {
+    let target_path = VarPath::new(name);
+    for (var_id, variable) in &module_variables.variables {
+        if variable.path == target_path {
+            return Some(*var_id);
+        }
+    }
+    for child in &module_variables.children {
+        if let Some(id) = find_var_id_by_name(child, name) {
+            return Some(id);
+        }
+    }
+    None
+}
+
 /// Build a mapping from $tb instance names (StrId) to their corresponding Events.
 ///
 /// Scans event_statements for TbMethodCall entries to determine which instance
 /// corresponds to clock_gen (Event::Clock) or reset_gen (Event::Reset).
 /// When no DUT-driven clock/reset events exist (e.g., purely combinational DUT),
-/// synthetic events are created so that clk.next()/rst.assert() still work.
-pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> HashMap<StrId, Event> {
+/// the actual VarId is resolved from module_variables so that VCD dump works.
+pub fn build_event_map(
+    event_statements: &HashMap<Event, Vec<Statement>>,
+    module_variables: &ModuleVariables,
+) -> HashMap<StrId, Event> {
     let clk_event = event_statements
         .keys()
         .find(|e| matches!(e, Event::Clock(_)))
@@ -115,19 +135,16 @@ pub fn build_event_map(event_statements: &HashMap<Event, Vec<Statement>>) -> Has
         }
     }
 
-    // Create synthetic events for $tb instances when no DUT-driven events exist.
-    // These events have no statements in event_statements, so sim.step() will
-    // only perform ff_swap and mark comb dirty — correct for purely comb DUTs.
     if clk_event.is_none() && !clock_insts.is_empty() {
-        let synthetic_clk = Event::Clock(VarId::SYNTHETIC);
         for inst in clock_insts {
-            event_map.entry(inst).or_insert(synthetic_clk.clone());
+            let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
+            event_map.entry(inst).or_insert(Event::Clock(var_id));
         }
     }
     if rst_event.is_none() && !reset_insts.is_empty() {
-        let synthetic_rst = Event::Reset(VarId::SYNTHETIC);
         for inst in reset_insts {
-            event_map.entry(inst).or_insert(synthetic_rst.clone());
+            let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
+            event_map.entry(inst).or_insert(Event::Reset(var_id));
         }
     }
 
@@ -289,7 +306,7 @@ pub fn run_native_testbench(
     dump: Option<Box<dyn std::io::Write>>,
 ) -> Result<TestResult, SimulatorError> {
     let mut sim = Simulator::new(ir, dump);
-    let event_map = build_event_map(&sim.ir.event_statements);
+    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
     let module_name = sim.ir.name.to_string();
