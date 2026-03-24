@@ -92,42 +92,23 @@ fn find_var_id_by_name(module_variables: &ModuleVariables, name: StrId) -> Optio
 }
 
 /// Build a mapping from $tb instance names (StrId) to their corresponding Events.
-///
-/// Scans event_statements for TbMethodCall entries to determine which instance
-/// corresponds to clock_gen (Event::Clock) or reset_gen (Event::Reset).
-/// When no DUT-driven clock/reset events exist (e.g., purely combinational DUT),
-/// the actual VarId is resolved from module_variables so that VCD dump works.
 pub fn build_event_map(
     event_statements: &HashMap<Event, Vec<Statement>>,
     module_variables: &ModuleVariables,
 ) -> HashMap<StrId, Event> {
-    let clk_event = event_statements
-        .keys()
-        .find(|e| matches!(e, Event::Clock(_)))
-        .cloned();
-    let rst_event = event_statements
-        .keys()
-        .find(|e| matches!(e, Event::Reset(_)))
-        .cloned();
-
-    let mut event_map = HashMap::default();
-    let mut clock_insts = Vec::new();
-    let mut reset_insts = Vec::new();
+    let mut clock_insts: Vec<StrId> = Vec::new();
+    let mut reset_insts: Vec<StrId> = Vec::new();
     for stmts in event_statements.values() {
         for stmt in stmts {
             if let Statement::TbMethodCall { inst, method } = stmt {
                 match method {
                     TbMethodKind::ClockNext { .. } => {
-                        if let Some(ref evt) = clk_event {
-                            event_map.entry(*inst).or_insert(evt.clone());
-                        } else {
+                        if !clock_insts.contains(inst) {
                             clock_insts.push(*inst);
                         }
                     }
                     TbMethodKind::ResetAssert { .. } => {
-                        if let Some(ref evt) = rst_event {
-                            event_map.entry(*inst).or_insert(evt.clone());
-                        } else {
+                        if !reset_insts.contains(inst) {
                             reset_insts.push(*inst);
                         }
                     }
@@ -136,17 +117,16 @@ pub fn build_event_map(
         }
     }
 
-    if clk_event.is_none() && !clock_insts.is_empty() {
-        for inst in clock_insts {
-            let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
-            event_map.entry(inst).or_insert(Event::Clock(var_id));
-        }
+    let mut event_map = HashMap::default();
+
+    for inst in clock_insts {
+        let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
+        event_map.entry(inst).or_insert(Event::Clock(var_id));
     }
-    if rst_event.is_none() && !reset_insts.is_empty() {
-        for inst in reset_insts {
-            let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
-            event_map.entry(inst).or_insert(Event::Reset(var_id));
-        }
+
+    for inst in reset_insts {
+        let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
+        event_map.entry(inst).or_insert(Event::Reset(var_id));
     }
 
     event_map
