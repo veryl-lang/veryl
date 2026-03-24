@@ -8,7 +8,8 @@ use veryl_analyzer::symbol_table;
 use veryl_metadata::WaveFormFormat;
 use veryl_metadata::{FilelistType, Metadata, SimType};
 use veryl_parser::resource_table;
-use veryl_simulator::ir::{Config, ProtoModuleCache, build_ir_cached};
+use veryl_simulator::ir::{Config, Ir, ProtoModuleCache, build_ir_cached};
+use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
 use veryl_simulator::testbench::{TestResult, run_native_testbench};
@@ -17,6 +18,13 @@ use veryl_simulator::wavedrom::{self, SignalKind, classify_signals, parse_wavedr
 
 pub struct CmdTest {
     opt: OptTest,
+}
+
+struct NativeTestJob {
+    test_name: String,
+    module_name: String,
+    sim_ir: Ir,
+    dump: Option<WaveDumper>,
 }
 
 impl CmdTest {
@@ -80,14 +88,18 @@ impl CmdTest {
 
         let mut success = 0;
         let mut failure = 0;
+
+        let mut native_jobs: Vec<NativeTestJob> = Vec::new();
+        let mut non_native_tests = Vec::new();
+
         for (test, property) in &tests {
             match property.r#type {
                 TestType::Native => {
                     let test_name =
                         veryl_parser::resource_table::get_str_value(*test).unwrap_or_default();
-                    info!("Executing test ({test_name})");
+                    info!("Building IR for test ({test_name})");
 
-                    match run_native_test(
+                    match prepare_native_test(
                         &ir,
                         &test_name,
                         &property.top,
@@ -96,39 +108,94 @@ impl CmdTest {
                         &config,
                         &mut proto_cache,
                     ) {
-                        Ok(()) => {
-                            info!("Succeeded test ({test_name})");
-                            success += 1;
-                        }
+                        Ok(job) => native_jobs.push(job),
                         Err(e) => {
-                            error!("Failed test ({test_name}): {e}");
+                            error!("Failed to build IR for test ({test_name}): {e}");
                             failure += 1;
                         }
                     }
                 }
                 _ => {
-                    let mut runner = match property.r#type {
-                        TestType::Inline => match sim_type {
-                            SimType::Verilator => Verilator::new().runner(),
-                            SimType::Vcs => Vcs::new().runner(),
-                            SimType::Dsim => Dsim::new().runner(),
-                            SimType::Vivado => Vivado::new().runner(),
-                        },
-                        TestType::CocotbEmbed(ref x) => {
-                            Cocotb::new(CocotbSource::Embed(x.clone())).runner()
-                        }
-                        TestType::CocotbInclude(x) => {
-                            Cocotb::new(CocotbSource::Include(x)).runner()
-                        }
-                        TestType::Native => unreachable!(),
-                    };
+                    non_native_tests.push((test, property));
+                }
+            }
+        }
 
-                    if runner.run(metadata, *test, property.top, property.path, self.opt.wave)? {
+        if !native_jobs.is_empty() {
+            let num_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+                .min(native_jobs.len());
+            let job_queue = std::sync::Mutex::new(native_jobs.into_iter());
+
+            type JobResult = (
+                String,
+                std::result::Result<TestResult, SimulatorError>,
+                String,
+            );
+            let results: Vec<Vec<JobResult>> = std::thread::scope(|s| {
+                let queue = &job_queue;
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|_| {
+                        s.spawn(move || {
+                            let mut thread_results = Vec::new();
+                            loop {
+                                let job = queue.lock().unwrap().next();
+                                let Some(job) = job else { break };
+                                output_buffer::enable();
+                                let result =
+                                    run_native_testbench(job.sim_ir, job.dump, job.module_name);
+                                let output = output_buffer::take();
+                                thread_results.push((job.test_name, result, output));
+                            }
+                            thread_results
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+
+            for (test_name, result, output) in results.into_iter().flatten() {
+                info!("Executing test ({test_name})");
+                if !output.is_empty() {
+                    print!("{output}");
+                }
+                match result {
+                    Ok(TestResult::Pass) => {
+                        info!("Succeeded test ({test_name})");
                         success += 1;
-                    } else {
+                    }
+                    Ok(TestResult::Fail(msg)) => {
+                        error!("Failed test ({test_name}): {msg}");
+                        failure += 1;
+                    }
+                    Err(e) => {
+                        error!("Failed test ({test_name}): {e}");
                         failure += 1;
                     }
                 }
+            }
+        }
+
+        for (test, property) in non_native_tests {
+            let mut runner = match property.r#type {
+                TestType::Inline => match sim_type {
+                    SimType::Verilator => Verilator::new().runner(),
+                    SimType::Vcs => Vcs::new().runner(),
+                    SimType::Dsim => Dsim::new().runner(),
+                    SimType::Vivado => Vivado::new().runner(),
+                },
+                TestType::CocotbEmbed(ref x) => {
+                    Cocotb::new(CocotbSource::Embed(x.clone())).runner()
+                }
+                TestType::CocotbInclude(x) => Cocotb::new(CocotbSource::Include(x)).runner(),
+                TestType::Native => unreachable!(),
+            };
+
+            if runner.run(metadata, *test, property.top, property.path, self.opt.wave)? {
+                success += 1;
+            } else {
+                failure += 1;
             }
         }
 
@@ -172,7 +239,7 @@ impl CmdTest {
     }
 }
 
-fn run_native_test(
+fn prepare_native_test(
     ir: &veryl_analyzer::ir::Ir,
     test_name: &str,
     top: &Option<resource_table::StrId>,
@@ -180,7 +247,7 @@ fn run_native_test(
     waveform_format: WaveFormFormat,
     config: &Config,
     cache: &mut ProtoModuleCache,
-) -> std::result::Result<(), SimulatorError> {
+) -> std::result::Result<NativeTestJob, SimulatorError> {
     let top_name = if let Some(top_str) = top {
         resource_table::get_str_value(*top_str).unwrap_or_default()
     } else {
@@ -193,6 +260,8 @@ fn run_native_test(
         }
     })?;
     let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
+
+    let module_name = sim_ir.name.to_string();
 
     let dump: Option<WaveDumper> = if opt.wave {
         let path = format!("{}.{}", test_name, waveform_format.extension());
@@ -210,10 +279,12 @@ fn run_native_test(
         None
     };
 
-    match run_native_testbench(sim_ir, dump)? {
-        TestResult::Pass => Ok(()),
-        TestResult::Fail(msg) => Err(SimulatorError::TestFailed { message: msg }),
-    }
+    Ok(NativeTestJob {
+        test_name: test_name.to_string(),
+        module_name,
+        sim_ir,
+        dump,
+    })
 }
 
 fn run_doc_test(

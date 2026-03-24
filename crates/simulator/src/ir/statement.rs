@@ -10,6 +10,7 @@ use crate::ir::variable::{
     native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
+use crate::output_buffer;
 use crate::simulator_error::SimulatorError;
 use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
@@ -137,6 +138,14 @@ pub enum Statement {
     TbMethodCall { inst: StrId, method: TbMethodKind },
 }
 
+// SAFETY: Raw pointers point into the owning Ir's exclusively-owned buffers.
+// No cross-thread aliasing when each thread operates on a distinct Ir.
+unsafe impl Send for Statement {}
+unsafe impl Send for AssignStatement {}
+unsafe impl Send for AssignDynamicStatement {}
+unsafe impl Send for IfStatement {}
+unsafe impl Send for SystemFunctionCall {}
+
 impl Statement {
     pub fn is_binary(&self) -> bool {
         matches!(
@@ -263,12 +272,12 @@ impl SystemFunctionCall {
                 let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
                 if format_str.is_empty() {
                     let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
-                    println!("{}", parts.join(" "));
+                    output_buffer::println(&parts.join(" "));
                 } else if values.is_empty() {
-                    println!("{format_str}");
+                    output_buffer::println(format_str);
                 } else {
                     let output = format_display_string(format_str, &values);
-                    println!("{output}");
+                    output_buffer::println(&output);
                 }
             }
             SystemFunctionCall::Readmemh {

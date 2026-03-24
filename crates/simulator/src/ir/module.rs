@@ -435,58 +435,62 @@ pub(crate) fn analyze_dependency(
             |x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()),
         );
         if !has_expandable {
-            // No expandable CompiledBlocks at all.
+            // No expandable CompiledBlocks. If any CBs exist at all (e.g. from
+            // shared JIT cache without original_stmts), skip to relaxed ordering
+            // instead of reporting a false-positive combinational loop.
+            let has_any_cb = table
+                .values()
+                .any(|x| matches!(x, ProtoStatement::CompiledBlock(_)));
+            if !has_any_cb {
+                // Genuine loop, no CBs involved — re-do analysis for error message.
+                let mut dag2 = Dag::<Node, ()>::new();
+                let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+                for (id, x) in &table {
+                    let mut inputs = vec![];
+                    let mut outputs = vec![];
+                    x.gather_variable_offsets(&mut inputs, &mut outputs);
+                    let stmt_node = Node::Statement(*id);
+                    let stmt = dag2.add_node(stmt_node);
+                    dag_nodes2.insert(stmt_node, stmt);
+
+                    let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+                    for var_key in inputs {
+                        if output_set.contains(&var_key) {
+                            continue;
+                        }
+                        let var_node = Node::Var(var_key.0, var_key.1);
+                        let var = *dag_nodes2
+                            .entry(var_node)
+                            .or_insert_with(|| dag2.add_node(var_node));
+                        if dag2.add_edge(var, stmt, ()).is_err() {
+                            let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
+                            let trigger_token = table[id].token().unwrap_or_default();
+                            return Err(SimulatorError::combinational_loop(
+                                &trigger_token,
+                                &participant_tokens,
+                            ));
+                        }
+                    }
+                    for var_key in outputs {
+                        let var_node = Node::Var(var_key.0, var_key.1);
+                        let var = *dag_nodes2
+                            .entry(var_node)
+                            .or_insert_with(|| dag2.add_node(var_node));
+                        if dag2.add_edge(stmt, var, ()).is_err() {
+                            let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
+                            let trigger_token = table[id].token().unwrap_or_default();
+                            return Err(SimulatorError::combinational_loop(
+                                &trigger_token,
+                                &participant_tokens,
+                            ));
+                        }
+                    }
+                }
+                unreachable!("cycle was detected but re-analysis succeeded");
+            }
         } else {
             log::debug!("analyze_dependency: cycle detected, retrying with fine-grained deps ({} CompiledBlocks with original_stmts)",
                 table.values().filter(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())).count());
-        }
-
-        if !has_expandable {
-            // Re-do the analysis to get the proper error message.
-            let mut dag2 = Dag::<Node, ()>::new();
-            let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
-            for (id, x) in &table {
-                let mut inputs = vec![];
-                let mut outputs = vec![];
-                x.gather_variable_offsets(&mut inputs, &mut outputs);
-                let stmt_node = Node::Statement(*id);
-                let stmt = dag2.add_node(stmt_node);
-                dag_nodes2.insert(stmt_node, stmt);
-
-                let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
-                for var_key in inputs {
-                    if output_set.contains(&var_key) {
-                        continue;
-                    }
-                    let var_node = Node::Var(var_key.0, var_key.1);
-                    let var = *dag_nodes2
-                        .entry(var_node)
-                        .or_insert_with(|| dag2.add_node(var_node));
-                    if dag2.add_edge(var, stmt, ()).is_err() {
-                        let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
-                        let trigger_token = table[id].token().unwrap_or_default();
-                        return Err(SimulatorError::combinational_loop(
-                            &trigger_token,
-                            &participant_tokens,
-                        ));
-                    }
-                }
-                for var_key in outputs {
-                    let var_node = Node::Var(var_key.0, var_key.1);
-                    let var = *dag_nodes2
-                        .entry(var_node)
-                        .or_insert_with(|| dag2.add_node(var_node));
-                    if dag2.add_edge(stmt, var, ()).is_err() {
-                        let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
-                        let trigger_token = table[id].token().unwrap_or_default();
-                        return Err(SimulatorError::combinational_loop(
-                            &trigger_token,
-                            &participant_tokens,
-                        ));
-                    }
-                }
-            }
-            unreachable!("cycle was detected but re-analysis succeeded");
         }
     }
 

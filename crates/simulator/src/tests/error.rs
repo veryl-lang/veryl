@@ -52,7 +52,8 @@ fn no_initial_block() {
     "#;
 
     let ir = analyze(code, &Config::default());
-    let result = run_native_testbench(ir, None);
+    let module_name = ir.name.to_string();
+    let result = run_native_testbench(ir, None, module_name);
     assert!(matches!(result, Err(SimulatorError::NoInitialBlock { .. })));
 }
 

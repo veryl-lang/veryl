@@ -332,8 +332,11 @@ mod error {
                                         .unwrap();
                                 }
                                 Ok(sim_ir) => {
+                                    let module_name = sim_ir.name.to_string();
                                     match veryl_simulator::testbench::run_native_testbench(
-                                        sim_ir, None,
+                                        sim_ir,
+                                        None,
+                                        module_name,
                                     ) {
                                         Err(tb_err) => {
                                             handler
@@ -724,7 +727,8 @@ mod native_test {
                     resource_table::get_str_id(top_name.clone()).expect("top module not found");
                 let sim_ir = build_ir(&ir, top_str_id, &config)
                     .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
-                let result = run_native_testbench(sim_ir, None)
+                let module_name = sim_ir.name.to_string();
+                let result = run_native_testbench(sim_ir, None, module_name)
                     .unwrap_or_else(|e| panic!("testbench error for {test_str}: {e}"));
                 assert_eq!(
                     result,

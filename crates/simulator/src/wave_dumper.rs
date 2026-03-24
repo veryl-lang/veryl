@@ -28,7 +28,7 @@ pub enum WaveDumper {
 }
 
 pub struct VcdDumper {
-    writer: vcd::Writer<Box<dyn Write>>,
+    writer: vcd::Writer<Box<dyn Write + Send>>,
 }
 
 pub struct FstDumper {
@@ -42,7 +42,7 @@ enum FstState {
 }
 
 impl WaveDumper {
-    pub fn new_vcd(io: Box<dyn Write>) -> Self {
+    pub fn new_vcd(io: Box<dyn Write + Send>) -> Self {
         WaveDumper::Vcd(VcdDumper {
             writer: vcd::Writer::new(io),
         })
@@ -256,3 +256,6 @@ pub struct DumpVar {
     pub native_bytes: usize,
     pub width: usize,
 }
+
+// SAFETY: Same as Statement — see statement.rs.
+unsafe impl Send for DumpVar {}
