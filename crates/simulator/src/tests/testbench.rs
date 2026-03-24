@@ -1203,3 +1203,69 @@ fn testbench_vcd_comb_only_clock_reset() {
         );
     }
 }
+
+#[test]
+fn tb_dual_clock() {
+    let code = r#"
+    module DualClock (
+        clk_a: input  'a clock    ,
+        rst_a: input  'a reset    ,
+        clk_b: input  'b clock    ,
+        rst_b: input  'b reset    ,
+        cnt_a: output 'a logic<32>,
+        cnt_b: output 'b logic<32>,
+    ) {
+        always_ff (clk_a, rst_a) {
+            if_reset { cnt_a = 0; }
+            else     { cnt_a += 1; }
+        }
+        always_ff (clk_b, rst_b) {
+            if_reset { cnt_b = 0; }
+            else     { cnt_b += 1; }
+        }
+    }
+
+    #[test(test_dual_clock)]
+    module test_dual_clock {
+        inst clk_a: $tb::clock_gen;
+        inst rst_a: $tb::reset_gen;
+        inst clk_b: $tb::clock_gen;
+        inst rst_b: $tb::reset_gen;
+
+        var cnt_a: logic<32>;
+        var cnt_b: logic<32>;
+
+        inst dut: DualClock (
+            clk_a, rst_a, clk_b, rst_b, cnt_a, cnt_b,
+        );
+
+        initial {
+            rst_a.assert(clk_a);
+            rst_b.assert(clk_b);
+            clk_a.next(10);
+            $assert(cnt_a == 32'd10);
+            $assert(cnt_b == 32'd0);
+            clk_b.next(5);
+            $assert(cnt_a == 32'd10);
+            $assert(cnt_b == 32'd5);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_dual_clock");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let result = run_native_testbench(ir, None);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_dual_clock failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
