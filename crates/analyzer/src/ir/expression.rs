@@ -3,9 +3,10 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::utils::convert_cast;
 use crate::ir::{
-    Comptime, ExpressionContext, FfTable, FunctionCall, Op, SystemFunctionCall, Type, TypeKind,
-    ValueVariant, VarId, VarIndex, VarSelect,
+    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall, Type,
+    TypeKind, ValueVariant, VarId, VarIndex, VarSelect,
 };
+use crate::symbol::{ClockDomain, Symbol, SymbolKind};
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -563,6 +564,35 @@ pub enum Factor {
 impl Factor {
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         let comptime = Comptime::create_value(value, token);
+        Factor::Value(comptime)
+    }
+
+    pub fn from_component_symbol(symbol: &Symbol, token: TokenRange) -> Self {
+        let sig = Signature::new(symbol.id);
+        let kind = match &symbol.kind {
+            SymbolKind::Module(_)
+            | SymbolKind::ProtoModule(_)
+            | SymbolKind::AliasModule(_)
+            | SymbolKind::ProtoAliasModule(_) => TypeKind::Module(sig),
+            SymbolKind::Interface(_)
+            | SymbolKind::ProtoInterface(_)
+            | SymbolKind::AliasInterface(_)
+            | SymbolKind::ProtoAliasInterface(_) => TypeKind::Interface(sig),
+            SymbolKind::Package(_)
+            | SymbolKind::ProtoPackage(_)
+            | SymbolKind::AliasPackage(_)
+            | SymbolKind::ProtoAliasPackage(_) => TypeKind::Package(sig),
+            _ => unreachable!(),
+        };
+        let r#type = Type {
+            kind,
+            ..Default::default()
+        };
+
+        let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
+        comptime.is_const = true;
+        comptime.is_global = true;
+
         Factor::Value(comptime)
     }
 

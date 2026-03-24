@@ -7,6 +7,7 @@
   "enum"
   "type"
   "const"
+  "gen"
   "var"
   "let"
   "param"

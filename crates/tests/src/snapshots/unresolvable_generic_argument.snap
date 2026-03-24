@@ -1,8 +1,9 @@
 ---
 source: crates/tests/src/lib.rs
+assertion_line: 359
 expression: out
 ---
-unresolvable_generic_argument (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_argument)
+unresolvable_generic_expression (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_expression)
 
   × "X" can't be resolved from the definition of generics
    ╭─[../../testcases/error/unresolvable_generic_argument.veryl:3:46]

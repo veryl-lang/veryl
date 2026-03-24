@@ -283,10 +283,11 @@ impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamespace {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GenericSymbolPathKind {
     Identifier,
     TypeLiteral,
+    VariableType(Vec<usize>),
     ValueLiteral,
 }
 
@@ -295,6 +296,7 @@ impl fmt::Display for GenericSymbolPathKind {
         let text = match self {
             GenericSymbolPathKind::Identifier => "identifier".to_string(),
             GenericSymbolPathKind::TypeLiteral => "type".to_string(),
+            GenericSymbolPathKind::VariableType(_) => "type".to_string(),
             GenericSymbolPathKind::ValueLiteral => "value".to_string(),
         };
         text.fmt(f)
@@ -413,13 +415,26 @@ impl GenericSymbolPath {
         };
         GenericSymbolPath {
             paths,
-            kind: self.kind,
+            kind: self.kind.clone(),
             range,
         }
     }
 
     pub fn mangled_path(&self) -> SymbolPath {
-        let path: Vec<_> = self.paths.iter().map(|x| x.mangled()).collect();
+        let mut path: Vec<_> = self.paths.iter().map(|x| x.mangled()).collect();
+
+        if let GenericSymbolPathKind::VariableType(width) = &self.kind
+            && let Some(x) = path.pop()
+        {
+            let mut text = x.to_string();
+            for w in width {
+                text.push_str(&format!("_{}", w));
+            }
+
+            let id = resource_table::insert_str(&text);
+            path.push(id);
+        }
+
         SymbolPath::new(&path)
     }
 
@@ -548,7 +563,9 @@ impl GenericSymbolPath {
         if let Ok(symbol) = symbol_table::resolve(&head.base) {
             let is_generic = matches!(
                 symbol.found.kind,
-                SymbolKind::GenericParameter(_) | SymbolKind::ProtoPackage(_)
+                SymbolKind::GenericParameter(_)
+                    | SymbolKind::GenericConst(_)
+                    | SymbolKind::ProtoPackage(_)
             ) || (symbol.imported
                 && symbol
                     .found
@@ -578,7 +595,7 @@ impl GenericSymbolPath {
                 let mut paths: Vec<_> = self.paths.drain(1..).collect();
                 self.paths.clone_from(&x.paths);
                 self.paths.append(&mut paths);
-                self.kind = x.kind;
+                self.kind = x.kind.clone();
                 self.range = x.range;
                 break;
             }
@@ -750,6 +767,20 @@ impl From<&syntax_tree::FixedType> for GenericSymbolPath {
                 arguments: Vec::new(),
             }],
             kind: GenericSymbolPathKind::TypeLiteral,
+            range: token,
+        }
+    }
+}
+
+impl From<(&syntax_tree::VariableType, &Vec<usize>)> for GenericSymbolPath {
+    fn from(value: (&syntax_tree::VariableType, &Vec<usize>)) -> Self {
+        let token: TokenRange = value.0.into();
+        GenericSymbolPath {
+            paths: vec![GenericSymbol {
+                base: token.beg,
+                arguments: Vec::new(),
+            }],
+            kind: GenericSymbolPathKind::VariableType(value.1.clone()),
             range: token,
         }
     }
@@ -941,6 +972,13 @@ impl fmt::Display for GenericSymbolPath {
                 text.push_str(&format!(" {}", path.mangled()));
             }
         }
+
+        if let GenericSymbolPathKind::VariableType(width) = &self.kind {
+            for w in width {
+                text.push_str(&format!("_{}", w));
+            }
+        }
+
         text.fmt(f)
     }
 }

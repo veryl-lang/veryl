@@ -1,8 +1,9 @@
 ---
 source: crates/tests/src/lib.rs
+assertion_line: 359
 expression: out
 ---
-unresolvable_generic_reference ()
+unresolvable_generic_expression (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unresolvable_generic_expression)
 
   × "__unresolvable_generic_reference_pkg__8 A" can't be resolved from the definition of generics
    ╭─[../../testcases/error/unresolvable_generic_reference.veryl:5:10]

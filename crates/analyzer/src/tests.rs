@@ -3895,6 +3895,75 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        gen A: u32 = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
+        gen A: type = 2;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA::<W: u32, T: type> (
+        a: input logic<W>,
+        b: input T       ,
+    ){
+    }
+    module ModuleB::<A: u32, B: u32, C: u32> {
+        gen W: u32  = A + B;
+        gen T: type = logic<C>;
+        inst u: ModuleA::<W, T> (
+            a: '0,
+            b: '0,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto module ProtoModuleA;
+    module ModuleB {
+        gen B: ProtoModuleA = 2;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    module ModuleB {
+        gen B: ProtoModuleA = logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    proto module ProtoModuleA;
+    proto module ProtoModuleB;
+    module ModuleB for ProtoModuleB {}
+    module ModuleC {
+        gen C: ProtoModuleA = ModuleB;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
 }
 
 #[test]
@@ -9571,7 +9640,7 @@ fn unresolvable_generic_argument() {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
+            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericExpression { .. }))
     );
 
     let code = r#"
@@ -9591,7 +9660,7 @@ fn unresolvable_generic_argument() {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericArgument { .. }))
+            .any(|e| matches!(e, AnalyzerError::UnresolvableGenericExpression { .. }))
     );
 
     let code = r#"
@@ -9611,7 +9680,7 @@ fn unresolvable_generic_argument() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::UnresolvableGenericArgument { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
 
     let code = r#"
@@ -9687,10 +9756,21 @@ fn unresolvable_generic_argument() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<A: u32> {}
+    module ModuleB {
+        gen B: u32 = 1;
+        inst u: ModuleA::<B>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
-fn unresolvable_generic_reference() {
+fn unresolvable_generic_expression() {
     let code = r#"
     package Pkg::<a: u32> {
         const A: u32 = a;
@@ -9703,7 +9783,7 @@ fn unresolvable_generic_reference() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::UnresolvableGenericReference { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
 
     let code = r#"
@@ -9720,21 +9800,21 @@ fn unresolvable_generic_reference() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::UnresolvableGenericReference { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
     assert!(matches!(
         errors[1],
-        AnalyzerError::UnresolvableGenericReference { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
     assert!(matches!(
         errors[2],
-        AnalyzerError::UnresolvableGenericReference { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
 
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::UnresolvableGenericReference { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
 
     let code = r#"
@@ -9751,7 +9831,7 @@ fn unresolvable_generic_reference() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::UnresolvableGenericReference { .. }
+        AnalyzerError::UnresolvableGenericExpression { .. }
     ));
 
     let code = r#"
@@ -9800,6 +9880,164 @@ fn unresolvable_generic_reference() {
     }
     function func_b() -> u32 {
         return func_a::<8>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: u32 = 1;
+        const B: u32 = 2;
+        gen   C: u32 = A + B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericExpression { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const W: u32  = 8;
+        gen   T: type = logic<W>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericExpression { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const A: type = logic<8>;
+        gen   B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UnresolvableGenericExpression { .. }
+    ));
+
+    let code = r#"
+    module ModuleA::<A: u32, B: u32> {
+        gen C: u32 = A + B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        gen A: u32 = 1;
+        gen B: u32 = 2;
+        gen C: u32 = A + B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        const A: u32 = 1;
+    }
+    package PkgB {
+        const B: u32= 2;
+    }
+    module ModuleC {
+        import PkgA::*;
+        import PkgB::*;
+        gen C: u32 = A + B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        gen W: u32  = 8;
+        gen T: type = logic<W>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<W: u32> {
+        gen T: type = logic<W>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        gen A: type = logic<8>;
+        gen B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<A: type> {
+        gen B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        type A = logic<8>;
+    }
+    module ModuleB {
+        import PkgA::*;
+        gen B: type = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        struct struct_a {
+            a: u32,
+            b: u32,
+            c: u32,
+        }
+    }
+    proto package ProtoPkgB {
+        const B: PkgA::struct_a;
+    }
+    package PkgB::<a: u32, b: u32, c: u32> for ProtoPkgB {
+        const B: PkgA::struct_a = PkgA::struct_a'{
+            a: a,
+            b: b,
+            c: c,
+        };
+    }
+    module ModuleA::<PKG: ProtoPkgB> {
+        gen innter_a: u32 = PKG::B.a + 1;
+        alias package innter_pkg = PkgB::<innter_a, PKG::B.b, PKG::B.c>;
+    }
+    module ModuleB {
+        inst u: ModuleA::<PkgB::<1, 2, 3>>;
     }
     "#;
 
@@ -11311,4 +11549,30 @@ fn unevaluable_value_parameter_value() {
         .filter(|e| matches!(e, AnalyzerError::UnevaluableValue { .. }))
         .collect();
     assert!(unevaluable_errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<a: u32, b: u32> {
+        gen   A_B: u32 = a + b;
+        const C  : u32 = A_B;
+    }
+    module ModuleB {
+        inst u: ModuleA::<1, 2>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA::<W: u32> {
+        gen   T0: type = logic<W>;
+        const T1: type = T0;
+    }
+    module ModuleB {
+        inst u: ModuleA::<1>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }

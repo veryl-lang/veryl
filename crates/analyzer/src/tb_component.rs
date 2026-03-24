@@ -58,6 +58,7 @@ fn insert_method(
         affiliation: Affiliation::Module,
         range: TokenRange::default(),
         generic_parameters: vec![],
+        generic_consts: vec![],
         generic_references: vec![],
         ports,
         ret: None,

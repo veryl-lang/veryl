@@ -2938,3 +2938,64 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn gen_declaration() {
+    let code = r#"
+    module ModuleA::<W: u32, T: type> (
+        a: input logic<W>,
+        b: input T       ,
+    ) {}
+    module ModuleB::<A: u32, B: u32, C: u32, D: u32> {
+        gen WIDTH_A: u32  = A + B;
+        gen TYPE_A : u32  = logic<WIDTH_A>;
+        gen TYPE_B : type = logic<C, D>;
+
+        let a: TYPE_A = '0;
+        let b: TYPE_B = '0;
+
+        inst u: ModuleA::<WIDTH_A, TYPE_B> (
+            a: a,
+            b: a,
+        );
+    }
+    module ModuleC {
+        inst u: ModuleB::<1, 2, 3, 4>;
+    }
+    "#;
+
+    let expect = r#"module prj___ModuleA__3__logic_3_4 (
+    input var logic [3-1:0]        a,
+    input var logic [3-1:0][4-1:0] b
+);
+endmodule
+module prj___ModuleB__1__2__3__4;
+
+
+
+
+    logic        [3-1:0] a; always_comb a = '0;
+    logic [3-1:0][4-1:0] b; always_comb b = '0;
+
+    prj___ModuleA__3__logic_3_4 u (
+        .a (a),
+        .b (a)
+    );
+endmodule
+module prj_ModuleC;
+    prj___ModuleB__1__2__3__4 u ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

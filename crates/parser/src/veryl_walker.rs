@@ -573,6 +573,13 @@ pub trait VerylWalker {
         after!(self, function, arg);
     }
 
+    /// Semantic action for non-terminal 'Gen'
+    fn r#gen(&mut self, arg: &Gen) {
+        before!(self, r#gen, arg);
+        self.veryl_token(&arg.gen_token);
+        after!(self, r#gen, arg);
+    }
+
     /// Semantic action for non-terminal 'I8'
     fn i8(&mut self, arg: &I8) {
         before!(self, i8, arg);
@@ -1760,6 +1767,7 @@ pub trait VerylWalker {
             StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
             StatementBlockItem::Statement(x) => self.statement(&x.statement),
             StatementBlockItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            StatementBlockItem::GenDeclaration(x) => self.gen_declaration(&x.gen_declaration),
             StatementBlockItem::ConcatenationAssignment(x) => {
                 self.concatenation_assignment(&x.concatenation_assignment)
             }
@@ -2081,6 +2089,26 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
         after!(self, const_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenDeclaration'
+    fn gen_declaration(&mut self, arg: &GenDeclaration) {
+        before!(self, gen_declaration, arg);
+        self.r#gen(&arg.r#gen);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        match &*arg.gen_declaration_group {
+            GenDeclarationGroup::GenericProtoBound(x) => {
+                self.generic_proto_bound(&x.generic_proto_bound);
+            }
+            GenDeclarationGroup::Type(x) => {
+                self.r#type(&x.r#type);
+            }
+        }
+        self.equ(&arg.equ);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+        after!(self, gen_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'TypeDefDeclaration'
@@ -3126,6 +3154,7 @@ pub trait VerylWalker {
             GenerateItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
             GenerateItem::BindDeclaration(x) => self.bind_declaration(&x.bind_declaration),
             GenerateItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            GenerateItem::GenDeclaration(x) => self.gen_declaration(&x.gen_declaration),
             GenerateItem::AlwaysFfDeclaration(x) => {
                 self.always_ff_declaration(&x.always_ff_declaration)
             }
@@ -3207,6 +3236,7 @@ pub trait VerylWalker {
         before!(self, package_item, arg);
         match arg {
             PackageItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            PackageItem::GenDeclaration(x) => self.gen_declaration(&x.gen_declaration),
             PackageItem::TypeDefDeclaration(x) => {
                 self.type_def_declaration(&x.type_def_declaration)
             }

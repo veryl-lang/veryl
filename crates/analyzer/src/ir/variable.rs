@@ -30,7 +30,7 @@ impl fmt::Display for VarId {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct VarPathSelect(pub VarPath, pub VarSelect, pub TokenRange);
 
 impl VarPathSelect {

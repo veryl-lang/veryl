@@ -435,6 +435,7 @@ impl Server {
                     VerylSymbolKind::Namespace => SymbolKind::NAMESPACE,
                     VerylSymbolKind::SystemFunction(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::GenericParameter(_) => SymbolKind::TYPE_PARAMETER,
+                    VerylSymbolKind::GenericConst(_) => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::GenericInstance(_) => SymbolKind::MODULE,
                     VerylSymbolKind::ClockDomain => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::Test(_) => SymbolKind::MODULE,

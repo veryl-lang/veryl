@@ -1,0 +1,26 @@
+module Module87A::<W: u32, T: type> (
+    a: output logic<W>,
+    b: output T       ,
+) {
+    always_comb {
+        a = '0;
+        b = '0;
+    }
+}
+
+module Module87B::<A: u32, B: u32, C: u32> {
+    gen W: u32  = A + B;
+    gen T: type = logic<C>;
+
+    var a: logic<W>;
+    var b: T       ;
+
+    inst u: Module87A::<W, T> (
+        a  ,
+        b  ,
+    );
+}
+
+module Module87C {
+    inst u: Module87B::<1, 2, 3>;
+}

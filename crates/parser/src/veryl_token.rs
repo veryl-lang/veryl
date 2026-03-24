@@ -515,6 +515,7 @@ token_with_comments!(False);
 token_with_comments!(Final);
 token_with_comments!(For);
 token_with_comments!(Function);
+token_with_comments!(Gen);
 token_with_comments!(I8);
 token_with_comments!(I16);
 token_with_comments!(I32);

@@ -278,7 +278,7 @@ impl SymbolTable {
         found: &Symbol,
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let SymbolKind::GenericParameter(x) = &found.kind {
-            if let Some(x) = self.resolve_generic_parameter(context.clone(), found) {
+            if let Some(x) = self.resolve_generic_param_const(context.clone(), found) {
                 return x;
             }
 
@@ -292,7 +292,7 @@ impl SymbolTable {
                 GenericBoundKind::Inst(proto) => {
                     let mut ctxt = ResolveContext::new(&found.namespace);
                     ctxt.depth = context.depth + 1;
-                    &self.resolve(proto, &[], ctxt)?.found
+                    &self.resolve(&proto.mangled_path(), &[], ctxt)?.found
                 }
                 GenericBoundKind::Proto(proto) => {
                     if let Some(x) = proto.get_user_defined() {
@@ -313,28 +313,72 @@ impl SymbolTable {
         Ok(context)
     }
 
-    fn resolve_generic_parameter<'a>(
+    fn trace_generic_const<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        found: &Symbol,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        if let SymbolKind::GenericConst(x) = &found.kind {
+            if let Some(x) = self.resolve_generic_param_const(context.clone(), found) {
+                return x;
+            }
+
+            let symbol = match &x.bound {
+                GenericBoundKind::Type => {
+                    if let Some(identifier) = x.value.unwrap_identifier() {
+                        let path: GenericSymbolPath = identifier.into();
+                        let mut ctxt = ResolveContext::new(&found.namespace);
+                        ctxt.depth = context.depth + 1;
+                        &self.resolve(&path.generic_path(), &[], ctxt)?.found
+                    } else {
+                        found
+                    }
+                }
+                GenericBoundKind::Proto(proto) => {
+                    if let Some(x) = proto.get_user_defined() {
+                        let mut ctxt = ResolveContext::new(&found.namespace);
+                        ctxt.depth = context.depth + 1;
+                        &self.resolve(&x.path.generic_path(), &[], ctxt)?.found
+                    } else {
+                        found
+                    }
+                }
+                _ => found,
+            };
+
+            context.namespace = symbol.inner_namespace();
+            context.last_found_type = Some(symbol.id);
+            context.inner = true;
+        }
+        Ok(context)
+    }
+
+    fn resolve_generic_param_const<'a>(
         &self,
         mut context: ResolveContext<'a>,
         found: &Symbol,
     ) -> Option<Result<ResolveContext<'a>, ResolveError>> {
-        if let SymbolKind::GenericParameter(_) = &found.kind
-            && let Some(generic_table) = context.generic_tables.get(&found.namespace)
-            && let Some(path) = generic_table.get(&found.token.text)
-        {
-            let result = self.resolve(
-                &path.generic_path(),
-                &path.generic_arguments(),
-                context.push(),
-            );
-            if let Ok(symbol) = result {
-                context.namespace = symbol.found.inner_namespace();
-                context.last_found_type = Some(symbol.found.id);
-                context.inner = true;
-                return Some(Ok(context));
-            } else {
-                return result.err().map(Err);
+        match &found.kind {
+            SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_) => {
+                if let Some(generic_table) = context.generic_tables.get(&found.namespace)
+                    && let Some(path) = generic_table.get(&found.token.text)
+                {
+                    let result = self.resolve(
+                        &path.generic_path(),
+                        &path.generic_arguments(),
+                        context.push(),
+                    );
+                    if let Ok(symbol) = result {
+                        context.namespace = symbol.found.inner_namespace();
+                        context.last_found_type = Some(symbol.found.id);
+                        context.inner = true;
+                        return Some(Ok(context));
+                    } else {
+                        return result.err().map(Err);
+                    }
+                }
             }
+            _ => {}
         }
 
         None
@@ -369,7 +413,15 @@ impl SymbolTable {
                 SymbolKind::GenericParameter(x) => {
                     if matches!(x.bound, GenericBoundKind::Type)
                         && let Some(x) =
-                            self.resolve_generic_parameter(context.clone(), &symbol.found)
+                            self.resolve_generic_param_const(context.clone(), &symbol.found)
+                    {
+                        return x;
+                    }
+                }
+                SymbolKind::GenericConst(x) => {
+                    if matches!(x.bound, GenericBoundKind::Type)
+                        && let Some(x) =
+                            self.resolve_generic_param_const(context.clone(), &symbol.found)
                     {
                         return x;
                     }
@@ -717,6 +769,9 @@ impl SymbolTable {
                             }
                             SymbolKind::GenericParameter(_) => {
                                 context = self.trace_generic_parameter(context, found)?;
+                            }
+                            SymbolKind::GenericConst(_) => {
+                                context = self.trace_generic_const(context, found)?;
                             }
                             // don't trace inner item
                             SymbolKind::Function(_)
