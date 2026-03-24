@@ -490,16 +490,46 @@ pub(crate) fn analyze_dependency(
         }
     }
 
-    // Iteratively expand CompiledBlocks that cause cycles until
-    // the DAG analysis succeeds or no more expandable blocks remain.
+    // Expand all CompiledBlocks with original_stmts at once (not one at
+    // a time, which depended on HashMap iteration order for CB selection).
     let mut next_id = table.keys().max().copied().unwrap_or(0) + 1;
+    let expandable_ids: Vec<usize> = table
+        .iter()
+        .filter_map(|(id, x)| {
+            if matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()) {
+                Some(*id)
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    loop {
+    log::debug!(
+        "analyze_dependency: expanding {} CompiledBlocks with original_stmts",
+        expandable_ids.len()
+    );
+
+    for eid in expandable_ids {
+        if let Some(ProtoStatement::CompiledBlock(cb)) = table.remove(&eid) {
+            for stmt in cb.original_stmts {
+                table.insert(next_id, stmt);
+                next_id += 1;
+            }
+        }
+    }
+
+    // Retry DAG analysis with all CBs expanded.
+    // Use sorted keys for deterministic iteration order.
+    {
         let mut dag = Dag::<Node, ()>::new();
         let mut dag_nodes_inner: HashMap<Node, _> = HashMap::default();
         let mut failed_id: Option<usize> = None;
 
-        for (id, x) in &table {
+        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+        sorted_keys.sort();
+
+        for id in &sorted_keys {
+            let x = &table[id];
             let mut inputs = vec![];
             let mut outputs = vec![];
             x.gather_variable_offsets(&mut inputs, &mut outputs);
@@ -544,7 +574,6 @@ pub(crate) fn analyze_dependency(
         }
 
         if failed_id.is_none() {
-            // Success: return sorted statements
             let nodes = algo::toposort(dag.graph(), None).unwrap();
             let mut ret = vec![];
             for i in nodes {
@@ -556,251 +585,161 @@ pub(crate) fn analyze_dependency(
             }
             return Ok(ret);
         }
+    }
 
-        // Find a CompiledBlock that's part of the cycle.
-        // The cycle involves `failed_id` (the statement whose edge caused
-        // the cycle). Trace the DAG from `failed_id` via BFS to find
-        // any reachable CB with original_stmts.
-        let fid = failed_id.unwrap();
-        let expand_id = if matches!(table.get(&fid), Some(ProtoStatement::CompiledBlock(cb)) if !cb.original_stmts.is_empty())
-        {
-            Some(fid)
-        } else {
-            // BFS both forward and backward from failed_id's node to
-            // find a CB that's part of the cycle path.
-            let mut found = None;
-            if let Some(&fid_idx) = dag_nodes_inner.get(&Node::Statement(fid)) {
-                // Forward BFS (output direction)
-                let bfs = Bfs::new(dag.graph(), fid_idx);
-                for node_idx in bfs.iter(dag.graph()) {
-                    if let Node::Statement(sid) = dag.graph()[node_idx]
-                        && sid != fid
-                        && matches!(table.get(&sid), Some(ProtoStatement::CompiledBlock(cb)) if !cb.original_stmts.is_empty())
-                    {
-                        found = Some(sid);
-                        break;
-                    }
-                }
-                // Reverse BFS (input direction) if forward didn't find
-                if found.is_none() {
-                    use daggy::petgraph::Direction;
-                    let mut visited = HashSet::default();
-                    let mut queue = std::collections::VecDeque::new();
-                    queue.push_back(fid_idx);
-                    visited.insert(fid_idx);
-                    while let Some(node) = queue.pop_front() {
-                        for neighbor in dag.graph().neighbors_directed(node, Direction::Incoming) {
-                            if visited.insert(neighbor) {
-                                if let Node::Statement(sid) = dag.graph()[neighbor]
-                                    && matches!(table.get(&sid), Some(ProtoStatement::CompiledBlock(cb)) if !cb.original_stmts.is_empty())
-                                {
-                                    found = Some(sid);
-                                    break;
-                                }
-                                queue.push_back(neighbor);
-                            }
-                        }
-                        if found.is_some() {
-                            break;
-                        }
-                    }
-                }
-            }
-            // If BFS didn't find one (the CB might be reachable only via
-            // the back-edge direction), search all CBs whose output offsets
-            // overlap with the failed statement's input offsets.
-            if found.is_none() {
-                let mut fid_inputs = HashSet::default();
-                if let Some(s) = table.get(&fid) {
-                    let mut ins = vec![];
-                    let mut outs = vec![];
-                    s.gather_variable_offsets(&mut ins, &mut outs);
-                    for (_, off) in ins {
-                        fid_inputs.insert(off);
-                    }
-                }
-                found = table.iter().find_map(|(id, x)| {
-                    if let ProtoStatement::CompiledBlock(cb) = x
-                        && !cb.original_stmts.is_empty()
-                        && cb
-                            .output_offsets
-                            .iter()
-                            .any(|(_, off)| fid_inputs.contains(off))
-                    {
-                        return Some(*id);
-                    }
-                    None
-                });
-            }
-            found
-        };
+    // Still have a cycle after expanding all CBs.
+    // Check if non-expandable CompiledBlocks remain (false positive from
+    // aggregate input/output overlap).
+    let has_non_expandable_cb = table
+        .values()
+        .any(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if cb.original_stmts.is_empty()));
 
-        if let Some(eid) = expand_id {
-            if let Some(ProtoStatement::CompiledBlock(cb)) = table.remove(&eid) {
-                for stmt in cb.original_stmts {
-                    table.insert(next_id, stmt);
-                    next_id += 1;
-                }
-            }
-            continue; // Retry DAG analysis with one CB expanded
-        }
-
-        // No more expandable CompiledBlocks. If any non-expandable
-        // CompiledBlocks remain, the cycle is likely a false positive
-        // caused by aggregate input/output overlap. Build a DAG that
-        // skips cyclic edges involving CompiledBlocks to get a partial
-        // topological ordering that is correct for the non-CB parts.
-        let has_non_expandable_cb = table.values().any(
-            |x| matches!(x, ProtoStatement::CompiledBlock(cb) if cb.original_stmts.is_empty()),
-        );
-
-        if !has_non_expandable_cb {
-            // Genuine combinational loop (no CompiledBlocks involved).
-            // Re-run to get error with tokens.
-            let mut dag2 = Dag::<Node, ()>::new();
-            let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
-            for (id, x) in &table {
-                let mut inputs = vec![];
-                let mut outputs = vec![];
-                x.gather_variable_offsets(&mut inputs, &mut outputs);
-                let stmt_node = Node::Statement(*id);
-                let stmt = dag2.add_node(stmt_node);
-                dag_nodes2.insert(stmt_node, stmt);
-                let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
-                for var_key in inputs {
-                    if output_set.contains(&var_key) {
-                        continue;
-                    }
-                    let var_node = Node::Var(var_key.0, var_key.1);
-                    let var = *dag_nodes2
-                        .entry(var_node)
-                        .or_insert_with(|| dag2.add_node(var_node));
-                    if dag2.add_edge(var, stmt, ()).is_err() {
-                        let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
-                        let trigger_token = table[id].token().unwrap_or_default();
-                        return Err(SimulatorError::combinational_loop(
-                            &trigger_token,
-                            &participant_tokens,
-                        ));
-                    }
-                }
-                for var_key in outputs {
-                    let var_node = Node::Var(var_key.0, var_key.1);
-                    let var = *dag_nodes2
-                        .entry(var_node)
-                        .or_insert_with(|| dag2.add_node(var_node));
-                    if dag2.add_edge(stmt, var, ()).is_err() {
-                        let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
-                        let trigger_token = table[id].token().unwrap_or_default();
-                        return Err(SimulatorError::combinational_loop(
-                            &trigger_token,
-                            &participant_tokens,
-                        ));
-                    }
-                }
-            }
-            return Err(SimulatorError::combinational_loop(
-                &TokenRange::default(),
-                &[],
-            ));
-        }
-
-        // Build a relaxed DAG: skip edges that would create cycles when
-        // at least one endpoint is a non-expandable CompiledBlock.
-        // This gives a best-effort topological ordering.
-        log::debug!(
-            "analyze_dependency: using relaxed ordering for {} stmts with non-expandable CompiledBlocks",
-            table.len()
-        );
-        let mut dag_relaxed = Dag::<Node, ()>::new();
-        let mut dag_nodes_relaxed: HashMap<Node, _> = HashMap::default();
-        let cb_ids: HashSet<usize> = table
-            .iter()
-            .filter_map(|(id, x)| {
-                if matches!(x, ProtoStatement::CompiledBlock(_)) {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for (id, x) in &table {
+    if !has_non_expandable_cb {
+        // Genuine combinational loop (no CompiledBlocks involved).
+        // Re-run with sorted keys to get deterministic error.
+        let mut dag2 = Dag::<Node, ()>::new();
+        let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+        sorted_keys.sort();
+        for id in &sorted_keys {
+            let x = &table[id];
             let mut inputs = vec![];
             let mut outputs = vec![];
             x.gather_variable_offsets(&mut inputs, &mut outputs);
             let stmt_node = Node::Statement(*id);
-            let stmt = dag_relaxed.add_node(stmt_node);
-            dag_nodes_relaxed.insert(stmt_node, stmt);
-
+            let stmt = dag2.add_node(stmt_node);
+            dag_nodes2.insert(stmt_node, stmt);
             let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
-            for var_key in &inputs {
-                if output_set.contains(var_key) {
+            for var_key in inputs {
+                if output_set.contains(&var_key) {
                     continue;
                 }
                 let var_node = Node::Var(var_key.0, var_key.1);
-                let var = *dag_nodes_relaxed
+                let var = *dag_nodes2
                     .entry(var_node)
-                    .or_insert_with(|| dag_relaxed.add_node(var_node));
-                if dag_relaxed.add_edge(var, stmt, ()).is_err() {
-                    // Skip this edge if a CompiledBlock is involved
-                    if cb_ids.contains(id) {
-                        continue;
-                    }
-                    // Check if the var was written by a CB
-                    let written_by_cb = table.iter().any(|(oid, ox)| {
-                        cb_ids.contains(oid) && {
-                            let mut o_outs = vec![];
-                            let mut o_ins = vec![];
-                            ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
-                            o_outs.contains(var_key)
-                        }
-                    });
-                    if written_by_cb {
-                        continue;
-                    }
-                    // Non-CB cycle: skip but log
-                    log::debug!("analyze_dependency: skipping non-CB cyclic input edge");
+                    .or_insert_with(|| dag2.add_node(var_node));
+                if dag2.add_edge(var, stmt, ()).is_err() {
+                    let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
+                    let trigger_token = table[id].token().unwrap_or_default();
+                    return Err(SimulatorError::combinational_loop(
+                        &trigger_token,
+                        &participant_tokens,
+                    ));
                 }
             }
-            for var_key in &outputs {
+            for var_key in outputs {
                 let var_node = Node::Var(var_key.0, var_key.1);
-                let var = *dag_nodes_relaxed
+                let var = *dag_nodes2
                     .entry(var_node)
-                    .or_insert_with(|| dag_relaxed.add_node(var_node));
-                if dag_relaxed.add_edge(stmt, var, ()).is_err() {
-                    // Skip cyclic output edges involving CompiledBlocks
-                    if cb_ids.contains(id) {
-                        continue;
-                    }
-                    let read_by_cb = table.iter().any(|(oid, ox)| {
-                        cb_ids.contains(oid) && {
-                            let mut o_outs = vec![];
-                            let mut o_ins = vec![];
-                            ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
-                            o_ins.contains(var_key)
-                        }
-                    });
-                    if read_by_cb {
-                        continue;
-                    }
-                    log::debug!("analyze_dependency: skipping non-CB cyclic output edge");
+                    .or_insert_with(|| dag2.add_node(var_node));
+                if dag2.add_edge(stmt, var, ()).is_err() {
+                    let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
+                    let trigger_token = table[id].token().unwrap_or_default();
+                    return Err(SimulatorError::combinational_loop(
+                        &trigger_token,
+                        &participant_tokens,
+                    ));
                 }
             }
         }
+        return Err(SimulatorError::combinational_loop(
+            &TokenRange::default(),
+            &[],
+        ));
+    }
 
-        // Toposort the relaxed DAG
-        let nodes = algo::toposort(dag_relaxed.graph(), None).unwrap();
-        let mut ret = vec![];
-        for i in nodes {
-            if let Node::Statement(x) = dag_relaxed[i]
-                && let Some(stmt) = table.remove(&x)
-            {
-                ret.push(stmt);
+    // Build a relaxed DAG: skip edges that would create cycles when
+    // at least one endpoint is a non-expandable CompiledBlock.
+    log::debug!(
+        "analyze_dependency: using relaxed ordering for {} stmts with non-expandable CompiledBlocks",
+        table.len()
+    );
+    let mut dag_relaxed = Dag::<Node, ()>::new();
+    let mut dag_nodes_relaxed: HashMap<Node, _> = HashMap::default();
+    let cb_ids: HashSet<usize> = table
+        .iter()
+        .filter_map(|(id, x)| {
+            if matches!(x, ProtoStatement::CompiledBlock(_)) {
+                Some(*id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+    for id in &sorted_keys {
+        let x = &table[id];
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+        x.gather_variable_offsets(&mut inputs, &mut outputs);
+        let stmt_node = Node::Statement(*id);
+        let stmt = dag_relaxed.add_node(stmt_node);
+        dag_nodes_relaxed.insert(stmt_node, stmt);
+
+        let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+        for var_key in &inputs {
+            if output_set.contains(var_key) {
+                continue;
+            }
+            let var_node = Node::Var(var_key.0, var_key.1);
+            let var = *dag_nodes_relaxed
+                .entry(var_node)
+                .or_insert_with(|| dag_relaxed.add_node(var_node));
+            if dag_relaxed.add_edge(var, stmt, ()).is_err() {
+                if cb_ids.contains(id) {
+                    continue;
+                }
+                let written_by_cb = table.iter().any(|(oid, ox)| {
+                    cb_ids.contains(oid) && {
+                        let mut o_outs = vec![];
+                        let mut o_ins = vec![];
+                        ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
+                        o_outs.contains(var_key)
+                    }
+                });
+                if written_by_cb {
+                    continue;
+                }
+                log::debug!("analyze_dependency: skipping non-CB cyclic input edge");
             }
         }
-        return Ok(ret);
+        for var_key in &outputs {
+            let var_node = Node::Var(var_key.0, var_key.1);
+            let var = *dag_nodes_relaxed
+                .entry(var_node)
+                .or_insert_with(|| dag_relaxed.add_node(var_node));
+            if dag_relaxed.add_edge(stmt, var, ()).is_err() {
+                if cb_ids.contains(id) {
+                    continue;
+                }
+                let read_by_cb = table.iter().any(|(oid, ox)| {
+                    cb_ids.contains(oid) && {
+                        let mut o_outs = vec![];
+                        let mut o_ins = vec![];
+                        ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
+                        o_ins.contains(var_key)
+                    }
+                });
+                if read_by_cb {
+                    continue;
+                }
+                log::debug!("analyze_dependency: skipping non-CB cyclic output edge");
+            }
+        }
     }
+
+    let nodes = algo::toposort(dag_relaxed.graph(), None).unwrap();
+    let mut ret = vec![];
+    for i in nodes {
+        if let Node::Statement(x) = dag_relaxed[i]
+            && let Some(stmt) = table.remove(&x)
+        {
+            ret.push(stmt);
+        }
+    }
+    Ok(ret)
 }
 
 /// Sort event (FF) statements and determine which FF variables need
@@ -1141,15 +1080,30 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
 /// each level so that CompiledBlocks with the same func pointer are adjacent.
 /// This enables batching of same-function JIT calls.
 fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    // Compute level for each statement:
-    // level = max(var_level[input] for each known input) + 1, or 0 if no known inputs
+    // Level = max(var_level[input]) + 1. For CBs, use all offsets
+    // (including FF) since gather_variable_offsets filters FF for DAG.
     let mut var_level: HashMap<(bool, isize), usize> = HashMap::default();
     let mut levels: Vec<usize> = Vec::with_capacity(sorted.len());
 
     for stmt in &sorted {
         let mut inputs = vec![];
         let mut outputs = vec![];
-        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+        match stmt {
+            ProtoStatement::CompiledBlock(x) => {
+                if !x.stmt_deps.is_empty() {
+                    for (ins, outs) in &x.stmt_deps {
+                        inputs.extend_from_slice(ins);
+                        outputs.extend_from_slice(outs);
+                    }
+                } else {
+                    inputs.extend_from_slice(&x.input_offsets);
+                    outputs.extend_from_slice(&x.output_offsets);
+                }
+            }
+            _ => {
+                stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+            }
+        }
 
         let level = inputs
             .iter()
@@ -1176,19 +1130,111 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         groups[level].push(stmt);
     }
 
-    // Within each level, sort so CompiledBlocks with same func are adjacent
-    for group in &mut groups {
-        group.sort_by_key(|stmt| match stmt {
-            ProtoStatement::CompiledBlock(x) => (0, x.func as usize),
-            ProtoStatement::Assign(_) => (1, 0),
-            ProtoStatement::AssignDynamic(_) => (2, 0),
-            ProtoStatement::If(_) => (3, 0),
-            ProtoStatement::SystemFunctionCall(_) => (4, 0),
-            ProtoStatement::TbMethodCall { .. } => (4, 0),
-        });
+    // Within each level, topological sort by actual variable dependencies.
+    for group in groups.iter_mut() {
+        if group.len() <= 1 {
+            continue;
+        }
+        *group = topo_sort_within_level(std::mem::take(group));
     }
 
     groups.into_iter().flatten().collect()
+}
+
+/// Local topological sort within a single level group.
+///
+/// Builds RAW dependency edges among the statements in this group and
+/// performs a stable Kahn's-algorithm sort.  Statements with no intra-group
+/// dependencies retain their original order (stable).  On cycle detection
+/// the original order is preserved as a safe fallback.
+fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
+    let n = stmts.len();
+
+    // Type priority for tie-breaking: CBs before Assigns when unordered.
+    let type_priority: Vec<u8> = stmts
+        .iter()
+        .map(|s| match s {
+            ProtoStatement::CompiledBlock(_) => 0,
+            ProtoStatement::Assign(_) => 1,
+            ProtoStatement::AssignDynamic(_) => 2,
+            ProtoStatement::If(_) => 3,
+            _ => 4,
+        })
+        .collect();
+
+    let mut stmt_inputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
+    for s in &stmts {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        stmt_inputs.push(ins);
+        stmt_outputs.push(outs);
+    }
+
+    let mut var_writers: HashMap<(bool, isize), Vec<usize>> = HashMap::default();
+    for (i, outs) in stmt_outputs.iter().enumerate() {
+        for key in outs {
+            var_writers.entry(*key).or_default().push(i);
+        }
+    }
+
+    // RAW edges: writer → reader (skip self-edges).
+    let mut adj: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    let mut in_degree = vec![0usize; n];
+    for (reader, ins) in stmt_inputs.iter().enumerate() {
+        for key in ins {
+            if let Some(writers) = var_writers.get(key) {
+                for &writer in writers {
+                    if writer == reader {
+                        continue; // skip self-edge
+                    }
+                    if adj[writer].insert(reader) {
+                        in_degree[reader] += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Kahn's with BTreeSet<(priority, index)> for stable tie-breaking.
+    let mut queue: std::collections::BTreeSet<(u8, usize)> = std::collections::BTreeSet::new();
+    for i in 0..n {
+        if in_degree[i] == 0 {
+            queue.insert((type_priority[i], i));
+        }
+    }
+
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    while let Some(&key) = queue.iter().next() {
+        queue.remove(&key);
+        let idx = key.1;
+        order.push(idx);
+        for &next in &adj[idx] {
+            in_degree[next] -= 1;
+            if in_degree[next] == 0 {
+                queue.insert((type_priority[next], next));
+            }
+        }
+    }
+
+    if order.len() != n {
+        let mut result = stmts;
+        result.sort_by_key(|s| match s {
+            ProtoStatement::CompiledBlock(_) => 0,
+            ProtoStatement::Assign(_) => 1,
+            ProtoStatement::AssignDynamic(_) => 2,
+            ProtoStatement::If(_) => 3,
+            _ => 4,
+        });
+        return result;
+    }
+
+    let mut indexed: Vec<Option<ProtoStatement>> = stmts.into_iter().map(Some).collect();
+    order
+        .into_iter()
+        .map(|i| indexed[i].take().unwrap())
+        .collect()
 }
 
 /// Merge consecutive Binary statements with the same function pointer into BinaryBatch.
@@ -1426,7 +1472,13 @@ impl Conv<&air::Module> for ProtoModule {
             // from merged functions that DCE would incorrectly remove.
             let full_sorted = reorder_by_level(full_sorted);
             required_comb_passes = compute_required_passes(&full_sorted);
-            Some(try_jit(context, full_sorted))
+            // Keep full_comb interpreted: JIT load_cache forwards stores
+            // within a single compiled block, making results depend on the
+            // statement ordering chosen by analyze_dependency (FxHashMap).
+            // Interpreted evaluation is order-independent for acyclic comb.
+            Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
+                full_sorted,
+            )]))
         } else if !all_post_comb_fns.is_empty() {
             // 3+ level hierarchy: middle module has post_comb_fns but no
             // merged functions. Combine comb + post_comb into a single
@@ -1448,32 +1500,20 @@ impl Conv<&air::Module> for ProtoModule {
             }
             match analyze_dependency(full.clone()) {
                 Ok(sorted) => {
-                    // Successfully sorted: safe to use in step() too
                     let full_sorted = reorder_by_level(sorted);
                     required_comb_passes = compute_required_passes(&full_sorted);
                     use_full_comb_in_step = true;
-                    Some(try_jit(context, full_sorted))
+                    Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
+                        full_sorted,
+                    )]))
                 }
                 Err(_) => {
-                    // Circular dependency detected. Decompose CompiledBlocks
-                    // into per-statement deps to avoid false cycles from
-                    // bundled input/output offsets.
+                    // Expand CompiledBlocks to original statements for
+                    // correct per-statement dependency analysis.
                     let mut decomposed = Vec::new();
                     for s in &full {
                         if let ProtoStatement::CompiledBlock(cb) = s {
-                            if !cb.stmt_deps.is_empty() {
-                                // Split CompiledBlock into individual
-                                // dependency entries for finer-grained sorting.
-                                for (ins, outs) in &cb.stmt_deps {
-                                    // Create a thin wrapper that represents
-                                    // just one statement's deps.
-                                    let mut thin = cb.clone();
-                                    thin.input_offsets = ins.clone();
-                                    thin.output_offsets = outs.clone();
-                                    thin.stmt_deps = vec![];
-                                    decomposed.push(ProtoStatement::CompiledBlock(thin));
-                                }
-                            } else if !cb.original_stmts.is_empty() {
+                            if !cb.original_stmts.is_empty() {
                                 decomposed.extend(cb.original_stmts.iter().cloned());
                             } else {
                                 decomposed.push(s.clone());
@@ -1487,15 +1527,16 @@ impl Conv<&air::Module> for ProtoModule {
                             use_full_comb_in_step = true;
                             let full_sorted = reorder_by_level(sorted);
                             required_comb_passes = compute_required_passes(&full_sorted);
-                            Some(try_jit(context, full_sorted))
+                            Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
+                                full_sorted,
+                            )]))
                         }
                         Err(_) => {
-                            // All sorting attempts failed. Use unsorted list
-                            // with level-based reordering; convergence relies
-                            // on required_comb_passes > 1.
                             let full_sorted = reorder_by_level(full);
                             required_comb_passes = compute_required_passes(&full_sorted);
-                            Some(try_jit(context, full_sorted))
+                            Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
+                                full_sorted,
+                            )]))
                         }
                     }
                 }

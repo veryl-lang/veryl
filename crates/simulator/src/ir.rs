@@ -129,12 +129,30 @@ impl Ir {
         }
     }
 
-    /// Settle the comb network: evaluate full comb the pre-computed
-    /// number of passes needed for convergence.
+    /// Evaluate comb until convergence. Runs at least `required_comb_passes`
+    /// times, then checks for additional convergence when hidden backward
+    /// edges may exist (full_comb_statements present).
     pub fn settle_comb(&self, mask_cache: &mut MaskCache) {
-        for _ in 0..self.required_comb_passes {
+        let min_passes = self.required_comb_passes;
+        self.eval_comb_full(mask_cache);
+        for _ in 1..min_passes {
             self.eval_comb_full(mask_cache);
         }
+        if self.full_comb_statements.is_none() && min_passes <= 1 {
+            return;
+        }
+        const MAX_EXTRA: usize = 4;
+        for _ in 0..MAX_EXTRA {
+            let before = self.comb_snapshot();
+            self.eval_comb_full(mask_cache);
+            if self.comb_values[..] == before[..] {
+                return;
+            }
+        }
+    }
+
+    fn comb_snapshot(&self) -> Vec<u8> {
+        self.comb_values.to_vec()
     }
 
     /// Evaluate full comb once (including per-core internal comb).
