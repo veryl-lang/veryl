@@ -26,6 +26,7 @@ pub const KEYWORDS: &[&str] = &[
     "final",
     "for",
     "function",
+    "gen",
     "i8",
     "i16",
     "i32",

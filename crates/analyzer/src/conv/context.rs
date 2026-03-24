@@ -55,6 +55,7 @@ pub struct Context {
     pub ignore_var_func: bool,
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
+    pub allow_component_as_factor: bool,
     pub in_test_module: bool,
     pub in_sequential_block: bool,
     pub in_unbound_func: Option<Token>,
@@ -81,6 +82,7 @@ impl Context {
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
         self.in_generic = tgt.in_generic;
+        self.allow_component_as_factor = tgt.allow_component_as_factor;
         self.config = tgt.config.clone();
     }
 

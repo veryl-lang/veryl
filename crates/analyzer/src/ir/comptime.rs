@@ -412,10 +412,18 @@ impl Type {
     }
 
     pub fn is_interface(&self) -> bool {
-        matches!(
-            &self.kind,
-            TypeKind::Interface(_) | TypeKind::Modport(_, _) | TypeKind::AbstractInterface(_)
-        )
+        match &self.kind {
+            TypeKind::Instance(_, kind) => *kind == InstanceKind::Interface,
+            TypeKind::Modport(_, _) | TypeKind::AbstractInterface(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_interface_instance(&self) -> bool {
+        match &self.kind {
+            TypeKind::Instance(_, kind) => *kind == InstanceKind::Interface,
+            _ => false,
+        }
     }
 
     pub fn is_string(&self) -> bool {
@@ -522,7 +530,7 @@ impl Type {
                 temp.sort_by_key(|x| x.0);
                 ret = temp.into_iter().map(|x| (x.1, x.2)).collect();
             }
-            TypeKind::Interface(sig) => {
+            TypeKind::Instance(sig, kind) if *kind == InstanceKind::Interface => {
                 let component = get_component(context, sig, token)?;
                 let Component::Interface(component) = component else {
                     unreachable!();
@@ -724,6 +732,14 @@ impl fmt::Display for Type {
 }
 
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InstanceKind {
+    #[default]
+    Module,
+    Interface,
+    SystemVerilog,
+}
+
+#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TypeKind {
     Clock,
     ClockPosedge,
@@ -740,8 +756,11 @@ pub enum TypeKind {
     Struct(TypeKindStruct),
     Union(TypeKindUnion),
     Enum(TypeKindEnum),
+    Module(Signature),
     Interface(Signature),
     Modport(Signature, StrId),
+    Package(Signature),
+    Instance(Signature, InstanceKind),
     AbstractInterface(Option<StrId>),
     Type,
     String,
@@ -770,8 +789,11 @@ impl TypeKind {
             | TypeKind::String
             | TypeKind::Unknown
             | TypeKind::SystemVerilog
+            | TypeKind::Module(_)
             | TypeKind::Interface(_)
             | TypeKind::Modport(_, _)
+            | TypeKind::Package(_)
+            | TypeKind::Instance(_, _)
             | TypeKind::AbstractInterface(_) => Some(1),
             TypeKind::Union(x) => x.width(),
             TypeKind::Struct(x) => x.width(),
@@ -786,7 +808,10 @@ impl TypeKind {
 
     pub fn signature(&self) -> Option<Signature> {
         match self {
-            TypeKind::Interface(x) => Some(x.clone()),
+            TypeKind::Module(x)
+            | TypeKind::Interface(x)
+            | TypeKind::Package(x)
+            | TypeKind::Instance(x, _) => Some(x.clone()),
             TypeKind::Modport(x, _) => Some(x.clone()),
             _ => None,
         }
@@ -811,8 +836,11 @@ impl fmt::Display for TypeKind {
             TypeKind::Struct(x) => x.fmt(f),
             TypeKind::Union(x) => x.fmt(f),
             TypeKind::Enum(x) => x.fmt(f),
+            TypeKind::Module(x) => format!("module {x}").fmt(f),
             TypeKind::Interface(x) => format!("interface {x}").fmt(f),
             TypeKind::Modport(x, _) => format!("modport {x}").fmt(f),
+            TypeKind::Package(x) => format!("package {x}").fmt(f),
+            TypeKind::Instance(x, _) => format!("instance {x}").fmt(f),
             TypeKind::AbstractInterface(x) => {
                 if let Some(x) = x {
                     format!("interface::{x}").fmt(f)

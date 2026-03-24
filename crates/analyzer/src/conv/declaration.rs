@@ -4,8 +4,10 @@ use crate::attribute_table;
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::bind::check_bind_target;
 use crate::conv::checker::clock_domain::check_clock_domain;
-use crate::conv::checker::generic::check_generic_bound;
-use crate::conv::checker::generic::check_generic_refereence;
+use crate::conv::checker::generic::{
+    check_generic_bound, check_generic_bound_item, check_generic_expression,
+    check_generic_refereence,
+};
 use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
@@ -18,8 +20,8 @@ use crate::conv::utils::{
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
-    self, Comptime, FuncArg, FuncPath, IrResult, Shape, Signature, TypeKind, ValueVariant, VarId,
-    VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
+    self, Comptime, FuncArg, FuncPath, InstanceKind, IrResult, Shape, Signature, TypeKind,
+    ValueVariant, VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind, TbComponentKind};
@@ -75,6 +77,10 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
             GenerateItem::ConstDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
                 context,
                 x.const_declaration.as_ref(),
+            )?)),
+            GenerateItem::GenDeclaration(x) => Ok(ir::DeclarationBlock::new(Conv::conv(
+                context,
+                x.gen_declaration.as_ref(),
             )?)),
             GenerateItem::AssignDeclaration(x) => {
                 let token: TokenRange = x.assign_declaration.as_ref().into();
@@ -345,6 +351,7 @@ impl Conv<&WithGenericParameterItem> for () {
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && let SymbolKind::GenericParameter(x) = &symbol.found.kind
         {
+            check_generic_bound_item(context, &x.bound, &symbol.found.namespace);
             if let Some(y) = &value.with_generic_parameter_item_opt {
                 let token: TokenRange = y.with_generic_argument_item.as_ref().into();
 
@@ -733,6 +740,31 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
     }
 }
 
+impl Conv<&GenDeclaration> for ir::Declaration {
+    fn conv(context: &mut Context, value: &GenDeclaration) -> IrResult<Self> {
+        let define_context: DefineContext = (&value.r#gen.gen_token).into();
+        if !define_context.is_default() {
+            return Ok(ir::Declaration::Null);
+        }
+
+        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+            && let SymbolKind::GenericConst(x) = &symbol.found.kind
+        {
+            check_generic_bound_item(context, &x.bound, &symbol.found.namespace);
+            check_generic_expression(
+                context,
+                &x.value,
+                &x.bound,
+                None,
+                value.identifier.as_ref().into(),
+            );
+            Ok(ir::Declaration::Null)
+        } else {
+            Err(ir_error!(value.into()))
+        }
+    }
+}
+
 impl Conv<&AssignDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &AssignDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.assign.assign_token).into();
@@ -847,7 +879,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
         if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
             && let SymbolKind::Function(x) = &symbol.found.kind
         {
-            let constantable = x.constantable.unwrap();
+            let is_const = x.constantable.unwrap();
             let ret_type = if let Some(x) = &x.ret {
                 let mut r#type = x.to_ir_type(context, TypePosition::Variable)?;
                 if r#type.is_struct() {
@@ -1003,7 +1035,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                 array: Shape::default(),
                 arity,
                 args,
-                constantable,
+                is_const,
                 functions: vec![body?],
                 token,
             };
@@ -1315,7 +1347,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 // insert path of interface instance
                 let path = VarPath::new(value.identifier.text());
                 let r#type = ir::Type {
-                    kind: TypeKind::Interface(sig),
+                    kind: TypeKind::Instance(sig, InstanceKind::Interface),
                     array,
                     ..Default::default()
                 };

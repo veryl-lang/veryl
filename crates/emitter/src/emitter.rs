@@ -16,7 +16,7 @@ use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TestType, TypeKind,
 };
-use veryl_analyzer::symbol_path::{GenericSymbolPath, SymbolPath};
+use veryl_analyzer::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
@@ -2661,6 +2661,24 @@ impl VerylWalker for Emitter {
                     self.identifier(&Identifier {
                         identifier_token: arg.identifier().replace(&text),
                     });
+
+                    if let GenericSymbolPathKind::VariableType(width) = &path.kind {
+                        self.align_finish(align_kind::TYPE);
+                        self.align_start(align_kind::WIDTH);
+
+                        if !width.is_empty() {
+                            let mut text = String::new();
+                            for w in width {
+                                text.push_str(&format!("[{}-1:0]", w));
+                            }
+
+                            self.space(1);
+                            self.veryl_token(&arg.identifier().replace(&text));
+                        } else {
+                            let loc = self.align_last_location(align_kind::TYPE);
+                            self.align_dummy_location(align_kind::WIDTH, loc);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -3998,6 +4016,10 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
+    }
+
+    fn gen_declaration(&mut self, _arg: &GenDeclaration) {
+        // nothing to do
     }
 
     /// Semantic action for non-terminal 'TypeDefDeclaration'
@@ -5982,6 +6004,7 @@ pub fn symbol_string(
             }
         }
         SymbolKind::GenericParameter(_)
+        | SymbolKind::GenericConst(_)
         | SymbolKind::ProtoModule(_)
         | SymbolKind::ProtoInterface(_)
         | SymbolKind::ProtoPackage(_) => (),
