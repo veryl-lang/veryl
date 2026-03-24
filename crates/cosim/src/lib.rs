@@ -22,15 +22,13 @@ fn build_ir(code: &str, top: &str, config: &Config) -> sir::Ir {
     sir::build_ir(&ir, top.into(), config).expect("Failed to build IR")
 }
 
-type Sim = Simulator<std::io::Empty>;
-
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cosim_open(
     path: *const c_char,
     top: *const c_char,
     use_4state: bool,
-) -> NonNull<Sim> {
+) -> NonNull<Simulator> {
     let path = unsafe { CStr::from_ptr(path) };
     let path = path.to_str().unwrap();
     let code = std::fs::read_to_string(path).unwrap();
@@ -45,20 +43,20 @@ pub unsafe extern "C" fn cosim_open(
 
     let ir = build_ir(&code, top, &config);
 
-    let sim = Box::new(Sim::new(ir, None));
-    let sim = Box::<Sim>::into_raw(sim);
+    let sim = Box::new(Simulator::new(ir, None));
+    let sim = Box::<Simulator>::into_raw(sim);
     NonNull::new(sim).unwrap()
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn cosim_close(handle: NonNull<Sim>) {
-    let _sim = unsafe { Box::<Sim>::from_raw(handle.as_ptr()) };
+pub unsafe extern "C" fn cosim_close(handle: NonNull<Simulator>) {
+    let _sim = unsafe { Box::<Simulator>::from_raw(handle.as_ptr()) };
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn cosim_step_reset(handle: NonNull<Sim>, name: *const c_char) {
+pub unsafe extern "C" fn cosim_step_reset(handle: NonNull<Simulator>, name: *const c_char) {
     let sim = unsafe { &mut *handle.as_ptr() };
 
     let name = unsafe { CStr::from_ptr(name) };
@@ -70,7 +68,7 @@ pub unsafe extern "C" fn cosim_step_reset(handle: NonNull<Sim>, name: *const c_c
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn cosim_step_clock(handle: NonNull<Sim>, name: *const c_char) {
+pub unsafe extern "C" fn cosim_step_clock(handle: NonNull<Simulator>, name: *const c_char) {
     let sim = unsafe { &mut *handle.as_ptr() };
 
     let name = unsafe { CStr::from_ptr(name) };
@@ -83,7 +81,7 @@ pub unsafe extern "C" fn cosim_step_clock(handle: NonNull<Sim>, name: *const c_c
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cosim_set(
-    handle: NonNull<Sim>,
+    handle: NonNull<Simulator>,
     name: *const c_char,
     value: &[SvLogicVecVal; 4],
 ) {
@@ -100,7 +98,7 @@ pub unsafe extern "C" fn cosim_set(
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cosim_get(
-    handle: NonNull<Sim>,
+    handle: NonNull<Simulator>,
     name: *const c_char,
     value: &mut [SvLogicVecVal; 4],
 ) {

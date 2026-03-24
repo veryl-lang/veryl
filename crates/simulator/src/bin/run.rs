@@ -82,7 +82,7 @@ fn main() {
 
     let ir = build(code, "Top", &config);
 
-    let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+    let mut sim = Simulator::new(ir, None);
     let clk = sim.get_clock("clk").unwrap();
     let rst = sim.get_reset("rst").unwrap();
 

@@ -63,7 +63,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function(design.name, |b| {
             b.iter_with_large_drop(|| {
                 let ir = build(black_box(design.code), "Top");
-                let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+                let mut sim = Simulator::new(ir, None);
                 let clk = sim.get_clock("clk").unwrap();
                 let rst = sim.get_reset("rst").unwrap();
                 sim.step(&rst);
