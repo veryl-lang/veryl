@@ -1941,17 +1941,28 @@ impl From<&syntax_tree::GenericProtoBound> for Type {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ClockDomain {
     Explicit(SymbolId),
+    Inferred(SymbolId),
     Implicit,
     #[default]
     None,
 }
 
 impl ClockDomain {
+    pub fn domain_id(&self) -> Option<SymbolId> {
+        match self {
+            ClockDomain::Explicit(id) | ClockDomain::Inferred(id) => Some(*id),
+            _ => None,
+        }
+    }
+
     pub fn compatible(&self, x: &ClockDomain) -> bool {
         match (self, x) {
-            (ClockDomain::None, _) => true,
-            (_, ClockDomain::None) => true,
-            (x, y) => x == y,
+            (ClockDomain::None, _) | (_, ClockDomain::None) => true,
+            (a, b) => match (a.domain_id(), b.domain_id()) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => true,
+                _ => false,
+            },
         }
     }
 }
@@ -1959,7 +1970,9 @@ impl ClockDomain {
 impl fmt::Display for ClockDomain {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self {
-            ClockDomain::Explicit(x) => format!("'{}", symbol_table::get(*x).unwrap().token),
+            ClockDomain::Explicit(x) | ClockDomain::Inferred(x) => {
+                format!("'{}", symbol_table::get(*x).unwrap().token)
+            }
             ClockDomain::Implicit => "'_".to_string(),
             ClockDomain::None => "".to_string(),
         };

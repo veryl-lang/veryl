@@ -345,11 +345,28 @@ pub fn eval_size(
 
 pub fn eval_assign_statement(
     context: &mut Context,
-    dst: &ir::AssignDestination,
+    dst: &mut ir::AssignDestination,
     expr: &mut (ir::Comptime, ir::Expression),
     token: TokenRange,
 ) -> IrResult<Vec<ir::Statement>> {
     let (comptime, expr) = expr;
+
+    if dst.comptime.clock_domain == ClockDomain::Implicit {
+        let inferred = if context.is_affiliated(Affiliation::AlwaysFf) {
+            context
+                .current_clock
+                .as_ref()
+                .and_then(|c| c.clock_domain.domain_id())
+        } else {
+            comptime.clock_domain.domain_id()
+        };
+        if let Some(id) = inferred {
+            dst.comptime.clock_domain = ClockDomain::Inferred(id);
+            if let Some((_, path_comptime)) = context.var_paths.get_mut(&dst.path) {
+                path_comptime.clock_domain = ClockDomain::Inferred(id);
+            }
+        }
+    }
 
     check_clock_domain(context, &dst.comptime, comptime, &token.beg);
 
