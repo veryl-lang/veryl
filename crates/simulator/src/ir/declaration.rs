@@ -34,10 +34,10 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
 
     let input_set: HashSet<(bool, isize)> = all_inputs.iter().cloned().collect();
     let output_set: HashSet<(bool, isize)> = all_outputs.iter().cloned().collect();
+    // Remove internal variables (both read and written) from inputs only.
+    // Outputs are kept so dependent blocks see the dependency edge.
     let internal: HashSet<(bool, isize)> = input_set.intersection(&output_set).cloned().collect();
-
     all_inputs.retain(|x| !internal.contains(x));
-    all_outputs.retain(|x| !internal.contains(x));
     all_inputs.dedup();
     all_outputs.dedup();
 
@@ -52,7 +52,7 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
 /// are skipped to avoid false cycles.
 ///
 /// Falls back to source order if a cycle is detected.
-fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
+pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let n = statements.len();
     if n <= 1 {
         return statements;
@@ -558,11 +558,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let mut merged_funcs = HashMap::default();
 
                 if comb_jittable {
-                    // Sort comb for inlining optimization.
-                    // Combinational loops in child modules will be caught by the
-                    // parent-level analyze_dependency call, so we can safely skip
-                    // the merge optimization here.
-                    let sorted_comb = super::module::analyze_dependency(original_comb.clone()).ok();
+                    // Sort comb for merged function inlining (deterministic order).
+                    let sorted_comb = Some(stable_topo_sort(original_comb.clone()));
 
                     // Compute external reads: output port comb offsets that are
                     // read by port connections after the merged function returns
@@ -703,6 +700,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     // When merged comb+event is used, add the comb-only function
                     // to post_comb_fns so child comb is evaluated before events fire.
                     if let Some(ref cf) = comb_func {
+                        // Preserve original_stmts so the parent module can
+                        // expand this CB into individual statements for
+                        // fine-grained dependency analysis in full_comb_statements.
+                        let original_stmts = if full.len() == 1 {
+                            if let ProtoStatement::CompiledBlock(cb) = &full[0] {
+                                cb.original_stmts.clone()
+                            } else {
+                                full.clone()
+                            }
+                        } else {
+                            full.clone()
+                        };
                         all_post_comb_fns.push(ProtoStatement::CompiledBlock(
                             CompiledBlockStatement {
                                 func: cf.func,
@@ -712,7 +721,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 output_offsets: cf.output_offsets.clone(),
                                 ff_canonical_offsets: vec![],
                                 stmt_deps: cf.stmt_deps.clone(),
-                                original_stmts: vec![],
+                                original_stmts,
                             },
                         ));
                     } else {

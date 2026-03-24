@@ -7669,3 +7669,376 @@ fn dynamic_array_three_level_hierarchy() {
         );
     }
 }
+
+/// Regression: within-level topological sort must order producer CB before
+/// consumer CB when they are connected through a parent-level comb Assign.
+///
+/// Both child CBs read only FF values, so they get the same dependency
+/// level. The old type-based sort (CB=0, Assign=1) would place both CBs
+/// before the port-connection Assign, causing the consumer to read a stale
+/// input. topo_sort_within_level resolves this by respecting the actual
+/// variable dependency: Producer CB → Assign(wire) → Consumer CB.
+#[test]
+fn within_level_comb_chain_through_parent_wire() {
+    let code = r#"
+    module Producer (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        o_val: output logic<8>,
+    ) {
+        var cnt: logic<8>;
+        always_ff {
+            if_reset { cnt = 8'd0; }
+            else     { cnt = cnt + 8'd1; }
+        }
+        // Comb output derived from FF — creates a CB with FF-only inputs
+        assign o_val = cnt + 8'd10;
+    }
+
+    module Consumer (
+        clk     : input  clock   ,
+        rst     : input  reset   ,
+        i_val   : input  logic<8>,
+        o_result: output logic<8>,
+    ) {
+        // Pure comb: reads port input, adds constant
+        assign o_result = i_val + 8'd100;
+    }
+
+    module Top (
+        clk   : input  clock   ,
+        rst   : input  reset   ,
+        result: output logic<8>,
+    ) {
+        var link: logic<8>;
+
+        inst u_prod: Producer (clk, rst, o_val: link);
+        inst u_cons: Consumer (clk, rst, i_val: link, o_result: result);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // After reset+step: cnt went 0→1 (ff_swap), get() settles with cnt=1
+        // o_val = 1+10 = 11, result = 11+100 = 111
+        sim.step(&clk);
+        let r = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            r, 111,
+            "JIT={} 4st={}: cycle 1 expected 111 (1+10+100), got {} — \
+             comb chain through parent wire not propagated in single pass",
+            config.use_jit, config.use_4state, r
+        );
+
+        // cnt=2, o_val=12, result=112
+        sim.step(&clk);
+        let r = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            r, 112,
+            "JIT={} 4st={}: cycle 2 expected 112 (2+10+100), got {}",
+            config.use_jit, config.use_4state, r
+        );
+    }
+}
+
+/// Regression: stall-signal propagation through parent-level wire.
+///
+/// Models the pattern that caused the heliodor sv39_4k failure:
+/// a "staller" child module produces a busy signal, which propagates
+/// through a parent wire (with a comb transform) to a "controller"
+/// child module. The controller must see the staller's output in
+/// the same cycle (single comb pass) to produce correct behavior.
+///
+/// Without correct within-level ordering, the controller CB evaluates
+/// before the staller's busy signal is written to the parent wire,
+/// reading stale data.
+#[test]
+fn within_level_stall_propagation() {
+    let code = r#"
+    module Staller (
+        clk   : input  clock   ,
+        rst   : input  reset   ,
+        i_req : input  logic   ,
+        o_busy: output logic   ,
+    ) {
+        var cnt: logic<4>;
+        always_ff {
+            if_reset { cnt = 4'd0; }
+            else if i_req && cnt == 4'd0 { cnt = 4'd3; }
+            else if cnt != 4'd0 { cnt = cnt - 4'd1; }
+        }
+        assign o_busy = cnt != 4'd0;
+    }
+
+    module Controller (
+        clk     : input  clock   ,
+        rst     : input  reset   ,
+        i_stall : input  logic   ,
+        o_active: output logic   ,
+    ) {
+        // Pure comb: active only when not stalled
+        assign o_active = !i_stall;
+    }
+
+    module Top (
+        clk    : input  clock   ,
+        rst    : input  reset   ,
+        active : output logic   ,
+        busy   : output logic   ,
+    ) {
+        var stall_wire: logic;
+        // Comb transform on stall path (like dcache_stall && !is_mmio)
+        var stall_gated: logic;
+        assign stall_gated = stall_wire;
+
+        inst u_stall: Staller (
+            clk, rst,
+            i_req : !stall_wire,   // request when not busy
+            o_busy: stall_wire,
+        );
+        inst u_ctrl: Controller (
+            clk, rst,
+            i_stall : stall_gated,
+            o_active: active,
+        );
+        assign busy = stall_wire;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // After reset+step: cnt went 0→3 (i_req=!stall_wire; at reset
+        // stall_wire=0 so i_req=1, cnt transitions 0→3).
+        // get() settles with cnt=3: busy=1, stall_gated=1, active=0.
+        sim.step(&clk);
+        let a = sim.get("active").unwrap().payload_u64();
+        let b = sim.get("busy").unwrap().payload_u64();
+        assert_eq!(
+            (a, b),
+            (0, 1),
+            "JIT={} 4st={}: cycle 1 expected active=0,busy=1 got active={},busy={} — \
+             stall signal not propagated through parent wire in single comb pass",
+            config.use_jit,
+            config.use_4state,
+            a,
+            b
+        );
+
+        // cnt=3→2 (counting down, i_req=0 since busy). busy=1, active=0.
+        sim.step(&clk);
+        let a = sim.get("active").unwrap().payload_u64();
+        let b = sim.get("busy").unwrap().payload_u64();
+        assert_eq!(
+            (a, b),
+            (0, 1),
+            "JIT={} 4st={}: cycle 2 expected active=0,busy=1 (cnt=2) got active={},busy={}",
+            config.use_jit,
+            config.use_4state,
+            a,
+            b
+        );
+
+        // cnt=2→1, busy=1, active=0
+        sim.step(&clk);
+        let a = sim.get("active").unwrap().payload_u64();
+        assert_eq!(
+            a, 0,
+            "JIT={} 4st={}: cycle 3 expected active=0 (cnt=1), got {}",
+            config.use_jit, config.use_4state, a
+        );
+
+        // cnt=1→0, busy=0, active=1
+        sim.step(&clk);
+        let a = sim.get("active").unwrap().payload_u64();
+        let b = sim.get("busy").unwrap().payload_u64();
+        assert_eq!(
+            (a, b),
+            (1, 0),
+            "JIT={} 4st={}: cycle 4 expected active=1,busy=0 (countdown done) got active={},busy={}",
+            config.use_jit,
+            config.use_4state,
+            a,
+            b
+        );
+    }
+}
+
+/// Regression: adding comb logic to one child module must not break a
+/// sibling module's write-first forwarding.  This is the pattern that
+/// triggered the full_comb JIT ordering bug (fp_regfile broke when mmu
+/// gained a comb variable).
+///
+/// Top instantiates RegFile (write-first forwarding) and Sibling (extra
+/// comb logic).  The test verifies that RegFile forwarding works
+/// regardless of Sibling's comb complexity.
+#[test]
+fn sibling_comb_does_not_break_forwarding() {
+    let code = r#"
+    module RegFile (
+        clk      : input  clock    ,
+        rst      : input  reset    ,
+        i_rs     : input  logic<2> ,
+        i_wd     : input  logic<8> ,
+        i_wen    : input  logic    ,
+        o_rd     : output logic<8> ,
+    ) {
+        var regs: logic<8> [4];
+        always_ff {
+            if_reset {
+                regs[0] = 8'd0; regs[1] = 8'd0;
+                regs[2] = 8'd0; regs[3] = 8'd0;
+            } else if i_wen {
+                regs[i_rs] = i_wd;
+            }
+        }
+        // Write-first forwarding
+        always_comb {
+            o_rd = if i_wen ? i_wd : regs[i_rs];
+        }
+    }
+
+    module Sibling (
+        clk    : input  clock    ,
+        rst    : input  reset    ,
+        i_en   : input  logic    ,
+        o_val  : output logic<8> ,
+    ) {
+        var cnt: logic<8>;
+        always_ff {
+            if_reset { cnt = 8'd0; }
+            else if i_en { cnt = cnt + 8'd1; }
+        }
+        // Extra comb — the kind that triggered the original bug
+        var extra: logic<8>;
+        always_comb { extra = cnt + 8'd42; }
+        assign o_val = extra;
+    }
+
+    module Top (
+        clk    : input  clock    ,
+        rst    : input  reset    ,
+        rd     : output logic<8> ,
+        sib    : output logic<8> ,
+    ) {
+        inst u_rf: RegFile (
+            clk, rst,
+            i_rs: 2'd1, i_wd: 8'd77, i_wen: 1'b1,
+            o_rd: rd,
+        );
+        inst u_sib: Sibling (
+            clk, rst, i_en: 1'b1, o_val: sib,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.step(&clk);
+
+        // Write-first: writing 77 and reading same register → must see 77
+        let rd = sim.get("rd").unwrap().payload_u64();
+        assert_eq!(
+            rd, 77,
+            "JIT={} 4st={}: write-first forwarding broken by sibling comb (got {})",
+            config.use_jit, config.use_4state, rd
+        );
+        // Sibling should work independently
+        let sib = sim.get("sib").unwrap().payload_u64();
+        assert_eq!(
+            sib,
+            43, // cnt=1, extra=1+42=43
+            "JIT={} 4st={}: sibling comb wrong (got {})",
+            config.use_jit,
+            config.use_4state,
+            sib
+        );
+    }
+}
+
+/// Regression: gather_external_offsets must keep outputs (not filter
+/// internal variables from both inputs AND outputs). When outputs are
+/// filtered, reorder_by_level assigns wrong dependency levels to
+/// downstream blocks that read the intermediate variable.
+#[test]
+fn intermediate_variable_dependency_level() {
+    // Three-level hierarchy: GrandChild writes a comb output that is
+    // wired through Child to Parent.  If the Child CB's output_offsets
+    // don't include the intermediate wire, Parent's Assign gets level 0
+    // instead of level 1, breaking evaluation order.
+    let code = r#"
+    module Inner (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        o_val: output logic<8>,
+    ) {
+        var cnt: logic<8>;
+        always_ff {
+            if_reset { cnt = 8'd0; }
+            else     { cnt = cnt + 8'd1; }
+        }
+        assign o_val = cnt;
+    }
+
+    module Middle (
+        clk    : input  clock   ,
+        rst    : input  reset   ,
+        o_out  : output logic<8>,
+    ) {
+        var mid: logic<8>;
+        inst u_inner: Inner (clk, rst, o_val: mid);
+        // Internal variable: both read (by assign below) and written (by Inner)
+        assign o_out = mid + 8'd10;
+    }
+
+    module Top (
+        clk    : input  clock   ,
+        rst    : input  reset   ,
+        result : output logic<8>,
+    ) {
+        var link: logic<8>;
+        inst u_mid: Middle (clk, rst, o_out: link);
+        assign result = link + 8'd100;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.step(&clk);
+
+        // cnt=1, mid=1+10=11, result=11+100=111
+        let r = sim.get("result").unwrap().payload_u64();
+        assert_eq!(
+            r, 111,
+            "JIT={} 4st={}: intermediate variable lost from CB outputs (got {})",
+            config.use_jit, config.use_4state, r
+        );
+    }
+}
