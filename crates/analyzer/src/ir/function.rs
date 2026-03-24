@@ -68,7 +68,7 @@ pub struct Function {
     pub array: Shape,
     pub arity: usize,
     pub args: Vec<FuncArg>,
-    pub constantable: bool,
+    pub is_const: bool,
     pub functions: Vec<FunctionBody>,
     pub token: TokenRange,
 }
@@ -173,21 +173,7 @@ pub struct FunctionCall {
 
 impl FunctionCall {
     pub fn eval_type(&mut self, context: &mut Context) {
-        let mut is_const = context
-            .functions
-            .get(&self.id)
-            .map(|func| func.constantable)
-            .unwrap_or(true);
-        for expr in self.inputs.values_mut() {
-            is_const &= expr.eval_comptime(context, None).is_const;
-        }
-
-        // function with side-effect through output ports is not const
-        if !self.outputs.is_empty() {
-            is_const = false;
-        }
-
-        self.comptime.is_const = is_const;
+        self.comptime.is_const = self.eval_comptime_flag(context);
     }
 
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
@@ -228,24 +214,10 @@ impl FunctionCall {
             ValueVariant::Unknown
         };
 
-        let mut is_const = context
-            .functions
-            .get(&self.id)
-            .map(|func| func.constantable)
-            .unwrap_or(true);
-        for expr in self.inputs.values_mut() {
-            is_const &= expr.eval_comptime(context, None).is_const;
-        }
-
-        // function with side-effect through output ports is not const
-        if !self.outputs.is_empty() {
-            is_const = false;
-        }
-
         let mut ret = self.comptime.clone();
         ret.value = value;
 
-        ret.is_const = is_const;
+        ret.is_const = self.eval_comptime_flag(context);
         ret
     }
 
@@ -317,6 +289,24 @@ impl FunctionCall {
                 x.set_index(index);
             }
         }
+    }
+
+    fn eval_comptime_flag(&mut self, context: &mut Context) -> bool {
+        let mut is_const = context
+            .functions
+            .get(&self.id)
+            .map(|func| func.is_const)
+            .unwrap_or(true);
+        for expr in self.inputs.values_mut() {
+            is_const &= expr.eval_comptime(context, None).is_const;
+        }
+
+        // function with side-effect through output ports is not const
+        if !self.outputs.is_empty() {
+            is_const = false;
+        }
+
+        is_const
     }
 }
 

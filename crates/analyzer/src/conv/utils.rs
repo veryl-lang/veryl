@@ -73,6 +73,17 @@ pub fn eval_expr(
     }
 }
 
+pub fn eval_generic_expr(
+    context: &mut Context,
+    expr: &Expression,
+) -> IrResult<(Comptime, ir::Expression)> {
+    let allow_component_as_factor = context.allow_component_as_factor;
+    context.allow_component_as_factor = true;
+    let ret = eval_expr(context, None, expr, false);
+    context.allow_component_as_factor = allow_component_as_factor;
+    ret
+}
+
 pub fn eval_range(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
     eval_range_inner(context, range, false)
 }
@@ -605,10 +616,19 @@ fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression)
 
 pub fn eval_struct_member(
     context: &mut Context,
+    member_symbol: &Symbol,
     path: &GenericSymbolPath,
     mut member_path: VarPath,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
+    fn get_member_type(context: &mut Context, member_symbol: &Symbol) -> IrResult<ir::Type> {
+        let SymbolKind::StructMember(member) = &member_symbol.kind else {
+            unreachable!();
+        };
+
+        member.r#type.to_ir_type(context, TypePosition::Variable)
+    }
+
     let mut parent_path = path.clone();
     if let Some(x) = parent_path.paths.pop() {
         member_path.add_prelude(&[x.base.text]);
@@ -627,6 +647,7 @@ pub fn eval_struct_member(
                         if x.path == member_path {
                             let mut comptime = expr.eval_comptime(context, None).clone();
                             comptime.token = token;
+                            comptime.r#type = get_member_type(context, member_symbol)?;
                             // TODO range select from PartSelect
                             return Ok(ir::Factor::Value(comptime));
                         }
@@ -640,7 +661,9 @@ pub fn eval_struct_member(
                 member_path.add_prelude(&path.0);
                 for x in r#type.expand_struct_union(&path, &[], None) {
                     if x.path == member_path {
-                        let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
+                        let member_type = get_member_type(context, member_symbol)?;
+                        let mut comptime =
+                            Comptime::from_type(member_type, ClockDomain::None, token);
                         comptime.is_const = true;
                         return Ok(ir::Factor::Value(comptime));
                     }
@@ -662,7 +685,7 @@ pub fn eval_struct_member(
                 _ => Err(ir_error!(token)),
             },
             SymbolKind::StructMember(_) => {
-                eval_struct_member(context, &parent_path, member_path, token)
+                eval_struct_member(context, member_symbol, &parent_path, member_path, token)
             }
             _ => Err(ir_error!(token)),
         }
@@ -1385,7 +1408,7 @@ pub fn eval_factor_path(
             .map(|x| symbol.found.namespace.included(&x))
             .unwrap_or(false);
         if is_inernal {
-            eval_external_symbol(context, generic_path, symbol, allow_unknown_value, token)
+            eval_factor_symbol(context, generic_path, symbol, allow_unknown_value, token)
         } else {
             // To resolve external symbol reference,
             // use an independent context to avoid name conflict
@@ -1393,9 +1416,8 @@ pub fn eval_factor_path(
             external_context.inherit(context);
 
             external_context.push_generic_map(generic_path.to_generic_maps());
-            let ret = external_context.block(|c| {
-                eval_external_symbol(c, generic_path, symbol, allow_unknown_value, token)
-            });
+            let ret = external_context
+                .block(|c| eval_factor_symbol(c, generic_path, symbol, allow_unknown_value, token));
 
             external_context.pop_generic_map();
             context.inherit(&mut external_context);
@@ -1407,7 +1429,7 @@ pub fn eval_factor_path(
     }
 }
 
-pub fn eval_external_symbol(
+pub fn eval_factor_symbol(
     context: &mut Context,
     path: GenericSymbolPath,
     symbol: ResolveResult,
@@ -1451,28 +1473,34 @@ pub fn eval_external_symbol(
                 return Err(ir_error!(token));
             };
 
-            if let Some(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace) {
-                let r#type = match proto {
-                    ProtoBound::FactorType(x) => Some(x),
-                    ProtoBound::Enum((_, x)) => Some(x),
-                    ProtoBound::Struct((_, x)) => Some(x),
-                    ProtoBound::Union((_, x)) => Some(x),
-                    _ => None,
-                };
-                if let Some(r#type) = r#type {
-                    let r#type = r#type.to_ir_type(context, TypePosition::Generic)?;
-                    let mut x = Comptime::create_unknown(token);
-
-                    if let Some(val) = default_value {
-                        x.value = val.value;
+            if let Ok(proto) = x.bound.resolve_proto_bound(&symbol.found.namespace) {
+                match proto {
+                    ProtoBound::ProtoModule(_)
+                    | ProtoBound::ProtoInterface(_)
+                    | ProtoBound::ProtoPackage(_)
+                        if context.allow_component_as_factor =>
+                    {
+                        context.allow_component_as_factor = false;
+                        return Ok(ir::Factor::from_component_symbol(&symbol.found, token));
                     }
+                    ProtoBound::FactorType(x)
+                    | ProtoBound::Enum((_, x))
+                    | ProtoBound::Struct((_, x))
+                    | ProtoBound::Union((_, x)) => {
+                        let r#type = x.to_ir_type(context, TypePosition::Generic)?;
+                        let mut x = Comptime::from_type(r#type, ClockDomain::None, token);
 
-                    // GenericParameter is const and global
-                    x.is_const = true;
-                    x.is_global = true;
-                    x.r#type = r#type;
+                        if let Some(val) = default_value {
+                            x.value = val.value;
+                        }
 
-                    return Ok(ir::Factor::Value(x));
+                        // GenericParameter is const and global
+                        x.is_const = true;
+                        x.is_global = true;
+
+                        return Ok(ir::Factor::Value(x));
+                    }
+                    _ => {}
                 }
             } else if matches!(x.bound, GenericBoundKind::Type) {
                 let mut x = Comptime::create_unknown(token);
@@ -1519,17 +1547,30 @@ pub fn eval_external_symbol(
                 unreachable!();
             };
 
-            match &x.value {
+            let factor = match &x.value {
                 EnumMemberValue::ImplicitValue(x) => {
                     let value = Value::new(*x as u64, r#enum.width, false);
-                    return Ok(ir::Factor::create_value(value, token));
+                    Some(ir::Factor::create_value(value, token))
                 }
                 EnumMemberValue::ExplicitValue(x, _) => {
                     let (mut x, _) = eval_expr(context, None, x, false)?;
                     x.token = token;
-                    return Ok(ir::Factor::Value(x));
+                    Some(ir::Factor::Value(x))
                 }
-                EnumMemberValue::UnevaluableValue => (),
+                EnumMemberValue::UnevaluableValue => None,
+            };
+
+            if let Some(mut factor) = factor {
+                let enum_type = factor.comptime().r#type.clone();
+                let type_kind = ir::TypeKind::Enum(ir::TypeKindEnum {
+                    id: enum_symbol.id,
+                    r#type: Box::new(enum_type),
+                });
+
+                let factor_comptime = factor.comptime_mut();
+                factor_comptime.r#type.kind = type_kind;
+
+                return Ok(factor);
             }
         }
         SymbolKind::StructMember(_) => {
@@ -1548,7 +1589,7 @@ pub fn eval_external_symbol(
                     &token,
                 ));
             }
-            return eval_struct_member(context, &path, VarPath::default(), token);
+            return eval_struct_member(context, &symbol.found, &path, VarPath::default(), token);
         }
         SymbolKind::SystemVerilog => {
             let r#type = ir::Type {
@@ -1563,7 +1604,53 @@ pub fn eval_external_symbol(
 
             return Ok(ir::Factor::Value(x));
         }
-        SymbolKind::Function(_) | SymbolKind::Module(_) | SymbolKind::SystemFunction(_) => {
+        SymbolKind::Module(_)
+        | SymbolKind::ProtoModule(_)
+        | SymbolKind::AliasModule(_)
+        | SymbolKind::ProtoAliasModule(_)
+        | SymbolKind::Interface(_)
+        | SymbolKind::ProtoInterface(_)
+        | SymbolKind::AliasInterface(_)
+        | SymbolKind::ProtoAliasInterface(_)
+        | SymbolKind::Package(_)
+        | SymbolKind::ProtoPackage(_)
+        | SymbolKind::AliasPackage(_)
+        | SymbolKind::ProtoAliasPackage(_) => {
+            if context.allow_component_as_factor {
+                context.allow_component_as_factor = false;
+                return Ok(ir::Factor::from_component_symbol(&symbol.found, token));
+            } else {
+                context.insert_error(AnalyzerError::invalid_factor(
+                    Some(&symbol.found.token.to_string()),
+                    &symbol.found.kind.to_kind_name(),
+                    &token,
+                    &[],
+                ));
+            }
+        }
+        SymbolKind::Instance(x) if context.allow_component_as_factor => {
+            context.allow_component_as_factor = false;
+            if let Ok(component) =
+                symbol_table::resolve((&x.type_name.mangled_path(), &symbol.found.namespace))
+            {
+                let sig = Signature::new(component.found.id);
+                let kind = if symbol.found.is_module(true) {
+                    ir::TypeKind::Instance(sig, ir::InstanceKind::Module)
+                } else if symbol.found.is_interface(true) {
+                    ir::TypeKind::Instance(sig, ir::InstanceKind::Interface)
+                } else {
+                    ir::TypeKind::Instance(sig, ir::InstanceKind::SystemVerilog)
+                };
+                let r#type = ir::Type {
+                    kind,
+                    ..Default::default()
+                };
+
+                let comptime = Comptime::from_type(r#type, ClockDomain::None, token);
+                return Ok(ir::Factor::Value(comptime));
+            }
+        }
+        SymbolKind::Function(_) | SymbolKind::SystemFunction(_) => {
             context.insert_error(AnalyzerError::invalid_factor(
                 Some(&symbol.found.token.to_string()),
                 &symbol.found.kind.to_kind_name(),

@@ -371,6 +371,7 @@ impl_token_range_singular!(False);
 impl_token_range_singular!(Final);
 impl_token_range_singular!(For);
 impl_token_range_singular!(Function);
+impl_token_range_singular!(Gen);
 impl_token_range_singular!(I8);
 impl_token_range_singular!(I16);
 impl_token_range_singular!(I32);
@@ -865,6 +866,7 @@ impl_token_range_enum!(
     let_statement,
     statement,
     const_declaration,
+    gen_declaration,
     concatenation_assignment
 );
 impl_token_range_enum!(
@@ -1035,6 +1037,9 @@ impl From<&ConstDeclarationGroup> for TokenRange {
     }
 }
 impl_token_ext!(ConstDeclarationGroup);
+
+impl_token_range!(GenDeclaration, r#gen, semicolon);
+impl_token_range_enum!(GenDeclarationGroup, generic_proto_bound, r#type);
 
 impl_token_range!(TypeDefDeclaration, r#type, semicolon);
 impl_token_range!(AlwaysFfDeclaration, always_ff, statement_block);
@@ -1386,6 +1391,7 @@ impl_token_range_enum!(
     inst_declaration,
     bind_declaration,
     const_declaration,
+    gen_declaration,
     always_ff_declaration,
     always_comb_declaration,
     assign_declaration,
@@ -1414,6 +1420,7 @@ impl_token_range_group!(PackageGroup, PackageItem);
 impl_token_range_enum!(
     PackageItem,
     const_declaration,
+    gen_declaration,
     type_def_declaration,
     enum_declaration,
     struct_union_declaration,
