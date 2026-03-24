@@ -787,10 +787,46 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {
-            let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
-
             for child_var_id in &input.id {
                 let child_meta = child_variable_meta.get(child_var_id).unwrap();
+
+                // Array port with a simple variable expression: expand per-element
+                if child_meta.elements.len() > 1
+                    && let air::Expression::Term(factor) = &input.expr
+                    && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
+                    && index.0.is_empty()
+                    && select.is_empty()
+                {
+                    let parent_scope = context.scope();
+                    let parent_meta = parent_scope.variable_meta.get(parent_id).unwrap();
+                    for i in 0..child_meta.elements.len() {
+                        let child_element = &child_meta.elements[i];
+                        let parent_element = &parent_meta.elements[i];
+                        let parent_expr = ProtoExpression::Variable {
+                            offset: parent_element.current_offset,
+                            is_ff: parent_element.is_ff,
+                            select: None,
+                            width: child_meta.width,
+                            expr_context: ExpressionContext {
+                                width: child_meta.width,
+                                signed: false,
+                            },
+                        };
+                        all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                            dst_offset: child_element.current_offset,
+                            dst_is_ff: false,
+                            dst_width: child_meta.width,
+                            select: None,
+                            rhs_select: None,
+                            expr: parent_expr,
+                            dst_ff_current_offset: 0, // not FF
+                            token: TokenRange::default(),
+                        }));
+                    }
+                    continue;
+                }
+
+                let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
                 let element = &child_meta.elements[0];
                 all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                     dst_offset: element.current_offset,
