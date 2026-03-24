@@ -5,6 +5,7 @@ use crate::ir::{
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
+use crate::wave_dumper::WaveDumper;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
@@ -289,21 +290,17 @@ fn convert_stmts(
         .collect()
 }
 
-pub fn run_testbench<T: std::io::Write>(
-    sim: &mut Simulator<T>,
-    stmts: &[TestbenchStatement],
-) -> TestResult {
+pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
     exec(sim, stmts).into()
 }
 
 /// Run a native testbench from a simulator IR.
 ///
 /// Builds a Simulator, extracts the initial block, converts it to testbench
-/// statements, and executes them. The `dump` parameter provides an optional
-/// writer for VCD waveform output.
+/// statements, and executes them.
 pub fn run_native_testbench(
     ir: Ir,
-    dump: Option<Box<dyn std::io::Write>>,
+    dump: Option<WaveDumper>,
 ) -> Result<TestResult, SimulatorError> {
     let mut sim = Simulator::new(ir, dump);
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
@@ -321,7 +318,7 @@ pub fn run_native_testbench(
     Ok(run_testbench(&mut sim, &tb_stmts))
 }
 
-fn exec<T: std::io::Write>(sim: &mut Simulator<T>, stmts: &[TestbenchStatement]) -> ExecResult {
+fn exec(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> ExecResult {
     for stmt in stmts {
         let result = exec_one(sim, stmt);
         if result.should_stop() {
@@ -331,7 +328,7 @@ fn exec<T: std::io::Write>(sim: &mut Simulator<T>, stmts: &[TestbenchStatement])
     ExecResult::Continue
 }
 
-fn exec_one<T: std::io::Write>(sim: &mut Simulator<T>, stmt: &TestbenchStatement) -> ExecResult {
+fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
     match stmt {
         TestbenchStatement::Stmt(s) => {
             sim.ensure_comb_updated();

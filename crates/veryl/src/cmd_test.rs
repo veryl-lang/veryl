@@ -5,12 +5,14 @@ use log::{error, info, warn};
 use miette::Result;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
+use veryl_metadata::WaveFormFormat;
 use veryl_metadata::{FilelistType, Metadata, SimType};
 use veryl_parser::resource_table;
 use veryl_simulator::ir::{Config, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
 use veryl_simulator::testbench::{TestResult, run_native_testbench};
+use veryl_simulator::wave_dumper::WaveDumper;
 use veryl_simulator::wavedrom::{self, SignalKind, classify_signals, parse_wavedrom};
 
 pub struct CmdTest {
@@ -90,6 +92,7 @@ impl CmdTest {
                         &test_name,
                         &property.top,
                         &self.opt,
+                        metadata.test.waveform_format,
                         &config,
                         &mut proto_cache,
                     ) {
@@ -134,12 +137,17 @@ impl CmdTest {
             let module_name = resource_table::get_str_value(dt.module_name).unwrap_or_default();
             info!("Executing doc test ({module_name})");
 
+            let wave_format = if self.opt.wave {
+                Some(metadata.test.waveform_format)
+            } else {
+                None
+            };
             match run_doc_test(
                 &ir,
                 &module_name,
                 &dt.wavedrom_json,
                 &dt.ports,
-                self.opt.wave,
+                wave_format,
                 &config,
                 &mut proto_cache,
             ) {
@@ -169,6 +177,7 @@ fn run_native_test(
     test_name: &str,
     top: &Option<resource_table::StrId>,
     opt: &OptTest,
+    waveform_format: WaveFormFormat,
     config: &Config,
     cache: &mut ProtoModuleCache,
 ) -> std::result::Result<(), SimulatorError> {
@@ -185,13 +194,18 @@ fn run_native_test(
     })?;
     let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
 
-    let dump: Option<Box<dyn std::io::Write>> = if opt.wave {
-        let path = format!("{}.vcd", test_name);
-        let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
-            message: format!("failed to create VCD file {path}: {e}"),
-        })?;
+    let dump: Option<WaveDumper> = if opt.wave {
+        let path = format!("{}.{}", test_name, waveform_format.extension());
         info!("  Dumping waveform to {}", path);
-        Some(Box::new(file))
+        match waveform_format {
+            WaveFormFormat::Vcd => {
+                let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
+                    message: format!("failed to create waveform file {path}: {e}"),
+                })?;
+                Some(WaveDumper::new_vcd(Box::new(file)))
+            }
+            WaveFormFormat::Fst => Some(WaveDumper::new_fst(&path)),
+        }
     } else {
         None
     };
@@ -207,7 +221,7 @@ fn run_doc_test(
     module_name: &str,
     wavedrom_json: &str,
     ports: &[(String, String)],
-    wave: bool,
+    wave_format: Option<WaveFormFormat>,
     config: &Config,
     cache: &mut ProtoModuleCache,
 ) -> std::result::Result<(), SimulatorError> {
@@ -223,13 +237,18 @@ fn run_doc_test(
     })?;
     let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
 
-    let dump: Option<Box<dyn std::io::Write>> = if wave {
-        let path = format!("{}_doc.vcd", module_name);
-        let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
-            message: format!("failed to create VCD file {path}: {e}"),
-        })?;
+    let dump: Option<WaveDumper> = if let Some(format) = wave_format {
+        let path = format!("{}_doc.{}", module_name, format.extension());
         info!("  Dumping waveform to {}", path);
-        Some(Box::new(file))
+        match format {
+            WaveFormFormat::Vcd => {
+                let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
+                    message: format!("failed to create waveform file {path}: {e}"),
+                })?;
+                Some(WaveDumper::new_vcd(Box::new(file)))
+            }
+            WaveFormFormat::Fst => Some(WaveDumper::new_fst(&path)),
+        }
     } else {
         None
     };

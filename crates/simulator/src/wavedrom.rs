@@ -219,8 +219,8 @@ pub fn classify_signals(scenario: &mut WaveScenario, port_info: &[(String, Strin
 /// Each cycle: drive inputs -> evaluate comb -> check outputs -> step clock/reset.
 /// This order ensures outputs reflect the pre-edge state (previous FF values +
 /// current combinational inputs), matching WaveDrom timing conventions.
-pub fn run_wavedrom_test<T: std::io::Write>(
-    sim: &mut Simulator<T>,
+pub fn run_wavedrom_test(
+    sim: &mut Simulator,
     scenario: &WaveScenario,
     clock_event: &Event,
     reset_event: &Option<Event>,

@@ -17,7 +17,7 @@ fn testbench_counter_clock_next() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -65,7 +65,7 @@ fn testbench_reset_clears_counter() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -104,7 +104,7 @@ fn testbench_for_loop() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -153,7 +153,7 @@ fn testbench_finish_stops_execution() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -274,7 +274,7 @@ fn tb_integration_counter() {
             Err(_) => continue,
         };
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
@@ -446,7 +446,7 @@ fn tb_readonly_cache_fill() {
             }
         };
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
         let initial_stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
@@ -509,7 +509,7 @@ fn tb_function_inline() {
             Err(_) => continue,
         };
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
@@ -723,8 +723,10 @@ fn testbench_vcd_clock_reset_waveform() {
     for config in Config::all() {
         let ir = analyze(code, &config);
 
-        let mut dump = Vec::new();
-        let mut sim = Simulator::new(ir, Some(&mut dump));
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -754,6 +756,11 @@ fn testbench_vcd_clock_reset_waveform() {
         assert_eq!(sim.get("cnt").unwrap(), Value::new(3, 32, false));
 
         // Parse VCD with the vcd crate
+        drop(sim);
+        let dump = std::sync::Arc::try_unwrap(dump_buf)
+            .unwrap()
+            .into_inner()
+            .unwrap();
         let mut parser = vcd::Parser::new(dump.as_slice());
         let header = parser.parse_header().unwrap();
 
@@ -837,6 +844,147 @@ fn testbench_vcd_clock_reset_waveform() {
 }
 
 #[test]
+fn testbench_fst_clock_reset_waveform() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        let fst_path = format!(
+            "{}/fst_test_{}_{}.fst",
+            std::env::temp_dir().display(),
+            config.use_jit,
+            config.use_4state,
+        );
+
+        use crate::wave_dumper::WaveDumper;
+        let dumper = WaveDumper::new_fst(&fst_path);
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        let stmts = vec![
+            TestbenchStatement::ResetAssert {
+                reset: rst.clone(),
+                clock: clk.clone(),
+                duration: 2,
+                high_time: 1,
+                low_time: 1,
+            },
+            TestbenchStatement::For {
+                count: 3,
+                body: vec![TestbenchStatement::ClockNext {
+                    clock: clk.clone(),
+                    count: None,
+                    high_time: 1,
+                    low_time: 1,
+                }],
+            },
+        ];
+
+        let result = run_testbench(&mut sim, &stmts);
+        assert_eq!(result, TestResult::Pass);
+        assert_eq!(sim.get("cnt").unwrap(), Value::new(3, 32, false));
+        drop(sim);
+
+        // Read FST back with wellen
+        let mut wave = wellen::simple::read(&fst_path).expect("failed to read FST");
+        let hier = wave.hierarchy();
+
+        // Find clk and rst variables
+        let clk_var = hier
+            .iter_vars()
+            .find(|v| v.name(hier) == "clk")
+            .expect("clk not found in FST");
+        let rst_var = hier
+            .iter_vars()
+            .find(|v| v.name(hier) == "rst")
+            .expect("rst not found in FST");
+        let clk_ref = clk_var.signal_ref();
+        let rst_ref = rst_var.signal_ref();
+
+        wave.load_signals(&[clk_ref, rst_ref]);
+
+        let time_table = wave.time_table();
+        let clk_signal = wave.get_signal(clk_ref).unwrap();
+        let rst_signal = wave.get_signal(rst_ref).unwrap();
+
+        // Collect clock values at each time step
+        let mut clk_values: Vec<(u64, u8)> = Vec::new();
+        for (i, &t) in time_table.iter().enumerate() {
+            if let Some(offset) = clk_signal.get_offset(i as u32) {
+                let val = clk_signal.get_value_at(&offset, 0);
+                if let wellen::SignalValue::Binary(bits, _) = val {
+                    clk_values.push((t, bits[0]));
+                }
+            }
+        }
+
+        // Clock should toggle across timestamps
+        assert!(
+            clk_values.len() >= 10,
+            "expected >= 10 clock transitions in FST, got {} (jit={}, 4state={})",
+            clk_values.len(),
+            config.use_jit,
+            config.use_4state,
+        );
+
+        for (i, &(_, val)) in clk_values.iter().enumerate() {
+            let expected: u8 = if i % 2 == 0 { 1 } else { 0 };
+            assert_eq!(
+                val, expected,
+                "FST clock at index {i} should be {expected}, got {val} (jit={}, 4state={})",
+                config.use_jit, config.use_4state,
+            );
+        }
+
+        // Collect reset values
+        let mut rst_values: Vec<(u64, u8)> = Vec::new();
+        for (i, &t) in time_table.iter().enumerate() {
+            if let Some(offset) = rst_signal.get_offset(i as u32) {
+                let val = rst_signal.get_value_at(&offset, 0);
+                if let wellen::SignalValue::Binary(bits, _) = val {
+                    rst_values.push((t, bits[0]));
+                }
+            }
+        }
+
+        assert!(
+            !rst_values.is_empty(),
+            "expected reset signal changes in FST (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            rst_values[0].1, 1,
+            "reset should be asserted initially in FST (jit={}, 4state={})",
+            config.use_jit, config.use_4state,
+        );
+        assert_eq!(
+            rst_values.last().unwrap().1,
+            0,
+            "reset should be deasserted after reset phase in FST (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        std::fs::remove_file(&fst_path).ok();
+    }
+}
+
+#[test]
 fn testbench_array_input_port() {
     let code = r#"
     module Top (
@@ -875,7 +1023,7 @@ fn testbench_array_input_port() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -948,8 +1096,10 @@ fn testbench_vcd_comb_only_clock_reset() {
             Err(_) => continue,
         };
 
-        let mut dump = Vec::new();
-        let mut sim = Simulator::new(ir, Some(&mut dump));
+        use crate::wave_dumper::{SharedVec, WaveDumper};
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
 
         let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
         let clock_periods = build_clock_periods(&sim.ir.event_statements);
@@ -962,6 +1112,10 @@ fn testbench_vcd_comb_only_clock_reset() {
         assert_eq!(result, TestResult::Pass);
         drop(sim);
 
+        let dump = std::sync::Arc::try_unwrap(dump_buf)
+            .unwrap()
+            .into_inner()
+            .unwrap();
         let mut parser = vcd::Parser::new(dump.as_slice());
         let header = parser.parse_header().unwrap();
 

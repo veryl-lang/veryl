@@ -17,7 +17,7 @@ fn simple_comb() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -62,7 +62,7 @@ fn simple_ff() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -117,7 +117,7 @@ fn ff_to_ff() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -162,7 +162,7 @@ fn short_bit() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -208,7 +208,7 @@ fn long_bit_128() {
         dbg!(&config);
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
@@ -246,7 +246,7 @@ fn long_bit_over_128() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -282,7 +282,7 @@ fn wide_bit_ops_256() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(0xff00ff, 256, false);
         let b = Value::new(0x0f0f0f, 256, false);
@@ -319,7 +319,7 @@ fn wide_256_arithmetic() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(100, 256, false);
         let b = Value::new(42, 256, false);
@@ -355,7 +355,7 @@ fn wide_256_comparison() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(100, 256, false);
         let b = Value::new(42, 256, false);
@@ -408,7 +408,7 @@ fn wide_256_shift() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(0xff, 256, false);
         let s = Value::new(4, 8, false);
@@ -448,7 +448,7 @@ fn wide_256_ternary() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(100, 256, false);
         let b = Value::new(200, 256, false);
@@ -503,7 +503,7 @@ fn wide_256_array_for_generate() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -549,7 +549,7 @@ fn wide_bit_ops() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(0xff00ff, 96, false);
         let b = Value::new(0x0f0f0f, 96, false);
@@ -583,7 +583,7 @@ fn wide_ternary() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(42, 128, false);
         let b = Value::new(99, 128, false);
@@ -626,7 +626,7 @@ fn select() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -685,7 +685,7 @@ fn inst() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -749,7 +749,7 @@ fn inst_array_input_port() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -807,7 +807,7 @@ fn inst_array_input_port_shorthand() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -858,7 +858,7 @@ fn inst_ff() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -917,7 +917,7 @@ fn inst_comb_and_ff() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -998,7 +998,7 @@ fn binary_op() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let a = Value::new(11, 32, false);
         let b = Value::new(21, 32, false);
@@ -1059,7 +1059,7 @@ fn comb_dependency() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -1100,8 +1100,10 @@ fn dump_vcd() {
 
         let ir = analyze(code, &config);
 
-        let mut dump = Vec::new();
-        let mut sim = Simulator::new(ir, Some(&mut dump));
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
 
         let a = Value::new(10, 32, false);
         let b = Value::new(20, 32, false);
@@ -1130,7 +1132,14 @@ fn dump_vcd() {
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         sim.time += 1;
 
-        let dump = String::from_utf8(dump).unwrap();
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
         let exp = r#"$timescale 1 us $end
 $scope module Top $end
 $var wire 32 ! a $end
@@ -1185,7 +1194,7 @@ fn unary_test(op: &str, x: &str, dst_width: usize, dst: &str, only_4state: bool)
 
         let ir = analyze(&code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("x", x.clone());
 
@@ -1330,7 +1339,7 @@ fn binary_test(x: &str, op: &str, y: &str, dst_width: usize, dst: &str, only_4st
 
         let ir = analyze(&code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("x", x.clone());
         sim.set("y", y.clone());
@@ -1608,7 +1617,7 @@ fn partial_jit() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(10, 32, false));
         sim.set("b", Value::new(20, 32, false));
@@ -1639,7 +1648,7 @@ fn concatenation() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(0xABCD_1234, 32, false));
         sim.set("b", Value::new(0x5678_9ABC, 32, false));
@@ -1670,7 +1679,7 @@ fn concatenation_repeat() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(0xAB, 32, false));
 
@@ -1705,7 +1714,7 @@ fn concatenation_4state() {
 
         let ir = analyze(code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         // a = 8'hx3 (upper nibble is X)
         sim.set("a", Value::from_str("8'hx3").unwrap());
@@ -1737,7 +1746,7 @@ fn lhs_concatenation() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         // x = 0xABCDE123 (32 bits)
         // a = upper 20 bits = 0xABCDE
@@ -1770,7 +1779,7 @@ fn lhs_concatenation_equal_split() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("x", Value::new(0xDEAD_BEEF, 32, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
@@ -1797,7 +1806,7 @@ fn lhs_concatenation_small_value() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.step(&Event::Clock(VarId::SYNTHETIC));
 
@@ -1831,7 +1840,7 @@ fn function_call_expr() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(10, 32, false));
         sim.set("b", Value::new(20, 32, false));
@@ -1865,7 +1874,7 @@ fn function_call_void() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(7, 32, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
@@ -1898,7 +1907,7 @@ fn function_call_with_output() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(5, 32, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
@@ -1937,7 +1946,7 @@ fn function_call_nested() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(3, 32, false));
         sim.set("b", Value::new(4, 32, false));
@@ -1977,7 +1986,7 @@ fn function_call_in_ff() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -2010,7 +2019,7 @@ fn if_expression() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("sel", Value::new(1, 1, false));
         sim.set("a", Value::new(42, 8, false));
@@ -2041,7 +2050,7 @@ fn if_expression_chained() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("sel", Value::new(2, 2, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
@@ -2076,7 +2085,7 @@ fn if_expression_nested() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("sel", Value::new(1, 1, false));
         sim.set("a", Value::new(30, 8, false));
@@ -2112,7 +2121,7 @@ fn if_expression_4state() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(42, 8, false));
         sim.set("b", Value::new(99, 8, false));
@@ -2157,7 +2166,7 @@ fn initial_display() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
 }
@@ -2178,7 +2187,7 @@ fn display_format_specifiers() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
 }
@@ -2196,7 +2205,7 @@ fn display_no_format_string() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
 }
@@ -2247,7 +2256,7 @@ fn readmemh_basic() {
         dbg!(&config);
         let ir = analyze(&code, &config);
 
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
 
         let dump = sim.ir.dump_variables();
@@ -2275,7 +2284,7 @@ fn final_display() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Final);
     }
 }
@@ -2308,7 +2317,7 @@ fn interface_inst() {
         dbg!(&config);
         let ir = analyze(code, &config);
         println!("{}", ir.dump_variables());
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         println!("{}", sim.ir.dump_variables());
         let out = sim.get("out").unwrap();
@@ -2381,7 +2390,7 @@ fn interface_modport() {
         dbg!(&config);
         let ir = analyze(code, &config);
         println!("{}", ir.dump_variables());
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         println!("{}", sim.ir.dump_variables());
         let data = sim.get("out_data").unwrap();
@@ -2417,7 +2426,7 @@ fn interface_function() {
         dbg!(&config);
         let ir = analyze(code, &config);
         println!("{}", ir.dump_variables());
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         println!("{}", sim.ir.dump_variables());
         let out = sim.get("out").unwrap();
@@ -2448,7 +2457,7 @@ fn array_literal_comb() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(40, 8, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
@@ -2487,7 +2496,7 @@ fn array_literal_ff() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -2525,7 +2534,7 @@ fn struct_constructor() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(0xAB, 8, false));
         sim.set("b", Value::new(0xCD, 8, false));
@@ -2567,7 +2576,7 @@ fn struct_constructor_ff() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -2604,7 +2613,7 @@ fn array_dynamic_index_read() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         for idx in 0..4u64 {
             sim.set("idx", Value::new(idx, 2, false));
@@ -2647,7 +2656,7 @@ fn array_dynamic_index_write_ff() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -2708,7 +2717,7 @@ fn array_dynamic_index_write_comb() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("idx", Value::new(1, 2, false));
         sim.set("val", Value::new(77, 8, false));
@@ -2731,7 +2740,7 @@ fn assert_pass() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
 }
@@ -2750,7 +2759,7 @@ fn assert_fail() {
     "#;
     let config = Config::default();
     let ir = analyze(code, &config);
-    let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+    let mut sim = Simulator::new(ir, None);
     sim.step(&Event::Initial);
 }
 
@@ -2767,7 +2776,7 @@ fn assert_with_message_pass() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
 }
@@ -2785,7 +2794,7 @@ fn finish_in_initial() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
 }
@@ -2822,7 +2831,7 @@ fn case_as_enum_cast() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("sel", Value::new(0, 2, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
@@ -2860,7 +2869,7 @@ fn signed_unsigned_in_expr() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         sim.set("a", Value::new(3, 8, false));
         sim.set("b", Value::new(5, 8, false));
@@ -2913,7 +2922,7 @@ fn inst_array_output_port() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -2974,7 +2983,7 @@ fn inst_split_comb_ff_counter() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3045,7 +3054,7 @@ fn merged_comb_output_to_sibling_ff() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3129,7 +3138,7 @@ fn merged_comb_output_multi_level() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3219,7 +3228,7 @@ fn merged_comb_output_write_to_parent_ff() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3302,7 +3311,7 @@ fn optimize_comb_no_cascade_inline() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3397,7 +3406,7 @@ fn optimize_comb_no_cascade_inline_multi_level() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3451,7 +3460,7 @@ fn u64_add_no_overflow_panic() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3551,7 +3560,7 @@ fn child_comb_eq_comparison() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3657,7 +3666,7 @@ fn branch_flush_consistency() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3849,7 +3858,7 @@ fn deep_forwarding_and_branch() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -3941,7 +3950,7 @@ fn post_comb_sibling_dependency() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4026,7 +4035,7 @@ fn post_comb_child_to_parent_comb_chain() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4113,7 +4122,7 @@ fn analyze_dep_self_ref_not_loop() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4195,7 +4204,7 @@ fn analyze_dep_self_ref_in_child_module() {
         dbg!(&config);
 
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4274,7 +4283,7 @@ fn jit_timing_pipeline_register() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4363,7 +4372,7 @@ fn jit_timing_conditional_ff_stall() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4476,7 +4485,7 @@ fn jit_timing_multi_stage_pipeline() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4566,7 +4575,7 @@ fn jit_timing_pipeline_flush() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4668,7 +4677,7 @@ fn jit_timing_cross_child_forwarding() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -4768,9 +4777,9 @@ fn child_output_to_var_passthrough() {
 
     for config in Config::all() {
         let ir_d = analyze(code_direct, &config);
-        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let mut sim_d = Simulator::new(ir_d, None);
         let ir_i = analyze(code_indirect, &config);
-        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let mut sim_i = Simulator::new(ir_i, None);
 
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
@@ -4925,7 +4934,7 @@ fn child_output_var_comb_feedback() {
     for config in Config::all() {
         // Test direct
         let ir_d = analyze(code_direct, &config);
-        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let mut sim_d = Simulator::new(ir_d, None);
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
 
@@ -4945,7 +4954,7 @@ fn child_output_var_comb_feedback() {
 
         // Test indirect
         let ir_i = analyze(code_indirect, &config);
-        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let mut sim_i = Simulator::new(ir_i, None);
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
 
@@ -5158,7 +5167,7 @@ fn three_level_var_port_redirect() {
 
     for config in Config::all() {
         let ir_d = analyze(code_direct, &config);
-        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let mut sim_d = Simulator::new(ir_d, None);
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
 
@@ -5169,7 +5178,7 @@ fn three_level_var_port_redirect() {
         let rd = sim_d.get("result").unwrap();
 
         let ir_i = analyze(code_indirect, &config);
-        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let mut sim_i = Simulator::new(ir_i, None);
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
 
@@ -5372,7 +5381,7 @@ fn pipeline_var_redirect_store_load() {
 
     for config in Config::all() {
         let ir_d = analyze(&code_direct, &config);
-        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let mut sim_d = Simulator::new(ir_d, None);
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
         sim_d.step(&rst_d);
@@ -5382,7 +5391,7 @@ fn pipeline_var_redirect_store_load() {
         let rd = sim_d.get("result").unwrap();
 
         let ir_i = analyze(&code_indirect, &config);
-        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let mut sim_i = Simulator::new(ir_i, None);
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
         sim_i.step(&rst_i);
@@ -5448,7 +5457,7 @@ fn child_output_var_mux() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -5753,7 +5762,7 @@ fn four_level_var_redirect_wdata() {
 
     for config in Config::all() {
         let ir_d = analyze(code_direct, &config);
-        let mut sim_d = Simulator::<std::io::Empty>::new(ir_d, None);
+        let mut sim_d = Simulator::new(ir_d, None);
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
         sim_d.step(&rst_d);
@@ -5763,7 +5772,7 @@ fn four_level_var_redirect_wdata() {
         let rd = sim_d.get("result").unwrap();
 
         let ir_i = analyze(code_indirect, &config);
-        let mut sim_i = Simulator::<std::io::Empty>::new(ir_i, None);
+        let mut sim_i = Simulator::new(ir_i, None);
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
         sim_i.step(&rst_i);
@@ -5868,9 +5877,9 @@ fn passthrough_with_unused_ff() {
 
     for config in Config::all() {
         let ir_a = analyze(code_comb_only, &config);
-        let mut sim_a = Simulator::<std::io::Empty>::new(ir_a, None);
+        let mut sim_a = Simulator::new(ir_a, None);
         let ir_b = analyze(code_with_ff, &config);
-        let mut sim_b = Simulator::<std::io::Empty>::new(ir_b, None);
+        let mut sim_b = Simulator::new(ir_b, None);
 
         let clk_a = sim_a.get_clock("clk").unwrap();
         let rst_a = sim_a.get_reset("rst").unwrap();
@@ -6011,7 +6020,7 @@ fn store_load_through_passthrough_with_ff() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6142,7 +6151,7 @@ fn store_load_comb_mem_through_passthrough_with_ff() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6228,7 +6237,7 @@ fn readonly_cache_fill() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6262,7 +6271,7 @@ fn ff_comb_let_basic() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6370,7 +6379,7 @@ fn readonly_cache_fill_with_tags() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6485,7 +6494,7 @@ fn readonly_cache_fill_3level() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6548,7 +6557,7 @@ fn bit_select_ternary_wide_var() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6629,7 +6638,7 @@ fn bit_select_child_output() {
     "#;
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6758,7 +6767,7 @@ fn cache_halfword_select_with_stall() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6876,7 +6885,7 @@ fn halfword_select_with_expander_child() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -6960,7 +6969,7 @@ fn dcache_write_through_hierarchy() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -7172,7 +7181,7 @@ fn nonff_dynamic_array_deep_hierarchy() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -7292,7 +7301,7 @@ fn child_always_comb_bit_select_64() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -7364,7 +7373,7 @@ fn dcache_write_through_pattern() {
 
     for config in Config::all() {
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
@@ -7505,7 +7514,7 @@ fn dynamic_array_two_read_ports() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
@@ -7638,7 +7647,7 @@ fn dynamic_array_three_level_hierarchy() {
     for config in Config::all() {
         dbg!(&config);
         let ir = analyze(code, &config);
-        let mut sim = Simulator::<std::io::Empty>::new(ir, None);
+        let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);

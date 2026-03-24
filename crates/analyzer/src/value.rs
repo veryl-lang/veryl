@@ -1378,6 +1378,22 @@ impl Value {
         }
     }
 
+    /// Return MSB-first byte representation for FST signal changes.
+    /// Each byte is an ASCII character: b'0', b'1', b'x', or b'z'.
+    pub fn to_fst_bits(&self) -> Vec<u8> {
+        let width = self.width() as u64;
+        let mut bits = Vec::with_capacity(width as usize);
+        for i in (0..width).rev() {
+            bits.push(match self.to_vcd_value(i) {
+                vcd::Value::V0 => b'0',
+                vcd::Value::V1 => b'1',
+                vcd::Value::X => b'x',
+                vcd::Value::Z => b'z',
+            });
+        }
+        bits
+    }
+
     pub fn as_u64_ptr(&mut self) -> Option<*mut ValueU64> {
         if let Value::U64(x) = self {
             Some(x)

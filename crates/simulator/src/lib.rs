@@ -3,6 +3,7 @@ pub mod ir;
 pub mod simulator;
 pub mod simulator_error;
 pub mod testbench;
+pub mod wave_dumper;
 pub mod wavedrom;
 pub mod wide_ops;
 

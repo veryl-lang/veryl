@@ -1,30 +1,21 @@
 use crate::ir::{
     Event, Ir, ModuleVariables, Value, VarId, VarPath, read_native_value, write_native_value,
 };
+use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::str::FromStr;
-use vcd::{self, IdCode, SimulationCommand, TimescaleUnit};
 use veryl_analyzer::value::MaskCache;
 
-/// A single variable entry for VCD dump, collected during header setup
-/// and replayed on every timestamp.
-struct DumpVar {
-    code: IdCode,
-    ptr: *const u8,
-    native_bytes: usize,
-    width: usize,
-}
-
-pub struct Simulator<T: std::io::Write> {
+pub struct Simulator {
     pub ir: Ir,
     pub time: u64,
-    pub dump: Option<vcd::Writer<T>>,
+    pub dump: Option<WaveDumper>,
     dump_vars: Vec<DumpVar>,
     pub mask_cache: MaskCache,
     comb_dirty: bool,
 }
 
-impl<T: std::io::Write> Simulator<T> {
-    pub fn new(ir: Ir, dump: Option<T>) -> Self {
+impl Simulator {
+    pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let mut ret = Self {
             ir,
             time: 0,
@@ -34,8 +25,8 @@ impl<T: std::io::Write> Simulator<T> {
             comb_dirty: true,
         };
 
-        if let Some(x) = dump {
-            ret.setup_dump(x);
+        if let Some(dumper) = dump {
+            ret.setup_dump(dumper);
         }
 
         ret
@@ -205,7 +196,7 @@ impl<T: std::io::Write> Simulator<T> {
     }
 
     /// Set a variable value by VarId. Used to write clock/reset signal values
-    /// into the variable storage so they appear in VCD dumps.
+    /// into the variable storage so they appear in wave dumps.
     pub fn set_var_by_id(&mut self, var_id: &VarId, val: Value) {
         if let Some(x) = self.ir.module_variables.variables.get_mut(var_id) {
             let mut val = val;
@@ -224,9 +215,9 @@ impl<T: std::io::Write> Simulator<T> {
 
     pub fn dump_start(&mut self) {
         if let Some(dump) = &mut self.dump {
-            dump.begin(SimulationCommand::Dumpvars).unwrap();
-            Self::dump_all_vars(&self.dump_vars, dump, self.ir.use_4state);
-            dump.end().unwrap();
+            dump.begin_dumpvars();
+            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            dump.end_dumpvars();
         }
     }
 
@@ -236,64 +227,15 @@ impl<T: std::io::Write> Simulator<T> {
                 self.ir.settle_comb(&mut self.mask_cache);
                 self.comb_dirty = false;
             }
-            dump.timestamp(self.time).unwrap();
-            Self::dump_all_vars(&self.dump_vars, dump, self.ir.use_4state);
+            dump.timestamp(self.time);
+            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
         }
     }
 
-    fn dump_all_vars(dump_vars: &[DumpVar], dump: &mut vcd::Writer<T>, use_4state: bool) {
-        for entry in dump_vars {
-            let mut value = unsafe {
-                read_native_value(
-                    entry.ptr,
-                    entry.native_bytes,
-                    use_4state,
-                    entry.width as u32,
-                    false,
-                )
-            };
-            // Mask off upper bits beyond declared width so VCD output
-            // matches the $var header.
-            value.trunc(entry.width);
-            dump.change_vector(entry.code, &value).unwrap();
-        }
-    }
-
-    fn setup_dump(&mut self, io: T) {
-        let mut dump = vcd::Writer::new(io);
-
-        dump.timescale(1, TimescaleUnit::US).unwrap();
-
-        Self::setup_dump_module(&self.ir.module_variables, &mut dump, &mut self.dump_vars);
-
-        dump.enddefinitions().unwrap();
-
-        self.dump = Some(dump);
-    }
-
-    fn setup_dump_module(
-        module_vars: &ModuleVariables,
-        dump: &mut vcd::Writer<T>,
-        dump_vars: &mut Vec<DumpVar>,
-    ) {
-        dump.add_module(&module_vars.name.to_string()).unwrap();
-
-        for x in module_vars.variables.values() {
-            let name = x.path.to_string();
-            let width = x.width as u32;
-            let code = dump.add_wire(width, &name).unwrap();
-            dump_vars.push(DumpVar {
-                code,
-                ptr: x.current_values[0],
-                native_bytes: x.native_bytes,
-                width: x.width,
-            });
-        }
-
-        for child in &module_vars.children {
-            Self::setup_dump_module(child, dump, dump_vars);
-        }
-
-        dump.upscope().unwrap();
+    fn setup_dump(&mut self, mut dumper: WaveDumper) {
+        dumper.timescale();
+        dumper.setup_module(&self.ir.module_variables, &mut self.dump_vars);
+        dumper.finish_header();
+        self.dump = Some(dumper);
     }
 }
