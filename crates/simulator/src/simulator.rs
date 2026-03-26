@@ -5,6 +5,28 @@ use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::str::FromStr;
 use veryl_analyzer::value::MaskCache;
 
+#[cfg(feature = "profile")]
+#[derive(Default, Debug)]
+pub struct SimProfile {
+    pub step_count: u64,
+    pub settle_comb_count: u64,
+    pub comb_eval_count: u64,
+    pub extra_pass_count: u64,
+    pub converged_first_try: u64,
+    pub settle_comb_ns: u64,
+    pub event_eval_ns: u64,
+    pub ff_swap_ns: u64,
+    pub eval_comb_full_ns: u64,
+}
+
+#[cfg(not(feature = "profile"))]
+#[derive(Default, Debug)]
+pub struct SimProfile;
+
+/// Number of consecutive first-try convergences needed before skipping
+/// the convergence check loop in settle_comb.
+const CONVERGENCE_WARMUP: u32 = 100;
+
 pub struct Simulator {
     pub ir: Ir,
     pub time: u64,
@@ -12,10 +34,19 @@ pub struct Simulator {
     dump_vars: Vec<DumpVar>,
     pub mask_cache: MaskCache,
     comb_dirty: bool,
+    comb_snapshot_buf: Vec<u8>,
+    pub profile: SimProfile,
+    /// When true, settle_comb skips the convergence check loop.
+    convergence_verified: bool,
+    /// Remaining warmup iterations before convergence can be trusted.
+    convergence_warmup: u32,
 }
 
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
+        let comb_snapshot_buf = vec![0u8; ir.comb_values.len()];
+        let needs_convergence_check =
+            ir.full_comb_statements.is_some() || ir.required_comb_passes > 1;
         let mut ret = Self {
             ir,
             time: 0,
@@ -23,6 +54,14 @@ impl Simulator {
             dump_vars: Vec::new(),
             mask_cache: MaskCache::default(),
             comb_dirty: true,
+            comb_snapshot_buf,
+            profile: Default::default(),
+            convergence_verified: false,
+            convergence_warmup: if needs_convergence_check {
+                CONVERGENCE_WARMUP
+            } else {
+                0
+            },
         };
 
         if let Some(dumper) = dump {
@@ -30,6 +69,27 @@ impl Simulator {
         }
 
         ret
+    }
+
+    fn do_settle_comb(&mut self) {
+        let skip = self.convergence_verified;
+        let converged_first = self.ir.settle_comb(
+            &mut self.mask_cache,
+            &mut self.comb_snapshot_buf,
+            &mut self.profile,
+            skip,
+        );
+        if !skip && self.convergence_warmup > 0 {
+            if converged_first {
+                self.convergence_warmup -= 1;
+                if self.convergence_warmup == 0 {
+                    self.convergence_verified = true;
+                }
+            } else {
+                // Reset warmup if convergence failed on first try
+                self.convergence_warmup = CONVERGENCE_WARMUP;
+            }
+        }
     }
 
     pub fn set(&mut self, port: &str, value: Value) {
@@ -121,8 +181,16 @@ impl Simulator {
 
     pub fn ensure_comb_updated(&mut self) {
         if self.comb_dirty {
-            self.ir.settle_comb(&mut self.mask_cache);
+            #[cfg(feature = "profile")]
+            let start = std::time::Instant::now();
+
+            self.do_settle_comb();
             self.comb_dirty = false;
+
+            #[cfg(feature = "profile")]
+            {
+                self.profile.settle_comb_ns += start.elapsed().as_nanos() as u64;
+            }
         }
     }
 
@@ -141,25 +209,49 @@ impl Simulator {
     }
 
     pub fn step(&mut self, event: &Event) {
-        if self.comb_dirty {
-            self.ir.settle_comb(&mut self.mask_cache);
-            self.comb_dirty = false;
+        #[cfg(feature = "profile")]
+        {
+            self.profile.step_count += 1;
         }
+
+        if self.comb_dirty {
+            #[cfg(feature = "profile")]
+            let start = std::time::Instant::now();
+
+            self.do_settle_comb();
+            self.comb_dirty = false;
+
+            #[cfg(feature = "profile")]
+            {
+                self.profile.settle_comb_ns += start.elapsed().as_nanos() as u64;
+            }
+        }
+
+        #[cfg(feature = "profile")]
+        let event_start = std::time::Instant::now();
 
         if let Some(statements) = self.ir.event_statements.get(event) {
             for x in statements {
                 x.eval_step(&mut self.mask_cache);
             }
-            // After events, re-settle comb when merged comb+event functions
-            // or multi-level hierarchies need their outputs propagated through
-            // port connections before ff_swap. Simple designs skip this —
-            // comb will be re-evaluated at the start of the next step().
-            if self.ir.use_full_comb_in_step || !self.ir.post_comb_fns.is_empty() {
-                self.ir.settle_comb(&mut self.mask_cache);
-            }
+            // No post-event settle: ff_swap only touches ff_values.
+            // Comb re-settles at the start of the next step().
         }
 
+        #[cfg(feature = "profile")]
+        {
+            self.profile.event_eval_ns += event_start.elapsed().as_nanos() as u64;
+        }
+
+        #[cfg(feature = "profile")]
+        let ff_start = std::time::Instant::now();
+
         Self::ff_swap(&mut self.ir.ff_values, &self.ir.ff_swap_entries);
+
+        #[cfg(feature = "profile")]
+        {
+            self.profile.ff_swap_ns += ff_start.elapsed().as_nanos() as u64;
+        }
 
         self.comb_dirty = true;
 
@@ -222,11 +314,12 @@ impl Simulator {
     }
 
     pub fn dump_variables(&mut self) {
-        if let Some(dump) = &mut self.dump {
+        if self.dump.is_some() {
             if self.comb_dirty {
-                self.ir.settle_comb(&mut self.mask_cache);
+                self.do_settle_comb();
                 self.comb_dirty = false;
             }
+            let dump = self.dump.as_mut().unwrap();
             dump.timestamp(self.time);
             dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
         }

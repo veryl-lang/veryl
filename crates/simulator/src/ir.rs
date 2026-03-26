@@ -25,6 +25,7 @@ pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
 
 use crate::HashMap;
+use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
 use memmap2::Mmap;
 use std::sync::Arc;
@@ -129,35 +130,68 @@ impl Ir {
         }
     }
 
-    /// Evaluate comb until convergence. Runs at least `required_comb_passes`
-    /// times, then checks for additional convergence when hidden backward
-    /// edges may exist (full_comb_statements present).
-    pub fn settle_comb(&self, mask_cache: &mut MaskCache) {
+    /// Evaluate comb until convergence.
+    /// Returns true if converged on the first extra pass (or no extra needed).
+    pub fn settle_comb(
+        &self,
+        mask_cache: &mut MaskCache,
+        snapshot_buf: &mut Vec<u8>,
+        profile: &mut SimProfile,
+        skip_convergence_check: bool,
+    ) -> bool {
+        #[cfg(feature = "profile")]
+        {
+            profile.settle_comb_count += 1;
+        }
+        let _ = profile; // suppress unused warning when profile feature is off
+
         let min_passes = self.required_comb_passes;
-        self.eval_comb_full(mask_cache);
+        self.eval_comb_full(mask_cache, profile);
+        #[cfg(feature = "profile")]
+        {
+            profile.comb_eval_count += 1;
+        }
         for _ in 1..min_passes {
-            self.eval_comb_full(mask_cache);
-        }
-        if self.full_comb_statements.is_none() && min_passes <= 1 {
-            return;
-        }
-        const MAX_EXTRA: usize = 4;
-        for _ in 0..MAX_EXTRA {
-            let before = self.comb_snapshot();
-            self.eval_comb_full(mask_cache);
-            if self.comb_values[..] == before[..] {
-                return;
+            self.eval_comb_full(mask_cache, profile);
+            #[cfg(feature = "profile")]
+            {
+                profile.comb_eval_count += 1;
             }
         }
-    }
-
-    fn comb_snapshot(&self) -> Vec<u8> {
-        self.comb_values.to_vec()
+        if self.full_comb_statements.is_none() && min_passes <= 1 {
+            return true;
+        }
+        if skip_convergence_check {
+            return true;
+        }
+        const MAX_EXTRA: usize = 4;
+        for _i in 0..MAX_EXTRA {
+            snapshot_buf.resize(self.comb_values.len(), 0);
+            snapshot_buf.copy_from_slice(&self.comb_values);
+            self.eval_comb_full(mask_cache, profile);
+            #[cfg(feature = "profile")]
+            {
+                profile.comb_eval_count += 1;
+                profile.extra_pass_count += 1;
+            }
+            if self.comb_values[..] == snapshot_buf[..] {
+                #[cfg(feature = "profile")]
+                if _i == 0 {
+                    profile.converged_first_try += 1;
+                }
+                return _i == 0;
+            }
+        }
+        false
     }
 
     /// Evaluate full comb once (including per-core internal comb).
     /// Called by settle_comb() for each required pass.
-    pub fn eval_comb_full(&self, mask_cache: &mut MaskCache) {
+    pub fn eval_comb_full(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
+        let _ = profile;
+        #[cfg(feature = "profile")]
+        let start = std::time::Instant::now();
+
         if let Some(stmts) = &self.full_comb_statements {
             for x in stmts {
                 x.eval_step(mask_cache);
@@ -171,6 +205,30 @@ impl Ir {
         } else {
             self.eval_comb(mask_cache);
         }
+
+        #[cfg(feature = "profile")]
+        {
+            profile.eval_comb_full_ns += start.elapsed().as_nanos() as u64;
+        }
+    }
+
+    /// Number of statements in full_comb_statements (for profiling).
+    pub fn full_comb_stmt_count(&self) -> (usize, usize, usize) {
+        let Some(stmts) = &self.full_comb_statements else {
+            return (0, 0, 0);
+        };
+        let mut binary = 0;
+        let mut interp = 0;
+        let mut total = 0;
+        for s in stmts {
+            total += 1;
+            if s.is_binary() {
+                binary += 1;
+            } else {
+                interp += 1;
+            }
+        }
+        (total, binary, interp)
     }
 
     pub fn dump_variables(&self) -> String {

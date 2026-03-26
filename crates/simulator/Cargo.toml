@@ -38,6 +38,9 @@ wellen    = "0.20.3"
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pprof = {workspace = true}
 
+[features]
+profile = []
+
 [[bench]]
 name = "benchmark"
 harness = false

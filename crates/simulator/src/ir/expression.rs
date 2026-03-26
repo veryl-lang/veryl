@@ -1069,12 +1069,17 @@ impl ProtoExpression {
                 let wide = read_width > 64;
 
                 // Load CSE: reuse previously loaded values for the same address
-                let (mut payload, mut mask_xz) = if let Some(&(cached_payload, cached_mask_xz)) =
-                    context.load_cache.get(&cache_key)
+                let (mut payload, mut mask_xz) = if !context.disable_load_cache
+                    && let Some(&(cached_payload, cached_mask_xz)) =
+                        context.load_cache.get(&cache_key)
                 {
                     (cached_payload, cached_mask_xz)
                 } else {
-                    let load_mem_flag = MemFlags::trusted().with_readonly();
+                    let load_mem_flag = if context.no_readonly_loads {
+                        MemFlags::trusted()
+                    } else {
+                        MemFlags::trusted().with_readonly()
+                    };
 
                     let base_addr = if *is_ff {
                         context.ff_values
@@ -2294,7 +2299,11 @@ impl ProtoExpression {
                 let addr = builder.ins().iadd(base_addr, static_offset);
                 let addr = builder.ins().iadd(addr, byte_offset);
 
-                let load_mem_flag = MemFlags::trusted().with_readonly();
+                let load_mem_flag = if context.no_readonly_loads {
+                    MemFlags::trusted()
+                } else {
+                    MemFlags::trusted().with_readonly()
+                };
 
                 let mut payload = if nb == 16 {
                     builder.ins().load(I128, load_mem_flag, addr, 0)

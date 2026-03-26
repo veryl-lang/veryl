@@ -275,17 +275,25 @@ fn try_jit_group(
     context: &mut Context,
     blocks: &mut Vec<ProtoStatementBlock>,
     group: Vec<ProtoStatement>,
+    no_readonly: bool,
 ) {
+    let build = |ctx: &mut Context, stmts: Vec<ProtoStatement>| {
+        if no_readonly {
+            cranelift::build_binary_no_readonly(ctx, stmts)
+        } else {
+            cranelift::build_binary(ctx, stmts)
+        }
+    };
     // Split large groups into chunks to avoid regalloc2 O(N^2) scaling
     if group.len() <= JIT_CHUNK_SIZE {
-        match cranelift::build_binary(context, group.clone()) {
+        match build(context, group.clone()) {
             Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
             None => blocks.push(ProtoStatementBlock::Interpreted(group)),
         }
     } else {
         for chunk in group.chunks(JIT_CHUNK_SIZE) {
             let chunk = chunk.to_vec();
-            match cranelift::build_binary(context, chunk.clone()) {
+            match build(context, chunk.clone()) {
                 Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
                 None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
             }
@@ -293,7 +301,11 @@ fn try_jit_group(
     }
 }
 
-fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+fn try_jit_impl(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    no_readonly: bool,
+) -> ProtoStatements {
     if !context.config.use_jit {
         return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
     }
@@ -312,7 +324,7 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
             if let Some(was_jittable) = current_jittable {
                 let group = std::mem::take(&mut current_group);
                 if was_jittable {
-                    try_jit_group(context, &mut blocks, group);
+                    try_jit_group(context, &mut blocks, group, no_readonly);
                 } else {
                     blocks.push(ProtoStatementBlock::Interpreted(group));
                 }
@@ -325,13 +337,22 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
     // Flush the last group
     if let Some(was_jittable) = current_jittable {
         if was_jittable {
-            try_jit_group(context, &mut blocks, current_group);
+            try_jit_group(context, &mut blocks, current_group, no_readonly);
         } else {
             blocks.push(ProtoStatementBlock::Interpreted(current_group));
         }
     }
 
     ProtoStatements(blocks)
+}
+
+fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+    try_jit_impl(context, proto, false)
+}
+
+/// JIT with load_cache and readonly hints disabled for full_comb.
+fn try_jit_no_readonly(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+    try_jit_impl(context, proto, true)
 }
 
 pub(crate) fn analyze_dependency(
@@ -1486,13 +1507,7 @@ impl Conv<&air::Module> for ProtoModule {
             // from merged functions that DCE would incorrectly remove.
             let full_sorted = reorder_by_level(full_sorted);
             required_comb_passes = compute_required_passes(&full_sorted);
-            // Keep full_comb interpreted: JIT load_cache forwards stores
-            // within a single compiled block, making results depend on the
-            // statement ordering chosen by analyze_dependency (FxHashMap).
-            // Interpreted evaluation is order-independent for acyclic comb.
-            Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
-                full_sorted,
-            )]))
+            Some(try_jit_no_readonly(context, full_sorted))
         } else if !all_post_comb_fns.is_empty() {
             // 3+ level hierarchy: middle module has post_comb_fns but no
             // merged functions. Combine comb + post_comb into a single
@@ -1517,9 +1532,7 @@ impl Conv<&air::Module> for ProtoModule {
                     let full_sorted = reorder_by_level(sorted);
                     required_comb_passes = compute_required_passes(&full_sorted);
                     use_full_comb_in_step = true;
-                    Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
-                        full_sorted,
-                    )]))
+                    Some(try_jit_no_readonly(context, full_sorted))
                 }
                 Err(_) => {
                     // Expand CompiledBlocks to original statements for
@@ -1541,16 +1554,12 @@ impl Conv<&air::Module> for ProtoModule {
                             use_full_comb_in_step = true;
                             let full_sorted = reorder_by_level(sorted);
                             required_comb_passes = compute_required_passes(&full_sorted);
-                            Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
-                                full_sorted,
-                            )]))
+                            Some(try_jit_no_readonly(context, full_sorted))
                         }
                         Err(_) => {
                             let full_sorted = reorder_by_level(full);
                             required_comb_passes = compute_required_passes(&full_sorted);
-                            Some(ProtoStatements(vec![ProtoStatementBlock::Interpreted(
-                                full_sorted,
-                            )]))
+                            Some(try_jit_no_readonly(context, full_sorted))
                         }
                     }
                 }
