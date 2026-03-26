@@ -295,7 +295,60 @@ pub fn run_native_testbench(
         .ok_or_else(|| SimulatorError::no_initial_block(&module_name, &token))?;
 
     let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
-    Ok(run_testbench(&mut sim, &tb_stmts))
+    let result = run_testbench(&mut sim, &tb_stmts);
+
+    #[cfg(feature = "profile")]
+    {
+        let p = &sim.profile;
+        eprintln!("=== SimProfile for {} ===", module_name);
+        eprintln!("  step_count:          {}", p.step_count);
+        eprintln!("  settle_comb_count:   {}", p.settle_comb_count);
+        eprintln!("  comb_eval_count:     {}", p.comb_eval_count);
+        eprintln!("  extra_pass_count:    {}", p.extra_pass_count);
+        eprintln!("  converged_first_try: {}", p.converged_first_try);
+        eprintln!(
+            "  settle_comb_ns:      {} ({:.2}ms)",
+            p.settle_comb_ns,
+            p.settle_comb_ns as f64 / 1_000_000.0
+        );
+        eprintln!(
+            "  event_eval_ns:       {} ({:.2}ms)",
+            p.event_eval_ns,
+            p.event_eval_ns as f64 / 1_000_000.0
+        );
+        eprintln!(
+            "  ff_swap_ns:          {} ({:.2}ms)",
+            p.ff_swap_ns,
+            p.ff_swap_ns as f64 / 1_000_000.0
+        );
+        eprintln!(
+            "  eval_comb_full_ns:   {} ({:.2}ms)",
+            p.eval_comb_full_ns,
+            p.eval_comb_full_ns as f64 / 1_000_000.0
+        );
+        let (jit, total) = sim.ir.jit_stats();
+        eprintln!(
+            "  jit_stats:           {}/{} ({:.1}%)",
+            jit,
+            total,
+            if total > 0 {
+                jit as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            }
+        );
+        let (fc_total, fc_jit, fc_interp) = sim.ir.full_comb_stmt_count();
+        eprintln!(
+            "  full_comb_stmts:     {} (jit:{}, interp:{})",
+            fc_total, fc_jit, fc_interp
+        );
+        eprintln!("  comb_values_len:     {}", sim.ir.comb_values.len());
+        eprintln!("  required_comb_passes:{}", sim.ir.required_comb_passes);
+        eprintln!("  use_full_comb_in_step:{}", sim.ir.use_full_comb_in_step);
+        eprintln!("===========================");
+    }
+
+    Ok(result)
 }
 
 fn exec(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> ExecResult {

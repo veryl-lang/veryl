@@ -42,6 +42,10 @@ pub struct Context {
     pub helper_sigs: HashMap<HelperSig, SigRef>,
     /// Calling convention for helper functions.
     pub call_conv: CallConv,
+    /// Disable readonly MemFlags hint on loads (prevents Cranelift load CSE).
+    pub no_readonly_loads: bool,
+    /// Disable load_cache: every access emits a fresh load instruction.
+    pub disable_load_cache: bool,
 }
 
 /// Get or create a SigRef for the given helper signature kind.
@@ -129,17 +133,27 @@ pub fn build_binary_with_store_elim(
     proto: Vec<ProtoStatement>,
     store_elim: HashSet<(bool, i32)>,
 ) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, store_elim)
+    build_binary_inner(context, proto, store_elim, false)
 }
 
 pub fn build_binary(context: &mut ConvContext, proto: Vec<ProtoStatement>) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, HashSet::default())
+    build_binary_inner(context, proto, HashSet::default(), false)
+}
+
+/// Build a JIT function with load_cache and readonly hints disabled.
+/// Used for full_comb where comb values change across statements.
+pub fn build_binary_no_readonly(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+) -> Option<FuncPtr> {
+    build_binary_inner(context, proto, HashSet::default(), true)
 }
 
 fn build_binary_inner(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
     store_elim: HashSet<(bool, i32)>,
+    no_readonly_loads: bool,
 ) -> Option<FuncPtr> {
     let config = &context.config;
 
@@ -188,6 +202,8 @@ fn build_binary_inner(
         store_elim_enabled: true,
         helper_sigs: HashMap::default(),
         call_conv,
+        no_readonly_loads,
+        disable_load_cache: no_readonly_loads,
     };
 
     let len = proto.len();

@@ -411,7 +411,11 @@ impl ProtoAssignDynamicStatement {
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
-        let load_mem_flag = MemFlags::trusted().with_readonly();
+        let load_mem_flag = if context.no_readonly_loads {
+            MemFlags::trusted()
+        } else {
+            MemFlags::trusted().with_readonly()
+        };
         let store_mem_flag = MemFlags::trusted();
 
         if let Some((beg, end)) = self.select {
@@ -1054,7 +1058,11 @@ impl ProtoAssignStatement {
             }
         }
 
-        let load_mem_flag = MemFlags::trusted().with_readonly();
+        let load_mem_flag = if context.no_readonly_loads {
+            MemFlags::trusted()
+        } else {
+            MemFlags::trusted().with_readonly()
+        };
         let store_mem_flag = MemFlags::trusted();
 
         let base_addr = if self.dst_is_ff {
@@ -1079,35 +1087,36 @@ impl ProtoAssignStatement {
             };
 
             // Use cached value if available, otherwise load from memory
-            let (org_payload, org_mask_xz) =
-                if let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key) {
-                    (cached_p, cached_m)
+            let (org_payload, org_mask_xz) = if !context.disable_load_cache
+                && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
+            {
+                (cached_p, cached_m)
+            } else {
+                let p = builder
+                    .ins()
+                    .load(load_type, load_mem_flag, base_addr, dst_offset);
+                let p = if nb == 4 {
+                    builder.ins().uextend(I64, p)
                 } else {
-                    let p = builder
-                        .ins()
-                        .load(load_type, load_mem_flag, base_addr, dst_offset);
-                    let p = if nb == 4 {
-                        builder.ins().uextend(I64, p)
-                    } else {
-                        p
-                    };
-                    let m = if context.use_4state {
-                        let m = builder.ins().load(
-                            load_type,
-                            load_mem_flag,
-                            base_addr,
-                            dst_offset + nb_i32,
-                        );
-                        Some(if nb == 4 {
-                            builder.ins().uextend(I64, m)
-                        } else {
-                            m
-                        })
-                    } else {
-                        None
-                    };
-                    (p, m)
+                    p
                 };
+                let m = if context.use_4state {
+                    let m = builder.ins().load(
+                        load_type,
+                        load_mem_flag,
+                        base_addr,
+                        dst_offset + nb_i32,
+                    );
+                    Some(if nb == 4 {
+                        builder.ins().uextend(I64, m)
+                    } else {
+                        m
+                    })
+                } else {
+                    None
+                };
+                (p, m)
+            };
 
             let not_mask = if wide {
                 let mask = gen_mask_range_128(beg, end);
