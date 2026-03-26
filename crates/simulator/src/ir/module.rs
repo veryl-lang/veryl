@@ -369,12 +369,19 @@ pub(crate) fn analyze_dependency(
 
     // First attempt: standard DAG analysis (CompiledBlocks as single nodes).
     // Track which statement IDs are involved in the cycle.
+    // Use sorted keys for deterministic DAG node insertion order —
+    // algo::toposort() output depends on adjacency list order, which
+    // depends on insertion order.
     {
         let mut dag = Dag::<Node, ()>::new();
         let mut dag_nodes: HashMap<Node, _> = HashMap::default();
         let mut failed_id: Option<usize> = None;
 
-        for (id, x) in &table {
+        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+        sorted_keys.sort();
+
+        for id in &sorted_keys {
+            let x = &table[id];
             let mut inputs = vec![];
             let mut outputs = vec![];
             x.gather_variable_offsets(&mut inputs, &mut outputs);
@@ -445,7 +452,10 @@ pub(crate) fn analyze_dependency(
                 // Genuine loop, no CBs involved — re-do analysis for error message.
                 let mut dag2 = Dag::<Node, ()>::new();
                 let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
-                for (id, x) in &table {
+                let mut err_sorted_keys: Vec<usize> = table.keys().cloned().collect();
+                err_sorted_keys.sort();
+                for id in &err_sorted_keys {
+                    let x = &table[id];
                     let mut inputs = vec![];
                     let mut outputs = vec![];
                     x.gather_variable_offsets(&mut inputs, &mut outputs);
