@@ -571,10 +571,11 @@ impl Factor {
                     is_global: x.comptime.is_global,
                 }
             }
-            Factor::SystemFunctionCall(_) => ExpressionContext {
-                is_const: true,
-                is_global: true,
-                ..Default::default()
+            Factor::SystemFunctionCall(x) => ExpressionContext {
+                width: x.comptime.r#type.total_width().unwrap_or(0),
+                signed: x.comptime.expr_context.signed,
+                is_const: x.comptime.is_const,
+                is_global: x.comptime.is_global,
             },
             Factor::Anonymous(_) | Factor::Unknown(_) => ExpressionContext::default(),
         }

@@ -7978,6 +7978,112 @@ fn sibling_comb_does_not_break_forwarding() {
     }
 }
 
+/// Regression: pipeline stall release must not skip a stage.
+///
+/// Models a 2-stage pipeline: stage1 FF latches input, comb transforms
+/// it, stage2 FF latches the comb result. When a long stall holds both
+/// stages, releasing the stall should let stage2 capture the value that
+/// was in stage1 BEFORE stage1 updates. If the simulator updates stage1
+/// FF before stage2's comb reads it (wrong FF ordering in merged JIT),
+/// stage2 gets the NEW stage1 value, skipping one pipeline slot.
+#[test]
+fn pipeline_stall_release_ordering() {
+    let code = r#"
+    module Top (
+        clk     : input  clock    ,
+        rst     : input  reset    ,
+        i_data  : input  logic<8> ,
+        i_stall : input  logic    ,
+        stage2  : output logic<8> ,
+    ) {
+        // Stage 1 FF: latches input
+        var s1: logic<8>;
+        always_ff {
+            if_reset { s1 = 8'd0; }
+            else if !i_stall { s1 = i_data; }
+        }
+
+        // Comb transform between stages
+        let s1_plus: logic<8> = s1 + 8'd100;
+
+        // Stage 2 FF: latches comb result
+        var s2: logic<8>;
+        always_ff {
+            if_reset { s2 = 8'd0; }
+            else if !i_stall { s2 = s1_plus; }
+        }
+
+        assign stage2 = s2;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // Cycle 1: feed 10, no stall → s1=10, s2=100 (0+100)
+        sim.set("i_data", Value::new(10, 8, false));
+        sim.set("i_stall", Value::new(0, 1, false));
+        sim.step(&clk);
+        let s2 = sim.get("stage2").unwrap().payload_u64();
+        assert_eq!(
+            s2, 100,
+            "JIT={} 4st={}: cycle 1 expected s2=100 (s1 was 0), got {}",
+            config.use_jit, config.use_4state, s2
+        );
+
+        // Cycle 2: feed 20, no stall → s1=20, s2=110 (10+100)
+        sim.set("i_data", Value::new(20, 8, false));
+        sim.step(&clk);
+        let s2 = sim.get("stage2").unwrap().payload_u64();
+        assert_eq!(
+            s2, 110,
+            "JIT={} 4st={}: cycle 2 expected s2=110 (s1 was 10), got {}",
+            config.use_jit, config.use_4state, s2
+        );
+
+        // Cycle 3-5: stall for 3 cycles. s1=20, s2=110 held.
+        sim.set("i_data", Value::new(30, 8, false));
+        sim.set("i_stall", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        sim.step(&clk);
+        let s2 = sim.get("stage2").unwrap().payload_u64();
+        assert_eq!(
+            s2, 110,
+            "JIT={} 4st={}: after stall expected s2=110 (held), got {}",
+            config.use_jit, config.use_4state, s2
+        );
+
+        // Cycle 6: release stall. s1 should latch 30, s2 should latch
+        // s1_plus = 20+100 = 120 (the OLD s1 value, not 30).
+        sim.set("i_data", Value::new(40, 8, false));
+        sim.set("i_stall", Value::new(0, 1, false));
+        sim.step(&clk);
+        let s2 = sim.get("stage2").unwrap().payload_u64();
+        assert_eq!(
+            s2, 120,
+            "JIT={} 4st={}: stall release expected s2=120 (old s1=20+100), got {} \
+             — stage1 FF updated before stage2 read the old value",
+            config.use_jit, config.use_4state, s2
+        );
+
+        // Cycle 7: s1=40 (latched in cycle 6), s2 = 40+100 = 140
+        sim.step(&clk);
+        let s2 = sim.get("stage2").unwrap().payload_u64();
+        assert_eq!(
+            s2, 140,
+            "JIT={} 4st={}: cycle 7 expected s2=140 (s1=40+100), got {}",
+            config.use_jit, config.use_4state, s2
+        );
+    }
+}
+
 /// Regression: gather_external_offsets must keep outputs (not filter
 /// internal variables from both inputs AND outputs). When outputs are
 /// filtered, reorder_by_level assigns wrong dependency levels to
