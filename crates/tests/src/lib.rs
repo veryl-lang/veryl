@@ -661,6 +661,7 @@ mod filelist {
 mod native_test {
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use veryl_analyzer::ir::Ir;
     use veryl_analyzer::symbol::TestType;
     use veryl_analyzer::symbol_table;
@@ -670,9 +671,45 @@ mod native_test {
     use veryl_parser::resource_table;
     use veryl_simulator::ir::{Config, build_ir};
     use veryl_simulator::testbench::{TestResult, run_native_testbench};
+    use veryl_simulator::wave_dumper::WaveDumper;
 
     #[test]
     fn test() {
+        let (native_tests, ir) = analyze_native_tests();
+
+        for (test_name, test_prop) in &native_tests {
+            let test_str = resource_table::get_str_value(*test_name).unwrap_or_default();
+            let top_name = if let Some(top) = &test_prop.top {
+                resource_table::get_str_value(*top).unwrap_or_default()
+            } else {
+                test_str.clone()
+            };
+
+            for config in Config::all() {
+                let top_str_id =
+                    resource_table::get_str_id(top_name.clone()).expect("top module not found");
+                let sim_ir = build_ir(&ir, top_str_id, &config)
+                    .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
+                let module_name = sim_ir.name.to_string();
+                let result = run_native_testbench(sim_ir, None, module_name)
+                    .unwrap_or_else(|e| panic!("testbench error for {test_str}: {e}"));
+                assert_eq!(
+                    result,
+                    TestResult::Pass,
+                    "native test {test_str} failed (jit={})",
+                    config.use_jit
+                );
+            }
+        }
+    }
+
+    fn analyze_native_tests() -> (
+        Vec<(
+            veryl_parser::resource_table::StrId,
+            veryl_analyzer::symbol::TestProperty,
+        )>,
+        Ir,
+    ) {
         let path = std::env::current_dir().unwrap();
         let path = path.join("../../testcases/native_test");
         let metadata_path = Metadata::search_from(path).unwrap();
@@ -706,13 +743,21 @@ mod native_test {
 
         let tests = symbol_table::get_tests(&metadata.project.name);
         let native_tests: Vec<_> = tests
-            .iter()
+            .into_iter()
             .filter(|(_, prop)| matches!(prop.r#type, TestType::Native))
             .collect();
         assert!(
             !native_tests.is_empty(),
             "no native tests found in native_test project"
         );
+
+        (native_tests, ir)
+    }
+
+    #[test]
+    fn test_wave_dump() {
+        let (native_tests, ir) = analyze_native_tests();
+        let config = Config::default();
 
         for (test_name, test_prop) in &native_tests {
             let test_str = resource_table::get_str_value(*test_name).unwrap_or_default();
@@ -722,21 +767,43 @@ mod native_test {
                 test_str.clone()
             };
 
-            for config in Config::all() {
-                let top_str_id =
-                    resource_table::get_str_id(top_name.clone()).expect("top module not found");
-                let sim_ir = build_ir(&ir, top_str_id, &config)
-                    .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
-                let module_name = sim_ir.name.to_string();
-                let result = run_native_testbench(sim_ir, None, module_name)
-                    .unwrap_or_else(|e| panic!("testbench error for {test_str}: {e}"));
-                assert_eq!(
-                    result,
-                    TestResult::Pass,
-                    "native test {test_str} failed (jit={})",
-                    config.use_jit
-                );
-            }
+            let top_str_id =
+                resource_table::get_str_id(top_name.clone()).expect("top module not found");
+            let sim_ir = build_ir(&ir, top_str_id, &config)
+                .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
+            let module_name = sim_ir.name.to_string();
+
+            let table_snapshot = resource_table::export_tables();
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    resource_table::import_tables(&table_snapshot);
+                    let dump_buf = Arc::new(Mutex::new(Vec::new()));
+                    let dumper = WaveDumper::new_vcd(Box::new(SharedWriter(dump_buf.clone())));
+                    let result = run_native_testbench(sim_ir, Some(dumper), module_name);
+                    assert!(
+                        result.is_ok(),
+                        "wave dump testbench failed for {test_str}: {result:?}"
+                    );
+                    let data = dump_buf.lock().unwrap();
+                    assert!(
+                        !data.is_empty(),
+                        "wave dump should not be empty for {test_str}"
+                    );
+                });
+            });
+        }
+    }
+
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
         }
     }
 }

@@ -127,6 +127,7 @@ impl CmdTest {
                 .unwrap_or(1)
                 .min(native_jobs.len());
             let job_queue = std::sync::Mutex::new(native_jobs.into_iter());
+            let table_snapshot = resource_table::export_tables();
 
             type JobResult = (
                 String,
@@ -135,9 +136,11 @@ impl CmdTest {
             );
             let results: Vec<Vec<JobResult>> = std::thread::scope(|s| {
                 let queue = &job_queue;
+                let snapshot = &table_snapshot;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         s.spawn(move || {
+                            resource_table::import_tables(snapshot);
                             let mut thread_results = Vec::new();
                             loop {
                                 let job = queue.lock().unwrap().next();
