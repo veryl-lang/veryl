@@ -15,6 +15,19 @@ where
     last: U,
 }
 
+impl<T, U> Clone for GlobalTable<T, U>
+where
+    T: Hash + Eq + Clone,
+    U: Hash + Eq + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            table: self.table.clone(),
+            last: self.last.clone(),
+        }
+    }
+}
+
 impl<T, U> GlobalTable<T, U>
 where
     T: Hash + Eq,
@@ -115,6 +128,23 @@ pub fn get_str_id<T: Borrow<String>>(value: T) -> Option<StrId> {
 
 pub fn get_path_id<T: Borrow<PathBuf>>(value: T) -> Option<PathId> {
     PATHBUF_TABLE.with(|f| f.borrow().get_id(value).map(|x| x.to_owned()))
+}
+
+pub struct ResourceTableSnapshot {
+    string_table: GlobalTable<String, StrId>,
+    pathbuf_table: GlobalTable<PathBuf, PathId>,
+}
+
+pub fn export_tables() -> ResourceTableSnapshot {
+    ResourceTableSnapshot {
+        string_table: STRING_TABLE.with(|f| f.borrow().clone()),
+        pathbuf_table: PATHBUF_TABLE.with(|f| f.borrow().clone()),
+    }
+}
+
+pub fn import_tables(snapshot: &ResourceTableSnapshot) {
+    STRING_TABLE.with(|f| *f.borrow_mut() = snapshot.string_table.clone());
+    PATHBUF_TABLE.with(|f| *f.borrow_mut() = snapshot.pathbuf_table.clone());
 }
 
 pub fn new_token_id() -> TokenId {
