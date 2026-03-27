@@ -4,14 +4,15 @@ use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::{
     ProtoAssignStatement, ProtoIfStatement, ProtoStatement, ProtoSystemFunctionCall,
 };
+use crate::ir::variable::VarOffset;
 
-type CombKey = (bool, isize); // (is_ff, offset)
+type CombKey = VarOffset;
 
 /// Count how many times each variable offset is read within an expression.
 fn count_expr_reads(expr: &ProtoExpression, counts: &mut HashMap<CombKey, usize>) {
     match expr {
-        ProtoExpression::Variable { offset, is_ff, .. } => {
-            *counts.entry((*is_ff, *offset)).or_insert(0) += 1;
+        ProtoExpression::Variable { var_offset, .. } => {
+            *counts.entry(*var_offset).or_insert(0) += 1;
         }
         ProtoExpression::Value { .. } => {}
         ProtoExpression::Unary { x, .. } => count_expr_reads(x, counts),
@@ -48,7 +49,7 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
             count_expr_reads(&x.expr, counts);
             // If select is present, the dst is also read (read-modify-write)
             if x.select.is_some() {
-                *counts.entry((x.dst_is_ff, x.dst_offset)).or_insert(0) += 1;
+                *counts.entry(x.dst).or_insert(0) += 1;
             }
         }
         ProtoStatement::AssignDynamic(x) => {
@@ -79,8 +80,8 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::CompiledBlock(x) => {
-            for (is_ff, off) in &x.input_offsets {
-                *counts.entry((*is_ff, *off)).or_insert(0) += 1;
+            for off in &x.input_offsets {
+                *counts.entry(*off).or_insert(0) += 1;
             }
         }
         ProtoStatement::TbMethodCall { .. } => {}
@@ -94,13 +95,12 @@ fn substitute_expr(
 ) -> ProtoExpression {
     match expr {
         ProtoExpression::Variable {
-            offset,
-            is_ff,
+            var_offset,
             select,
             width,
             expr_context,
         } => {
-            if let Some(inlined) = inline_map.get(&(is_ff, offset)) {
+            if let Some(inlined) = inline_map.get(&var_offset) {
                 if select.is_none() {
                     // Direct substitution
                     inlined.clone()
@@ -108,8 +108,7 @@ fn substitute_expr(
                     // Cannot inline if the consumer applies a bit-select;
                     // keep the original variable reference
                     ProtoExpression::Variable {
-                        offset,
-                        is_ff,
+                        var_offset,
                         select,
                         width,
                         expr_context,
@@ -117,8 +116,7 @@ fn substitute_expr(
                 }
             } else {
                 ProtoExpression::Variable {
-                    offset,
-                    is_ff,
+                    var_offset,
                     select,
                     width,
                     expr_context,
@@ -178,7 +176,6 @@ fn substitute_expr(
         ProtoExpression::DynamicVariable {
             base_offset,
             stride,
-            is_ff,
             index_expr,
             num_elements,
             select,
@@ -187,7 +184,6 @@ fn substitute_expr(
         } => ProtoExpression::DynamicVariable {
             base_offset,
             stride,
-            is_ff,
             index_expr: Box::new(substitute_expr(*index_expr, inline_map)),
             num_elements,
             select,
@@ -230,100 +226,6 @@ fn substitute_stmt(
     }
 }
 
-/// Optimize combinational statements using dead code elimination and expression inlining.
-///
-/// `comb_stmts` must be in topological (dependency) order.
-/// `event_stmts` are the event statements that consume comb values.
-/// `observable_comb` are comb offsets that are externally visible (ports, named variables)
-/// and must NOT be eliminated or inlined away.
-pub fn optimize_comb(
-    comb_stmts: Vec<ProtoStatement>,
-    event_stmts: &HashMap<super::Event, Vec<ProtoStatement>>,
-    observable_comb: &HashSet<isize>,
-    allow_inline: bool,
-) -> Vec<ProtoStatement> {
-    // Step 1: Count reads of each variable across all comb and event statements.
-    // Track comb-only reads separately so we only inline within comb.
-    let mut read_counts: HashMap<CombKey, usize> = HashMap::default();
-    let mut comb_only_reads: HashMap<CombKey, usize> = HashMap::default();
-    for stmt in &comb_stmts {
-        count_stmt_reads(stmt, &mut read_counts);
-        count_stmt_reads(stmt, &mut comb_only_reads);
-    }
-    for stmts in event_stmts.values() {
-        for stmt in stmts {
-            count_stmt_reads(stmt, &mut read_counts);
-        }
-    }
-
-    // Step 2: Collect comb offsets that are read by CompiledBlock (native code
-    // that reads directly from the buffer, so we cannot remove the store).
-    let mut compiled_block_reads = HashSet::default();
-    for stmt in &comb_stmts {
-        if let ProtoStatement::CompiledBlock(x) = stmt {
-            for (is_ff, off) in &x.input_offsets {
-                if !*is_ff {
-                    compiled_block_reads.insert(*off);
-                }
-            }
-        }
-    }
-    for stmts in event_stmts.values() {
-        for stmt in stmts {
-            if let ProtoStatement::CompiledBlock(x) = stmt {
-                for (is_ff, off) in &x.input_offsets {
-                    if !*is_ff {
-                        compiled_block_reads.insert(*off);
-                    }
-                }
-            }
-        }
-    }
-
-    // Step 3: Process comb statements in topological order.
-    // - Apply inlined expressions to each statement
-    // - If output is never read AND not observable, eliminate it (DCE)
-    // - If output is single-use within comb AND not observable, inline it
-    let mut inline_map: HashMap<CombKey, ProtoExpression> = HashMap::default();
-    let mut result: Vec<ProtoStatement> = Vec::new();
-
-    for stmt in comb_stmts {
-        // Apply pending substitutions
-        let stmt = substitute_stmt(stmt, &inline_map);
-
-        match &stmt {
-            ProtoStatement::Assign(x) if !x.dst_is_ff && x.select.is_none() => {
-                let key: CombKey = (false, x.dst_offset);
-                let is_observable = observable_comb.contains(&x.dst_offset)
-                    || compiled_block_reads.contains(&x.dst_offset);
-                let count = read_counts.get(&key).copied().unwrap_or(0);
-
-                if count == 0 && !is_observable {
-                    continue;
-                }
-
-                let comb_reads = comb_only_reads.get(&key).copied().unwrap_or(0);
-                if allow_inline && comb_reads == 1 && count == 1 && !is_observable {
-                    // Single-use within comb, not externally visible: inline.
-                    // Only safe when JIT is enabled (merged functions bypass
-                    // the comb path). Without JIT, cascading inlining can
-                    // remove intermediate statements whose outputs are needed
-                    // by the inlined expressions' inputs.
-                    inline_map.insert(key, x.expr.clone());
-                    continue;
-                }
-
-                result.push(stmt);
-            }
-            _ => {
-                result.push(stmt);
-            }
-        }
-    }
-
-    result
-}
-
 /// Optimize comb statements for a merged comb+event JIT function.
 /// Inlines single-use comb variables into event statements,
 /// eliminating intermediate stores and loads in the generated code.
@@ -354,9 +256,9 @@ pub fn optimize_merged(
                 let mut outs = vec![];
                 let mut ins = vec![];
                 stmt.gather_variable_offsets(&mut ins, &mut outs);
-                for (is_ff, off) in outs {
-                    if !is_ff {
-                        multi_write_offsets.insert(off);
+                for off in outs {
+                    if !off.is_ff() {
+                        multi_write_offsets.insert(off.raw());
                     }
                 }
             }
@@ -373,10 +275,10 @@ pub fn optimize_merged(
         let stmt = substitute_stmt(stmt, &inline_map);
 
         match &stmt {
-            ProtoStatement::Assign(x) if !x.dst_is_ff && x.select.is_none() => {
-                let key: CombKey = (false, x.dst_offset);
-                let is_external = external_reads.contains(&x.dst_offset);
-                let has_override = multi_write_offsets.contains(&x.dst_offset);
+            ProtoStatement::Assign(x) if !x.dst.is_ff() && x.select.is_none() => {
+                let key: CombKey = x.dst;
+                let is_external = external_reads.contains(&x.dst.raw());
+                let has_override = multi_write_offsets.contains(&x.dst.raw());
                 let count = read_counts.get(&key).copied().unwrap_or(0);
 
                 if count == 0 && !is_external && !has_override {

@@ -7,7 +7,7 @@ use crate::ir::expression::{
     ExpressionContext, band_const, gen_mask_for_width, gen_mask_range_128, iconst_128,
 };
 use crate::ir::variable::{
-    native_bytes as calc_native_bytes, read_native_value, write_native_value,
+    VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -23,8 +23,7 @@ use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
 /// Per-statement dependency: (input offsets, output offsets).
-/// Each offset is (is_ff, byte_offset).
-pub type StmtDep = (Vec<(bool, isize)>, Vec<(bool, isize)>);
+pub type StmtDep = (Vec<VarOffset>, Vec<VarOffset>);
 
 /// A single block within a ProtoStatements list: either interpreted or JIT-compiled.
 pub enum ProtoStatementBlock {
@@ -65,9 +64,8 @@ impl ProtoStatements {
 
 #[derive(Clone, Debug)]
 pub struct ReadmemhElement {
-    pub current_offset: isize,
+    pub current: VarOffset,
     pub next_offset: Option<isize>,
-    pub is_ff: bool,
 }
 
 #[derive(Clone)]
@@ -346,9 +344,8 @@ pub enum ProtoSystemFunctionCall {
 
 #[derive(Clone, Debug)]
 pub struct ProtoAssignDynamicStatement {
-    pub dst_base_offset: isize,
+    pub dst_base: VarOffset,
     pub dst_stride: isize,
-    pub dst_is_ff: bool,
     pub dst_num_elements: usize,
     pub dst_index_expr: ProtoExpression,
     pub dst_width: usize,
@@ -402,20 +399,16 @@ impl ProtoAssignDynamicStatement {
         let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
         let byte_offset = builder.ins().imul(clamped, stride_val);
 
-        let base_addr = if self.dst_is_ff {
+        let base_addr = if self.dst_base.is_ff() {
             context.ff_values
         } else {
             context.comb_values
         };
-        let static_offset = builder.ins().iconst(I64, self.dst_base_offset as i64);
+        let static_offset = builder.ins().iconst(I64, self.dst_base.raw() as i64);
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
-        let load_mem_flag = if context.no_readonly_loads {
-            MemFlags::trusted()
-        } else {
-            MemFlags::trusted().with_readonly()
-        };
+        let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
         if let Some((beg, end)) = self.select {
@@ -520,8 +513,8 @@ pub struct CompiledBlockStatement {
     pub func: FuncPtr,
     pub ff_delta_bytes: isize,
     pub comb_delta_bytes: isize,
-    pub input_offsets: Vec<(bool, isize)>,
-    pub output_offsets: Vec<(bool, isize)>,
+    pub input_offsets: Vec<VarOffset>,
+    pub output_offsets: Vec<VarOffset>,
     /// Canonical (current) offsets for FF variables written by this block.
     /// output_offsets stores actual dst_offset (next for FF), but ff_swap
     /// and needs_swap logic require canonical (current) offsets.
@@ -552,6 +545,81 @@ pub enum ProtoStatement {
 }
 
 impl ProtoStatement {
+    /// Adjust all embedded byte offsets by the given deltas.
+    /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
+    pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.dst = x.dst.adjust(ff_delta, comb_delta);
+                if x.dst.is_ff() {
+                    x.dst_ff_current_offset += ff_delta;
+                }
+                x.expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_base = x.dst_base.adjust(ff_delta, comb_delta);
+                if x.dst_base.is_ff() {
+                    x.dst_ff_current_base_offset += ff_delta;
+                }
+                x.dst_index_expr.adjust_offsets(ff_delta, comb_delta);
+                x.expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &mut x.cond {
+                    cond.adjust_offsets(ff_delta, comb_delta);
+                }
+                for s in &mut x.true_side {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+                for s in &mut x.false_side {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. } => {
+                    for arg in args {
+                        arg.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { elements, .. } => {
+                    for elem in elements {
+                        elem.current = elem.current.adjust(ff_delta, comb_delta);
+                        if let Some(next) = &mut elem.next_offset {
+                            *next += if elem.current.is_ff() {
+                                ff_delta
+                            } else {
+                                comb_delta
+                            };
+                        }
+                    }
+                }
+                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                    condition.adjust_offsets(ff_delta, comb_delta);
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(_) => {
+                // CompiledBlocks use ff_delta_bytes/comb_delta_bytes at runtime.
+                // Their original_stmts should be adjusted separately if needed.
+            }
+            ProtoStatement::TbMethodCall { method, .. } => match method {
+                ProtoTbMethodKind::ClockNext { count, period } => {
+                    if let Some(c) = count {
+                        c.adjust_offsets(ff_delta, comb_delta);
+                    }
+                    if let Some(p) = period {
+                        p.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoTbMethodKind::ResetAssert { duration, .. } => {
+                    if let Some(d) = duration {
+                        d.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+            },
+        }
+    }
+
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoStatement::Assign(x) => x.can_build_binary(),
@@ -584,13 +652,13 @@ impl ProtoStatement {
 
     pub fn gather_variable_offsets(
         &self,
-        inputs: &mut Vec<(bool, isize)>,
-        outputs: &mut Vec<(bool, isize)>,
+        inputs: &mut Vec<VarOffset>,
+        outputs: &mut Vec<VarOffset>,
     ) {
         match self {
             ProtoStatement::Assign(x) => {
                 x.expr.gather_variable_offsets(inputs);
-                outputs.push((x.dst_is_ff, x.dst_offset));
+                outputs.push(x.dst);
             }
             ProtoStatement::AssignDynamic(x) => {
                 x.dst_index_expr.gather_variable_offsets(inputs);
@@ -598,11 +666,13 @@ impl ProtoStatement {
                 // Emit only base + last offset to represent the entire array as
                 // a single dependency unit.  Per-element expansion caused O(N²)
                 // blowup in analyze_dependency / sort_ff_event for large arrays.
-                outputs.push((x.dst_is_ff, x.dst_base_offset));
+                outputs.push(x.dst_base);
                 if x.dst_num_elements > 1 {
-                    let last_offset =
-                        x.dst_base_offset + x.dst_stride * (x.dst_num_elements as isize - 1);
-                    outputs.push((x.dst_is_ff, last_offset));
+                    let last_offset = VarOffset::new(
+                        x.dst_base.is_ff(),
+                        x.dst_base.raw() + x.dst_stride * (x.dst_num_elements as isize - 1),
+                    );
+                    outputs.push(last_offset);
                 }
             }
             ProtoStatement::If(x) => {
@@ -638,26 +708,26 @@ impl ProtoStatement {
                 if !x.stmt_deps.is_empty() {
                     // Use fine-grained per-statement deps if available
                     for (ins, outs) in &x.stmt_deps {
-                        for &(is_ff, off) in ins {
-                            if !is_ff {
-                                inputs.push((false, off));
+                        for &off in ins {
+                            if !off.is_ff() {
+                                inputs.push(VarOffset::Comb(off.raw()));
                             }
                         }
-                        for &(is_ff, off) in outs {
-                            if !is_ff {
-                                outputs.push((false, off));
+                        for &off in outs {
+                            if !off.is_ff() {
+                                outputs.push(VarOffset::Comb(off.raw()));
                             }
                         }
                     }
                 } else {
-                    for &(is_ff, off) in &x.input_offsets {
-                        if !is_ff {
-                            inputs.push((false, off));
+                    for &off in &x.input_offsets {
+                        if !off.is_ff() {
+                            inputs.push(VarOffset::Comb(off.raw()));
                         }
                     }
-                    for &(is_ff, off) in &x.output_offsets {
-                        if !is_ff {
-                            outputs.push((false, off));
+                    for &off in &x.output_offsets {
+                        if !off.is_ff() {
+                            outputs.push(VarOffset::Comb(off.raw()));
                         }
                     }
                 }
@@ -671,12 +741,12 @@ impl ProtoStatement {
         let mut result = HashSet::default();
         match self {
             ProtoStatement::Assign(x) => {
-                if x.dst_is_ff {
+                if x.dst.is_ff() {
                     result.insert(x.dst_ff_current_offset);
                 }
             }
             ProtoStatement::AssignDynamic(x) => {
-                if x.dst_is_ff {
+                if x.dst_base.is_ff() {
                     // Emit only base + last canonical offset to represent the
                     // array.  Per-element expansion caused O(N) blowup for
                     // large arrays.
@@ -724,10 +794,10 @@ impl ProtoStatement {
                 )),
                 ProtoStatement::AssignDynamic(x) => {
                     let nb = calc_native_bytes(x.dst_width);
-                    let dst_base_ptr = if x.dst_is_ff {
-                        ff_values_ptr.offset(x.dst_base_offset)
+                    let dst_base_ptr = if x.dst_base.is_ff() {
+                        ff_values_ptr.offset(x.dst_base.raw())
                     } else {
-                        comb_values_ptr.offset(x.dst_base_offset)
+                        comb_values_ptr.offset(x.dst_base.raw())
                     };
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
@@ -773,10 +843,10 @@ impl ProtoStatement {
                         let resolved: Vec<_> = elements
                             .iter()
                             .map(|elem| {
-                                let current = if elem.is_ff {
-                                    ff_values_ptr.offset(elem.current_offset)
+                                let current = if elem.current.is_ff() {
+                                    ff_values_ptr.offset(elem.current.raw())
                                 } else {
-                                    comb_values_ptr.offset(elem.current_offset)
+                                    comb_values_ptr.offset(elem.current.raw())
                                 };
                                 let next = elem.next_offset.map(|off| ff_values_ptr.offset(off));
                                 (current, next, nb, use_4state)
@@ -959,8 +1029,7 @@ impl AssignDynamicStatement {
 
 #[derive(Clone, Debug)]
 pub struct ProtoAssignStatement {
-    pub dst_offset: isize,
-    pub dst_is_ff: bool,
+    pub dst: VarOffset,
     pub dst_width: usize,
     pub select: Option<(usize, usize)>,
     pub rhs_select: Option<(usize, usize)>,
@@ -990,10 +1059,10 @@ impl ProtoAssignStatement {
     ) -> AssignStatement {
         unsafe {
             let nb = calc_native_bytes(self.dst_width);
-            let dst = if self.dst_is_ff {
-                ff_values_ptr.add(self.dst_offset as usize)
+            let dst = if self.dst.is_ff() {
+                ff_values_ptr.add(self.dst.raw() as usize)
             } else {
-                comb_values_ptr.add(self.dst_offset as usize)
+                comb_values_ptr.add(self.dst.raw() as usize)
             };
 
             let expr = self
@@ -1058,21 +1127,17 @@ impl ProtoAssignStatement {
             }
         }
 
-        let load_mem_flag = if context.no_readonly_loads {
-            MemFlags::trusted()
-        } else {
-            MemFlags::trusted().with_readonly()
-        };
+        let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
-        let base_addr = if self.dst_is_ff {
+        let base_addr = if self.dst.is_ff() {
             context.ff_values
         } else {
             context.comb_values
         };
 
-        let dst_offset = self.dst_offset as i32;
-        let cache_key = (self.dst_is_ff, dst_offset);
+        let dst_offset = self.dst.raw() as i32;
+        let cache_key = self.dst;
 
         if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
@@ -1312,12 +1377,12 @@ impl ProtoAssignStatement {
         let n_words = nb / 8;
         let flags = MemFlags::trusted();
 
-        let base_addr = if self.dst_is_ff {
+        let base_addr = if self.dst.is_ff() {
             context.ff_values
         } else {
             context.comb_values
         };
-        let dst_offset = self.dst_offset as i32;
+        let dst_offset = self.dst.raw() as i32;
 
         // Source is a wide pointer (for >128-bit expressions)
         // Use expr_width captured before build_binary to determine representation.
@@ -1606,13 +1671,12 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         .elements
                         .iter()
                         .map(|elem| ReadmemhElement {
-                            current_offset: elem.current_offset,
-                            next_offset: if elem.is_ff {
+                            current: elem.current,
+                            next_offset: if elem.is_ff() {
                                 Some(elem.next_offset)
                             } else {
                                 None
                             },
-                            is_ff: elem.is_ff,
                         })
                         .collect();
                     vec![ProtoStatement::SystemFunctionCall(
@@ -1772,27 +1836,26 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             if let Some(idx_vals) = const_index {
                 let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                 let element = &meta.elements[index];
-                let dst_is_ff = element.is_ff;
+                let is_ff = element.is_ff();
                 let dst_width = meta.width;
                 // FF assignment writes to next, but in initial block writes to current
-                let dst_offset = if dst_is_ff {
+                let dst_var = if is_ff {
                     if in_initial {
-                        element.current_offset
+                        VarOffset::Ff(element.current_offset())
                     } else {
-                        element.next_offset
+                        VarOffset::Ff(element.next_offset)
                     }
                 } else {
-                    element.current_offset
+                    VarOffset::Comb(element.current_offset())
                 };
 
                 result.push(ProtoStatement::Assign(ProtoAssignStatement {
-                    dst_offset,
-                    dst_is_ff,
+                    dst: dst_var,
                     dst_width,
                     select,
                     rhs_select,
                     expr: expr.clone(),
-                    dst_ff_current_offset: element.current_offset,
+                    dst_ff_current_offset: element.current_offset(),
                     token: src.token,
                 }));
             } else {
@@ -1801,19 +1864,22 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 let num_elements = meta.elements.len();
                 let (base_current, base_next, stride, is_ff) = dyn_info;
                 // FF assignment writes to next, but in initial block writes to current
-                let dst_base_offset = if is_ff {
-                    if in_initial { base_current } else { base_next }
+                let dst_base = if is_ff {
+                    if in_initial {
+                        VarOffset::Ff(base_current)
+                    } else {
+                        VarOffset::Ff(base_next)
+                    }
                 } else {
-                    base_current
+                    VarOffset::Comb(base_current)
                 };
                 let dst_width = meta.width;
 
                 let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
 
                 result.push(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
-                    dst_base_offset,
+                    dst_base,
                     dst_stride: stride,
-                    dst_is_ff: is_ff,
                     dst_num_elements: num_elements,
                     dst_index_expr: index_proto,
                     dst_width,
@@ -1839,22 +1905,22 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
     let mut extras = Vec::new();
     for s in stmts.iter() {
         match s {
-            ProtoStatement::Assign(a) if a.dst_is_ff => {
+            ProtoStatement::Assign(a) if a.dst.is_ff() => {
                 // FF layout: [current][next] contiguously, each calc_native_bytes wide.
                 // next_offset = current_offset + native_bytes.
                 let nb = calc_native_bytes(a.dst_width) as isize;
                 let next_offset = a.dst_ff_current_offset + nb;
                 extras.push(ProtoStatement::Assign(ProtoAssignStatement {
-                    dst_offset: next_offset,
+                    dst: VarOffset::Ff(next_offset),
                     ..a.clone()
                 }));
             }
-            ProtoStatement::AssignDynamic(a) if a.dst_is_ff => {
+            ProtoStatement::AssignDynamic(a) if a.dst_base.is_ff() => {
                 // For dynamic index FF: base_next = base_current + native_bytes
                 let nb = calc_native_bytes(a.dst_width) as isize;
                 let next_base = a.dst_ff_current_base_offset + nb;
                 extras.push(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
-                    dst_base_offset: next_base,
+                    dst_base: VarOffset::Ff(next_base),
                     ..a.clone()
                 }));
             }
@@ -1889,24 +1955,23 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         if let Some(idx_vals) = const_index {
             let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
             let element = &meta.elements[index];
-            let dst_is_ff = element.is_ff;
-            let current_offset = element.current_offset;
+            let is_ff = element.is_ff();
+            let current_offset = element.current_offset();
             // FF assignment writes to next, but in initial block writes to current
-            let dst_offset = if dst_is_ff {
+            let dst = if is_ff {
                 if in_initial {
-                    current_offset
+                    VarOffset::Ff(current_offset)
                 } else {
-                    element.next_offset
+                    VarOffset::Ff(element.next_offset)
                 }
             } else {
-                current_offset
+                VarOffset::Comb(current_offset)
             };
 
             let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
             Ok(ProtoStatement::Assign(ProtoAssignStatement {
-                dst_offset,
-                dst_is_ff,
+                dst,
                 dst_width,
                 select,
                 rhs_select: None,
@@ -1921,19 +1986,22 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let num_elements = meta.elements.len();
             let (base_current, base_next, stride, is_ff) = dyn_info;
             // FF assignment writes to next, but in initial block writes to current
-            let dst_base_offset = if is_ff {
-                if in_initial { base_current } else { base_next }
+            let dst_base = if is_ff {
+                if in_initial {
+                    VarOffset::Ff(base_current)
+                } else {
+                    VarOffset::Ff(base_next)
+                }
             } else {
-                base_current
+                VarOffset::Comb(base_current)
             };
 
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
             let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
             Ok(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
-                dst_base_offset,
+                dst_base,
                 dst_stride: stride,
-                dst_is_ff: is_ff,
                 dst_num_elements: num_elements,
                 dst_index_expr: index_proto,
                 dst_width,
@@ -1968,25 +2036,24 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
         };
 
         let element = &meta.elements[index];
-        let dst_is_ff = element.is_ff;
-        let current_offset = element.current_offset;
+        let is_ff = element.is_ff();
+        let current_offset = element.current_offset();
         let dst_width = meta.width;
         // FF assignment writes to next, but in initial block writes to current
-        let dst_offset = if dst_is_ff {
+        let dst_var = if is_ff {
             if in_initial {
-                current_offset
+                VarOffset::Ff(current_offset)
             } else {
-                element.next_offset
+                VarOffset::Ff(element.next_offset)
             }
         } else {
-            current_offset
+            VarOffset::Comb(current_offset)
         };
 
         let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
 
         Ok(ProtoAssignStatement {
-            dst_offset,
-            dst_is_ff,
+            dst: dst_var,
             dst_width,
             select,
             rhs_select: None,
@@ -2086,8 +2153,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             let meta = scope.variable_meta.get(arg_var_id).unwrap();
             let element = &meta.elements[0];
             result.push(ProtoStatement::Assign(ProtoAssignStatement {
-                dst_offset: element.current_offset,
-                dst_is_ff: false,
+                dst: element.current,
                 dst_width: meta.width,
                 select: None,
                 rhs_select: None,
@@ -2113,8 +2179,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             let arg_meta = scope.variable_meta.get(arg_var_id).unwrap();
             let arg_element = &arg_meta.elements[0];
             let arg_expr = ProtoExpression::Variable {
-                offset: arg_element.current_offset,
-                is_ff: false,
+                var_offset: arg_element.current,
                 select: None,
                 width: arg_meta.width,
                 expr_context: ExpressionContext {
@@ -2136,20 +2201,19 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     None
                 };
 
-                let (dst_offset, dst_is_ff) = if dst_element.is_ff {
-                    (dst_element.next_offset, true)
+                let dst_var = if dst_element.is_ff() {
+                    VarOffset::Ff(dst_element.next_offset)
                 } else {
-                    (dst_element.current_offset, false)
+                    VarOffset::Comb(dst_element.current_offset())
                 };
 
                 result.push(ProtoStatement::Assign(ProtoAssignStatement {
-                    dst_offset,
-                    dst_is_ff,
+                    dst: dst_var,
                     dst_width: dst_meta.width,
                     select,
                     rhs_select: None,
                     expr: arg_expr.clone(),
-                    dst_ff_current_offset: dst_element.current_offset,
+                    dst_ff_current_offset: dst_element.current_offset(),
                     token: TokenRange::default(),
                 }));
             }

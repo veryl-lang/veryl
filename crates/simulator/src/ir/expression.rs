@@ -2,7 +2,7 @@ use crate::cranelift::{
     Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
 };
 use crate::ir::context::{Context as ConvContext, Conv};
-use crate::ir::variable::{native_bytes as calc_native_bytes, read_native_value};
+use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes, read_native_value};
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use crate::wide_ops;
@@ -619,9 +619,9 @@ impl Expression {
 }
 
 impl ProtoExpression {
-    pub fn gather_variable_offsets(&self, inputs: &mut Vec<(bool, isize)>) {
+    pub fn gather_variable_offsets(&self, inputs: &mut Vec<VarOffset>) {
         match self {
-            ProtoExpression::Variable { offset, is_ff, .. } => inputs.push((*is_ff, *offset)),
+            ProtoExpression::Variable { var_offset, .. } => inputs.push(*var_offset),
             ProtoExpression::Value { .. } => (),
             ProtoExpression::Unary { x, .. } => x.gather_variable_offsets(inputs),
             ProtoExpression::Binary { x, y, .. } => {
@@ -646,7 +646,6 @@ impl ProtoExpression {
             ProtoExpression::DynamicVariable {
                 base_offset,
                 stride,
-                is_ff,
                 index_expr,
                 num_elements,
                 ..
@@ -655,12 +654,15 @@ impl ProtoExpression {
                 // Emit only the base offset to represent the entire array as a
                 // single dependency unit.  Per-element expansion caused O(N²)
                 // blowup in analyze_dependency / sort_ff_event for large arrays.
-                inputs.push((*is_ff, *base_offset));
+                inputs.push(*base_offset);
                 // Also emit the last element offset so that static accesses to
                 // any element of the same array create a dependency edge.
                 if *num_elements > 1 {
-                    let last_offset = *base_offset + *stride * (*num_elements as isize - 1);
-                    inputs.push((*is_ff, last_offset));
+                    let last_offset = VarOffset::new(
+                        base_offset.is_ff(),
+                        base_offset.raw() + *stride * (*num_elements as isize - 1),
+                    );
+                    inputs.push(last_offset);
                 }
             }
         }
@@ -670,8 +672,7 @@ impl ProtoExpression {
 #[derive(Clone, Debug)]
 pub enum ProtoExpression {
     Variable {
-        offset: isize,
-        is_ff: bool,
+        var_offset: VarOffset,
         select: Option<(usize, usize)>,
         width: usize,
         expr_context: ExpressionContext,
@@ -707,9 +708,8 @@ pub enum ProtoExpression {
         expr_context: ExpressionContext,
     },
     DynamicVariable {
-        base_offset: isize,
+        base_offset: VarOffset,
         stride: isize,
-        is_ff: bool,
         index_expr: Box<ProtoExpression>,
         num_elements: usize,
         select: Option<(usize, usize)>,
@@ -719,6 +719,47 @@ pub enum ProtoExpression {
 }
 
 impl ProtoExpression {
+    /// Adjust all embedded byte offsets by the given deltas.
+    /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
+    pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
+        match self {
+            ProtoExpression::Variable { var_offset, .. } => {
+                *var_offset = var_offset.adjust(ff_delta, comb_delta);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                index_expr,
+                ..
+            } => {
+                *base_offset = base_offset.adjust(ff_delta, comb_delta);
+                index_expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Unary { x, .. } => {
+                x.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Binary { x, y, .. } => {
+                x.adjust_offsets(ff_delta, comb_delta);
+                y.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.adjust_offsets(ff_delta, comb_delta);
+                true_expr.adjust_offsets(ff_delta, comb_delta);
+                false_expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
+            ProtoExpression::Value { .. } => {}
+        }
+    }
+
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoExpression::Variable { .. } => true,
@@ -895,8 +936,7 @@ impl ProtoExpression {
         unsafe {
             match self {
                 ProtoExpression::Variable {
-                    offset,
-                    is_ff,
+                    var_offset,
                     select,
                     width,
                     expr_context,
@@ -911,10 +951,10 @@ impl ProtoExpression {
                         None => *width,
                     };
                     let nb = calc_native_bytes(read_width);
-                    let value = if *is_ff {
-                        (ff_values_ptr as *const u8).add(*offset as usize)
+                    let value = if var_offset.is_ff() {
+                        (ff_values_ptr as *const u8).add(var_offset.raw() as usize)
                     } else {
-                        (comb_values_ptr as *const u8).add(*offset as usize)
+                        (comb_values_ptr as *const u8).add(var_offset.raw() as usize)
                     };
                     Expression::Variable {
                         value,
@@ -988,7 +1028,6 @@ impl ProtoExpression {
                 ProtoExpression::DynamicVariable {
                     base_offset,
                     stride,
-                    is_ff,
                     index_expr,
                     num_elements,
                     select,
@@ -997,10 +1036,10 @@ impl ProtoExpression {
                     ..
                 } => {
                     let nb = calc_native_bytes(*width);
-                    let base_ptr = if *is_ff {
-                        (ff_values_ptr as *const u8).offset(*base_offset)
+                    let base_ptr = if base_offset.is_ff() {
+                        (ff_values_ptr as *const u8).offset(base_offset.raw())
                     } else {
-                        (comb_values_ptr as *const u8).offset(*base_offset)
+                        (comb_values_ptr as *const u8).offset(base_offset.raw())
                     };
                     let index_expr =
                         index_expr.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
@@ -1027,21 +1066,20 @@ impl ProtoExpression {
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
         match self {
             ProtoExpression::Variable {
-                offset,
+                var_offset,
                 width,
-                is_ff,
                 select,
                 ..
             } => {
                 // Wide path: >128-bit variable → return memory pointer
                 if is_wide_ptr(*width) {
                     let nb = calc_native_bytes(*width);
-                    let base_addr = if *is_ff {
+                    let base_addr = if var_offset.is_ff() {
                         context.ff_values
                     } else {
                         context.comb_values
                     };
-                    let ptr = builder.ins().iadd_imm(base_addr, *offset as i64);
+                    let ptr = builder.ins().iadd_imm(base_addr, var_offset.raw() as i64);
 
                     // Select on >128-bit values: fall back to interpreter
                     if select.is_some() {
@@ -1064,8 +1102,8 @@ impl ProtoExpression {
                     None => *width,
                 };
                 let nb = calc_native_bytes(read_width);
-                let offset = *offset as i32;
-                let cache_key = (*is_ff, offset);
+                let offset = var_offset.raw() as i32;
+                let cache_key = *var_offset;
                 let wide = read_width > 64;
 
                 // Load CSE: reuse previously loaded values for the same address
@@ -1075,13 +1113,9 @@ impl ProtoExpression {
                 {
                     (cached_payload, cached_mask_xz)
                 } else {
-                    let load_mem_flag = if context.no_readonly_loads {
-                        MemFlags::trusted()
-                    } else {
-                        MemFlags::trusted().with_readonly()
-                    };
+                    let load_mem_flag = MemFlags::trusted();
 
-                    let base_addr = if *is_ff {
+                    let base_addr = if var_offset.is_ff() {
                         context.ff_values
                     } else {
                         context.comb_values
@@ -2260,7 +2294,6 @@ impl ProtoExpression {
             ProtoExpression::DynamicVariable {
                 base_offset,
                 stride,
-                is_ff,
                 index_expr,
                 num_elements,
                 select,
@@ -2290,20 +2323,16 @@ impl ProtoExpression {
                 let byte_offset = builder.ins().imul(clamped, stride_val);
 
                 // Compute address: base_addr + base_offset + byte_offset
-                let base_addr = if *is_ff {
+                let base_addr = if base_offset.is_ff() {
                     context.ff_values
                 } else {
                     context.comb_values
                 };
-                let static_offset = builder.ins().iconst(I64, *base_offset as i64);
+                let static_offset = builder.ins().iconst(I64, base_offset.raw() as i64);
                 let addr = builder.ins().iadd(base_addr, static_offset);
                 let addr = builder.ins().iadd(addr, byte_offset);
 
-                let load_mem_flag = if context.no_readonly_loads {
-                    MemFlags::trusted()
-                } else {
-                    MemFlags::trusted().with_readonly()
-                };
+                let load_mem_flag = MemFlags::trusted();
 
                 let mut payload = if nb == 16 {
                     builder.ins().load(I128, load_mem_flag, addr, 0)
@@ -3349,12 +3378,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                     if let Some(idx_vals) = const_index {
                         let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                         let element = &meta.elements[index];
-                        let is_ff = element.is_ff;
-                        let offset = element.current_offset;
 
                         Ok(ProtoExpression::Variable {
-                            offset,
-                            is_ff,
+                            var_offset: element.current,
                             select: select_val,
                             width,
                             expr_context,
@@ -3369,9 +3395,8 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let index_proto = build_linear_index_expr(context, &array_shape, index)?;
 
                         Ok(ProtoExpression::DynamicVariable {
-                            base_offset,
+                            base_offset: VarOffset::new(is_ff, base_offset),
                             stride,
-                            is_ff,
                             index_expr: Box::new(index_proto),
                             num_elements,
                             select: select_val,
@@ -3423,8 +3448,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
                     Ok(ProtoExpression::Variable {
-                        offset: element.current_offset,
-                        is_ff: element.is_ff,
+                        var_offset: element.current,
                         select: None,
                         width,
                         expr_context,

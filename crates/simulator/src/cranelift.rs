@@ -1,5 +1,6 @@
 use crate::ir::Context as ConvContext;
 use crate::ir::ProtoStatement;
+use crate::ir::VarOffset;
 use crate::{HashMap, HashSet};
 use cranelift::codegen::control::ControlPlane;
 use cranelift::codegen::ir::{AbiParam, Function, SigRef, Signature, StackSlotData, UserFuncName};
@@ -32,19 +33,19 @@ pub struct Context {
     pub comb_values: Value,
     pub zero: Value,
     pub zero_128: Value,
-    /// Load CSE cache: (is_ff, byte_offset) → (payload, mask_xz)
-    pub load_cache: HashMap<(bool, i32), (Value, Option<Value>)>,
+    /// Load CSE cache: VarOffset → (payload, mask_xz)
+    pub load_cache: HashMap<VarOffset, (Value, Option<Value>)>,
     /// Comb offsets where stores can be skipped (value forwarded via load_cache only).
-    pub store_elim_offsets: HashSet<(bool, i32)>,
+    pub store_elim_offsets: HashSet<VarOffset>,
     /// Whether store elimination is active (disabled inside If blocks).
     pub store_elim_enabled: bool,
     /// Helper function signatures (cached per arity/return type).
     pub helper_sigs: HashMap<HelperSig, SigRef>,
     /// Calling convention for helper functions.
     pub call_conv: CallConv,
-    /// Disable readonly MemFlags hint on loads (prevents Cranelift load CSE).
-    pub no_readonly_loads: bool,
     /// Disable load_cache: every access emits a fresh load instruction.
+    /// Used for unified comb where helper functions may modify values
+    /// between cached loads.
     pub disable_load_cache: bool,
 }
 
@@ -131,7 +132,7 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
 pub fn build_binary_with_store_elim(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
-    store_elim: HashSet<(bool, i32)>,
+    store_elim: HashSet<VarOffset>,
 ) -> Option<FuncPtr> {
     build_binary_inner(context, proto, store_elim, false)
 }
@@ -140,9 +141,18 @@ pub fn build_binary(context: &mut ConvContext, proto: Vec<ProtoStatement>) -> Op
     build_binary_inner(context, proto, HashSet::default(), false)
 }
 
-/// Build a JIT function with load_cache and readonly hints disabled.
-/// Used for full_comb where comb values change across statements.
-pub fn build_binary_no_readonly(
+pub fn build_binary_with_store_elim_and_no_cache(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+    store_elim: HashSet<VarOffset>,
+) -> Option<FuncPtr> {
+    build_binary_inner(context, proto, store_elim, true)
+}
+
+/// Build a JIT function with load_cache disabled.
+/// Used for unified comb where helper functions (CompiledBlocks) may
+/// modify comb values between cached loads within the same JIT function.
+pub fn build_binary_no_cache(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
 ) -> Option<FuncPtr> {
@@ -152,8 +162,8 @@ pub fn build_binary_no_readonly(
 fn build_binary_inner(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
-    store_elim: HashSet<(bool, i32)>,
-    no_readonly_loads: bool,
+    store_elim: HashSet<VarOffset>,
+    disable_load_cache: bool,
 ) -> Option<FuncPtr> {
     let config = &context.config;
 
@@ -202,8 +212,7 @@ fn build_binary_inner(
         store_elim_enabled: true,
         helper_sigs: HashMap::default(),
         call_conv,
-        no_readonly_loads,
-        disable_load_cache: no_readonly_loads,
+        disable_load_cache,
     };
 
     let len = proto.len();

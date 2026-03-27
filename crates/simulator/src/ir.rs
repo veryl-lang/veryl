@@ -17,7 +17,7 @@ pub use statement::{
     SystemFunctionCall, TbMethodKind, parse_hex_content,
 };
 pub use variable::{
-    ModuleVariableMeta, ModuleVariables, Variable, VariableElement, VariableMeta,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
     create_variable_meta, native_bytes, read_native_value, read_payload, value_size,
     write_native_value, write_payload,
 };
@@ -43,20 +43,9 @@ pub struct Ir {
     pub use_4state: bool,
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
+    /// Unified comb statements: all port connections, child comb, and internal
+    /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
-    /// Post-comb functions: child module comb-only JIT functions that run
-    /// after lite comb (port connections) to compute child comb values
-    /// before events fire.
-    pub post_comb_fns: Vec<Statement>,
-    /// Output port connections from post_comb_fns that propagate child
-    /// comb values to parent variables. Subset of post_comb_fns: only
-    /// the non-Binary (Assign) statements. Run after events for propagation.
-    pub post_comb_ports: Vec<Statement>,
-    /// Full comb statements (includes per-core internal comb).
-    /// Used by get()/dump() when merged comb+event events exist.
-    pub full_comb_statements: Option<Vec<Statement>>,
-    /// When true, settle_comb() uses full_comb_statements.
-    pub use_full_comb_in_step: bool,
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
@@ -94,39 +83,9 @@ impl Ir {
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
-            post_comb_ports: module.post_comb_fns.clone(),
-            post_comb_fns: module.post_comb_fns,
-            full_comb_statements: module.full_comb_statements,
-            use_full_comb_in_step: module.use_full_comb_in_step,
             required_comb_passes: module.required_comb_passes,
             ff_swap_entries: module.ff_swap_entries,
             _binary: binary,
-        }
-    }
-
-    /// Evaluate lite comb (port connections + top-level comb only).
-    /// Used during step() when merged comb+event functions handle per-core comb.
-    pub fn eval_comb(&self, mask_cache: &mut MaskCache) {
-        for x in &self.comb_statements {
-            x.eval_step(mask_cache);
-        }
-    }
-
-    /// Evaluate post-comb functions: child comb-only JIT functions that
-    /// compute child module comb values after port connections have been
-    /// set by eval_comb. Called between eval_comb and events in step().
-    pub fn eval_post_comb(&self, mask_cache: &mut MaskCache) {
-        for x in &self.post_comb_fns {
-            x.eval_step(mask_cache);
-        }
-    }
-
-    /// Evaluate only the output port connections from post_comb_fns.
-    /// Called after events to propagate merged event comb outputs to
-    /// parent variables without re-running expensive child comb functions.
-    pub fn eval_post_comb_ports(&self, mask_cache: &mut MaskCache) {
-        for x in &self.post_comb_ports {
-            x.eval_step(mask_cache);
         }
     }
 
@@ -158,7 +117,22 @@ impl Ir {
                 profile.comb_eval_count += 1;
             }
         }
-        if self.full_comb_statements.is_none() && min_passes <= 1 {
+        // In debug builds, verify that required_comb_passes is sufficient
+        // by checking that one more eval doesn't change comb_values.
+        #[cfg(debug_assertions)]
+        if !skip_convergence_check {
+            snapshot_buf.resize(self.comb_values.len(), 0);
+            snapshot_buf.copy_from_slice(&self.comb_values);
+            self.eval_comb_full(mask_cache, profile);
+            debug_assert!(
+                self.comb_values[..] == snapshot_buf[..],
+                "comb did not converge after {} required passes ({} stmts) — \
+                 required_comb_passes may be underestimated",
+                min_passes,
+                self.comb_statements.len()
+            );
+        }
+        if min_passes <= 1 {
             return true;
         }
         if skip_convergence_check {
@@ -182,28 +156,24 @@ impl Ir {
                 return _i == 0;
             }
         }
+        log::warn!(
+            "comb convergence failed after {} + {} passes ({} stmts)",
+            min_passes,
+            MAX_EXTRA,
+            self.comb_statements.len()
+        );
         false
     }
 
-    /// Evaluate full comb once (including per-core internal comb).
+    /// Evaluate unified comb once.
     /// Called by settle_comb() for each required pass.
     pub fn eval_comb_full(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
         let _ = profile;
         #[cfg(feature = "profile")]
         let start = std::time::Instant::now();
 
-        if let Some(stmts) = &self.full_comb_statements {
-            for x in stmts {
-                x.eval_step(mask_cache);
-            }
-        } else if !self.post_comb_fns.is_empty() {
-            // 3+ level hierarchy: full_comb_statements should have been
-            // built. If somehow it wasn't, fall back to settle loop.
-            self.eval_comb(mask_cache);
-            self.eval_post_comb(mask_cache);
-            self.eval_comb(mask_cache);
-        } else {
-            self.eval_comb(mask_cache);
+        for x in &self.comb_statements {
+            x.eval_step(mask_cache);
         }
 
         #[cfg(feature = "profile")]
@@ -212,15 +182,12 @@ impl Ir {
         }
     }
 
-    /// Number of statements in full_comb_statements (for profiling).
-    pub fn full_comb_stmt_count(&self) -> (usize, usize, usize) {
-        let Some(stmts) = &self.full_comb_statements else {
-            return (0, 0, 0);
-        };
+    /// Number of statements in comb_statements (for profiling).
+    pub fn comb_stmt_count(&self) -> (usize, usize, usize) {
         let mut binary = 0;
         let mut interp = 0;
         let mut total = 0;
-        for s in stmts {
+        for s in &self.comb_statements {
             total += 1;
             if s.is_binary() {
                 binary += 1;
