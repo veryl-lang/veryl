@@ -1,0 +1,17 @@
+/// Module with JavaScript expression in wavedrom,test block
+///
+/// ```wavedrom,test
+/// (function (bits, ticks) {
+///   return {signal: [
+///     {name: 'clk', wave: 'p' + '.'.repeat(ticks - 1)}
+///   ]};
+/// })(5, 16)
+/// ```
+module invalid_wavedrom_js_test (
+    i_clk : input  clock,
+    i_rst : input  reset,
+    i_dat : input  logic,
+    o_dat : output logic,
+) {
+    assign o_dat = i_dat;
+}

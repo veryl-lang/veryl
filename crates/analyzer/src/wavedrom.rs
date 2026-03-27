@@ -1,4 +1,5 @@
 use crate::AnalyzerError;
+use crate::analyzer_error::InvalidWavedromKind;
 use crate::symbol::WavedromBlock;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -163,25 +164,11 @@ fn doc_line_token(module_token: &Token, line: u32) -> Option<TokenRange> {
     None
 }
 
-/// WaveDrom validation error with an optional signal name for locating the source line.
-struct WavedromValidationError {
-    message: String,
-    signal_hint: Option<String>,
-}
-
-impl WavedromValidationError {
-    fn new(message: String) -> Self {
-        Self {
-            message,
-            signal_hint: None,
-        }
-    }
-
-    fn with_signal(message: String, signal: &str) -> Self {
-        Self {
-            message,
-            signal_hint: Some(signal.to_string()),
-        }
+fn signal_hint(kind: &InvalidWavedromKind) -> Option<&str> {
+    match kind {
+        InvalidWavedromKind::UnknownWaveChar { signal, .. } => Some(signal),
+        InvalidWavedromKind::PipeSeparatorInTest { signal } => Some(signal),
+        _ => None,
     }
 }
 
@@ -189,10 +176,10 @@ impl WavedromValidationError {
 fn resolve_error_line(
     module_token: &Token,
     block: &WavedromBlock,
-    err: &WavedromValidationError,
+    kind: &InvalidWavedromKind,
     fallback: TokenRange,
 ) -> TokenRange {
-    if let Some(ref hint) = err.signal_hint
+    if let Some(hint) = signal_hint(kind)
         && let Some(line) = block.find_line_containing(hint)
         && let Some(token) = doc_line_token(module_token, line)
     {
@@ -211,15 +198,12 @@ fn resolve_error_line(
     fallback
 }
 
-type WavedromResult = Result<(), WavedromValidationError>;
-
-fn parse_wavedrom_json(json_str: &str) -> Result<serde_json::Value, WavedromValidationError> {
+fn parse_wavedrom_json(json_str: &str) -> Result<serde_json::Value, InvalidWavedromKind> {
     let json_str = preprocess_json5(json_str);
-    serde_json::from_str(&json_str)
-        .map_err(|e| WavedromValidationError::new(format!("invalid WaveDrom JSON: {e}")))
+    serde_json::from_str(&json_str).map_err(|e| InvalidWavedromKind::InvalidJson(e.to_string()))
 }
 
-fn check_wave_chars(signal_array: &[serde_json::Value]) -> WavedromResult {
+fn check_wave_chars(signal_array: &[serde_json::Value]) -> Result<(), InvalidWavedromKind> {
     for item in signal_array {
         if item.is_string() || item.is_array() || item.as_object().is_none_or(|o| o.is_empty()) {
             continue;
@@ -251,10 +235,10 @@ fn check_wave_chars(signal_array: &[serde_json::Value]) -> WavedromResult {
                         | '='
                         | ' '
                 ) {
-                    return Err(WavedromValidationError::with_signal(
-                        format!("WaveDrom signal '{name}' contains unknown wave character '{c}'"),
-                        name,
-                    ));
+                    return Err(InvalidWavedromKind::UnknownWaveChar {
+                        signal: name.to_string(),
+                        ch: c,
+                    });
                 }
             }
         }
@@ -262,32 +246,38 @@ fn check_wave_chars(signal_array: &[serde_json::Value]) -> WavedromResult {
     Ok(())
 }
 
-/// Validate WaveDrom JSON syntax (for all ```wavedrom blocks).
-fn validate_wavedrom_syntax(json_str: &str) -> WavedromResult {
+fn is_javascript_expression(content: &str) -> bool {
+    let trimmed = content.trim();
+    !trimmed.starts_with('{') && !trimmed.starts_with('[')
+}
+
+fn validate_wavedrom_syntax(json_str: &str) -> Result<(), InvalidWavedromKind> {
+    if is_javascript_expression(json_str) {
+        return Ok(());
+    }
+
     let value = parse_wavedrom_json(json_str)?;
     let signal_array = value
         .get("signal")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            WavedromValidationError::new("WaveDrom JSON missing 'signal' array".to_string())
-        })?;
+        .ok_or(InvalidWavedromKind::MissingSignalArray)?;
     check_wave_chars(signal_array)
 }
 
-/// Validate a ```wavedrom,test block for simulation testing.
-///
 /// Assumes syntax is already validated by validate_wavedrom_syntax.
-/// Checks:
-/// - No '|' pipe separators (indeterminate timing)
-/// - At least one non-clock signal matches a module port
-fn validate_wavedrom_test(json_str: &str, port_names: &[String]) -> WavedromResult {
+fn validate_wavedrom_test(
+    json_str: &str,
+    port_names: &[String],
+) -> Result<(), InvalidWavedromKind> {
+    if is_javascript_expression(json_str) {
+        return Err(InvalidWavedromKind::JavaScriptInTestBlock);
+    }
+
     let value = parse_wavedrom_json(json_str)?;
     let signal_array = value
         .get("signal")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            WavedromValidationError::new("WaveDrom JSON missing 'signal' array".to_string())
-        })?;
+        .ok_or(InvalidWavedromKind::MissingSignalArray)?;
 
     for item in signal_array {
         if let Some(obj) = item.as_object()
@@ -295,12 +285,9 @@ fn validate_wavedrom_test(json_str: &str, port_names: &[String]) -> WavedromResu
             && let Some(wave) = obj.get("wave").and_then(|v| v.as_str())
             && wave.contains('|')
         {
-            return Err(WavedromValidationError::with_signal(
-                format!(
-                    "WaveDrom signal '{name}' contains '|' separator (indeterminate timing, not testable)"
-                ),
-                name,
-            ));
+            return Err(InvalidWavedromKind::PipeSeparatorInTest {
+                signal: name.to_string(),
+            });
         }
     }
 
@@ -322,15 +309,12 @@ fn validate_wavedrom_test(json_str: &str, port_names: &[String]) -> WavedromResu
     });
 
     if !has_output_match {
-        return Err(WavedromValidationError::new(
-            "WaveDrom test has no signals matching module ports".to_string(),
-        ));
+        return Err(InvalidWavedromKind::NoMatchingPorts);
     }
 
     Ok(())
 }
 
-/// Validate WaveDrom blocks in a module's doc comment and return any errors.
 pub fn check_wavedrom(
     module_token: &Token,
     block: Option<WavedromBlock>,
@@ -340,20 +324,18 @@ pub fn check_wavedrom(
     let mut ret = vec![];
     let fallback_token: TokenRange = (*module_token).into();
 
-    // Check all ```wavedrom blocks for syntax errors
     if let Some(block) = block
-        && let Err(e) = validate_wavedrom_syntax(&block.json)
+        && let Err(kind) = validate_wavedrom_syntax(&block.json)
     {
-        let token = resolve_error_line(module_token, &block, &e, fallback_token);
-        ret.push(AnalyzerError::invalid_wavedrom(&e.message, &token));
+        let token = resolve_error_line(module_token, &block, &kind, fallback_token);
+        ret.push(AnalyzerError::invalid_wavedrom(kind, &token));
     }
 
-    // Check ```wavedrom,test blocks for testability
     if let Some(block) = test_block
-        && let Err(e) = validate_wavedrom_test(&block.json, port_names)
+        && let Err(kind) = validate_wavedrom_test(&block.json, port_names)
     {
-        let token = resolve_error_line(module_token, &block, &e, fallback_token);
-        ret.push(AnalyzerError::invalid_wavedrom(&e.message, &token));
+        let token = resolve_error_line(module_token, &block, &kind, fallback_token);
+        ret.push(AnalyzerError::invalid_wavedrom(kind, &token));
     }
 
     ret
@@ -403,5 +385,31 @@ mod tests {
         let input = "{ signal: [{ name: 'clk', wave: 'p...' }] }";
         let result = preprocess_json5(input);
         assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
+
+    #[test]
+    fn javascript_expression_detected() {
+        assert!(is_javascript_expression(
+            "(function(bits) { return {}; })(8)",
+        ));
+        assert!(is_javascript_expression(
+            "  (function(bits) { return {}; })(8)  ",
+        ));
+        assert!(!is_javascript_expression("{signal: []}"));
+        assert!(!is_javascript_expression("  { signal: [] }  "));
+        assert!(!is_javascript_expression("[{name: 'clk'}]"));
+    }
+
+    #[test]
+    fn validate_wavedrom_syntax_accepts_js_expression() {
+        let js = "(function(bits, ticks) { return {signal: []}; })(5, 16)";
+        assert!(validate_wavedrom_syntax(js).is_ok());
+    }
+
+    #[test]
+    fn validate_wavedrom_test_rejects_js_expression() {
+        let js = "(function(bits, ticks) { return {signal: []}; })(5, 16)";
+        let err = validate_wavedrom_test(js, &[]).unwrap_err();
+        assert!(matches!(err, InvalidWavedromKind::JavaScriptInTestBlock));
     }
 }

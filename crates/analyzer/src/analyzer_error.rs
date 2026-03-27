@@ -1492,7 +1492,7 @@ pub enum AnalyzerError {
     )]
     #[error("{cause}")]
     InvalidWavedrom {
-        cause: String,
+        cause: InvalidWavedromKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2446,9 +2446,9 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn invalid_wavedrom(cause: &str, token: &TokenRange) -> Self {
+    pub fn invalid_wavedrom(cause: InvalidWavedromKind, token: &TokenRange) -> Self {
         AnalyzerError::InvalidWavedrom {
-            cause: cause.to_string(),
+            cause,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -2589,6 +2589,48 @@ impl fmt::Display for InvalidConnectOperandKind {
             InvalidConnectOperandKind::InstanceArray => "it is an array interface instance".fmt(f),
             InvalidConnectOperandKind::ModportArray => "it is an array modport".fmt(f),
             InvalidConnectOperandKind::UnemittableCast => "modport including variables of which type is defined in the interface can't be used for a connect operand".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InvalidWavedromKind {
+    InvalidJson(String),
+    MissingSignalArray,
+    UnknownWaveChar { signal: String, ch: char },
+    JavaScriptInTestBlock,
+    PipeSeparatorInTest { signal: String },
+    NoMatchingPorts,
+}
+
+impl fmt::Display for InvalidWavedromKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidWavedromKind::InvalidJson(e) => write!(f, "invalid WaveDrom JSON: {e}"),
+            InvalidWavedromKind::MissingSignalArray => {
+                write!(f, "WaveDrom JSON missing 'signal' array")
+            }
+            InvalidWavedromKind::UnknownWaveChar { signal, ch } => {
+                write!(
+                    f,
+                    "WaveDrom signal '{signal}' contains unknown wave character '{ch}'"
+                )
+            }
+            InvalidWavedromKind::JavaScriptInTestBlock => {
+                write!(
+                    f,
+                    "WaveDrom test blocks must use JSON, not JavaScript expressions"
+                )
+            }
+            InvalidWavedromKind::PipeSeparatorInTest { signal } => {
+                write!(
+                    f,
+                    "WaveDrom signal '{signal}' contains '|' separator (indeterminate timing, not testable)"
+                )
+            }
+            InvalidWavedromKind::NoMatchingPorts => {
+                write!(f, "WaveDrom test has no signals matching module ports")
+            }
         }
     }
 }

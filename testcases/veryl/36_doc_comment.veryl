@@ -14,6 +14,19 @@
 /// ]}
 /// ```
 ///
+/// ```wavedrom
+/// (function (bits, ticks) {
+///   var i, t, gray, state, data = [], clock = [];
+///   for (i = 0; i < ticks; i++) {
+///     clock.push({tick: i});
+///   }
+///   return {signal: [
+///     {name: 'clock', wave: 'p' + '.'.repeat(ticks - 1)},
+///     {name: 'data',  wave: 'x' + '='.repeat(ticks - 1), data: clock.map(function(c) { return c.tick; })}
+///   ]};
+/// })(5, 16)
+/// ```
+///
 /// ```mermaid
 /// graph TD;
 ///     A-->B;
