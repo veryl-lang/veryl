@@ -1,11 +1,11 @@
-use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
+use crate::runner::{Runner, copy_wave, new_cmd, remap_msg_by_regex};
 use futures::prelude::*;
 use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::process::Stdio;
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use veryl_metadata::{Metadata, WaveFormFormat};
@@ -157,7 +157,7 @@ impl Runner for Vivado {
         let rt = Runtime::new().unwrap();
 
         rt.block_on(async {
-            let compile = Command::new("xvlog")
+            let compile = new_cmd("xvlog")
                 .arg("--sv")
                 .arg("-f")
                 .arg(metadata.filelist_path())
@@ -189,7 +189,7 @@ impl Runner for Vivado {
         };
 
         rt.block_on(async {
-            let elaborate = Command::new("xelab")
+            let elaborate = new_cmd("xelab")
                 .args(top)
                 .args(opt)
                 .arg("-s")
@@ -213,7 +213,7 @@ impl Runner for Vivado {
         info!("Executing test ({test})");
 
         rt.block_on(async {
-            let simulate = Command::new("xsim")
+            let simulate = new_cmd("xsim")
                 .arg("simv")
                 .arg("--runall")
                 .args(&metadata.test.vivado.simulate_args)
