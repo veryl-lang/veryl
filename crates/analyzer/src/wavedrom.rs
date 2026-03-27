@@ -93,7 +93,27 @@ pub fn preprocess_json5(input: &str) -> String {
         }
     }
 
-    result
+    // Remove trailing commas: `,` followed by optional whitespace then `]` or `}`
+    let mut cleaned = String::with_capacity(result.len());
+    let result_chars: Vec<char> = result.chars().collect();
+    let rlen = result_chars.len();
+    let mut ri = 0;
+    while ri < rlen {
+        if result_chars[ri] == ',' {
+            let mut j = ri + 1;
+            while j < rlen && result_chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < rlen && (result_chars[j] == ']' || result_chars[j] == '}') {
+                ri += 1;
+                continue;
+            }
+        }
+        cleaned.push(result_chars[ri]);
+        ri += 1;
+    }
+
+    cleaned
 }
 
 /// Strip common port prefixes (i_, o_, io_).
@@ -337,4 +357,51 @@ pub fn check_wavedrom(
     }
 
     ret
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preprocess_json5_trailing_comma_object() {
+        let input = r#"{signal: [{ name: "clk", wave: "p...",},]}"#;
+        let result = preprocess_json5(input);
+        assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
+
+    #[test]
+    fn preprocess_json5_trailing_comma_array() {
+        let input = r#"{signal: ["group", {name: "a", wave: "01."},]}"#;
+        let result = preprocess_json5(input);
+        assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
+
+    #[test]
+    fn preprocess_json5_trailing_comma_nested() {
+        let input = r#"{signal: [{name: "clk", wave: "p...",}, {name: "data", wave: "x.=.",},],}"#;
+        let result = preprocess_json5(input);
+        assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
+
+    #[test]
+    fn preprocess_json5_trailing_comma_with_whitespace() {
+        let input = "{ signal: [ { name: \"clk\", wave: \"p\" } , \n] , \n}";
+        let result = preprocess_json5(input);
+        assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
+
+    #[test]
+    fn preprocess_json5_no_trailing_comma() {
+        let input = r#"{signal: [{name: "clk", wave: "p..."}]}"#;
+        let result = preprocess_json5(input);
+        assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
+
+    #[test]
+    fn preprocess_json5_single_quotes() {
+        let input = "{ signal: [{ name: 'clk', wave: 'p...' }] }";
+        let result = preprocess_json5(input);
+        assert!(serde_json::from_str::<serde_json::Value>(&result).is_ok());
+    }
 }
