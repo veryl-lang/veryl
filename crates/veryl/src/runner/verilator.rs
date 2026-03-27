@@ -1,4 +1,4 @@
-use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
+use crate::runner::{Runner, copy_wave, new_cmd, remap_msg_by_regex};
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -187,7 +187,7 @@ impl Runner for Verilator {
         let rt = Runtime::new().unwrap();
 
         rt.block_on(async {
-            let compile = Command::new("verilator")
+            let compile = new_cmd("verilator")
                 .args(&opt)
                 .arg("-f")
                 .arg(metadata.filelist_path())

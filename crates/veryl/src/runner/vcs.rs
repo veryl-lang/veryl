@@ -1,4 +1,4 @@
-use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
+use crate::runner::{Runner, copy_wave, new_cmd, remap_msg_by_regex};
 use futures::prelude::*;
 use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -156,7 +156,7 @@ impl Runner for Vcs {
         let rt = Runtime::new().unwrap();
 
         rt.block_on(async {
-            let compile = Command::new("vcs")
+            let compile = new_cmd("vcs")
                 .arg("-sverilog")
                 .arg("-f")
                 .arg(metadata.filelist_path())

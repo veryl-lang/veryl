@@ -1,11 +1,11 @@
-use crate::runner::{Runner, copy_wave, remap_msg_by_regex};
+use crate::runner::{Runner, copy_wave, new_cmd, remap_msg_by_regex};
 use futures::prelude::*;
 use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::process::Stdio;
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use veryl_metadata::{Metadata, WaveFormFormat};
@@ -193,7 +193,7 @@ impl Runner for Dsim {
         let rt = Runtime::new().unwrap();
 
         rt.block_on(async {
-            let compile = Command::new("dsim")
+            let compile = new_cmd("dsim")
                 .arg("-genimage")
                 .arg(test.to_string())
                 .arg("-sv2017")
@@ -218,7 +218,7 @@ impl Runner for Dsim {
         info!("Executing test ({test})");
 
         rt.block_on(async {
-            let simulate = Command::new("dsim")
+            let simulate = new_cmd("dsim")
                 .arg("-image")
                 .arg(test.to_string())
                 .args(&metadata.test.dsim.simulate_args)

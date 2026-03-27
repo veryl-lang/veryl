@@ -5,6 +5,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tokio::process::Command;
 use veryl_metadata::{Metadata, WaveFormTarget};
 use veryl_parser::resource_table::{PathId, StrId};
 use veryl_sourcemap::SourceMap;
@@ -19,6 +20,19 @@ pub use dsim::*;
 pub use vcs::*;
 pub use verilator::*;
 pub use vivado::*;
+
+fn new_cmd(program: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", program]);
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(program)
+    }
+}
 
 pub trait Runner {
     fn run(
