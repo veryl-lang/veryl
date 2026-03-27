@@ -7,6 +7,7 @@ use crate::ir::VarId;
 use crate::ir::VariableMeta;
 use crate::ir::event::Event;
 use crate::ir::statement::StmtDep;
+use crate::ir::variable::VarOffset;
 use crate::simulator_error::SimulatorError;
 use memmap2::Mmap;
 use veryl_parser::resource_table::StrId;
@@ -20,8 +21,8 @@ pub struct ScopeContext {
 /// the variable offsets it reads/writes (used for dependency analysis).
 pub struct JitCachedFunc {
     pub func: FuncPtr,
-    pub input_offsets: Vec<(bool, isize)>,
-    pub output_offsets: Vec<(bool, isize)>,
+    pub input_offsets: Vec<VarOffset>,
+    pub output_offsets: Vec<VarOffset>,
     /// Canonical (current) offsets for FF variables written by this function.
     pub ff_canonical_offsets: Vec<isize>,
     pub stmt_deps: Vec<StmtDep>,

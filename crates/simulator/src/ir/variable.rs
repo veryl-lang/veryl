@@ -5,6 +5,45 @@ use veryl_analyzer::ir::{Type, VarId, VarPath};
 use veryl_analyzer::value::Value;
 use veryl_parser::resource_table::StrId;
 
+/// Typed variable offset that encodes buffer identity (FF or Comb).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum VarOffset {
+    Ff(isize),
+    Comb(isize),
+}
+
+impl VarOffset {
+    #[inline]
+    pub fn is_ff(&self) -> bool {
+        matches!(self, VarOffset::Ff(_))
+    }
+    #[inline]
+    pub fn raw(&self) -> isize {
+        match self {
+            VarOffset::Ff(o) | VarOffset::Comb(o) => *o,
+        }
+    }
+    #[inline]
+    pub fn adjust(&self, ff_delta: isize, comb_delta: isize) -> Self {
+        match self {
+            VarOffset::Ff(o) => VarOffset::Ff(o + ff_delta),
+            VarOffset::Comb(o) => VarOffset::Comb(o + comb_delta),
+        }
+    }
+    #[inline]
+    pub fn new(is_ff: bool, offset: isize) -> Self {
+        if is_ff {
+            VarOffset::Ff(offset)
+        } else {
+            VarOffset::Comb(offset)
+        }
+    }
+    #[inline]
+    pub fn to_pair(&self) -> (bool, isize) {
+        (self.is_ff(), self.raw())
+    }
+}
+
 /// Returns native storage width in bytes: 4 for width <= 32, 8 for 33-64, 16 for 65-128,
 /// and 8-byte aligned for >128.
 pub fn native_bytes(width: usize) -> usize {
@@ -175,13 +214,23 @@ impl fmt::Display for Variable {
 
 #[derive(Clone, Debug)]
 pub struct VariableElement {
-    pub is_ff: bool,
     /// Native storage width in bytes (4 or 8)
     pub native_bytes: usize,
-    /// byte offset of current value from ff_buf[0] (is_ff) or comb_buf[0] (!is_ff)
-    pub current_offset: isize,
+    /// Typed byte offset of current value from ff_buf[0] (Ff) or comb_buf[0] (Comb)
+    pub current: VarOffset,
     /// byte offset of next value from ff_buf[0]; meaningful only when is_ff == true
     pub next_offset: isize,
+}
+
+impl VariableElement {
+    #[inline]
+    pub fn is_ff(&self) -> bool {
+        self.current.is_ff()
+    }
+    #[inline]
+    pub fn current_offset(&self) -> isize {
+        self.current.raw()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -199,9 +248,9 @@ impl VariableMeta {
     /// Returns (base_current_offset, base_next_offset, stride, is_ff) for dynamic indexing.
     pub fn dynamic_index_info(&self) -> Option<(isize, isize, isize, bool)> {
         let first = self.elements.first()?;
-        let is_ff = first.is_ff;
+        let is_ff = first.is_ff();
         let stride = if self.elements.len() > 1 {
-            self.elements[1].current_offset - self.elements[0].current_offset
+            self.elements[1].current_offset() - self.elements[0].current_offset()
         } else {
             // Single-element: compute stride from native_bytes
             // FF: [current vs][next vs] → stride = 2 * vs
@@ -210,14 +259,14 @@ impl VariableMeta {
             // we need to provide a sensible stride for bounds checking.
             // Use the offset gap between current and next as the half-stride for FF.
             if is_ff {
-                (first.next_offset - first.current_offset) * 2
+                (first.next_offset - first.current_offset()) * 2
             } else {
                 // Cannot determine from single element; use value_size as stride
                 // This only matters for dynamic index bounds, so any positive value works.
                 first.native_bytes as isize
             }
         };
-        Some((first.current_offset, first.next_offset, stride, is_ff))
+        Some((first.current_offset(), first.next_offset, stride, is_ff))
     }
 }
 
@@ -261,18 +310,16 @@ pub fn create_variable_meta(
                 let current_offset = ff_pos;
                 let next_offset = ff_pos + vs as isize;
                 elements.push(VariableElement {
-                    is_ff: true,
                     native_bytes: nb,
-                    current_offset,
+                    current: VarOffset::Ff(current_offset),
                     next_offset,
                 });
                 ff_pos += (vs * 2) as isize; // current + next
             } else {
                 let current_offset = comb_pos;
                 elements.push(VariableElement {
-                    is_ff: false,
                     native_bytes: nb,
-                    current_offset,
+                    current: VarOffset::Comb(current_offset),
                     next_offset: 0,
                 });
                 comb_pos += vs as isize;
@@ -290,6 +337,33 @@ pub fn create_variable_meta(
             initial_values,
         };
         variables.insert(*k, meta);
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let ff_end = ff_pos;
+        let comb_end = comb_pos;
+        for meta in variables.values() {
+            for elem in &meta.elements {
+                let off = elem.current_offset();
+                match elem.current {
+                    VarOffset::Ff(_) => debug_assert!(
+                        off >= ff_start_bytes && off < ff_end,
+                        "FF offset {} out of range [{}, {})",
+                        off,
+                        ff_start_bytes,
+                        ff_end
+                    ),
+                    VarOffset::Comb(_) => debug_assert!(
+                        off >= comb_start_bytes && off < comb_end,
+                        "Comb offset {} out of range [{}, {})",
+                        off,
+                        comb_start_bytes,
+                        comb_end
+                    ),
+                }
+            }
+        }
     }
 
     Some((

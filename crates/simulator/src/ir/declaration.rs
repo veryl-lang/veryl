@@ -4,7 +4,7 @@ use crate::cranelift;
 use crate::ir::context::{Context, Conv, JitCacheEntry, JitCachedFunc, ScopeContext};
 use crate::ir::expression::ExpressionContext;
 use crate::ir::statement::{CompiledBlockStatement, ProtoAssignStatement};
-use crate::ir::variable::{ModuleVariableMeta, create_variable_meta};
+use crate::ir::variable::{ModuleVariableMeta, VarOffset, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use crate::simulator_error::SimulatorError;
 use std::collections::VecDeque;
@@ -14,7 +14,7 @@ use veryl_parser::token_range::TokenRange;
 /// Collect variable offsets from statements, filtering out internal variables
 /// (those that appear in both inputs and outputs) to avoid dependency cycles
 /// when the compiled block is used in analyze_dependency.
-type VarOffsets = Vec<(bool, isize)>;
+type VarOffsets = Vec<VarOffset>;
 
 /// Collect canonical (current) FF offsets written by these statements.
 fn gather_ff_canonical(stmts: &[ProtoStatement]) -> Vec<isize> {
@@ -32,11 +32,11 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
         s.gather_variable_offsets(&mut all_inputs, &mut all_outputs);
     }
 
-    let input_set: HashSet<(bool, isize)> = all_inputs.iter().cloned().collect();
-    let output_set: HashSet<(bool, isize)> = all_outputs.iter().cloned().collect();
+    let input_set: HashSet<VarOffset> = all_inputs.iter().cloned().collect();
+    let output_set: HashSet<VarOffset> = all_outputs.iter().cloned().collect();
     // Remove internal variables (both read and written) from inputs only.
     // Outputs are kept so dependent blocks see the dependency edge.
-    let internal: HashSet<(bool, isize)> = input_set.intersection(&output_set).cloned().collect();
+    let internal: HashSet<VarOffset> = input_set.intersection(&output_set).cloned().collect();
     all_inputs.retain(|x| !internal.contains(x));
     all_inputs.dedup();
     all_outputs.dedup();
@@ -59,8 +59,8 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
     }
 
     // Gather per-statement inputs and outputs (variable offsets).
-    let mut stmt_inputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
-    let mut stmt_outputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
+    let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     for s in &statements {
         let mut ins = vec![];
         let mut outs = vec![];
@@ -70,8 +70,7 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
     }
 
     // Build a map: variable → set of statement indices that write it.
-    // Key: (is_ff, offset)
-    let mut writers: HashMap<(bool, isize), Vec<usize>> = HashMap::default();
+    let mut writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
     for (i, outs) in stmt_outputs.iter().enumerate() {
         for &key in outs {
             writers.entry(key).or_default().push(i);
@@ -315,8 +314,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let mut outs = vec![];
                     let mut ins = vec![];
                     s.gather_variable_offsets(&mut ins, &mut outs);
-                    for (_, off) in outs {
-                        inst_written_offsets.insert(off);
+                    for off in outs {
+                        inst_written_offsets.insert(off.raw());
                     }
                 }
             }
@@ -325,8 +324,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if matches!(decl, air::Declaration::Comb(_)) {
                 for s in &proto_decl.comb_statements {
                     if let ProtoStatement::Assign(a) = s
-                        && !a.dst_is_ff
-                        && !inst_written_offsets.contains(&a.dst_offset)
+                        && !a.dst.is_ff()
+                        && !inst_written_offsets.contains(&a.dst.raw())
                     {
                         own_new_assigns.push(s.clone());
                     }
@@ -352,12 +351,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let ff_delta = ff_start_bytes - cache_entry.ref_ff_start_bytes;
                 let comb_delta = comb_start_bytes - cache_entry.ref_comb_start_bytes;
 
-                let adjust = |offsets: &[(bool, isize)]| -> Vec<(bool, isize)> {
+                let adjust = |offsets: &[VarOffset]| -> Vec<VarOffset> {
                     offsets
                         .iter()
-                        .map(|(is_ff, off)| {
-                            (*is_ff, off + if *is_ff { ff_delta } else { comb_delta })
-                        })
+                        .map(|off| off.adjust(ff_delta, comb_delta))
                         .collect()
                 };
 
@@ -403,7 +400,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 };
 
                 if !cache_entry.merged_funcs.is_empty() {
-                    // Re-add own assign statements whose dst_offset is NOT
+                    // Re-add own assign statements whose dst is NOT
                     // already handled by the merged JIT (full_internal_comb).
                     if let Some(ref full) = full_internal_comb {
                         let mut full_outputs = HashSet::default();
@@ -411,13 +408,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             let mut outs = vec![];
                             let mut ins = vec![];
                             s.gather_variable_offsets(&mut ins, &mut outs);
-                            for (_, off) in outs {
-                                full_outputs.insert(off);
+                            for off in outs {
+                                full_outputs.insert(off.raw());
                             }
                         }
                         for s in &own_new_assigns {
                             if let ProtoStatement::Assign(a) = s
-                                && !full_outputs.contains(&a.dst_offset)
+                                && !full_outputs.contains(&a.dst.raw())
                             {
                                 all_post_comb_fns.push(s.clone());
                             }
@@ -579,8 +576,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         for child_var_id in &output.id {
                             if let Some(child_meta) = child_variable_meta.get(child_var_id) {
                                 let element = &child_meta.elements[0];
-                                if !element.is_ff {
-                                    external_reads.insert(element.current_offset);
+                                if !element.is_ff() {
+                                    external_reads.insert(element.current_offset());
                                 }
                             }
                         }
@@ -621,8 +618,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             let mut ins = vec![];
                             let mut outs = vec![];
                             s.gather_variable_offsets(&mut ins, &mut outs);
-                            for (_, off) in ins {
-                                event_reads.insert(off);
+                            for off in ins {
+                                event_reads.insert(off.raw());
                             }
                         }
 
@@ -632,12 +629,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         let mut store_elim = HashSet::default();
                         for s in &opt_comb {
                             if let ProtoStatement::Assign(a) = s
-                                && !a.dst_is_ff
+                                && !a.dst.is_ff()
                                 && a.select.is_none()
-                                && !external_reads.contains(&a.dst_offset)
-                                && !event_reads.contains(&a.dst_offset)
+                                && !external_reads.contains(&a.dst.raw())
+                                && !event_reads.contains(&a.dst.raw())
                             {
-                                store_elim.insert((a.dst_is_ff, a.dst_offset as i32));
+                                store_elim.insert(a.dst);
                             }
                         }
 
@@ -689,7 +686,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 full_internal_comb = if !merged_funcs.is_empty() {
                     let full = all_comb_statements.clone();
                     all_comb_statements.clear();
-                    // Re-add own assign statements whose dst_offset is NOT
+                    // Re-add own assign statements whose dst is NOT
                     // already in the full internal comb (merged JIT handles those).
                     {
                         let mut full_outputs = HashSet::default();
@@ -697,13 +694,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             let mut outs = vec![];
                             let mut ins = vec![];
                             s.gather_variable_offsets(&mut ins, &mut outs);
-                            for (_, off) in outs {
-                                full_outputs.insert(off);
+                            for off in outs {
+                                full_outputs.insert(off.raw());
                             }
                         }
                         for s in &own_new_assigns {
                             if let ProtoStatement::Assign(a) = s
-                                && !full_outputs.contains(&a.dst_offset)
+                                && !full_outputs.contains(&a.dst.raw())
                             {
                                 all_post_comb_fns.push(s.clone());
                             }
@@ -771,8 +768,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let mut outs = vec![];
                 let mut ins = vec![];
                 s.gather_variable_offsets(&mut ins, &mut outs);
-                for (_, off) in outs {
-                    post_comb_written.insert(off);
+                for off in outs {
+                    post_comb_written.insert(off.raw());
                 }
             }
             // Add own assigns that READ from post_comb-written offsets
@@ -782,7 +779,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let mut outs = vec![];
                     s.gather_variable_offsets(&mut ins, &mut outs);
                     let reads_post_comb =
-                        ins.iter().any(|(_, off)| post_comb_written.contains(off));
+                        ins.iter().any(|off| post_comb_written.contains(&off.raw()));
                     if reads_post_comb {
                         all_post_comb_fns.push(s.clone());
                     }
@@ -793,7 +790,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let mut ins = vec![];
                 let mut outs = vec![];
                 s.gather_variable_offsets(&mut ins, &mut outs);
-                let reads_post_comb = ins.iter().any(|(_, off)| post_comb_written.contains(off));
+                let reads_post_comb = ins.iter().any(|off| post_comb_written.contains(&off.raw()));
                 if reads_post_comb {
                     if let ProtoStatement::CompiledBlock(cb) = s
                         && !cb.original_stmts.is_empty()
@@ -824,8 +821,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         let child_element = &child_meta.elements[i];
                         let parent_element = &parent_meta.elements[i];
                         let parent_expr = ProtoExpression::Variable {
-                            offset: parent_element.current_offset,
-                            is_ff: parent_element.is_ff,
+                            var_offset: parent_element.current,
                             select: None,
                             width: child_meta.width,
                             expr_context: ExpressionContext {
@@ -834,8 +830,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             },
                         };
                         all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                            dst_offset: child_element.current_offset,
-                            dst_is_ff: false,
+                            dst: child_element.current,
                             dst_width: child_meta.width,
                             select: None,
                             rhs_select: None,
@@ -850,8 +845,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
                 let element = &child_meta.elements[0];
                 all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                    dst_offset: element.current_offset,
-                    dst_is_ff: false,
+                    dst: element.current,
                     dst_width: child_meta.width,
                     select: None,
                     rhs_select: None,
@@ -900,8 +894,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let parent_element = &parent_meta.elements[parent_elem_idx];
 
                     let child_expr = ProtoExpression::Variable {
-                        offset: child_element.current_offset,
-                        is_ff: child_element.is_ff,
+                        var_offset: child_element.current,
                         select: None,
                         width: child_meta.width,
                         expr_context: ExpressionContext {
@@ -910,20 +903,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         },
                     };
 
-                    let (dst_offset, dst_is_ff) = if parent_element.is_ff {
-                        (parent_element.next_offset, true)
+                    let dst_var = if parent_element.is_ff() {
+                        VarOffset::Ff(parent_element.next_offset)
                     } else {
-                        (parent_element.current_offset, false)
+                        VarOffset::Comb(parent_element.current_offset())
                     };
 
                     let stmt = ProtoStatement::Assign(ProtoAssignStatement {
-                        dst_offset,
-                        dst_is_ff,
+                        dst: dst_var,
                         dst_width: parent_meta.width,
                         select: None,
                         rhs_select: None,
                         expr: child_expr,
-                        dst_ff_current_offset: parent_element.current_offset,
+                        dst_ff_current_offset: parent_element.current_offset(),
                         token: TokenRange::default(),
                     });
 
@@ -932,7 +924,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     // When this module has merged functions, also add comb
                     // output port connections to post_comb_fns so that child
                     // comb values propagate to parent before events fire.
-                    if needs_post_comb_propagation && !dst_is_ff {
+                    if needs_post_comb_propagation && !dst_var.is_ff() {
                         all_post_comb_fns.push(stmt);
                     }
                 }

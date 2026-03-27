@@ -17,7 +17,7 @@ pub use statement::{
     SystemFunctionCall, TbMethodKind, parse_hex_content,
 };
 pub use variable::{
-    ModuleVariableMeta, ModuleVariables, Variable, VariableElement, VariableMeta,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
     create_variable_meta, native_bytes, read_native_value, read_payload, value_size,
     write_native_value, write_payload,
 };

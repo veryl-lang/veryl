@@ -8198,10 +8198,7 @@ fn ordering_long_chain() {
         for i in 0u64..20 {
             dual.set("a", Value::new(i, 32, false));
             dual.step_synthetic();
-            assert_eq!(
-                dual.get("h").unwrap(),
-                Value::new(i + 7, 32, false)
-            );
+            assert_eq!(dual.get("h").unwrap(), Value::new(i + 7, 32, false));
         }
     });
 }
@@ -8356,10 +8353,7 @@ fn ordering_ff_to_comb_chain() {
             dual.step_clock("clk");
             let cnt = i + 1;
             let expected = (cnt + 10) * 2 + 5;
-            assert_eq!(
-                dual.get("result").unwrap(),
-                Value::new(expected, 32, false)
-            );
+            assert_eq!(dual.get("result").unwrap(), Value::new(expected, 32, false));
         }
     });
 }
@@ -8406,10 +8400,7 @@ fn ordering_three_level_hierarchy() {
             dual.set("a", Value::new(i, 32, false));
             dual.step_synthetic();
             // Leaf: x+1, Mid: (x+1)+1, Top: ((x+1)+1)+1 = x+3
-            assert_eq!(
-                dual.get("result").unwrap(),
-                Value::new(i + 3, 32, false)
-            );
+            assert_eq!(dual.get("result").unwrap(), Value::new(i + 3, 32, false));
         }
     });
 }
@@ -8617,7 +8608,13 @@ fn required_passes_bounded_for_hierarchy() {
     }
     "#;
 
-    let ir = analyze(code, &Config { use_jit: true, ..Default::default() });
+    let ir = analyze(
+        code,
+        &Config {
+            use_jit: true,
+            ..Default::default()
+        },
+    );
     assert!(
         ir.required_comb_passes <= 2,
         "expected required_comb_passes <= 2, got {} — CB atomic handling may be broken",
@@ -8671,6 +8668,274 @@ fn dual_cross_child_forwarding() {
                 dual.get("result").unwrap(),
                 Value::new((i + 1) * 2 + 100, 32, false)
             );
+        }
+    });
+}
+
+// ============================================================
+// is_ff classification edge case tests
+// ============================================================
+
+/// Two always_comb blocks in the same module with variable flow.
+/// mid must be is_ff=false (assigned and read both in comb context).
+#[test]
+fn is_ff_two_always_comb_same_module() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var mid: logic<32>;
+        always_comb { mid = a + 1; }
+        always_comb { result = mid * 2; }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..10 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new((i + 1) * 2, 32, false)
+            );
+        }
+    });
+}
+
+/// Comb variable propagated to child module input port.
+/// computed must remain is_ff=false and reach child correctly.
+#[test]
+fn is_ff_comb_to_child_port() {
+    let code = r#"
+    module Child (
+        i: input  logic<32>,
+        o: output logic<32>,
+    ) {
+        assign o = i + 100;
+    }
+
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var computed: logic<32>;
+        always_comb { computed = a * 3; }
+        inst u: Child (i: computed, o: result);
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..10 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new(i * 3 + 100, 32, false)
+            );
+        }
+    });
+}
+
+/// Single FF variable consumed by multiple comb assign statements.
+#[test]
+fn is_ff_one_ff_multiple_comb_readers() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        sum: output logic<32>,
+        diff: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset { cnt = 0; } else { cnt += 1; }
+        }
+        assign sum  = cnt + 10;
+        assign diff = cnt - 1;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            // After step: cnt = i+1
+            let cnt = i + 1;
+            assert_eq!(dual.get("sum").unwrap(), Value::new(cnt + 10, 32, false));
+            assert_eq!(
+                dual.get("diff").unwrap(),
+                Value::new(cnt.wrapping_sub(1) & 0xFFFF_FFFF, 32, false)
+            );
+        }
+    });
+}
+
+/// DualSimulator version of simple_ff: basic FF counter.
+#[test]
+fn dual_simple_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                out = 0;
+            } else {
+                out += 1;
+            }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..20 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(dual.get("out").unwrap(), Value::new(i + 1, 32, false));
+        }
+    });
+}
+
+/// DualSimulator version of inst_ff: FF in child module.
+#[test]
+fn dual_inst_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        inst u: Inner (clk, rst, out);
+    }
+
+    module Inner (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { out = 0; } else { out += 1; }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..20 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(dual.get("out").unwrap(), Value::new(i + 1, 32, false));
+        }
+    });
+}
+
+// ============================================================
+// is_ff edge case: if_reset branch semantics
+// ============================================================
+
+/// Variable assigned only in reset branch of always_ff should be FF.
+/// The normal branch reads but does not assign — is_ff must still be true.
+#[test]
+fn is_ff_reset_branch_only_assign() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        var state: logic<32>;
+        always_ff {
+            if_reset {
+                state = 32'd42;
+            }
+        }
+        assign out = state;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        assert_eq!(dual.get("out").unwrap(), Value::new(42, 32, false));
+        // state should remain 42 since normal branch has no assignment
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("out").unwrap(), Value::new(42, 32, false));
+    });
+}
+
+/// Variable assigned in both reset and normal branches of always_ff,
+/// read by always_comb. Verifies FF classification and correct timing.
+#[test]
+fn is_ff_both_branches_with_comb_reader() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        doubled: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        var tmp: logic<32>;
+        always_comb {
+            tmp = cnt * 2;
+        }
+        assign doubled = tmp;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(
+                dual.get("doubled").unwrap(),
+                Value::new((i + 1) * 2, 32, false)
+            );
+        }
+    });
+}
+
+/// Verify that input/output port variables are not treated as FF
+/// even when referenced across always_ff and always_comb boundaries.
+#[test]
+fn is_ff_port_variables_not_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a: input  logic<32>,
+        b: output logic<32>,
+    ) {
+        // b is an output port assigned in always_comb (not FF)
+        always_comb {
+            b = a + 1;
+        }
+    }
+    "#;
+
+    // Pure comb: verify with DualSimulator
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..10 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(dual.get("b").unwrap(), Value::new(i + 1, 32, false));
         }
     });
 }

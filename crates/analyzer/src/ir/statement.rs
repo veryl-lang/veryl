@@ -101,6 +101,30 @@ impl Statement {
         }
     }
 
+    pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        match self {
+            Statement::Assign(x) => x.gather_ff_comb_assign(context, table, decl),
+            Statement::If(x) => {
+                for s in &x.true_side {
+                    s.gather_ff_comb_assign(context, table, decl);
+                }
+                for s in &x.false_side {
+                    s.gather_ff_comb_assign(context, table, decl);
+                }
+            }
+            Statement::IfReset(x) => {
+                for s in &x.true_side {
+                    s.gather_ff_comb_assign(context, table, decl);
+                }
+                for s in &x.false_side {
+                    s.gather_ff_comb_assign(context, table, decl);
+                }
+            }
+            Statement::FunctionCall(x) => x.gather_ff_comb_assign(context, table, decl),
+            _ => {}
+        }
+    }
+
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
             Statement::Assign(x) => x.set_index(index),
@@ -246,6 +270,20 @@ impl AssignDestination {
         }
     }
 
+    pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        if let Some(variable) = context.get_variable_info(self.id) {
+            if let Some(index) = self.index.eval_value(context) {
+                if let Some(index) = variable.r#type.array.calc_index(&index) {
+                    table.insert_assigned_comb(self.id, index, decl);
+                }
+            } else if let Some(total_array) = variable.r#type.total_array() {
+                for i in 0..total_array {
+                    table.insert_assigned_comb(self.id, i, decl);
+                }
+            }
+        }
+    }
+
     pub fn set_index(&mut self, index: &VarIndex) {
         self.index.add_prelude(index);
     }
@@ -298,6 +336,12 @@ impl AssignStatement {
         self.expr.gather_ff(context, table, decl);
         for dst in &self.dst {
             dst.gather_ff(context, table, decl);
+        }
+    }
+
+    pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for dst in &self.dst {
+            dst.gather_ff_comb_assign(context, table, decl);
         }
     }
 

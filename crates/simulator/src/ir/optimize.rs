@@ -4,14 +4,15 @@ use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::{
     ProtoAssignStatement, ProtoIfStatement, ProtoStatement, ProtoSystemFunctionCall,
 };
+use crate::ir::variable::VarOffset;
 
-type CombKey = (bool, isize); // (is_ff, offset)
+type CombKey = VarOffset;
 
 /// Count how many times each variable offset is read within an expression.
 fn count_expr_reads(expr: &ProtoExpression, counts: &mut HashMap<CombKey, usize>) {
     match expr {
-        ProtoExpression::Variable { offset, is_ff, .. } => {
-            *counts.entry((*is_ff, *offset)).or_insert(0) += 1;
+        ProtoExpression::Variable { var_offset, .. } => {
+            *counts.entry(*var_offset).or_insert(0) += 1;
         }
         ProtoExpression::Value { .. } => {}
         ProtoExpression::Unary { x, .. } => count_expr_reads(x, counts),
@@ -48,7 +49,7 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
             count_expr_reads(&x.expr, counts);
             // If select is present, the dst is also read (read-modify-write)
             if x.select.is_some() {
-                *counts.entry((x.dst_is_ff, x.dst_offset)).or_insert(0) += 1;
+                *counts.entry(x.dst).or_insert(0) += 1;
             }
         }
         ProtoStatement::AssignDynamic(x) => {
@@ -79,8 +80,8 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::CompiledBlock(x) => {
-            for (is_ff, off) in &x.input_offsets {
-                *counts.entry((*is_ff, *off)).or_insert(0) += 1;
+            for off in &x.input_offsets {
+                *counts.entry(*off).or_insert(0) += 1;
             }
         }
         ProtoStatement::TbMethodCall { .. } => {}
@@ -94,13 +95,12 @@ fn substitute_expr(
 ) -> ProtoExpression {
     match expr {
         ProtoExpression::Variable {
-            offset,
-            is_ff,
+            var_offset,
             select,
             width,
             expr_context,
         } => {
-            if let Some(inlined) = inline_map.get(&(is_ff, offset)) {
+            if let Some(inlined) = inline_map.get(&var_offset) {
                 if select.is_none() {
                     // Direct substitution
                     inlined.clone()
@@ -108,8 +108,7 @@ fn substitute_expr(
                     // Cannot inline if the consumer applies a bit-select;
                     // keep the original variable reference
                     ProtoExpression::Variable {
-                        offset,
-                        is_ff,
+                        var_offset,
                         select,
                         width,
                         expr_context,
@@ -117,8 +116,7 @@ fn substitute_expr(
                 }
             } else {
                 ProtoExpression::Variable {
-                    offset,
-                    is_ff,
+                    var_offset,
                     select,
                     width,
                     expr_context,
@@ -178,7 +176,6 @@ fn substitute_expr(
         ProtoExpression::DynamicVariable {
             base_offset,
             stride,
-            is_ff,
             index_expr,
             num_elements,
             select,
@@ -187,7 +184,6 @@ fn substitute_expr(
         } => ProtoExpression::DynamicVariable {
             base_offset,
             stride,
-            is_ff,
             index_expr: Box::new(substitute_expr(*index_expr, inline_map)),
             num_elements,
             select,
@@ -260,9 +256,9 @@ pub fn optimize_merged(
                 let mut outs = vec![];
                 let mut ins = vec![];
                 stmt.gather_variable_offsets(&mut ins, &mut outs);
-                for (is_ff, off) in outs {
-                    if !is_ff {
-                        multi_write_offsets.insert(off);
+                for off in outs {
+                    if !off.is_ff() {
+                        multi_write_offsets.insert(off.raw());
                     }
                 }
             }
@@ -279,10 +275,10 @@ pub fn optimize_merged(
         let stmt = substitute_stmt(stmt, &inline_map);
 
         match &stmt {
-            ProtoStatement::Assign(x) if !x.dst_is_ff && x.select.is_none() => {
-                let key: CombKey = (false, x.dst_offset);
-                let is_external = external_reads.contains(&x.dst_offset);
-                let has_override = multi_write_offsets.contains(&x.dst_offset);
+            ProtoStatement::Assign(x) if !x.dst.is_ff() && x.select.is_none() => {
+                let key: CombKey = x.dst;
+                let is_external = external_reads.contains(&x.dst.raw());
+                let has_override = multi_write_offsets.contains(&x.dst.raw());
                 let count = read_counts.get(&key).copied().unwrap_or(0);
 
                 if count == 0 && !is_external && !has_override {

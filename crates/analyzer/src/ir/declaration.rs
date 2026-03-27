@@ -60,8 +60,10 @@ impl Declaration {
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        if let Declaration::Ff(x) = self {
-            x.gather_ff(context, table, decl);
+        match self {
+            Declaration::Ff(x) => x.gather_ff(context, table, decl),
+            Declaration::Comb(x) => x.gather_ff_comb(context, table, decl),
+            _ => {}
         }
     }
 }
@@ -89,6 +91,12 @@ impl CombDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for x in &self.statements {
             x.eval_assign(context, assign_table, AssignContext::Comb, &[]);
+        }
+    }
+
+    pub fn gather_ff_comb(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for x in &self.statements {
+            x.gather_ff_comb_assign(context, table, decl);
         }
     }
 }

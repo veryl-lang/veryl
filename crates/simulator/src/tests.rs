@@ -298,9 +298,7 @@ impl DualSimulator {
             interp_buf.len()
         );
 
-        for (offset, (jit_byte, interp_byte)) in
-            jit_buf.iter().zip(interp_buf.iter()).enumerate()
-        {
+        for (offset, (jit_byte, interp_byte)) in jit_buf.iter().zip(interp_buf.iter()).enumerate() {
             if jit_byte != interp_byte {
                 let var_name = find_var_at_offset(
                     &self.jit.ir.module_variables,
@@ -316,13 +314,7 @@ impl DualSimulator {
                      JIT byte:    {:#04x}\n\
                      Interp byte: {:#04x}\n\
                      use_4state: {}",
-                    self.cycle,
-                    label,
-                    offset,
-                    var_name,
-                    jit_byte,
-                    interp_byte,
-                    self.use_4state,
+                    self.cycle, label, offset, var_name, jit_byte, interp_byte, self.use_4state,
                 );
             }
         }

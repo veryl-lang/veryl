@@ -3,7 +3,7 @@ use crate::HashSet;
 use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::variable::{
-    ModuleVariableMeta, ModuleVariables, Variable, create_variable_meta, value_size,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
     write_native_value,
 };
 use crate::ir::{
@@ -87,8 +87,9 @@ fn fill_buffers_recursive(
     for (_, meta) in &sorted {
         for (element, initial) in meta.elements.iter().zip(meta.initial_values.iter()) {
             let nb = element.native_bytes;
-            if element.is_ff {
-                let cur = &mut ff_values[element.current_offset as usize..] as *mut [u8] as *mut u8;
+            if element.is_ff() {
+                let cur =
+                    &mut ff_values[element.current_offset() as usize..] as *mut [u8] as *mut u8;
                 let nxt = &mut ff_values[element.next_offset as usize..] as *mut [u8] as *mut u8;
                 unsafe {
                     write_native_value(cur, nb, use_4state, initial);
@@ -96,7 +97,7 @@ fn fill_buffers_recursive(
                 }
             } else {
                 let cur =
-                    &mut comb_values[element.current_offset as usize..] as *mut [u8] as *mut u8;
+                    &mut comb_values[element.current_offset() as usize..] as *mut [u8] as *mut u8;
                 unsafe {
                     write_native_value(cur, nb, use_4state, initial);
                 }
@@ -122,12 +123,12 @@ fn create_variables_recursive(
 
         for element in &meta.elements {
             let current = unsafe {
-                let base = if element.is_ff { ff_base } else { comb_base };
-                base.add(element.current_offset as usize)
+                let base = if element.is_ff() { ff_base } else { comb_base };
+                base.add(element.current_offset() as usize)
             };
             current_values.push(current);
 
-            if element.is_ff {
+            if element.is_ff() {
                 let next = unsafe { ff_base.add(element.next_offset as usize) };
                 next_values.push(next);
             }
@@ -168,14 +169,14 @@ fn collect_ff_swap_entries(
     let mut entries = vec![];
     for meta in module_meta.variable_meta.values() {
         for element in &meta.elements {
-            if element.is_ff {
+            if element.is_ff() {
                 let include = match filter {
-                    Some(offsets) => offsets.contains(&element.current_offset),
+                    Some(offsets) => offsets.contains(&element.current_offset()),
                     None => true,
                 };
                 if include {
                     let vs = value_size(element.native_bytes, use_4state);
-                    entries.push((element.current_offset as usize, vs));
+                    entries.push((element.current_offset() as usize, vs));
                 }
             }
         }
@@ -381,7 +382,7 @@ pub(crate) fn analyze_dependency(
 ) -> Result<Vec<ProtoStatement>, SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
-        Var(bool, isize), // (is_ff, offset)
+        Var(VarOffset),
         Statement(usize),
     }
 
@@ -428,13 +429,13 @@ pub(crate) fn analyze_dependency(
                 let stmt = dag.add_node(stmt_node);
                 dag_nodes.insert(stmt_node, stmt);
 
-                let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+                let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
                 let mut ok = true;
                 for var_key in inputs {
                     if output_set.contains(&var_key) {
                         continue;
                     }
-                    let var_node = Node::Var(var_key.0, var_key.1);
+                    let var_node = Node::Var(var_key);
                     let var = *dag_nodes
                         .entry(var_node)
                         .or_insert_with(|| dag.add_node(var_node));
@@ -447,7 +448,7 @@ pub(crate) fn analyze_dependency(
                     return Err(*id);
                 }
                 for var_key in outputs {
-                    let var_node = Node::Var(var_key.0, var_key.1);
+                    let var_node = Node::Var(var_key);
                     let var = *dag_nodes
                         .entry(var_node)
                         .or_insert_with(|| dag.add_node(var_node));
@@ -480,17 +481,16 @@ pub(crate) fn analyze_dependency(
     }
 
     // Phase 2: Expand all CompiledBlocks with original_stmts and retry.
-    let has_expandable = table.values().any(
-        |x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()),
-    );
+    let has_expandable = table
+        .values()
+        .any(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()));
 
     if has_expandable {
         let mut next_id = table.keys().max().copied().unwrap_or(0) + 1;
         let expandable_ids: Vec<usize> = table
             .iter()
             .filter_map(|(id, x)| {
-                if matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
-                {
+                if matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()) {
                     Some(*id)
                 } else {
                     None
@@ -535,12 +535,12 @@ pub(crate) fn analyze_dependency(
             let stmt_node = Node::Statement(*id);
             let stmt = dag2.add_node(stmt_node);
             dag_nodes2.insert(stmt_node, stmt);
-            let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+            let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
             for var_key in inputs {
                 if output_set.contains(&var_key) {
                     continue;
                 }
-                let var_node = Node::Var(var_key.0, var_key.1);
+                let var_node = Node::Var(var_key);
                 let var = *dag_nodes2
                     .entry(var_node)
                     .or_insert_with(|| dag2.add_node(var_node));
@@ -554,7 +554,7 @@ pub(crate) fn analyze_dependency(
                 }
             }
             for var_key in outputs {
-                let var_node = Node::Var(var_key.0, var_key.1);
+                let var_node = Node::Var(var_key);
                 let var = *dag_nodes2
                     .entry(var_node)
                     .or_insert_with(|| dag2.add_node(var_node));
@@ -612,12 +612,12 @@ pub(crate) fn analyze_dependency(
         let stmt = dag_relaxed.add_node(stmt_node);
         dag_nodes_relaxed.insert(stmt_node, stmt);
 
-        let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+        let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
         for var_key in &inputs {
             if output_set.contains(var_key) {
                 continue;
             }
-            let var_node = Node::Var(var_key.0, var_key.1);
+            let var_node = Node::Var(*var_key);
             let var = *dag_nodes_relaxed
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
@@ -639,7 +639,7 @@ pub(crate) fn analyze_dependency(
             }
         }
         for var_key in &outputs {
-            let var_node = Node::Var(var_key.0, var_key.1);
+            let var_node = Node::Var(*var_key);
             let var = *dag_nodes_relaxed
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
@@ -693,7 +693,7 @@ pub(crate) fn sort_ff_event(
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
         /// Variable node. For FF, offset is the canonical current_offset.
-        Var(bool, isize),
+        Var(VarOffset),
         Statement(usize),
     }
 
@@ -721,8 +721,8 @@ pub(crate) fn sort_ff_event(
         let ff_write_canonical: HashSet<isize> = x.gather_ff_canonical_offsets();
         let ff_read_offsets: HashSet<isize> = inputs
             .iter()
-            .filter(|(is_ff, _)| *is_ff)
-            .map(|(_, off)| *off)
+            .filter(|off| off.is_ff())
+            .map(|off| off.raw())
             .collect();
         let self_ref: HashSet<isize> = ff_read_offsets
             .intersection(&ff_write_canonical)
@@ -734,13 +734,13 @@ pub(crate) fn sort_ff_event(
         let stmt = dag.add_node(stmt_node);
         dag_nodes.insert(stmt_node, stmt);
 
-        for (is_ff, offset) in &inputs {
-            if *is_ff {
-                if self_ref.contains(offset) {
+        for var_off in &inputs {
+            if var_off.is_ff() {
+                if self_ref.contains(&var_off.raw()) {
                     continue;
                 }
                 // FF read: REVERSED edge (stmt → var)
-                let var_node = Node::Var(true, *offset);
+                let var_node = Node::Var(*var_off);
                 let var = *dag_nodes
                     .entry(var_node)
                     .or_insert_with(|| dag.add_node(var_node));
@@ -748,7 +748,7 @@ pub(crate) fn sort_ff_event(
                     return fallback_preserve_order(table);
                 }
             } else {
-                let var_node = Node::Var(false, *offset);
+                let var_node = Node::Var(*var_off);
                 let var = *dag_nodes
                     .entry(var_node)
                     .or_insert_with(|| dag.add_node(var_node));
@@ -763,7 +763,7 @@ pub(crate) fn sort_ff_event(
                 continue;
             }
             // FF write: REVERSED edge (var → stmt)
-            let var_node = Node::Var(true, *canonical);
+            let var_node = Node::Var(VarOffset::Ff(*canonical));
             let var = *dag_nodes
                 .entry(var_node)
                 .or_insert_with(|| dag.add_node(var_node));
@@ -773,9 +773,9 @@ pub(crate) fn sort_ff_event(
         }
 
         // Comb writes: normal edge (stmt → var)
-        for (is_ff, offset) in &outputs {
-            if !*is_ff {
-                let var_node = Node::Var(false, *offset);
+        for var_off in &outputs {
+            if !var_off.is_ff() {
+                let var_node = Node::Var(*var_off);
                 let var = *dag_nodes
                     .entry(var_node)
                     .or_insert_with(|| dag.add_node(var_node));
@@ -816,9 +816,9 @@ pub(crate) fn sort_ff_event(
                 let mut outputs = vec![];
                 stmt.gather_variable_offsets(&mut inputs, &mut outputs);
 
-                for (is_ff, offset) in &inputs {
-                    if *is_ff && written_ff.contains(offset) {
-                        needs_swap.insert(*offset);
+                for var_off in &inputs {
+                    if var_off.is_ff() && written_ff.contains(&var_off.raw()) {
+                        needs_swap.insert(var_off.raw());
                     }
                 }
 
@@ -860,8 +860,8 @@ fn fallback_preserve_order(
         let ff_write_canonical: HashSet<isize> = stmt.gather_ff_canonical_offsets();
         let ff_read_offsets: HashSet<isize> = inputs
             .iter()
-            .filter(|(is_ff, _)| *is_ff)
-            .map(|(_, off)| *off)
+            .filter(|off| off.is_ff())
+            .map(|off| off.raw())
             .collect();
         for off in ff_read_offsets.intersection(&ff_write_canonical) {
             needs_swap.insert(*off);
@@ -883,9 +883,9 @@ fn fallback_preserve_order(
         let mut inputs = vec![];
         let mut outputs = vec![];
         stmt.gather_variable_offsets(&mut inputs, &mut outputs);
-        for (is_ff, offset) in &inputs {
-            if *is_ff && written_ff.contains(offset) {
-                needs_swap.insert(*offset);
+        for var_off in &inputs {
+            if var_off.is_ff() && written_ff.contains(&var_off.raw()) {
+                needs_swap.insert(var_off.raw());
             }
         }
         let canonical = stmt.gather_ff_canonical_offsets();
@@ -911,19 +911,19 @@ pub(crate) fn rewrite_ff_direct(
 ) -> ProtoStatement {
     match stmt {
         ProtoStatement::Assign(mut x) => {
-            if x.dst_is_ff {
+            if x.dst.is_ff() {
                 let canonical = x.dst_ff_current_offset;
                 if !needs_swap.contains(&canonical) {
-                    x.dst_offset = canonical;
+                    x.dst = VarOffset::Ff(canonical);
                 }
             }
             ProtoStatement::Assign(x)
         }
         ProtoStatement::AssignDynamic(mut x) => {
-            if x.dst_is_ff {
+            if x.dst_base.is_ff() {
                 let canonical = x.dst_ff_current_base_offset;
                 if !needs_swap.contains(&canonical) {
-                    x.dst_base_offset = canonical;
+                    x.dst_base = VarOffset::Ff(canonical);
                 }
             }
             ProtoStatement::AssignDynamic(x)
@@ -963,7 +963,7 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
     }
 
     // For each comb variable, record the position of its last writer.
-    let mut var_last_writer: HashMap<(bool, isize), usize> = HashMap::default();
+    let mut var_last_writer: HashMap<VarOffset, usize> = HashMap::default();
     for (pos, stmt) in sorted.iter().enumerate() {
         let mut inputs = vec![];
         let mut outputs = vec![];
@@ -981,7 +981,7 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
         let mut inputs = vec![];
         let mut outputs = vec![];
         sorted[pos].gather_variable_offsets(&mut inputs, &mut outputs);
-        let output_set: HashSet<(bool, isize)> = outputs.iter().cloned().collect();
+        let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
 
         for key in &inputs {
             if output_set.contains(key) {
@@ -1014,7 +1014,7 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
 fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     // Level = max(var_level[input]) + 1. For CBs, use all offsets
     // (including FF) since gather_variable_offsets filters FF for DAG.
-    let mut var_level: HashMap<(bool, isize), usize> = HashMap::default();
+    let mut var_level: HashMap<VarOffset, usize> = HashMap::default();
     let mut levels: Vec<usize> = Vec::with_capacity(sorted.len());
 
     for stmt in &sorted {
@@ -1094,8 +1094,8 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         })
         .collect();
 
-    let mut stmt_inputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
-    let mut stmt_outputs: Vec<Vec<(bool, isize)>> = Vec::with_capacity(n);
+    let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     for s in &stmts {
         let mut ins = vec![];
         let mut outs = vec![];
@@ -1104,7 +1104,7 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         stmt_outputs.push(outs);
     }
 
-    let mut var_writers: HashMap<(bool, isize), Vec<usize>> = HashMap::default();
+    let mut var_writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
     for (i, outs) in stmt_outputs.iter().enumerate() {
         for key in outs {
             var_writers.entry(*key).or_default().push(i);
@@ -1267,8 +1267,8 @@ impl Conv<&air::Module> for ProtoModule {
         // This preserves correct internal ordering for self-referencing comb within CBs.
         let unified: Vec<ProtoStatement> = all_comb_statements
             .into_iter()
-            .chain(all_post_comb_fns.into_iter())
-            .chain(full_comb_extra.into_iter())
+            .chain(all_post_comb_fns)
+            .chain(full_comb_extra)
             .collect();
 
         let unified_sorted = analyze_dependency(unified)?;

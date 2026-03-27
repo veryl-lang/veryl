@@ -287,6 +287,19 @@ impl FunctionCall {
         for input in self.inputs.values() {
             input.gather_ff(context, table, decl);
         }
+        for dsts in self.outputs.values() {
+            for dst in dsts {
+                dst.gather_ff(context, table, decl);
+            }
+        }
+    }
+
+    pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for dsts in self.outputs.values() {
+            for dst in dsts {
+                dst.gather_ff_comb_assign(context, table, decl);
+            }
+        }
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {

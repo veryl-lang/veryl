@@ -6,6 +6,7 @@ pub struct FfTableEntry {
     pub assigned: Option<usize>,
     pub refered: Vec<usize>,
     pub is_ff: bool,
+    pub assigned_comb: Option<usize>,
 }
 
 impl FfTableEntry {
@@ -51,6 +52,7 @@ impl FfTable {
                 assigned: None,
                 refered: vec![decl],
                 is_ff: false,
+                assigned_comb: None,
             });
     }
 
@@ -62,6 +64,34 @@ impl FfTable {
                 assigned: Some(decl),
                 refered: vec![],
                 is_ff: false,
+                assigned_comb: None,
             });
+    }
+
+    pub fn insert_assigned_comb(&mut self, id: VarId, index: usize, decl: usize) {
+        self.table
+            .entry((id, index))
+            .and_modify(|x| x.assigned_comb = Some(decl))
+            .or_insert(FfTableEntry {
+                assigned: None,
+                refered: vec![],
+                is_ff: false,
+                assigned_comb: Some(decl),
+            });
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn validate(&self) {
+        for ((id, index), entry) in &self.table {
+            if let (Some(ff_decl), Some(comb_decl)) = (entry.assigned, entry.assigned_comb) {
+                log::warn!(
+                    "FfTable: variable {:?}[{}] assigned in both always_ff (decl {}) and always_comb (decl {})",
+                    id,
+                    index,
+                    ff_decl,
+                    comb_decl
+                );
+            }
+        }
     }
 }
