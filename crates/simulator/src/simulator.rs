@@ -45,8 +45,7 @@ pub struct Simulator {
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let comb_snapshot_buf = vec![0u8; ir.comb_values.len()];
-        let needs_convergence_check =
-            ir.full_comb_statements.is_some() || ir.required_comb_passes > 1;
+        let needs_convergence_check = ir.required_comb_passes > 1;
         let mut ret = Self {
             ir,
             time: 0,

@@ -25,6 +25,11 @@ pub struct JitCachedFunc {
     /// Canonical (current) offsets for FF variables written by this function.
     pub ff_canonical_offsets: Vec<isize>,
     pub stmt_deps: Vec<StmtDep>,
+    /// Original individual statements before JIT compilation.
+    /// Stored in the cache so that subsequent instances can expand
+    /// CompiledBlocks for fine-grained dependency analysis after
+    /// applying offset deltas.
+    pub original_stmts: Vec<ProtoStatement>,
 }
 
 /// Cache entry for a module type's JIT-compiled internal logic.

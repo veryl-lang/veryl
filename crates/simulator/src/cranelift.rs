@@ -42,9 +42,9 @@ pub struct Context {
     pub helper_sigs: HashMap<HelperSig, SigRef>,
     /// Calling convention for helper functions.
     pub call_conv: CallConv,
-    /// Disable readonly MemFlags hint on loads (prevents Cranelift load CSE).
-    pub no_readonly_loads: bool,
     /// Disable load_cache: every access emits a fresh load instruction.
+    /// Used for unified comb where helper functions may modify values
+    /// between cached loads.
     pub disable_load_cache: bool,
 }
 
@@ -140,9 +140,18 @@ pub fn build_binary(context: &mut ConvContext, proto: Vec<ProtoStatement>) -> Op
     build_binary_inner(context, proto, HashSet::default(), false)
 }
 
-/// Build a JIT function with load_cache and readonly hints disabled.
-/// Used for full_comb where comb values change across statements.
-pub fn build_binary_no_readonly(
+pub fn build_binary_with_store_elim_and_no_cache(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+    store_elim: HashSet<(bool, i32)>,
+) -> Option<FuncPtr> {
+    build_binary_inner(context, proto, store_elim, true)
+}
+
+/// Build a JIT function with load_cache disabled.
+/// Used for unified comb where helper functions (CompiledBlocks) may
+/// modify comb values between cached loads within the same JIT function.
+pub fn build_binary_no_cache(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
 ) -> Option<FuncPtr> {
@@ -153,7 +162,7 @@ fn build_binary_inner(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
     store_elim: HashSet<(bool, i32)>,
-    no_readonly_loads: bool,
+    disable_load_cache: bool,
 ) -> Option<FuncPtr> {
     let config = &context.config;
 
@@ -202,8 +211,7 @@ fn build_binary_inner(
         store_elim_enabled: true,
         helper_sigs: HashMap::default(),
         call_conv,
-        no_readonly_loads,
-        disable_load_cache: no_readonly_loads,
+        disable_load_cache,
     };
 
     let len = proto.len();

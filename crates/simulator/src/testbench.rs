@@ -337,14 +337,13 @@ pub fn run_native_testbench(
                 0.0
             }
         );
-        let (fc_total, fc_jit, fc_interp) = sim.ir.full_comb_stmt_count();
+        let (fc_total, fc_jit, fc_interp) = sim.ir.comb_stmt_count();
         eprintln!(
-            "  full_comb_stmts:     {} (jit:{}, interp:{})",
+            "  comb_stmts:          {} (jit:{}, interp:{})",
             fc_total, fc_jit, fc_interp
         );
         eprintln!("  comb_values_len:     {}", sim.ir.comb_values.len());
         eprintln!("  required_comb_passes:{}", sim.ir.required_comb_passes);
-        eprintln!("  use_full_comb_in_step:{}", sim.ir.use_full_comb_in_step);
         eprintln!("===========================");
     }
 

@@ -2939,10 +2939,9 @@ fn inst_array_output_port() {
     }
 }
 
-// Regression: comb-only variable read by event statements was incorrectly
-// inlined away by optimize_comb, leaving the event statement reading a stale
-// value.  The split comb/ff pattern (always_comb feeding always_ff) in a
-// child module must work identically to the single-block pattern.
+// Regression: comb-only variable in a child module must be correctly included
+// in the unified comb list. The split comb/ff pattern (always_comb feeding
+// always_ff) in a child module must work identically to the single-block pattern.
 #[test]
 fn inst_split_comb_ff_counter() {
     let code = r#"
@@ -3001,7 +3000,7 @@ fn inst_split_comb_ff_counter() {
 // Regression: merged comb+event functions compute child comb values during
 // the event step. Sibling FF events that read port-connected child comb
 // outputs must see the correct values (not stale values from the previous
-// cycle). The post_comb_fns mechanism ensures child comb is evaluated
+// cycle). The unified comb ordering ensures child comb is evaluated
 // before events fire.
 //
 // Pattern: child module has comb output + FF, parent module has a separate
@@ -3171,8 +3170,8 @@ fn merged_comb_output_multi_level() {
 // Regression: parent FF reads child's comb output that was computed by
 // merged comb+event function. The child has both comb and FF, creating
 // a merged function. The parent has a separate FF that latches the
-// child's comb output through a port connection. Without post_comb_fns,
-// the parent FF sees stale comb values from the previous cycle.
+// child's comb output through a port connection. Without child comb in
+// the unified comb list, the parent FF sees stale values from the previous cycle.
 //
 // This pattern matches heliodor's testbench memory reading dmem_wdata
 // from the memory module.
@@ -3247,17 +3246,10 @@ fn merged_comb_output_write_to_parent_ff() {
     }
 }
 
-// Regression: optimize_comb inlining can cascade and remove essential
-// comb statements in the non-JIT (interpreted) path.
-//
-// When a child module's comb output is read by a port connection that
-// is the sole reader, the port connection gets inlined into the next
-// consumer. After inlining, the child comb statement's read count
-// drops to zero (stale static count), causing DCE to remove it.
-// The fix disables inlining when JIT is off (allow_inline=false).
-//
-// Pattern: Child comb → port connection (single reader) → parent comb.
-// Without fix, the child comb is removed and the parent reads stale 0.
+// Validates that child comb → port connection → parent comb chains
+// are correctly evaluated in the unified comb list.
+// (Originally a regression test for optimize_comb DCE, which is no longer used.
+// The test remains valid as a comb chain correctness check.)
 #[test]
 fn optimize_comb_no_cascade_inline() {
     let code = r#"
@@ -3274,8 +3266,6 @@ fn optimize_comb_no_cascade_inline() {
         );
 
         // This comb chain reads child_val through a port connection.
-        // Without the fix, optimize_comb inlines the port connection
-        // into this expression, then DCEs the child's comb output.
         var doubled: logic<32>;
         assign doubled = child_val + child_val;
 
@@ -3343,10 +3333,10 @@ fn optimize_comb_no_cascade_inline() {
     }
 }
 
-// Regression: multi-level port connection chain with single-use
-// intermediate variables. Each level's port connection is a candidate
-// for inlining. Without the fix, cascading inlining removes all
-// intermediate comb computations.
+// Validates multi-level port connection chains with single-use
+// intermediate variables. Each level's comb must be correctly
+// included in the unified comb list.
+// (Originally a regression test for optimize_comb cascading inline.)
 #[test]
 fn optimize_comb_no_cascade_inline_multi_level() {
     let code = r#"
@@ -3877,13 +3867,13 @@ fn deep_forwarding_and_branch() {
     }
 }
 
-// Regression: post_comb_fns dependency tracking.
+// Regression: cross-child dependency tracking in unified comb.
 //
 // When child module A's comb output is connected to a parent variable,
 // and that parent variable feeds child module B's input port, the
-// dependency tracking must add B's input port connection to post_comb_fns.
-// Without this, B's merged event reads stale values from the pre-event
-// eval_comb pass.
+// unified comb ordering must place A's comb before B's input port
+// connection. declaration.rs's dependency tracking (post_comb_fns)
+// ensures this chain is correctly represented in the unified list.
 //
 // Chain: ChildA comb → output port → parent var → ChildB input → ChildB merged event
 //
@@ -7883,7 +7873,7 @@ fn within_level_stall_propagation() {
 
 /// Regression: adding comb logic to one child module must not break a
 /// sibling module's write-first forwarding.  This is the pattern that
-/// triggered the full_comb JIT ordering bug (fp_regfile broke when mmu
+/// triggered the unified comb JIT ordering bug (fp_regfile broke when mmu
 /// gained a comb variable).
 ///
 /// Top instantiates RegFile (write-first forwarding) and Sibling (extra
@@ -8147,4 +8137,540 @@ fn intermediate_variable_dependency_level() {
             config.use_jit, config.use_4state, r
         );
     }
+}
+
+// ============================================================
+// Adversarial ordering tests: verify JIT/interpreter equivalence
+// at every cycle using DualSimulator.
+// ============================================================
+
+/// Diamond dependency: A→B, A→C, B→D, C→D (fan-in levelization)
+#[test]
+fn ordering_diamond_dependency() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        d: output logic<32>,
+    ) {
+        var b: logic<32>;
+        var c: logic<32>;
+        assign b = a + 1;
+        assign c = a + 2;
+        assign d = b + c;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            let expected = (i + 1) + (i + 2);
+            assert_eq!(dual.get("d").unwrap(), Value::new(expected, 32, false));
+        }
+    });
+}
+
+/// Long chain: A→B→C→...→H (correct levelization → 1 pass, wrong → many)
+#[test]
+fn ordering_long_chain() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        h: output logic<32>,
+    ) {
+        var b: logic<32>;
+        var c: logic<32>;
+        var d: logic<32>;
+        var e: logic<32>;
+        var f: logic<32>;
+        var g: logic<32>;
+        assign b = a + 1;
+        assign c = b + 1;
+        assign d = c + 1;
+        assign e = d + 1;
+        assign f = e + 1;
+        assign g = f + 1;
+        assign h = g + 1;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(
+                dual.get("h").unwrap(),
+                Value::new(i + 7, 32, false)
+            );
+        }
+    });
+}
+
+/// Cross-module diamond: Parent comb → Child comb → Parent comb
+/// (test_hello_str equivalent pattern)
+#[test]
+fn ordering_cross_module_diamond() {
+    let code = r#"
+    module Child (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        assign y = x * 2;
+    }
+
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var mid: logic<32>;
+        assign mid = a + 10;
+
+        inst u: Child (
+            x: mid,
+            y: result,
+        );
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new((i + 10) * 2, 32, false)
+            );
+        }
+    });
+}
+
+/// Conditional dependency: different comb levels in if/else branches
+#[test]
+fn ordering_conditional_dependency() {
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        a:   input  logic<32>,
+        out: output logic<32>,
+    ) {
+        var x: logic<32>;
+        var y: logic<32>;
+        assign x = a + 1;
+        assign y = a + 2;
+        assign out = if sel ? x : y;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            let sel_val = (i % 2) as u64;
+            dual.set("sel", Value::new(sel_val, 1, false));
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            let expected = if sel_val == 1 { i + 1 } else { i + 2 };
+            assert_eq!(dual.get("out").unwrap(), Value::new(expected, 32, false));
+        }
+    });
+}
+
+/// Re-convergent fan-out: single comb variable feeds multiple child modules
+/// that converge back to parent
+#[test]
+fn ordering_reconvergent_fanout() {
+    let code = r#"
+    module Adder (
+        x: input  logic<32>,
+        bias: input logic<32>,
+        y: output logic<32>,
+    ) {
+        assign y = x + bias;
+    }
+
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var y1: logic<32>;
+        var y2: logic<32>;
+        assign result = y1 + y2;
+
+        inst u1: Adder (
+            x: a,
+            bias: 32'd100,
+            y: y1,
+        );
+
+        inst u2: Adder (
+            x: a,
+            bias: 32'd200,
+            y: y2,
+        );
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new((i + 100) + (i + 200), 32, false)
+            );
+        }
+    });
+}
+
+/// Sequential + comb interaction: FF output feeds comb chain,
+/// verifies ordering across clock edges with DualSimulator
+#[test]
+fn ordering_ff_to_comb_chain() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        result: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        var a: logic<32>;
+        var b: logic<32>;
+        var c: logic<32>;
+
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+
+        assign a = cnt + 10;
+        assign b = a * 2;
+        assign c = b + 5;
+        assign result = c;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        dual.step_reset("rst");
+        for i in 0u64..50 {
+            dual.step_clock("clk");
+            let cnt = i + 1;
+            let expected = (cnt + 10) * 2 + 5;
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new(expected, 32, false)
+            );
+        }
+    });
+}
+
+/// Multi-level hierarchy: grandparent → parent → child comb propagation.
+/// Unified comb list ensures correct ordering across all hierarchy levels.
+#[test]
+fn ordering_three_level_hierarchy() {
+    let code = r#"
+    module Leaf (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        assign y = x + 1;
+    }
+
+    module Mid (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        var tmp: logic<32>;
+        inst u: Leaf (
+            x: x,
+            y: tmp,
+        );
+        assign y = tmp + 1;
+    }
+
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var tmp: logic<32>;
+        inst u: Mid (
+            x: a,
+            y: tmp,
+        );
+        assign result = tmp + 1;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            // Leaf: x+1, Mid: (x+1)+1, Top: ((x+1)+1)+1 = x+3
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new(i + 3, 32, false)
+            );
+        }
+    });
+}
+
+/// Multiple children with cross-dependencies in parent
+#[test]
+fn ordering_multi_child_cross_dep() {
+    let code = r#"
+    module Child1 (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        assign y = x * 3;
+    }
+
+    module Child2 (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        assign y = x + 7;
+    }
+
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var c1_out: logic<32>;
+        var c2_out: logic<32>;
+
+        inst u1: Child1 (
+            x: a,
+            y: c1_out,
+        );
+
+        // Child2 depends on Child1's output
+        inst u2: Child2 (
+            x: c1_out,
+            y: c2_out,
+        );
+
+        assign result = c2_out;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..20 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            // Child1: a*3, Child2: (a*3)+7
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new(i * 3 + 7, 32, false)
+            );
+        }
+    });
+}
+
+// ============================================================
+// DualSimulator regression tests for merged event + hierarchy
+// ============================================================
+
+/// JIT/interpreter equivalence for child comb+FF (merged event pattern).
+#[test]
+fn dual_inst_comb_and_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+        comb_out: output logic<32>,
+    ) {
+        inst u: Inner (
+            clk,
+            rst,
+            out,
+            comb_out,
+        );
+    }
+
+    module Inner (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+        comb_out: output logic<32>,
+    ) {
+        assign comb_out = out + 1;
+
+        always_ff {
+            if_reset {
+                out = 0;
+            } else {
+                out = comb_out;
+            }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(dual.get("out").unwrap(), Value::new(i + 1, 32, false));
+        }
+    });
+}
+
+/// JIT/interpreter equivalence for 3-level merged comb output chain.
+#[test]
+fn dual_merged_comb_output_multi_level() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var mid_out: logic<32>;
+        inst u_mid: Middle (
+            clk,
+            rst,
+            o_val: mid_out,
+        );
+        always_ff {
+            if_reset {
+                result = 0;
+            } else {
+                result = mid_out;
+            }
+        }
+    }
+
+    module Middle (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var inner_out: logic<32>;
+        inst u_inner: Inner (
+            clk,
+            rst,
+            o_val: inner_out,
+        );
+        assign o_val = inner_out + 1000;
+    }
+
+    module Inner (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_val: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt += 1;
+            }
+        }
+        assign o_val = cnt;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for _ in 0..10 {
+            dual.step(&jclk, &iclk);
+        }
+        // Verify result is consistent between JIT and interpreter
+        let _ = dual.get("result").unwrap();
+    });
+}
+
+/// Verify that required_comb_passes stays bounded for hierarchical designs.
+/// CBs are kept atomic, so internal backward edges are invisible.
+/// A sudden increase in passes would indicate a regression in CB handling.
+#[test]
+fn required_passes_bounded_for_hierarchy() {
+    let code = r#"
+    module Leaf (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        assign y = x + 1;
+    }
+
+    module Mid (
+        x: input  logic<32>,
+        y: output logic<32>,
+    ) {
+        var tmp: logic<32>;
+        inst u: Leaf (x: x, y: tmp);
+        assign y = tmp + 1;
+    }
+
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        var tmp: logic<32>;
+        inst u: Mid (x: a, y: tmp);
+        assign result = tmp + 1;
+    }
+    "#;
+
+    let ir = analyze(code, &Config { use_jit: true, ..Default::default() });
+    assert!(
+        ir.required_comb_passes <= 2,
+        "expected required_comb_passes <= 2, got {} — CB atomic handling may be broken",
+        ir.required_comb_passes
+    );
+}
+
+/// JIT/interpreter equivalence for cross-child forwarding.
+#[test]
+fn dual_cross_child_forwarding() {
+    let code = r#"
+    module ChildA (
+        clk: input  clock,
+        rst: input  reset,
+        o  : output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset { cnt = 0; } else { cnt += 1; }
+        }
+        assign o = cnt * 2;
+    }
+
+    module ChildB (
+        i     : input  logic<32>,
+        result: output logic<32>,
+    ) {
+        assign result = i + 100;
+    }
+
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<32>,
+    ) {
+        var a_out: logic<32>;
+        inst ua: ChildA (clk, rst, o: a_out);
+        inst ub: ChildB (i: a_out, result);
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            // After step: cnt incremented to i+1, comb settles with new cnt.
+            // ChildA: cnt=i+1, o=(i+1)*2; ChildB: result=(i+1)*2+100
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new((i + 1) * 2 + 100, 32, false)
+            );
+        }
+    });
 }

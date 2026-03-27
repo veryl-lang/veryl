@@ -361,6 +361,14 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         .collect()
                 };
 
+                let adjust_stmts = |stmts: &[ProtoStatement]| -> Vec<ProtoStatement> {
+                    let mut adjusted = stmts.to_vec();
+                    for s in &mut adjusted {
+                        s.adjust_offsets(ff_delta, comb_delta);
+                    }
+                    adjusted
+                };
+
                 for (event, stmts) in all_event_statements.iter_mut() {
                     // Prefer merged function (comb+event combined) over event-only
                     let cached = cache_entry
@@ -381,7 +389,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             output_offsets: adjust(&cached.output_offsets),
                             ff_canonical_offsets: adjusted_canonical,
                             stmt_deps: vec![],
-                            original_stmts: vec![],
+                            original_stmts: adjust_stmts(&cached.original_stmts),
                         })];
                     }
                 }
@@ -434,7 +442,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 output_offsets: adjust(&cached.output_offsets),
                                 ff_canonical_offsets: vec![],
                                 stmt_deps: adjusted_deps,
-                                original_stmts: vec![],
+                                original_stmts: adjust_stmts(&cached.original_stmts),
                             },
                         ));
                     } else if let Some(ref full) = full_internal_comb {
@@ -457,7 +465,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             output_offsets: adjust(&cached.output_offsets),
                             ff_canonical_offsets: vec![],
                             stmt_deps: adjusted_deps,
-                            original_stmts: vec![],
+                            original_stmts: adjust_stmts(&cached.original_stmts),
                         })];
                 }
             } else {
@@ -476,6 +484,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         let (input_offsets, output_offsets) = gather_external_offsets(stmts);
                         let ff_canonical = gather_ff_canonical(stmts);
 
+                        let event_original = stmts.clone();
                         event_funcs.insert(
                             event.clone(),
                             JitCachedFunc {
@@ -484,6 +493,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 output_offsets: output_offsets.clone(),
                                 ff_canonical_offsets: ff_canonical.clone(),
                                 stmt_deps: vec![],
+                                original_stmts: event_original.clone(),
                             },
                         );
 
@@ -495,7 +505,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             output_offsets,
                             ff_canonical_offsets: ff_canonical,
                             stmt_deps: vec![],
-                            original_stmts: vec![],
+                            original_stmts: event_original,
                         })];
                     }
                 }
@@ -542,6 +552,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             output_offsets,
                             ff_canonical_offsets: vec![],
                             stmt_deps,
+                            original_stmts: sorted_comb_for_func,
                         })
                     } else {
                         None
@@ -652,7 +663,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     output_offsets: output_offsets.clone(),
                                     ff_canonical_offsets: ff_canonical.clone(),
                                     stmt_deps: vec![],
-                                    original_stmts: vec![],
+                                    original_stmts: merged.clone(),
                                 })],
                             );
 
@@ -664,6 +675,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     output_offsets,
                                     ff_canonical_offsets: ff_canonical,
                                     stmt_deps: vec![],
+                                    original_stmts: merged,
                                 },
                             );
                         }
@@ -702,7 +714,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     if let Some(ref cf) = comb_func {
                         // Preserve original_stmts so the parent module can
                         // expand this CB into individual statements for
-                        // fine-grained dependency analysis in full_comb_statements.
+                        // fine-grained dependency analysis in the unified comb list.
                         let original_stmts = if full.len() == 1 {
                             if let ProtoStatement::CompiledBlock(cb) = &full[0] {
                                 cb.original_stmts.clone()

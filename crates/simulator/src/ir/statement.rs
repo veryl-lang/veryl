@@ -411,11 +411,7 @@ impl ProtoAssignDynamicStatement {
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
-        let load_mem_flag = if context.no_readonly_loads {
-            MemFlags::trusted()
-        } else {
-            MemFlags::trusted().with_readonly()
-        };
+        let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
         if let Some((beg, end)) = self.select {
@@ -552,6 +548,77 @@ pub enum ProtoStatement {
 }
 
 impl ProtoStatement {
+    /// Adjust all embedded byte offsets by the given deltas.
+    /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
+    pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.dst_offset += if x.dst_is_ff { ff_delta } else { comb_delta };
+                if x.dst_is_ff {
+                    x.dst_ff_current_offset += ff_delta;
+                }
+                x.expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_base_offset += if x.dst_is_ff { ff_delta } else { comb_delta };
+                if x.dst_is_ff {
+                    x.dst_ff_current_base_offset += ff_delta;
+                }
+                x.dst_index_expr.adjust_offsets(ff_delta, comb_delta);
+                x.expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &mut x.cond {
+                    cond.adjust_offsets(ff_delta, comb_delta);
+                }
+                for s in &mut x.true_side {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+                for s in &mut x.false_side {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. } => {
+                    for arg in args {
+                        arg.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { elements, .. } => {
+                    for elem in elements {
+                        elem.current_offset += if elem.is_ff { ff_delta } else { comb_delta };
+                        if let Some(next) = &mut elem.next_offset {
+                            *next += if elem.is_ff { ff_delta } else { comb_delta };
+                        }
+                    }
+                }
+                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                    condition.adjust_offsets(ff_delta, comb_delta);
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(_) => {
+                // CompiledBlocks use ff_delta_bytes/comb_delta_bytes at runtime.
+                // Their original_stmts should be adjusted separately if needed.
+            }
+            ProtoStatement::TbMethodCall { method, .. } => match method {
+                ProtoTbMethodKind::ClockNext { count, period } => {
+                    if let Some(c) = count {
+                        c.adjust_offsets(ff_delta, comb_delta);
+                    }
+                    if let Some(p) = period {
+                        p.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoTbMethodKind::ResetAssert { duration, .. } => {
+                    if let Some(d) = duration {
+                        d.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+            },
+        }
+    }
+
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoStatement::Assign(x) => x.can_build_binary(),
@@ -1058,11 +1125,7 @@ impl ProtoAssignStatement {
             }
         }
 
-        let load_mem_flag = if context.no_readonly_loads {
-            MemFlags::trusted()
-        } else {
-            MemFlags::trusted().with_readonly()
-        };
+        let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
         let base_addr = if self.dst_is_ff {

@@ -719,6 +719,50 @@ pub enum ProtoExpression {
 }
 
 impl ProtoExpression {
+    /// Adjust all embedded byte offsets by the given deltas.
+    /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
+    pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
+        match self {
+            ProtoExpression::Variable {
+                offset, is_ff, ..
+            } => {
+                *offset += if *is_ff { ff_delta } else { comb_delta };
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                is_ff,
+                index_expr,
+                ..
+            } => {
+                *base_offset += if *is_ff { ff_delta } else { comb_delta };
+                index_expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Unary { x, .. } => {
+                x.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Binary { x, y, .. } => {
+                x.adjust_offsets(ff_delta, comb_delta);
+                y.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.adjust_offsets(ff_delta, comb_delta);
+                true_expr.adjust_offsets(ff_delta, comb_delta);
+                false_expr.adjust_offsets(ff_delta, comb_delta);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
+            ProtoExpression::Value { .. } => {}
+        }
+    }
+
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoExpression::Variable { .. } => true,
@@ -1075,11 +1119,7 @@ impl ProtoExpression {
                 {
                     (cached_payload, cached_mask_xz)
                 } else {
-                    let load_mem_flag = if context.no_readonly_loads {
-                        MemFlags::trusted()
-                    } else {
-                        MemFlags::trusted().with_readonly()
-                    };
+                    let load_mem_flag = MemFlags::trusted();
 
                     let base_addr = if *is_ff {
                         context.ff_values
@@ -2299,11 +2339,7 @@ impl ProtoExpression {
                 let addr = builder.ins().iadd(base_addr, static_offset);
                 let addr = builder.ins().iadd(addr, byte_offset);
 
-                let load_mem_flag = if context.no_readonly_loads {
-                    MemFlags::trusted()
-                } else {
-                    MemFlags::trusted().with_readonly()
-                };
+                let load_mem_flag = MemFlags::trusted();
 
                 let mut payload = if nb == 16 {
                     builder.ins().load(I128, load_mem_flag, addr, 0)
