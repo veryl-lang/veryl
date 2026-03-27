@@ -1,0 +1,21 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 362
+expression: out
+---
+invalid_wavedrom (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_wavedrom)
+
+  × WaveDrom test blocks must use JSON, not JavaScript expressions
+    ╭─[../../testcases/error/invalid_wavedrom_js_test.veryl:3:1]
+  2 │     ///
+  3 │ ╭─▶ /// ```wavedrom,test
+  4 │ │   /// (function (bits, ticks) {
+  5 │ │   ///   return {signal: [
+  6 │ │   ///     {name: 'clk', wave: 'p' + '.'.repeat(ticks - 1)}
+  7 │ │   ///   ]};
+  8 │ │   /// })(5, 16)
+  9 │ ├─▶ /// ```
+    · ╰──── Error location
+ 10 │     module invalid_wavedrom_js_test (
+    ╰────
+  help:
