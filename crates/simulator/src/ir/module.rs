@@ -32,8 +32,8 @@ pub struct Module {
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
-    /// FF swap entries: (current_offset, value_size) pairs.
-    pub ff_swap_entries: Vec<(usize, usize)>,
+    /// FF commit entries: (current_offset, value_size) pairs.
+    pub ff_commit_entries: Vec<(usize, usize)>,
 }
 
 pub struct ProtoModule {
@@ -50,9 +50,6 @@ pub struct ProtoModule {
     pub comb_statements: ProtoStatements,
     /// Number of eval_comb passes needed for full convergence.
     pub required_comb_passes: usize,
-    /// FF canonical offsets (current_offset) that need swapping.
-    /// If None, all ff variables are swapped.
-    pub ff_swap_offsets: Option<HashSet<isize>>,
 }
 
 fn create_buffers(
@@ -87,7 +84,20 @@ fn fill_buffers_recursive(
     for (_, meta) in &sorted {
         for (element, initial) in meta.elements.iter().zip(meta.initial_values.iter()) {
             let nb = element.native_bytes;
+            let vs = value_size(nb, use_4state);
             if element.is_ff() {
+                #[cfg(debug_assertions)]
+                {
+                    let off = element.current_offset() as usize;
+                    debug_assert!(
+                        off + vs <= ff_values.len(),
+                        "FF current_offset out of bounds"
+                    );
+                    debug_assert!(
+                        element.next_offset as usize + vs <= ff_values.len(),
+                        "FF next_offset out of bounds"
+                    );
+                }
                 let cur =
                     &mut ff_values[element.current_offset() as usize..] as *mut [u8] as *mut u8;
                 let nxt = &mut ff_values[element.next_offset as usize..] as *mut [u8] as *mut u8;
@@ -96,6 +106,11 @@ fn fill_buffers_recursive(
                     write_native_value(nxt, nb, use_4state, initial);
                 }
             } else {
+                #[cfg(debug_assertions)]
+                debug_assert!(
+                    element.current_offset() as usize + vs <= comb_values.len(),
+                    "Comb current_offset out of bounds"
+                );
                 let cur =
                     &mut comb_values[element.current_offset() as usize..] as *mut [u8] as *mut u8;
                 unsafe {
@@ -160,29 +175,22 @@ fn create_variables_recursive(
     }
 }
 
-/// Collect all FF swap entries (current_offset, value_size) from module metadata.
-fn collect_ff_swap_entries(
+/// Collect all FF commit entries (current_offset, value_size) from module metadata.
+fn collect_ff_commit_entries(
     module_meta: &ModuleVariableMeta,
     use_4state: bool,
-    filter: Option<&HashSet<isize>>,
 ) -> Vec<(usize, usize)> {
     let mut entries = vec![];
     for meta in module_meta.variable_meta.values() {
         for element in &meta.elements {
             if element.is_ff() {
-                let include = match filter {
-                    Some(offsets) => offsets.contains(&element.current_offset()),
-                    None => true,
-                };
-                if include {
-                    let vs = value_size(element.native_bytes, use_4state);
-                    entries.push((element.current_offset() as usize, vs));
-                }
+                let vs = value_size(element.native_bytes, use_4state);
+                entries.push((element.current_offset() as usize, vs));
             }
         }
     }
     for child in &module_meta.children {
-        entries.extend(collect_ff_swap_entries(child, use_4state, filter));
+        entries.extend(collect_ff_commit_entries(child, use_4state));
     }
     entries.sort_unstable();
     entries
@@ -221,11 +229,8 @@ impl ProtoModule {
             self.use_4state,
         ));
 
-        let ff_swap_entries = collect_ff_swap_entries(
-            &self.module_variable_meta,
-            self.use_4state,
-            self.ff_swap_offsets.as_ref(),
-        );
+        let ff_commit_entries =
+            collect_ff_commit_entries(&self.module_variable_meta, self.use_4state);
 
         Module {
             name: self.name,
@@ -237,7 +242,7 @@ impl ProtoModule {
             event_statements,
             comb_statements,
             required_comb_passes: self.required_comb_passes,
-            ff_swap_entries,
+            ff_commit_entries,
         }
     }
 }
@@ -584,8 +589,10 @@ pub(crate) fn analyze_dependency(
 
     // Relaxed ordering: skip edges that would create cycles when at least
     // one endpoint is a non-expandable CompiledBlock.
-    log::debug!(
-        "analyze_dependency: using relaxed ordering for {} stmts with non-expandable CompiledBlocks",
+    // NOTE: With original_stmts now stored in shared JIT cache, all CBs
+    // should be expandable. This path should be unreachable in practice.
+    log::warn!(
+        "analyze_dependency: falling back to relaxed ordering for {} stmts with non-expandable CompiledBlocks",
         table.len()
     );
     let mut dag_relaxed = Dag::<Node, ()>::new();
@@ -672,277 +679,6 @@ pub(crate) fn analyze_dependency(
         }
     }
     Ok(ret)
-}
-
-/// Sort event (FF) statements and determine which FF variables need
-/// double-buffered swap.
-///
-/// Non-blocking assignment semantics require all reads to see "old" values.
-/// With native-width storage, each variable may have a different value_size,
-/// so we use dst_ff_current_offset as canonical key instead of computing
-/// from a uniform ff_next_delta.
-///
-/// Returns (sorted_statements, needs_swap_offsets).
-/// `needs_swap_offsets`: FF current_offsets that need swapping.
-/// For non-swap variables, dst_offset is rewritten from next to current.
-/// Returns (sorted_statements, needs_swap_offsets, force_all_swap).
-/// force_all_swap=true means ff_swap_offsets should be None.
-pub(crate) fn sort_ff_event(
-    statements: Vec<ProtoStatement>,
-) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
-    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-    enum Node {
-        /// Variable node. For FF, offset is the canonical current_offset.
-        Var(VarOffset),
-        Statement(usize),
-    }
-
-    let mut table: HashMap<usize, ProtoStatement> = HashMap::default();
-    for (i, x) in statements.into_iter().enumerate() {
-        table.insert(i, x);
-    }
-
-    if table.is_empty() {
-        return (vec![], HashSet::default(), false);
-    }
-
-    let mut dag = Dag::<Node, ()>::new();
-    let mut dag_nodes: HashMap<Node, _> = HashMap::default();
-    // Track self-referencing FF offsets (read + write same variable)
-    let mut self_ref_all: HashSet<isize> = HashSet::default();
-
-    for (id, x) in &table {
-        let mut inputs = vec![];
-        let mut outputs = vec![];
-        x.gather_variable_offsets(&mut inputs, &mut outputs);
-
-        // For FF outputs, gather_variable_offsets returns the actual dst_offset (next).
-        // We need canonical (current) offsets. Get them from the statement.
-        let ff_write_canonical: HashSet<isize> = x.gather_ff_canonical_offsets();
-        let ff_read_offsets: HashSet<isize> = inputs
-            .iter()
-            .filter(|off| off.is_ff())
-            .map(|off| off.raw())
-            .collect();
-        let self_ref: HashSet<isize> = ff_read_offsets
-            .intersection(&ff_write_canonical)
-            .cloned()
-            .collect();
-        self_ref_all.extend(&self_ref);
-
-        let stmt_node = Node::Statement(*id);
-        let stmt = dag.add_node(stmt_node);
-        dag_nodes.insert(stmt_node, stmt);
-
-        for var_off in &inputs {
-            if var_off.is_ff() {
-                if self_ref.contains(&var_off.raw()) {
-                    continue;
-                }
-                // FF read: REVERSED edge (stmt → var)
-                let var_node = Node::Var(*var_off);
-                let var = *dag_nodes
-                    .entry(var_node)
-                    .or_insert_with(|| dag.add_node(var_node));
-                if dag.add_edge(stmt, var, ()).is_err() {
-                    return fallback_preserve_order(table);
-                }
-            } else {
-                let var_node = Node::Var(*var_off);
-                let var = *dag_nodes
-                    .entry(var_node)
-                    .or_insert_with(|| dag.add_node(var_node));
-                if dag.add_edge(var, stmt, ()).is_err() {
-                    return fallback_preserve_order(table);
-                }
-            }
-        }
-
-        for canonical in &ff_write_canonical {
-            if self_ref.contains(canonical) {
-                continue;
-            }
-            // FF write: REVERSED edge (var → stmt)
-            let var_node = Node::Var(VarOffset::Ff(*canonical));
-            let var = *dag_nodes
-                .entry(var_node)
-                .or_insert_with(|| dag.add_node(var_node));
-            if dag.add_edge(var, stmt, ()).is_err() {
-                return fallback_preserve_order(table);
-            }
-        }
-
-        // Comb writes: normal edge (stmt → var)
-        for var_off in &outputs {
-            if !var_off.is_ff() {
-                let var_node = Node::Var(*var_off);
-                let var = *dag_nodes
-                    .entry(var_node)
-                    .or_insert_with(|| dag.add_node(var_node));
-                if dag.add_edge(stmt, var, ()).is_err() {
-                    return fallback_preserve_order(table);
-                }
-            }
-        }
-    }
-
-    match algo::toposort(dag.graph(), None) {
-        Ok(nodes) => {
-            let mut sorted = vec![];
-            for i in nodes {
-                if let Node::Statement(x) = dag[i] {
-                    sorted.push(table.remove(&x).unwrap());
-                }
-            }
-
-            // Self-referencing FF variables always need swap.
-            let mut needs_swap: HashSet<isize> = self_ref_all;
-
-            // CompiledBlock FF writes are opaque: always need swap.
-            // Use ff_canonical_offsets (current offsets) for correct ff_swap matching.
-            for stmt in &sorted {
-                if let ProtoStatement::CompiledBlock(cb) = stmt {
-                    for off in &cb.ff_canonical_offsets {
-                        needs_swap.insert(*off);
-                    }
-                }
-            }
-
-            // Walk sorted order to find additional read-after-write violations.
-            let mut written_ff = HashSet::default();
-
-            for stmt in &sorted {
-                let mut inputs = vec![];
-                let mut outputs = vec![];
-                stmt.gather_variable_offsets(&mut inputs, &mut outputs);
-
-                for var_off in &inputs {
-                    if var_off.is_ff() && written_ff.contains(&var_off.raw()) {
-                        needs_swap.insert(var_off.raw());
-                    }
-                }
-
-                let canonical = stmt.gather_ff_canonical_offsets();
-                for off in canonical {
-                    written_ff.insert(off);
-                }
-            }
-
-            // Rewrite non-swap FF assignments: dst_offset next → current
-            let sorted: Vec<_> = sorted
-                .into_iter()
-                .map(|stmt| rewrite_ff_direct(stmt, &needs_swap))
-                .collect();
-
-            (sorted, needs_swap, false)
-        }
-        Err(_) => fallback_preserve_order(table),
-    }
-}
-
-/// Fallback: preserve original statement order when DAG has cycles.
-/// Compute needs_swap using the same logic as the success path so that
-/// rewrite_ff_direct can still convert non-swap FF assignments to direct writes.
-fn fallback_preserve_order(
-    table: HashMap<usize, ProtoStatement>,
-) -> (Vec<ProtoStatement>, HashSet<isize>, bool) {
-    // Sort by key (insertion index) to preserve source order
-    let mut entries: Vec<_> = table.into_iter().collect();
-    entries.sort_by_key(|(k, _)| *k);
-    let stmts: Vec<_> = entries.into_iter().map(|(_, v)| v).collect();
-
-    // Self-referencing FF variables need swap
-    let mut needs_swap: HashSet<isize> = HashSet::default();
-    for stmt in &stmts {
-        let mut inputs = vec![];
-        let mut outputs = vec![];
-        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
-        let ff_write_canonical: HashSet<isize> = stmt.gather_ff_canonical_offsets();
-        let ff_read_offsets: HashSet<isize> = inputs
-            .iter()
-            .filter(|off| off.is_ff())
-            .map(|off| off.raw())
-            .collect();
-        for off in ff_read_offsets.intersection(&ff_write_canonical) {
-            needs_swap.insert(*off);
-        }
-    }
-
-    // CompiledBlock FF writes are opaque: always need swap
-    for stmt in &stmts {
-        if let ProtoStatement::CompiledBlock(cb) = stmt {
-            for off in &cb.ff_canonical_offsets {
-                needs_swap.insert(*off);
-            }
-        }
-    }
-
-    // Walk source order to find read-after-write violations
-    let mut written_ff = HashSet::default();
-    for stmt in &stmts {
-        let mut inputs = vec![];
-        let mut outputs = vec![];
-        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
-        for var_off in &inputs {
-            if var_off.is_ff() && written_ff.contains(&var_off.raw()) {
-                needs_swap.insert(var_off.raw());
-            }
-        }
-        let canonical = stmt.gather_ff_canonical_offsets();
-        for off in canonical {
-            written_ff.insert(off);
-        }
-    }
-
-    // Rewrite non-swap FF assignments: dst_offset next → current
-    let stmts: Vec<_> = stmts
-        .into_iter()
-        .map(|stmt| rewrite_ff_direct(stmt, &needs_swap))
-        .collect();
-
-    (stmts, needs_swap, false)
-}
-
-/// Rewrite a ProtoStatement: for FF assignments whose canonical offset
-/// is NOT in needs_swap, change dst_offset from next to current.
-pub(crate) fn rewrite_ff_direct(
-    stmt: ProtoStatement,
-    needs_swap: &HashSet<isize>,
-) -> ProtoStatement {
-    match stmt {
-        ProtoStatement::Assign(mut x) => {
-            if x.dst.is_ff() {
-                let canonical = x.dst_ff_current_offset;
-                if !needs_swap.contains(&canonical) {
-                    x.dst = VarOffset::Ff(canonical);
-                }
-            }
-            ProtoStatement::Assign(x)
-        }
-        ProtoStatement::AssignDynamic(mut x) => {
-            if x.dst_base.is_ff() {
-                let canonical = x.dst_ff_current_base_offset;
-                if !needs_swap.contains(&canonical) {
-                    x.dst_base = VarOffset::Ff(canonical);
-                }
-            }
-            ProtoStatement::AssignDynamic(x)
-        }
-        ProtoStatement::If(mut x) => {
-            x.true_side = x
-                .true_side
-                .into_iter()
-                .map(|s| rewrite_ff_direct(s, needs_swap))
-                .collect();
-            x.false_side = x
-                .false_side
-                .into_iter()
-                .map(|s| rewrite_ff_direct(s, needs_swap))
-                .collect();
-            ProtoStatement::If(x)
-        }
-        other => other,
-    }
 }
 
 /// Compute the number of eval_comb passes required for convergence.
@@ -1215,6 +951,9 @@ impl Conv<&air::Module> for ProtoModule {
         let mut ff_table = air::FfTable::default();
         src.gather_ff(&mut analyzer_context, &mut ff_table);
         ff_table.update_is_ff();
+        if context.config.disable_ff_opt {
+            ff_table.force_all_ff();
+        }
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
@@ -1277,33 +1016,14 @@ impl Conv<&air::Module> for ProtoModule {
         let required_comb_passes = compute_required_passes(&unified_sorted);
         let comb_statements = try_jit_no_cache(context, unified_sorted);
 
-        // Sort FF event statements and determine selective swap set
-        let mut all_swap_offsets = HashSet::default();
-        let mut force_all_swap = false;
-
+        // Event statements preserve source order (no topological sorting).
+        // NBA semantics: reads come from current, writes go to next, then
+        // ff_commit copies next → current. Source order must be preserved
+        // for sequential writes to the same variable.
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
-            .map(|(event, stmts)| {
-                if matches!(event, Event::Initial | Event::Final) {
-                    (event, try_jit(context, stmts))
-                } else {
-                    let (sorted, swap_offsets, all_swap) = sort_ff_event(stmts);
-                    if all_swap {
-                        force_all_swap = true;
-                    }
-                    if !swap_offsets.is_empty() {
-                        all_swap_offsets.extend(&swap_offsets);
-                    }
-                    (event, try_jit(context, sorted))
-                }
-            })
+            .map(|(event, stmts)| (event, try_jit(context, stmts)))
             .collect();
-
-        let ff_swap_offsets = if force_all_swap {
-            None // swap all FF variables (CompiledBlocks have opaque internal FF)
-        } else {
-            Some(all_swap_offsets)
-        };
 
         let module_variable_meta = ModuleVariableMeta {
             name: src.name,
@@ -1321,7 +1041,6 @@ impl Conv<&air::Module> for ProtoModule {
             event_statements,
             comb_statements,
             required_comb_passes,
-            ff_swap_offsets,
         })
     }
 }

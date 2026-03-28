@@ -30,11 +30,15 @@ fn nw(nb: u32) -> usize {
 
 #[inline]
 unsafe fn rd(ptr: *const u8, i: usize) -> u64 {
+    #[cfg(debug_assertions)]
+    debug_assert!(i.checked_mul(8).is_some(), "wide_ops rd: stride overflow");
     unsafe { (ptr.add(i * 8) as *const u64).read_unaligned() }
 }
 
 #[inline]
 unsafe fn wr(ptr: *mut u8, i: usize, v: u64) {
+    #[cfg(debug_assertions)]
+    debug_assert!(i.checked_mul(8).is_some(), "wide_ops wr: stride overflow");
     unsafe { (ptr.add(i * 8) as *mut u64).write_unaligned(v) }
 }
 

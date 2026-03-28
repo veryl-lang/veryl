@@ -556,6 +556,11 @@ impl Expression {
             } => {
                 let idx_val = index_expr.eval(mask_cache);
                 let idx = idx_val.to_usize().unwrap_or(0).min(*num_elements - 1);
+                #[cfg(debug_assertions)]
+                debug_assert!(
+                    stride.checked_mul(idx as isize).is_some(),
+                    "DynamicVariable: stride*idx overflow"
+                );
                 let ptr = unsafe { (*base_ptr).offset(*stride * idx as isize) };
                 let value = unsafe {
                     read_native_value(ptr, *native_bytes, *use_4state, *width as u32, *signed)
@@ -653,7 +658,7 @@ impl ProtoExpression {
                 index_expr.gather_variable_offsets(inputs);
                 // Emit only the base offset to represent the entire array as a
                 // single dependency unit.  Per-element expansion caused O(N²)
-                // blowup in analyze_dependency / sort_ff_event for large arrays.
+                // blowup in analyze_dependency for large arrays.
                 inputs.push(*base_offset);
                 // Also emit the last element offset so that static accesses to
                 // any element of the same array create a dependency edge.

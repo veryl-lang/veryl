@@ -82,6 +82,7 @@ impl CmdTest {
 
         let config = Config {
             use_jit: !self.opt.disable_jit,
+            disable_ff_opt: self.opt.disable_ff_opt,
             ..Config::default()
         };
         let mut proto_cache = ProtoModuleCache::default();

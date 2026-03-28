@@ -516,8 +516,7 @@ pub struct CompiledBlockStatement {
     pub input_offsets: Vec<VarOffset>,
     pub output_offsets: Vec<VarOffset>,
     /// Canonical (current) offsets for FF variables written by this block.
-    /// output_offsets stores actual dst_offset (next for FF), but ff_swap
-    /// and needs_swap logic require canonical (current) offsets.
+    /// Used by gather_ff_canonical_offsets for dependency analysis.
     pub ff_canonical_offsets: Vec<isize>,
     /// Per-statement (inputs, outputs) from the original individual
     /// statements before JIT compilation. Used by analyze_dependency
@@ -665,7 +664,7 @@ impl ProtoStatement {
                 x.expr.gather_variable_offsets(inputs);
                 // Emit only base + last offset to represent the entire array as
                 // a single dependency unit.  Per-element expansion caused O(N²)
-                // blowup in analyze_dependency / sort_ff_event for large arrays.
+                // blowup in analyze_dependency for large arrays.
                 outputs.push(x.dst_base);
                 if x.dst_num_elements > 1 {
                     let last_offset = VarOffset::new(
@@ -1035,7 +1034,8 @@ pub struct ProtoAssignStatement {
     pub rhs_select: Option<(usize, usize)>,
     pub expr: ProtoExpression,
     /// Canonical (current) byte offset for FF variables.
-    /// Used by sort_ff_event to identify which FF slots are written.
+    /// Used by append_ff_next_copies to compute the next offset and
+    /// by gather_ff_canonical_offsets for dependency analysis.
     pub dst_ff_current_offset: isize,
     /// Source location from the original assign statement.
     pub token: TokenRange,
