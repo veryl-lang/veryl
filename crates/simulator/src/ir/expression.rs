@@ -935,7 +935,9 @@ impl ProtoExpression {
     pub unsafe fn apply_values_ptr(
         &self,
         ff_values_ptr: *mut u8,
+        ff_len: usize,
         comb_values_ptr: *mut u8,
+        comb_len: usize,
         use_4state: bool,
     ) -> Expression {
         unsafe {
@@ -956,9 +958,34 @@ impl ProtoExpression {
                         None => *width,
                     };
                     let nb = calc_native_bytes(read_width);
+                    let vs = if use_4state { nb * 2 } else { nb };
                     let value = if var_offset.is_ff() {
+                        #[cfg(debug_assertions)]
+                        debug_assert!(
+                            (var_offset.raw() as usize) + vs <= ff_len,
+                            "apply_values_ptr: ff offset {} + vs {} > ff_len {} \
+                             (width={}, read_width={}, select={:?})",
+                            var_offset.raw(),
+                            vs,
+                            ff_len,
+                            width,
+                            read_width,
+                            select,
+                        );
                         (ff_values_ptr as *const u8).add(var_offset.raw() as usize)
                     } else {
+                        #[cfg(debug_assertions)]
+                        debug_assert!(
+                            (var_offset.raw() as usize) + vs <= comb_len,
+                            "apply_values_ptr: comb offset {} + vs {} > comb_len {} \
+                             (width={}, read_width={}, select={:?})",
+                            var_offset.raw(),
+                            vs,
+                            comb_len,
+                            width,
+                            read_width,
+                            select,
+                        );
                         (comb_values_ptr as *const u8).add(var_offset.raw() as usize)
                     };
                     Expression::Variable {
@@ -979,7 +1006,13 @@ impl ProtoExpression {
                     expr_context,
                     ..
                 } => {
-                    let x = x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                    let x = x.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
                     Expression::Unary {
                         op: *op,
                         x: Box::new(x),
@@ -993,8 +1026,20 @@ impl ProtoExpression {
                     expr_context,
                     ..
                 } => {
-                    let x = x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
-                    let y = y.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                    let x = x.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
+                    let y = y.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
                     Expression::Binary {
                         x: Box::new(x),
                         op: *op,
@@ -1006,8 +1051,13 @@ impl ProtoExpression {
                     let elements = elements
                         .iter()
                         .map(|(expr, repeat, elem_width)| {
-                            let expr =
-                                expr.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                            let expr = expr.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            );
                             (Box::new(expr), *repeat, *elem_width)
                         })
                         .collect();
@@ -1019,11 +1069,27 @@ impl ProtoExpression {
                     false_expr,
                     ..
                 } => {
-                    let cond = cond.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
-                    let true_expr =
-                        true_expr.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
-                    let false_expr =
-                        false_expr.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                    let cond = cond.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
+                    let true_expr = true_expr.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
+                    let false_expr = false_expr.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
                     Expression::Ternary {
                         cond: Box::new(cond),
                         true_expr: Box::new(true_expr),
@@ -1041,13 +1107,37 @@ impl ProtoExpression {
                     ..
                 } => {
                     let nb = calc_native_bytes(*width);
+                    let vs = if use_4state { nb * 2 } else { nb };
                     let base_ptr = if base_offset.is_ff() {
+                        #[cfg(debug_assertions)]
+                        debug_assert!(
+                            (base_offset.raw() as usize) + vs * *num_elements <= ff_len,
+                            "apply_values_ptr: DynVar ff base_offset {} + vs {} * num {} > ff_len {}",
+                            base_offset.raw(),
+                            vs,
+                            num_elements,
+                            ff_len,
+                        );
                         (ff_values_ptr as *const u8).offset(base_offset.raw())
                     } else {
+                        #[cfg(debug_assertions)]
+                        debug_assert!(
+                            (base_offset.raw() as usize) + vs * *num_elements <= comb_len,
+                            "apply_values_ptr: DynVar comb base_offset {} + vs {} * num {} > comb_len {}",
+                            base_offset.raw(),
+                            vs,
+                            num_elements,
+                            comb_len,
+                        );
                         (comb_values_ptr as *const u8).offset(base_offset.raw())
                     };
-                    let index_expr =
-                        index_expr.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                    let index_expr = index_expr.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
                     Expression::DynamicVariable {
                         base_ptr,
                         native_bytes: nb,

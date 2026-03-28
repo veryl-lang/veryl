@@ -38,7 +38,9 @@ impl ProtoStatements {
     pub(crate) fn to_statements(
         &self,
         ff_ptr: *mut u8,
+        ff_len: usize,
         comb_ptr: *mut u8,
+        comb_len: usize,
         use_4state: bool,
     ) -> Vec<Statement> {
         let mut result = Vec::new();
@@ -46,7 +48,9 @@ impl ProtoStatements {
             match block {
                 ProtoStatementBlock::Interpreted(proto) => {
                     for s in proto {
-                        result.push(unsafe { s.apply_values_ptr(ff_ptr, comb_ptr, use_4state) });
+                        result.push(unsafe {
+                            s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+                        });
                     }
                 }
                 ProtoStatementBlock::Compiled(func) => {
@@ -781,14 +785,18 @@ impl ProtoStatement {
     pub unsafe fn apply_values_ptr(
         &self,
         ff_values_ptr: *mut u8,
+        ff_len: usize,
         comb_values_ptr: *mut u8,
+        comb_len: usize,
         use_4state: bool,
     ) -> Statement {
         unsafe {
             match self {
                 ProtoStatement::Assign(x) => Statement::Assign(x.apply_values_ptr(
                     ff_values_ptr,
+                    ff_len,
                     comb_values_ptr,
+                    comb_len,
                     use_4state,
                 )),
                 ProtoStatement::AssignDynamic(x) => {
@@ -800,12 +808,18 @@ impl ProtoStatement {
                     };
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
+                        ff_len,
                         comb_values_ptr,
+                        comb_len,
                         use_4state,
                     );
-                    let expr = x
-                        .expr
-                        .apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                    let expr = x.expr.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
                     Statement::AssignDynamic(AssignDynamicStatement {
                         dst_base_ptr,
                         dst_stride: x.dst_stride,
@@ -819,14 +833,26 @@ impl ProtoStatement {
                         expr,
                     })
                 }
-                ProtoStatement::If(x) => {
-                    Statement::If(x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
-                }
+                ProtoStatement::If(x) => Statement::If(x.apply_values_ptr(
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                )),
                 ProtoStatement::SystemFunctionCall(x) => match x {
                     ProtoSystemFunctionCall::Display { format_str, args } => {
                         let args = args
                             .iter()
-                            .map(|a| a.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                            .map(|a| {
+                                a.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            })
                             .collect();
                         Statement::SystemFunctionCall(SystemFunctionCall::Display {
                             format_str: format_str.clone(),
@@ -858,8 +884,13 @@ impl ProtoStatement {
                         })
                     }
                     ProtoSystemFunctionCall::Assert { condition, message } => {
-                        let condition =
-                            condition.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+                        let condition = condition.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        );
                         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
                             condition,
                             message: message.clone(),
@@ -870,24 +901,48 @@ impl ProtoStatement {
                     }
                 },
                 ProtoStatement::CompiledBlock(x) => {
-                    let adjusted_ff = (ff_values_ptr as *const u8).offset(x.ff_delta_bytes);
-                    let adjusted_comb = (comb_values_ptr as *const u8).offset(x.comb_delta_bytes);
+                    // Use wrapping_offset because the adjusted pointer may temporarily
+                    // go before the buffer start when ff_delta_bytes is negative.
+                    // This is safe because the JIT code's actual memory accesses always
+                    // land within the buffer (adjusted_ptr + original_offset is in bounds).
+                    let adjusted_ff =
+                        (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes);
+                    let adjusted_comb =
+                        (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes);
                     Statement::Binary(x.func, adjusted_ff, adjusted_comb)
                 }
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
                         ProtoTbMethodKind::ClockNext { count, period } => {
                             let count = count.as_ref().map(|e| {
-                                e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
+                                e.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
                             });
                             let period = period.as_ref().map(|e| {
-                                e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
+                                e.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
                             });
                             TbMethodKind::ClockNext { count, period }
                         }
                         ProtoTbMethodKind::ResetAssert { clock, duration } => {
                             let duration = duration.as_ref().map(|e| {
-                                e.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state)
+                                e.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
                             });
                             TbMethodKind::ResetAssert {
                                 clock: *clock,
@@ -1054,20 +1109,45 @@ impl ProtoAssignStatement {
     pub unsafe fn apply_values_ptr(
         &self,
         ff_values_ptr: *mut u8,
+        ff_len: usize,
         comb_values_ptr: *mut u8,
+        comb_len: usize,
         use_4state: bool,
     ) -> AssignStatement {
         unsafe {
             let nb = calc_native_bytes(self.dst_width);
+            let vs = if use_4state { nb * 2 } else { nb };
             let dst = if self.dst.is_ff() {
+                #[cfg(debug_assertions)]
+                debug_assert!(
+                    (self.dst.raw() as usize) + vs <= ff_len,
+                    "apply_values_ptr Assign: ff dst {} + vs {} > ff_len {} (width={})",
+                    self.dst.raw(),
+                    vs,
+                    ff_len,
+                    self.dst_width,
+                );
                 ff_values_ptr.add(self.dst.raw() as usize)
             } else {
+                #[cfg(debug_assertions)]
+                debug_assert!(
+                    (self.dst.raw() as usize) + vs <= comb_len,
+                    "apply_values_ptr Assign: comb dst {} + vs {} > comb_len {} (width={})",
+                    self.dst.raw(),
+                    vs,
+                    comb_len,
+                    self.dst_width,
+                );
                 comb_values_ptr.add(self.dst.raw() as usize)
             };
 
-            let expr = self
-                .expr
-                .apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state);
+            let expr = self.expr.apply_values_ptr(
+                ff_values_ptr,
+                ff_len,
+                comb_values_ptr,
+                comb_len,
+                use_4state,
+            );
 
             AssignStatement {
                 dst,
@@ -1499,23 +1579,28 @@ impl ProtoIfStatement {
     pub unsafe fn apply_values_ptr(
         &self,
         ff_values_ptr: *mut u8,
+        ff_len: usize,
         comb_values_ptr: *mut u8,
+        comb_len: usize,
         use_4state: bool,
     ) -> IfStatement {
         unsafe {
-            let cond = self
-                .cond
-                .as_ref()
-                .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state));
+            let cond = self.cond.as_ref().map(|x| {
+                x.apply_values_ptr(ff_values_ptr, ff_len, comb_values_ptr, comb_len, use_4state)
+            });
             let true_side: Vec<_> = self
                 .true_side
                 .iter()
-                .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                .map(|x| {
+                    x.apply_values_ptr(ff_values_ptr, ff_len, comb_values_ptr, comb_len, use_4state)
+                })
                 .collect();
             let false_side: Vec<_> = self
                 .false_side
                 .iter()
-                .map(|x| x.apply_values_ptr(ff_values_ptr, comb_values_ptr, use_4state))
+                .map(|x| {
+                    x.apply_values_ptr(ff_values_ptr, ff_len, comb_values_ptr, comb_len, use_4state)
+                })
                 .collect();
 
             IfStatement {

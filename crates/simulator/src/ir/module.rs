@@ -198,6 +198,12 @@ fn collect_ff_commit_entries(
 
 impl ProtoModule {
     pub fn instantiate(&self) -> Module {
+        log::trace!(
+            "instantiate: module={}, ff_bytes={}, comb_bytes={}",
+            self.name,
+            self.ff_bytes,
+            self.comb_bytes,
+        );
         let (mut ff_values, mut comb_values) = create_buffers(
             &self.module_variable_meta,
             self.ff_bytes,
@@ -214,18 +220,23 @@ impl ProtoModule {
         let ff_ptr = ff_values.as_mut_ptr();
         let comb_ptr = comb_values.as_mut_ptr();
 
+        let ff_len = self.ff_bytes;
+        let comb_len = self.comb_bytes;
+
         let event_statements = self
             .event_statements
             .iter()
             .map(|(event, stmts)| {
-                let s = stmts.to_statements(ff_ptr, comb_ptr, self.use_4state);
+                let s = stmts.to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
                 (event.clone(), batch_binary_statements(s))
             })
             .collect();
 
         let comb_statements = batch_binary_statements(self.comb_statements.to_statements(
             ff_ptr,
+            ff_len,
             comb_ptr,
+            comb_len,
             self.use_4state,
         ));
 
