@@ -1,13 +1,16 @@
 use crate::HashMap;
 use crate::ir::VarId;
 
+/// Identifies the LHS of an assignment: (VarId, Option<array_element_index>).
+/// None index means dynamic (unknown at analysis time).
+type AssignTarget = (VarId, Option<usize>);
+
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
     pub assigned: Option<usize>,
-    /// (decl_index, assign_target_var) pairs where this variable is referenced.
-    /// assign_target_var is the VarId of the LHS variable in whose assignment
-    /// this variable appears on the RHS.
-    pub refered: Vec<(usize, Option<VarId>)>,
+    /// (decl_index, assign_target) pairs where this variable is referenced.
+    /// None assign_target for condition expressions (if/case).
+    pub refered: Vec<(usize, Option<AssignTarget>)>,
     pub is_ff: bool,
     pub assigned_comb: Option<usize>,
 }
@@ -29,7 +32,17 @@ impl FfTableEntry {
                     return true;
                 }
                 match assign_target {
-                    Some(target_id) => *target_id != self_key.0,
+                    Some((target_id, target_idx)) => {
+                        if *target_id != self_key.0 {
+                            return true;
+                        }
+                        // Same VarId: compare array index.
+                        // None index (dynamic) is conservative → FF.
+                        match target_idx {
+                            Some(idx) => *idx != self_key.1,
+                            None => true,
+                        }
+                    }
                     None => true,
                 }
             });
@@ -73,7 +86,7 @@ impl FfTable {
         id: VarId,
         index: usize,
         decl: usize,
-        assign_target: Option<VarId>,
+        assign_target: Option<AssignTarget>,
     ) {
         self.table
             .entry((id, index))

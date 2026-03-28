@@ -267,6 +267,14 @@ impl Simulator {
         let ptr = ff_values.as_mut_ptr();
         for &(current_offset, value_size) in entries {
             let next_offset = current_offset + value_size;
+            #[cfg(debug_assertions)]
+            debug_assert!(
+                next_offset + value_size <= ff_values.len(),
+                "ff_commit: offset {}+{} exceeds buffer len {}",
+                next_offset,
+                value_size,
+                ff_values.len()
+            );
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     ptr.add(next_offset),

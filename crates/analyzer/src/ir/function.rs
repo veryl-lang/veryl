@@ -288,7 +288,7 @@ impl FunctionCall {
         context: &mut Context,
         table: &mut FfTable,
         decl: usize,
-        assign_target: Option<VarId>,
+        assign_target: Option<(VarId, Option<usize>)>,
     ) {
         for input in self.inputs.values() {
             input.gather_ff(context, table, decl, assign_target);

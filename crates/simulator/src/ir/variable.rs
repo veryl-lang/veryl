@@ -249,6 +249,18 @@ impl VariableMeta {
     pub fn dynamic_index_info(&self) -> Option<(isize, isize, isize, bool)> {
         let first = self.elements.first()?;
         let is_ff = first.is_ff();
+        #[cfg(debug_assertions)]
+        for (i, elem) in self.elements.iter().enumerate() {
+            debug_assert_eq!(
+                elem.is_ff(),
+                is_ff,
+                "dynamic_index_info: mixed FF/comb in array, elem[{}] is_ff={} but elem[0] is_ff={} (path={:?})",
+                i,
+                elem.is_ff(),
+                is_ff,
+                self.path,
+            );
+        }
         let stride = if self.elements.len() > 1 {
             self.elements[1].current_offset() - self.elements[0].current_offset()
         } else {
@@ -297,6 +309,16 @@ pub fn create_variable_meta(
         let nb = native_bytes(width);
         let vs = value_size(nb, use_4state);
 
+        // For multi-element variables (arrays), all elements must have the
+        // same FF/comb classification. DynamicVariable expressions assume
+        // uniform stride in a single buffer; mixed placement is invalid.
+        let any_ff = v
+            .value
+            .iter()
+            .enumerate()
+            .any(|(i, _)| ff_table.is_ff(v.id, i));
+        let force_ff = any_ff && v.value.len() > 1;
+
         let mut elements = vec![];
         let mut initial_values = vec![];
 
@@ -306,7 +328,7 @@ pub fn create_variable_meta(
                 val.clear_xz();
             }
 
-            if ff_table.is_ff(v.id, i) {
+            if force_ff || ff_table.is_ff(v.id, i) {
                 let current_offset = ff_pos;
                 let next_offset = ff_pos + vs as isize;
                 elements.push(VariableElement {

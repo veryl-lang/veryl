@@ -338,7 +338,13 @@ impl AssignStatement {
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        let assign_target = self.dst.first().map(|d| d.id);
+        let assign_target = self.dst.first().map(|d| {
+            let idx = d
+                .index
+                .eval_value(context)
+                .and_then(|v| context.get_variable_info(d.id)?.r#type.array.calc_index(&v));
+            (d.id, idx)
+        });
         self.expr.gather_ff(context, table, decl, assign_target);
         for dst in &self.dst {
             dst.gather_ff(context, table, decl);
