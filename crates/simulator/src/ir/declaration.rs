@@ -264,6 +264,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_ff_table = air::FfTable::default();
         child_module.gather_ff(&mut child_analyzer_context, &mut child_ff_table);
         child_ff_table.update_is_ff();
+        if context.config.disable_ff_opt {
+            child_ff_table.force_all_ff();
+        }
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;

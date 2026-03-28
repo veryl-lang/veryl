@@ -283,9 +283,15 @@ impl FunctionCall {
         }
     }
 
-    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        assign_target: Option<VarId>,
+    ) {
         for input in self.inputs.values() {
-            input.gather_ff(context, table, decl);
+            input.gather_ff(context, table, decl, assign_target);
         }
         for dsts in self.outputs.values() {
             for dst in dsts {

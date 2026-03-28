@@ -6014,7 +6014,9 @@ fn store_load_through_passthrough_with_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
-        for _ in 0..10 {
+        // NBA causes 1-cycle delay for FF outputs through comb chains;
+        // allow extra cycles for the state machine to complete.
+        for _ in 0..20 {
             sim.step(&clk);
         }
         let result = sim.get("result").unwrap().payload_u64();
@@ -6145,7 +6147,9 @@ fn store_load_comb_mem_through_passthrough_with_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
-        for _ in 0..10 {
+        // NBA causes 1-cycle delay for FF outputs through comb chains;
+        // allow extra cycles for the state machine to complete.
+        for _ in 0..20 {
             sim.step(&clk);
         }
         let result = sim.get("result").unwrap().payload_u64();
@@ -9117,12 +9121,11 @@ fn ir_drop_order_safety() {
     }
 }
 
-/// FF variable not in needs_swap (not read by other statements in same event)
-/// gets rewrite_ff_direct optimization: writes to current instead of next,
-/// skipping ff_swap. Verify NBA semantics are preserved: comb in next cycle
-/// sees the new value, and other FF statements in same event see old values.
+/// Independent FF variables in the same always_ff block.
+/// Verify both self-referencing and constant-assigned FF variables
+/// produce correct values across clock cycles with NBA semantics.
 #[test]
-fn nba_rewrite_ff_direct_correctness() {
+fn nba_independent_ff_variables() {
     let code = r#"
     module Top (
         clk: input  clock,
@@ -9134,14 +9137,14 @@ fn nba_rewrite_ff_direct_correctness() {
         var b: logic<32>;
 
         // a and b are independent FF variables in the same always_ff.
-        // Neither reads the other, so both may be rewrite_ff_direct candidates.
+        // Neither reads the other — independent FF variables.
         always_ff {
             if_reset {
                 a = 0;
                 b = 100;
             } else {
-                a = a + 1;   // self-ref → needs_swap (NOT rewrite_ff_direct)
-                b = 200;     // no readers in this event → rewrite_ff_direct candidate
+                a = a + 1;   // self-ref
+                b = 200;     // constant assign
             }
         }
         assign a_out = a;
@@ -9166,10 +9169,7 @@ fn nba_rewrite_ff_direct_correctness() {
 
 /// Two FF variables where one reads the other in the same always_ff block.
 /// The reader must see the OLD value (NBA semantics), not the just-written value.
-/// NOTE: 4state mode has a separate initialization bug for newly-FF variables;
-/// this test uses 2state only until that is fixed.
 #[test]
-#[ignore]
 fn nba_cross_read_in_same_event() {
     let code = r#"
     module Top (
@@ -9195,28 +9195,27 @@ fn nba_cross_read_in_same_event() {
     }
     "#;
 
-    // 2state only (4state has separate initialization bug for newly-FF variables)
-    let mut dual = DualSimulator::new(code, false);
-    let (jclk, iclk) = dual.get_clock("clk");
-    let (jrst, irst) = dual.get_reset("rst");
-    dual.step(&jrst, &irst);
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
 
-    for i in 0u64..10 {
-        dual.step(&jclk, &iclk);
-        assert_eq!(dual.get("x_out").unwrap(), Value::new(i + 1, 32, false));
-        assert_eq!(
-            dual.get("y_out").unwrap(),
-            Value::new(i, 32, false),
-            "cycle {}: y should see old x (NBA), got new x",
-            i + 1
-        );
-    }
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(dual.get("x_out").unwrap(), Value::new(i + 1, 32, false));
+            assert_eq!(
+                dual.get("y_out").unwrap(),
+                Value::new(i, 32, false),
+                "cycle {}: y should see old x (NBA), got new x",
+                i + 1
+            );
+        }
+    });
 }
 
 /// Three FF variables with chain dependency: a→b→c in same always_ff.
 /// All reads must see old values regardless of statement order.
 #[test]
-#[ignore]
 fn nba_three_variable_chain() {
     let code = r#"
     module Top (
@@ -9244,26 +9243,24 @@ fn nba_three_variable_chain() {
     "#;
 
     // After reset: a=1, b=0, c=0
-    // Cycle 1: c=old_b=0, b=old_a=1, a=old_a+1=2 → c=0
-    // Cycle 2: c=old_b=1, b=old_a=2, a=old_a+1=3 → c=1
-    // Cycle 3: c=old_b=2, b=old_a=3, a=old_a+1=4 → c=2
-    // Pattern: c_out = cycle - 2 (for cycle >= 2), 0 for cycle 1
-    // 2state only (4state has separate initialization bug for newly-FF variables)
-    let mut dual = DualSimulator::new(code, false);
-    let (jclk, iclk) = dual.get_clock("clk");
-    let (jrst, irst) = dual.get_reset("rst");
-    dual.step(&jrst, &irst);
+    // Cycle 1: c=old_b=0, b=old_a=1, a=2 → c_out=0
+    // Cycle 2: c=old_b=1, b=old_a=2, a=3 → c_out=1
+    // Cycle n: c=old_b=n-1, b=old_a=n, a=n+1 → c_out=n-1
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
 
-    dual.step(&jclk, &iclk);
-    assert_eq!(dual.get("c_out").unwrap(), Value::new(0, 32, false));
-
-    dual.step(&jclk, &iclk);
-    assert_eq!(dual.get("c_out").unwrap(), Value::new(1, 32, false));
-
-    for i in 3u64..=10 {
-        dual.step(&jclk, &iclk);
-        assert_eq!(dual.get("c_out").unwrap(), Value::new(i - 2, 32, false));
-    }
+        for i in 1u64..=10 {
+            dual.step(&jclk, &iclk);
+            let expected = if i <= 1 { 0 } else { i - 1 };
+            assert_eq!(
+                dual.get("c_out").unwrap(),
+                Value::new(expected, 32, false),
+                "cycle {i}: c_out should be {expected}"
+            );
+        }
+    });
 }
 
 /// let binding inside always_ff must use blocking assignment (BA) semantics:

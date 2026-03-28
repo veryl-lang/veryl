@@ -93,7 +93,7 @@ impl Statement {
             Statement::Assign(x) => x.gather_ff(context, table, decl),
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
-            Statement::FunctionCall(x) => x.gather_ff(context, table, decl),
+            Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None),
             Statement::TbMethodCall(_)
             | Statement::SystemFunctionCall(_)
             | Statement::Unsupported(_)
@@ -258,6 +258,11 @@ impl AssignDestination {
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         if let Some(variable) = context.get_variable_info(self.id) {
+            // Let-bound variables use blocking assignment (BA) semantics
+            // and must not be registered as FF in the table.
+            if variable.kind == crate::ir::VarKind::Let {
+                return;
+            }
             if let Some(index) = self.index.eval_value(context) {
                 if let Some(index) = variable.r#type.array.calc_index(&index) {
                     table.insert_assigned(self.id, index, decl);
@@ -333,7 +338,8 @@ impl AssignStatement {
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        self.expr.gather_ff(context, table, decl);
+        let assign_target = self.dst.first().map(|d| d.id);
+        self.expr.gather_ff(context, table, decl, assign_target);
         for dst in &self.dst {
             dst.gather_ff(context, table, decl);
         }
@@ -426,7 +432,7 @@ impl IfStatement {
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        self.cond.gather_ff(context, table, decl);
+        self.cond.gather_ff(context, table, decl, None);
         for x in &self.true_side {
             x.gather_ff(context, table, decl);
         }

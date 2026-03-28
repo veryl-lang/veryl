@@ -4,22 +4,35 @@ use crate::ir::VarId;
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
     pub assigned: Option<usize>,
-    pub refered: Vec<usize>,
+    /// (decl_index, assign_target_var) pairs where this variable is referenced.
+    /// assign_target_var is the VarId of the LHS variable in whose assignment
+    /// this variable appears on the RHS.
+    pub refered: Vec<(usize, Option<VarId>)>,
     pub is_ff: bool,
     pub assigned_comb: Option<usize>,
 }
 
 impl FfTableEntry {
-    fn update_is_ff(&mut self) {
-        if let Some(assigned) = self.assigned {
-            // If assigned is only member of refered, it is not necessary to treat as FF.
-            // For example, if `a` in the following code is not refered in other always_ff,
-            // it can be treat as non-FF value.
+    fn update_is_ff(&mut self, self_key: (VarId, usize)) {
+        if let Some(assigned_decl) = self.assigned {
+            // FF if referenced in a different decl (traditional check) OR
+            // referenced by a different variable's assignment within the same
+            // decl (NBA: cross-variable reads must see old values).
+            // Self-referencing within the same decl (e.g. `a = a + 1` alone)
+            // can remain comb because no other variable observes the old value.
             //
-            // always_ff {
-            //   a += 1;
-            // }
-            self.is_ff = self.refered.iter().any(|x| *x != assigned);
+            // assign_target=None means the reference is in a condition expression
+            // (if/case) which indirectly affects all assignments in the block,
+            // so it must be treated as a cross-reference.
+            self.is_ff = self.refered.iter().any(|(decl, assign_target)| {
+                if *decl != assigned_decl {
+                    return true;
+                }
+                match assign_target {
+                    Some(target_id) => *target_id != self_key.0,
+                    None => true,
+                }
+            });
         }
     }
 }
@@ -31,8 +44,19 @@ pub struct FfTable {
 
 impl FfTable {
     pub fn update_is_ff(&mut self) {
-        for x in self.table.values_mut() {
-            x.update_is_ff()
+        let keys: Vec<_> = self.table.keys().cloned().collect();
+        for key in keys {
+            self.table.get_mut(&key).unwrap().update_is_ff(key);
+        }
+    }
+
+    /// Force all always_ff-assigned variables to FF, disabling the
+    /// assign_target refinement. Used by --disable-ff-opt for debugging.
+    pub fn force_all_ff(&mut self) {
+        for entry in self.table.values_mut() {
+            if entry.assigned.is_some() {
+                entry.is_ff = true;
+            }
         }
     }
 
@@ -44,13 +68,19 @@ impl FfTable {
         }
     }
 
-    pub fn insert_refered(&mut self, id: VarId, index: usize, decl: usize) {
+    pub fn insert_refered(
+        &mut self,
+        id: VarId,
+        index: usize,
+        decl: usize,
+        assign_target: Option<VarId>,
+    ) {
         self.table
             .entry((id, index))
-            .and_modify(|x| x.refered.push(decl))
+            .and_modify(|x| x.refered.push((decl, assign_target)))
             .or_insert(FfTableEntry {
                 assigned: None,
-                refered: vec![decl],
+                refered: vec![(decl, assign_target)],
                 is_ff: false,
                 assigned_comb: None,
             });

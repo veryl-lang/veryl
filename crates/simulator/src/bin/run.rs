@@ -20,6 +20,8 @@ pub struct Opt {
     pub dump_cranelift: bool,
     #[arg(long)]
     pub dump_asm: bool,
+    #[arg(long)]
+    pub disable_ff_opt: bool,
 }
 
 impl From<Opt> for Config {
@@ -29,6 +31,7 @@ impl From<Opt> for Config {
             use_4state: value.use_4state,
             dump_cranelift: value.dump_cranelift,
             dump_asm: value.dump_asm,
+            disable_ff_opt: value.disable_ff_opt,
         }
     }
 }
@@ -100,7 +103,7 @@ fn main() {
         let pct = jit as f64 / total as f64 * 100.0;
         eprintln!("JIT: {jit}/{total} statements ({pct:.1}%)");
     }
-    eprintln!("FF swap entries: {}", sim.ir.ff_swap_entries.len());
+    eprintln!("FF commit entries: {}", sim.ir.ff_commit_entries.len());
     eprintln!(
         "FF buffer: {} bytes, Comb buffer: {} bytes",
         sim.ir.ff_values.len(),

@@ -410,30 +410,36 @@ impl Expression {
         }
     }
 
-    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        assign_target: Option<VarId>,
+    ) {
         match self {
-            Expression::Term(x) => x.gather_ff(context, table, decl),
-            Expression::Unary(_, x, _) => x.gather_ff(context, table, decl),
+            Expression::Term(x) => x.gather_ff(context, table, decl, assign_target),
+            Expression::Unary(_, x, _) => x.gather_ff(context, table, decl, assign_target),
             Expression::Binary(x, _, y, _) => {
-                x.gather_ff(context, table, decl);
-                y.gather_ff(context, table, decl);
+                x.gather_ff(context, table, decl, assign_target);
+                y.gather_ff(context, table, decl, assign_target);
             }
             Expression::Ternary(x, y, z, _) => {
-                x.gather_ff(context, table, decl);
-                y.gather_ff(context, table, decl);
-                z.gather_ff(context, table, decl);
+                x.gather_ff(context, table, decl, assign_target);
+                y.gather_ff(context, table, decl, assign_target);
+                z.gather_ff(context, table, decl, assign_target);
             }
             Expression::Concatenation(x, _) => {
                 for (x, y) in x {
-                    x.gather_ff(context, table, decl);
+                    x.gather_ff(context, table, decl, assign_target);
                     if let Some(y) = y {
-                        y.gather_ff(context, table, decl);
+                        y.gather_ff(context, table, decl, assign_target);
                     }
                 }
             }
             Expression::StructConstructor(_, exprs, _) => {
                 for (_, expr) in exprs {
-                    expr.gather_ff(context, table, decl);
+                    expr.gather_ff(context, table, decl, assign_target);
                 }
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
@@ -657,23 +663,29 @@ impl Factor {
         }
     }
 
-    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        assign_target: Option<VarId>,
+    ) {
         match self {
             Factor::Variable(id, index, _, _) => {
                 if let Some(variable) = context.get_variable_info(*id) {
                     if let Some(index) = index.eval_value(context) {
                         if let Some(index) = variable.r#type.array.calc_index(&index) {
-                            table.insert_refered(*id, index, decl);
+                            table.insert_refered(*id, index, decl, assign_target);
                         }
                     } else if let Some(total_array) = variable.r#type.total_array() {
                         for i in 0..total_array {
-                            table.insert_refered(*id, i, decl);
+                            table.insert_refered(*id, i, decl, assign_target);
                         }
                     }
                 }
             }
             Factor::FunctionCall(x) => {
-                x.gather_ff(context, table, decl);
+                x.gather_ff(context, table, decl, assign_target);
             }
             _ => (),
         }

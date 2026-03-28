@@ -49,9 +49,11 @@ pub struct Ir {
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
-    /// FF swap entries: (current_offset, value_size) pairs.
-    /// Swap value_size bytes between current_offset and current_offset + value_size.
-    pub ff_swap_entries: Vec<(usize, usize)>,
+    /// FF commit entries: (current_offset, value_size) pairs.
+    /// After event execution, next → current copy is performed for each entry.
+    pub ff_commit_entries: Vec<(usize, usize)>,
+    /// Whether FF classification optimization is disabled.
+    pub disable_ff_opt: bool,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
     /// instances created from the same cached `ProtoModule` can share the binary.
     _binary: Arc<Vec<Mmap>>,
@@ -61,16 +63,16 @@ impl Ir {
     pub fn from_module(
         module: Module,
         binary: Vec<Mmap>,
-        use_4state: bool,
+        config: &Config,
         token: TokenRange,
     ) -> Ir {
-        Ir::from_module_arc(module, Arc::new(binary), use_4state, token)
+        Ir::from_module_arc(module, Arc::new(binary), config, token)
     }
 
     pub fn from_module_arc(
         module: Module,
         binary: Arc<Vec<Mmap>>,
-        use_4state: bool,
+        config: &Config,
         token: TokenRange,
     ) -> Ir {
         Ir {
@@ -79,12 +81,13 @@ impl Ir {
             ports: module.ports,
             ff_values: module.ff_values,
             comb_values: module.comb_values,
-            use_4state,
+            use_4state: config.use_4state,
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
-            ff_swap_entries: module.ff_swap_entries,
+            ff_commit_entries: module.ff_commit_entries,
+            disable_ff_opt: config.disable_ff_opt,
             _binary: binary,
         }
     }
@@ -268,12 +271,7 @@ pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, Simulat
             };
             let proto: ProtoModule = Conv::conv(&mut context, x)?;
             let module = proto.instantiate();
-            return Ok(Ir::from_module(
-                module,
-                context.binary,
-                config.use_4state,
-                token,
-            ));
+            return Ok(Ir::from_module(module, context.binary, config, token));
         }
     }
     Err(SimulatorError::TopModuleNotFound {
@@ -309,7 +307,7 @@ pub fn build_ir_cached(
         return Ok(Ir::from_module_arc(
             module,
             Arc::clone(&entry.binary),
-            config.use_4state,
+            config,
             entry.token,
         ));
     }
@@ -330,7 +328,7 @@ pub fn build_ir_cached(
             let module = proto.instantiate();
             let binary = Arc::new(context.binary);
 
-            let result = Ir::from_module_arc(module, Arc::clone(&binary), config.use_4state, token);
+            let result = Ir::from_module_arc(module, Arc::clone(&binary), config, token);
 
             cache.shared_jit_cache = context.jit_cache;
             cache.shared_binaries.push(Arc::clone(&binary));
@@ -358,6 +356,8 @@ pub struct Config {
     pub use_jit: bool,
     pub dump_cranelift: bool,
     pub dump_asm: bool,
+    /// Force all always_ff variables to FF (disable is_ff refinement).
+    pub disable_ff_opt: bool,
 }
 
 impl Config {
@@ -366,11 +366,14 @@ impl Config {
 
         for use_4state in [false, true] {
             for use_jit in [false, true] {
-                ret.push(Config {
-                    use_4state,
-                    use_jit,
-                    ..Default::default()
-                });
+                for disable_ff_opt in [false, true] {
+                    ret.push(Config {
+                        use_4state,
+                        use_jit,
+                        disable_ff_opt,
+                        ..Default::default()
+                    });
+                }
             }
         }
 

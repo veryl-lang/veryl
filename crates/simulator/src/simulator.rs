@@ -46,6 +46,7 @@ impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let comb_snapshot_buf = vec![0u8; ir.comb_values.len()];
         let needs_convergence_check = ir.required_comb_passes > 1;
+        let disable_ff_opt = ir.disable_ff_opt;
         let mut ret = Self {
             ir,
             time: 0,
@@ -56,7 +57,9 @@ impl Simulator {
             comb_snapshot_buf,
             profile: Default::default(),
             convergence_verified: false,
-            convergence_warmup: if needs_convergence_check {
+            // When disable_ff_opt is set, always perform full convergence
+            // checks to help detect comb evaluation inconsistencies.
+            convergence_warmup: if needs_convergence_check && !disable_ff_opt {
                 CONVERGENCE_WARMUP
             } else {
                 0
@@ -233,8 +236,6 @@ impl Simulator {
             for x in statements {
                 x.eval_step(&mut self.mask_cache);
             }
-            // No post-event settle: ff_swap only touches ff_values.
-            // Comb re-settles at the start of the next step().
         }
 
         #[cfg(feature = "profile")]
@@ -245,7 +246,7 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let ff_start = std::time::Instant::now();
 
-        Self::ff_swap(&mut self.ir.ff_values, &self.ir.ff_swap_entries);
+        Self::ff_commit(&mut self.ir.ff_values, &self.ir.ff_commit_entries);
 
         #[cfg(feature = "profile")]
         {
@@ -257,31 +258,21 @@ impl Simulator {
         self.dump_variables();
     }
 
+    /// Commit FF updates: copy next → current for all FF variables.
+    /// Event statements write new values to next; this makes them visible
+    /// in current for the next cycle. Unwritten variables keep their value
+    /// because next still holds the previous commit's value.
     #[inline(always)]
-    fn ff_swap(ff_values: &mut [u8], entries: &[(usize, usize)]) {
+    fn ff_commit(ff_values: &mut [u8], entries: &[(usize, usize)]) {
         let ptr = ff_values.as_mut_ptr();
         for &(current_offset, value_size) in entries {
             let next_offset = current_offset + value_size;
             unsafe {
-                match value_size {
-                    4 => {
-                        let a = ptr.add(current_offset) as *mut u32;
-                        let b = ptr.add(next_offset) as *mut u32;
-                        std::ptr::swap(a, b);
-                    }
-                    8 => {
-                        let a = ptr.add(current_offset) as *mut u64;
-                        let b = ptr.add(next_offset) as *mut u64;
-                        std::ptr::swap(a, b);
-                    }
-                    _ => {
-                        std::ptr::swap_nonoverlapping(
-                            ptr.add(current_offset),
-                            ptr.add(next_offset),
-                            value_size,
-                        );
-                    }
-                }
+                std::ptr::copy_nonoverlapping(
+                    ptr.add(next_offset),
+                    ptr.add(current_offset),
+                    value_size,
+                );
             }
         }
     }

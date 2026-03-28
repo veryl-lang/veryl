@@ -176,6 +176,10 @@ pub struct OptTest {
     /// Disable JIT compilation for native tests
     #[arg(long)]
     pub disable_jit: bool,
+
+    /// Disable FF classification optimization (force all always_ff variables to FF)
+    #[arg(long)]
+    pub disable_ff_opt: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
