@@ -415,7 +415,7 @@ impl Expression {
         context: &mut Context,
         table: &mut FfTable,
         decl: usize,
-        assign_target: Option<VarId>,
+        assign_target: Option<(VarId, Option<usize>)>,
     ) {
         match self {
             Expression::Term(x) => x.gather_ff(context, table, decl, assign_target),
@@ -668,7 +668,7 @@ impl Factor {
         context: &mut Context,
         table: &mut FfTable,
         decl: usize,
-        assign_target: Option<VarId>,
+        assign_target: Option<(VarId, Option<usize>)>,
     ) {
         match self {
             Factor::Variable(id, index, _, _) => {

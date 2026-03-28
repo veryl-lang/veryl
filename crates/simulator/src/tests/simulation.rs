@@ -9306,3 +9306,245 @@ fn let_in_always_ff_blocking_semantics() {
         }
     });
 }
+
+// ============================================================
+// Additional NBA edge case tests
+// ============================================================
+
+/// Array elements with NBA: arr[1] reads old arr[0] within same always_ff.
+#[test]
+fn nba_array_element() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out0: output logic<32>,
+        out1: output logic<32>,
+    ) {
+        var arr: logic<32> [2];
+
+        always_ff {
+            if_reset {
+                arr[0] = 0;
+                arr[1] = 0;
+            } else {
+                arr[0] = arr[0] + 1;
+                arr[1] = arr[0];   // must see OLD arr[0]
+            }
+        }
+        assign out0 = arr[0];
+        assign out1 = arr[1];
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(dual.get("out0").unwrap(), Value::new(i + 1, 32, false));
+            assert_eq!(
+                dual.get("out1").unwrap(),
+                Value::new(i, 32, false),
+                "cycle {}: arr[1] should see old arr[0]",
+                i + 1
+            );
+        }
+    });
+}
+
+/// Two separate always_ff blocks reading the same variable.
+/// Both must see the pre-clock-edge value of the shared variable.
+#[test]
+fn nba_multiple_always_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a_out: output logic<32>,
+        b_out: output logic<32>,
+    ) {
+        var shared: logic<32>;
+        var a: logic<32>;
+        var b: logic<32>;
+
+        always_ff {
+            if_reset { shared = 0; }
+            else     { shared = shared + 1; }
+        }
+        always_ff {
+            if_reset { a = 0; }
+            else     { a = shared; }
+        }
+        always_ff {
+            if_reset { b = 0; }
+            else     { b = shared + 10; }
+        }
+        assign a_out = a;
+        assign b_out = b;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(
+                dual.get("a_out").unwrap(),
+                Value::new(i, 32, false),
+                "cycle {}: a should see old shared",
+                i + 1
+            );
+            assert_eq!(
+                dual.get("b_out").unwrap(),
+                Value::new(i + 10, 32, false),
+                "cycle {}: b should see old shared + 10",
+                i + 1
+            );
+        }
+    });
+}
+
+/// Conditional FF write: value must persist when condition is false.
+/// With NBA, the condition becomes true one cycle after the counter is incremented.
+#[test]
+fn nba_conditional_write() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        var cnt: logic<4>;
+        var val: logic<32>;
+
+        always_ff {
+            if_reset {
+                cnt = 0;
+                val = 0;
+            } else {
+                cnt += 1;
+                if cnt == 4'd1 {
+                    val = 32'd42;
+                }
+                // No else: val must retain 42 for all subsequent cycles
+            }
+        }
+        assign out = val;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+
+        // cycle 1: cnt_cur=0(old) → cnt==1 is false → val stays 0
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("out").unwrap(), Value::new(0, 32, false));
+
+        // cycle 2: cnt_cur=1(old) → cnt==1 is true → val=42
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("out").unwrap(), Value::new(42, 32, false));
+
+        // cycle 3+: condition false, val persists at 42
+        for _ in 3..=10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(
+                dual.get("out").unwrap(),
+                Value::new(42, 32, false),
+                "val should persist when condition is false"
+            );
+        }
+    });
+}
+
+// ============================================================
+// 4-state X/Z propagation tests
+// ============================================================
+
+/// FF variable with 4-state: verify X/Z clears after reset
+/// and NBA produces correct values across cycles.
+#[test]
+fn ff_4state_xz_propagation() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        var a: logic<32>;
+        var b: logic<32>;
+
+        always_ff {
+            if_reset {
+                a = 32'd5;
+                b = 32'd0;
+            } else {
+                a = a + 1;
+                b = a;
+            }
+        }
+        assign out = b;
+    }
+    "#;
+
+    let config = Config {
+        use_4state: true,
+        use_jit: false,
+        ..Default::default()
+    };
+    let ir = analyze(code, &config);
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let rst = sim.get_reset("rst").unwrap();
+
+    sim.step(&rst);
+    let b = sim.get("out").unwrap();
+    assert_eq!(b.payload_u64(), 0, "b should be 0 after reset");
+    assert!(!b.is_xz(), "b should not have X/Z after reset");
+
+    sim.step(&clk);
+    let b = sim.get("out").unwrap();
+    assert_eq!(b.payload_u64(), 5);
+    assert!(!b.is_xz());
+}
+
+/// Combinational 4-state: X in arithmetic produces X result.
+#[test]
+fn comb_4state_arithmetic() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        sum: output logic<8>,
+        and_out: output logic<8>,
+    ) {
+        assign sum = a + b;
+        assign and_out = a & b;
+    }
+    "#;
+
+    let config = Config {
+        use_4state: true,
+        use_jit: false,
+        ..Default::default()
+    };
+    let ir = analyze(code, &config);
+    let mut sim = Simulator::new(ir, None);
+
+    sim.set("a", Value::new(5, 8, false));
+    // b is unset (X in 4state) → sum has X
+    let sum = sim.get("sum").unwrap();
+    assert!(sum.is_xz(), "sum should have X when input b has X/Z");
+
+    sim.set("b", Value::new(3, 8, false));
+    let sum = sim.get("sum").unwrap();
+    assert_eq!(sum.payload_u64(), 8);
+    assert!(!sum.is_xz(), "sum should be clean after both inputs set");
+}
