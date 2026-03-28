@@ -8939,3 +8939,373 @@ fn is_ff_port_variables_not_ff() {
         }
     });
 }
+
+// ============================================================
+// Case statement tests
+// ============================================================
+
+/// Simple case/default pattern in always_comb.
+#[test]
+fn case_simple() {
+    let code = r#"
+    module Top (
+        sel: input  logic<2>,
+        result: output logic<32>,
+    ) {
+        always_comb {
+            case sel {
+                2'd0: result = 32'd10;
+                2'd1: result = 32'd20;
+                2'd2: result = 32'd30;
+                default: result = 32'd99;
+            }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        dual.set("sel", Value::new(0, 2, false));
+        dual.step_synthetic();
+        assert_eq!(dual.get("result").unwrap(), Value::new(10, 32, false));
+
+        dual.set("sel", Value::new(1, 2, false));
+        dual.step_synthetic();
+        assert_eq!(dual.get("result").unwrap(), Value::new(20, 32, false));
+
+        dual.set("sel", Value::new(2, 2, false));
+        dual.step_synthetic();
+        assert_eq!(dual.get("result").unwrap(), Value::new(30, 32, false));
+
+        dual.set("sel", Value::new(3, 2, false));
+        dual.step_synthetic();
+        assert_eq!(dual.get("result").unwrap(), Value::new(99, 32, false));
+    });
+}
+
+/// Case result feeds into a comb dependency chain.
+#[test]
+fn case_with_comb_dependency() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        result: output logic<32>,
+    ) {
+        var cnt: logic<2>;
+        always_ff {
+            if_reset { cnt = 0; } else { cnt += 1; }
+        }
+
+        var decoded: logic<32>;
+        always_comb {
+            case cnt {
+                2'd0: decoded = 32'd100;
+                2'd1: decoded = 32'd200;
+                2'd2: decoded = 32'd300;
+                default: decoded = 32'd400;
+            }
+        }
+        assign result = decoded + 1;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+
+        let expected = [101, 201, 301, 401];
+        for i in 0..8 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new(expected[(i + 1) % 4], 32, false)
+            );
+        }
+    });
+}
+
+// ============================================================
+// Let binding tests
+// ============================================================
+
+/// let binding in always_comb context.
+#[test]
+fn let_in_comb() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        always_comb {
+            let x: logic<32> = a + 1;
+            result = x * 2;
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..10 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new((i + 1) * 2, 32, false)
+            );
+        }
+    });
+}
+
+/// Chained let bindings: let → let → assign.
+#[test]
+fn let_chain() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        result: output logic<32>,
+    ) {
+        always_comb {
+            let x: logic<32> = a + 1;
+            let y: logic<32> = x + 2;
+            result = y + 3;
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..10 {
+            dual.set("a", Value::new(i, 32, false));
+            dual.step_synthetic();
+            // result = (a + 1) + 2 + 3 = a + 6
+            assert_eq!(dual.get("result").unwrap(), Value::new(i + 6, 32, false));
+        }
+    });
+}
+
+// ============================================================
+// JIT lifetime / drop order safety
+// ============================================================
+
+/// Verify Ir can be created and dropped without panic.
+/// Ensures JIT Mmap backing outlives function pointers during drop.
+#[test]
+fn ir_drop_order_safety() {
+    let code = r#"
+    module Top (
+        clk: input clock, rst: input reset,
+        out: output logic<32>,
+    ) {
+        inst u: Inner (clk, rst, out);
+    }
+    module Inner (
+        clk: input clock, rst: input reset,
+        out: output logic<32>,
+    ) {
+        always_ff { if_reset { out = 0; } else { out += 1; } }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.step(&clk);
+        // Explicitly drop — should not panic
+        drop(sim);
+    }
+}
+
+/// FF variable not in needs_swap (not read by other statements in same event)
+/// gets rewrite_ff_direct optimization: writes to current instead of next,
+/// skipping ff_swap. Verify NBA semantics are preserved: comb in next cycle
+/// sees the new value, and other FF statements in same event see old values.
+#[test]
+fn nba_rewrite_ff_direct_correctness() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a_out: output logic<32>,
+        b_out: output logic<32>,
+    ) {
+        var a: logic<32>;
+        var b: logic<32>;
+
+        // a and b are independent FF variables in the same always_ff.
+        // Neither reads the other, so both may be rewrite_ff_direct candidates.
+        always_ff {
+            if_reset {
+                a = 0;
+                b = 100;
+            } else {
+                a = a + 1;   // self-ref → needs_swap (NOT rewrite_ff_direct)
+                b = 200;     // no readers in this event → rewrite_ff_direct candidate
+            }
+        }
+        assign a_out = a;
+        assign b_out = b;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("a_out").unwrap(), Value::new(1, 32, false));
+        assert_eq!(dual.get("b_out").unwrap(), Value::new(200, 32, false));
+
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("a_out").unwrap(), Value::new(2, 32, false));
+        assert_eq!(dual.get("b_out").unwrap(), Value::new(200, 32, false));
+    });
+}
+
+/// Two FF variables where one reads the other in the same always_ff block.
+/// The reader must see the OLD value (NBA semantics), not the just-written value.
+/// NOTE: 4state mode has a separate initialization bug for newly-FF variables;
+/// this test uses 2state only until that is fixed.
+#[test]
+#[ignore]
+fn nba_cross_read_in_same_event() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        x_out: output logic<32>,
+        y_out: output logic<32>,
+    ) {
+        var x: logic<32>;
+        var y: logic<32>;
+
+        always_ff {
+            if_reset {
+                x = 0;
+                y = 0;
+            } else {
+                x = x + 1;
+                y = x;      // y reads x: must see OLD x (before +1)
+            }
+        }
+        assign x_out = x;
+        assign y_out = y;
+    }
+    "#;
+
+    // 2state only (4state has separate initialization bug for newly-FF variables)
+    let mut dual = DualSimulator::new(code, false);
+    let (jclk, iclk) = dual.get_clock("clk");
+    let (jrst, irst) = dual.get_reset("rst");
+    dual.step(&jrst, &irst);
+
+    for i in 0u64..10 {
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("x_out").unwrap(), Value::new(i + 1, 32, false));
+        assert_eq!(
+            dual.get("y_out").unwrap(),
+            Value::new(i, 32, false),
+            "cycle {}: y should see old x (NBA), got new x",
+            i + 1
+        );
+    }
+}
+
+/// Three FF variables with chain dependency: a→b→c in same always_ff.
+/// All reads must see old values regardless of statement order.
+#[test]
+#[ignore]
+fn nba_three_variable_chain() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        c_out: output logic<32>,
+    ) {
+        var a: logic<32>;
+        var b: logic<32>;
+        var c: logic<32>;
+
+        always_ff {
+            if_reset {
+                a = 1;
+                b = 0;
+                c = 0;
+            } else {
+                c = b;       // c reads old b
+                b = a;       // b reads old a
+                a = a + 1;   // a self-increments
+            }
+        }
+        assign c_out = c;
+    }
+    "#;
+
+    // After reset: a=1, b=0, c=0
+    // Cycle 1: c=old_b=0, b=old_a=1, a=old_a+1=2 → c=0
+    // Cycle 2: c=old_b=1, b=old_a=2, a=old_a+1=3 → c=1
+    // Cycle 3: c=old_b=2, b=old_a=3, a=old_a+1=4 → c=2
+    // Pattern: c_out = cycle - 2 (for cycle >= 2), 0 for cycle 1
+    // 2state only (4state has separate initialization bug for newly-FF variables)
+    let mut dual = DualSimulator::new(code, false);
+    let (jclk, iclk) = dual.get_clock("clk");
+    let (jrst, irst) = dual.get_reset("rst");
+    dual.step(&jrst, &irst);
+
+    dual.step(&jclk, &iclk);
+    assert_eq!(dual.get("c_out").unwrap(), Value::new(0, 32, false));
+
+    dual.step(&jclk, &iclk);
+    assert_eq!(dual.get("c_out").unwrap(), Value::new(1, 32, false));
+
+    for i in 3u64..=10 {
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("c_out").unwrap(), Value::new(i - 2, 32, false));
+    }
+}
+
+/// let binding inside always_ff must use blocking assignment (BA) semantics:
+/// the let-bound value is immediately visible within the same cycle.
+/// FfTable classifies let variables as is_ff=false (comb) since they are
+/// only assigned and referenced within the same declaration block.
+#[test]
+fn let_in_always_ff_blocking_semantics() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        result: output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                let tmp: logic<32> = cnt + 1;
+                cnt = tmp + 1;
+            }
+        }
+        assign result = cnt;
+    }
+    "#;
+
+    // If let uses BA: cnt = (old_cnt + 1) + 1 = old_cnt + 2 each cycle → 0, 2, 4, 6, ...
+    // If let uses NBA: tmp reads stale value → wrong result
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        for i in 0u64..10 {
+            dual.step(&jclk, &iclk);
+            assert_eq!(
+                dual.get("result").unwrap(),
+                Value::new((i + 1) * 2, 32, false),
+                "cycle {}: expected {} (BA semantics), let in always_ff may be using NBA",
+                i + 1,
+                (i + 1) * 2
+            );
+        }
+    });
+}

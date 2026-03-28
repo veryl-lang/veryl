@@ -87,7 +87,20 @@ fn fill_buffers_recursive(
     for (_, meta) in &sorted {
         for (element, initial) in meta.elements.iter().zip(meta.initial_values.iter()) {
             let nb = element.native_bytes;
+            let vs = value_size(nb, use_4state);
             if element.is_ff() {
+                #[cfg(debug_assertions)]
+                {
+                    let off = element.current_offset() as usize;
+                    debug_assert!(
+                        off + vs <= ff_values.len(),
+                        "FF current_offset out of bounds"
+                    );
+                    debug_assert!(
+                        element.next_offset as usize + vs <= ff_values.len(),
+                        "FF next_offset out of bounds"
+                    );
+                }
                 let cur =
                     &mut ff_values[element.current_offset() as usize..] as *mut [u8] as *mut u8;
                 let nxt = &mut ff_values[element.next_offset as usize..] as *mut [u8] as *mut u8;
@@ -96,6 +109,11 @@ fn fill_buffers_recursive(
                     write_native_value(nxt, nb, use_4state, initial);
                 }
             } else {
+                #[cfg(debug_assertions)]
+                debug_assert!(
+                    element.current_offset() as usize + vs <= comb_values.len(),
+                    "Comb current_offset out of bounds"
+                );
                 let cur =
                     &mut comb_values[element.current_offset() as usize..] as *mut [u8] as *mut u8;
                 unsafe {
@@ -584,8 +602,10 @@ pub(crate) fn analyze_dependency(
 
     // Relaxed ordering: skip edges that would create cycles when at least
     // one endpoint is a non-expandable CompiledBlock.
-    log::debug!(
-        "analyze_dependency: using relaxed ordering for {} stmts with non-expandable CompiledBlocks",
+    // NOTE: With original_stmts now stored in shared JIT cache, all CBs
+    // should be expandable. This path should be unreachable in practice.
+    log::warn!(
+        "analyze_dependency: falling back to relaxed ordering for {} stmts with non-expandable CompiledBlocks",
         table.len()
     );
     let mut dag_relaxed = Dag::<Node, ()>::new();

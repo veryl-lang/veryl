@@ -392,8 +392,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
 
                 full_internal_comb = if !cache_entry.merged_funcs.is_empty() {
-                    let full = all_comb_statements.clone();
-                    all_comb_statements.clear();
+                    let full = std::mem::take(&mut all_comb_statements);
                     Some(full)
                 } else {
                     None
@@ -684,8 +683,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 // after this block so they remain in comb_statements.
                 // The full comb is needed by get()/dump() for correctness.
                 full_internal_comb = if !merged_funcs.is_empty() {
-                    let full = all_comb_statements.clone();
-                    all_comb_statements.clear();
+                    let full = std::mem::take(&mut all_comb_statements);
                     // Re-add own assign statements whose dst is NOT
                     // already in the full internal comb (merged JIT handles those).
                     {
@@ -764,23 +762,32 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // runs in eval_comb (before events) and misses the new values.
         if !all_post_comb_fns.is_empty() && full_internal_comb.is_none() {
             let mut post_comb_written: HashSet<isize> = HashSet::default();
+            // Track output offsets already in all_post_comb_fns to avoid duplicates.
+            let mut already_added: HashSet<isize> = HashSet::default();
             for s in &all_post_comb_fns {
                 let mut outs = vec![];
                 let mut ins = vec![];
                 s.gather_variable_offsets(&mut ins, &mut outs);
-                for off in outs {
+                for off in &outs {
                     post_comb_written.insert(off.raw());
+                    already_added.insert(off.raw());
                 }
             }
             // Add own assigns that READ from post_comb-written offsets
             for s in &own_new_assigns {
-                if let ProtoStatement::Assign(_) = s {
+                if let ProtoStatement::Assign(a) = s {
+                    if already_added.contains(&a.dst.raw()) {
+                        continue;
+                    }
                     let mut ins = vec![];
                     let mut outs = vec![];
                     s.gather_variable_offsets(&mut ins, &mut outs);
                     let reads_post_comb =
                         ins.iter().any(|off| post_comb_written.contains(&off.raw()));
                     if reads_post_comb {
+                        for off in &outs {
+                            already_added.insert(off.raw());
+                        }
                         all_post_comb_fns.push(s.clone());
                     }
                 }
@@ -790,8 +797,14 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let mut ins = vec![];
                 let mut outs = vec![];
                 s.gather_variable_offsets(&mut ins, &mut outs);
+                if outs.iter().all(|off| already_added.contains(&off.raw())) {
+                    continue;
+                }
                 let reads_post_comb = ins.iter().any(|off| post_comb_written.contains(&off.raw()));
                 if reads_post_comb {
+                    for off in &outs {
+                        already_added.insert(off.raw());
+                    }
                     if let ProtoStatement::CompiledBlock(cb) = s
                         && !cb.original_stmts.is_empty()
                     {

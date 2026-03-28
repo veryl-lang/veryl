@@ -556,6 +556,11 @@ impl Expression {
             } => {
                 let idx_val = index_expr.eval(mask_cache);
                 let idx = idx_val.to_usize().unwrap_or(0).min(*num_elements - 1);
+                #[cfg(debug_assertions)]
+                debug_assert!(
+                    stride.checked_mul(idx as isize).is_some(),
+                    "DynamicVariable: stride*idx overflow"
+                );
                 let ptr = unsafe { (*base_ptr).offset(*stride * idx as isize) };
                 let value = unsafe {
                     read_native_value(ptr, *native_bytes, *use_4state, *width as u32, *signed)
