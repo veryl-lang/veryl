@@ -1,107 +1,140 @@
-use crate::conv::Context;
+use crate::conv::utils::{TypePosition, eval_factor_path, eval_generic_expr};
+use crate::conv::{Context, Conv};
+use crate::ir::{self, Comptime, IrResult, Type, VarPathSelect};
 use crate::namespace::Namespace;
-use crate::symbol::{
-    GenericBoundKind, ProtoBound, Symbol, SymbolId, SymbolKind, Type as SymType, TypeKind,
-};
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind};
+use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolKind};
+use crate::symbol_path::GenericSymbolPath;
 use crate::{AnalyzerError, namespace_table, symbol_table};
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
-fn collect_identifier(value: &ScopedIdentifier) -> Vec<ScopedIdentifier> {
-    let mut ret = vec![value.clone()];
-
-    if let ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) =
-        value.scoped_identifier_group.as_ref()
-        && let Some(x) = &x.scoped_identifier_opt
-        && let Some(x) = &x.with_generic_argument.with_generic_argument_opt
-    {
-        let items: Vec<_> = x.with_generic_argument_list.as_ref().into();
-        for item in items {
-            if let WithGenericArgumentItem::GenericArgIdentifier(x) = item {
-                ret.append(&mut collect_identifier(
-                    x.generic_arg_identifier.scoped_identifier.as_ref(),
+pub fn check_generic_bound_item(
+    context: &mut Context,
+    bound: &GenericBoundKind,
+    namespace: &Namespace,
+) {
+    match bound {
+        GenericBoundKind::Inst(path) => {
+            if let Err(Some(id)) = bound.resolve_inst_bound(namespace) {
+                let symbol = symbol_table::get(id).unwrap();
+                context.insert_error(AnalyzerError::mismatch_type(
+                    &symbol.token.to_string(),
+                    "proto module, proto interface or non generic interface",
+                    &symbol.kind.to_kind_name(),
+                    &path.range,
                 ));
             }
         }
-    }
-
-    for x in &value.scoped_identifier_list {
-        if let Some(x) = &x.scoped_identifier_opt0
-            && let Some(x) = &x.with_generic_argument.with_generic_argument_opt
-        {
-            let items: Vec<_> = x.with_generic_argument_list.as_ref().into();
-            for item in items {
-                if let WithGenericArgumentItem::GenericArgIdentifier(x) = item {
-                    ret.append(&mut collect_identifier(
-                        x.generic_arg_identifier.scoped_identifier.as_ref(),
-                    ));
-                }
+        GenericBoundKind::Proto(r#type) => {
+            if let Err(Some(id)) = bound.resolve_proto_bound(namespace) {
+                let symbol = symbol_table::get(id).unwrap();
+                context.insert_error(AnalyzerError::mismatch_type(
+                    &symbol.token.to_string(),
+                    "proto module, proto interface, proto package or variable type",
+                    &symbol.kind.to_kind_name(),
+                    &r#type.token,
+                ));
             }
         }
+        _ => {}
     }
-
-    ret
 }
 
 pub fn check_generic_bound(context: &mut Context, value: &WithGenericParameter) {
     let items: Vec<_> = value.with_generic_parameter_list.as_ref().into();
 
     for item in items {
-        match item.generic_bound.as_ref() {
-            GenericBound::InstScopedIdentifier(x) => {
-                let items = collect_identifier(&x.scoped_identifier);
-
-                for item in &items {
-                    if let Ok(symbol) = symbol_table::resolve(item)
-                        && !symbol.found.is_proto_interface(false, true)
-                    {
-                        context.insert_error(AnalyzerError::mismatch_type(
-                            &symbol.found.token.to_string(),
-                            "proto module, proto interface or non generic interface",
-                            &symbol.found.kind.to_kind_name(),
-                            &item.identifier().token.into(),
-                        ));
-                    }
-                }
-            }
-            GenericBound::GenericProtoBound(x) => {
-                if let GenericProtoBound::ScopedIdentifier(x) = x.generic_proto_bound.as_ref() {
-                    let items = collect_identifier(&x.scoped_identifier);
-
-                    for item in &items {
-                        if let Ok(symbol) = symbol_table::resolve(item) {
-                            let is_valid = symbol.found.is_proto_module(false)
-                                || symbol.found.is_proto_interface(false, false)
-                                || symbol.found.is_proto_package(false)
-                                || symbol.found.is_variable_type();
-                            if !is_valid {
-                                context.insert_error(AnalyzerError::mismatch_type(
-                                    &symbol.found.token.to_string(),
-                                    "proto module, proto interface, proto package or variable type",
-                                    &symbol.found.kind.to_kind_name(),
-                                    &item.identifier().token.into(),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-            _ => (),
-        }
+        let _: IrResult<()> = Conv::conv(context, item);
     }
 }
 
-fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespace) -> bool {
+fn check_referable_generic_expression(
+    context: &Context,
+    expression: &Expression,
+    base: Option<&Symbol>,
+    token: TokenRange,
+) -> Option<AnalyzerError> {
+    let mut paths = collect_symbol_paths(expression);
+    for path in paths.drain(..) {
+        let mut path = context.resolve_path(path);
+        path.unalias();
+        let error = check_referable_path(&path, base, token);
+        if error.is_some() {
+            return error;
+        }
+    }
+
+    None
+}
+
+fn collect_symbol_paths(expression: &Expression) -> Vec<GenericSymbolPath> {
+    let factors = expression.collect_factors();
+    factors
+        .iter()
+        .filter_map(|factor| match factor {
+            Factor::Number(x) => Some(x.number.as_ref().into()),
+            Factor::BooleanLiteral(x) => Some(x.boolean_literal.as_ref().into()),
+            Factor::IdentifierFactor(x) => {
+                Some(x.identifier_factor.expression_identifier.as_ref().into())
+            }
+            Factor::FactorTypeFactor(x) => {
+                match x.factor_type_factor.factor_type.factor_type_group.as_ref() {
+                    FactorTypeGroup::FixedType(x) => Some(x.fixed_type.as_ref().into()),
+                    FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
+                        Some((x.variable_type.as_ref(), &vec![]).into())
+                    }
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn check_referable_path(
+    path: &GenericSymbolPath,
+    base: Option<&Symbol>,
+    token: TokenRange,
+) -> Option<AnalyzerError> {
+    if !path.is_resolvable() || base.map(|x| x.is_unbound_function()).unwrap_or(false) {
+        return None;
+    }
+
+    let is_referable = if let Ok(symbol) = symbol_table::resolve(path) {
+        if symbol.found.is_component(true) {
+            true
+        } else {
+            symbol.full_path.iter().any(|x| {
+                let symbol = symbol_table::get(*x).unwrap();
+                is_referable_symbol(&symbol, base)
+            })
+        }
+    } else {
+        true
+    };
+
+    if !is_referable {
+        Some(AnalyzerError::unresolvable_generic_expression(
+            &path.to_string(),
+            &path.range,
+            &token,
+        ))
+    } else {
+        None
+    }
+}
+
+fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
     match &symbol.kind {
         SymbolKind::Package(_)
         | SymbolKind::ProtoPackage(_)
         | SymbolKind::GenericParameter(_)
+        | SymbolKind::GenericConst(_)
         | SymbolKind::SystemVerilog => {
             return true;
         }
         SymbolKind::GenericInstance(x) => {
             return symbol_table::get(x.base)
-                .map(|x| is_referable_generic_arg_symbol(&x, defined_namesapce))
+                .map(|x| is_referable_symbol(&x, base))
                 .unwrap_or(false);
         }
         _ => {
@@ -111,10 +144,12 @@ fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespac
                     SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) | SymbolKind::Instance(_)
                 )
             {
-                if symbol.namespace.matched(defined_namesapce) {
+                if let Some(base) = base
+                    && symbol.namespace.matched(&base.namespace)
+                {
                     return true;
                 } else if let Some(parent) = symbol.get_parent() {
-                    return is_referable_generic_arg_symbol(&parent, defined_namesapce);
+                    return is_referable_symbol(&parent, base);
                 }
             }
         }
@@ -123,267 +158,148 @@ fn is_referable_generic_arg_symbol(symbol: &Symbol, defined_namesapce: &Namespac
     false
 }
 
-fn is_referable_generic_arg(full_path: &[SymbolId], defined_namesapce: &Namespace) -> bool {
-    full_path
-        .iter()
-        .map(|x| symbol_table::get(*x).unwrap())
-        .any(|x| is_referable_generic_arg_symbol(&x, defined_namesapce))
-}
+fn check_generic_type_arg(arg: &Comptime) -> Option<AnalyzerError> {
+    let dst = Type {
+        kind: crate::ir::TypeKind::Type,
+        ..Default::default()
+    };
 
-fn check_generic_type_arg(
-    arg: &GenericSymbolPath,
-    namespace: &Namespace,
-    base: &Symbol,
-) -> Option<AnalyzerError> {
-    if arg.kind == GenericSymbolPathKind::TypeLiteral {
+    if dst.compatible(arg) {
         None
-    } else if arg.is_resolvable() {
-        let Ok(symbol) = symbol_table::resolve((&arg.generic_path(), namespace)) else {
-            // Undefiend identifier has been checked at 'analyze_post_pass1' phase
-            return None;
-        };
-
-        if symbol.found.is_variable_type() {
-            if base.is_unbound_function()
-                || is_referable_generic_arg_symbol(&symbol.found, &base.namespace)
-            {
-                return None;
-            }
-
-            Some(AnalyzerError::unresolvable_generic_argument(
-                &arg.to_string(),
-                &arg.range,
-                &base.token.into(),
-            ))
-        } else {
-            Some(AnalyzerError::mismatch_type(
-                &arg.to_string(),
-                "variable type",
-                &symbol.found.kind.to_kind_name(),
-                &arg.range,
-            ))
-        }
     } else {
+        let src_type = arg.r#type.to_string();
         Some(AnalyzerError::mismatch_type(
-            &arg.to_string(),
+            &arg.token.end.to_string(),
             "variable type",
-            &arg.kind.to_string(),
-            &arg.range,
+            &src_type,
+            &arg.token,
         ))
     }
 }
 
 fn check_generic_inst_arg(
-    arg: &GenericSymbolPath,
-    namespace: &Namespace,
+    arg: &Comptime,
     bound: &GenericBoundKind,
-    base: &Symbol,
+    bound_namespace: &Namespace,
 ) -> Option<AnalyzerError> {
-    let required = bound.resolve_inst_bound(&base.namespace)?;
-    let actual = if arg.is_resolvable() {
-        'inst: {
-            let arg_symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok()?;
-            let SymbolKind::Instance(inst) = &arg_symbol.found.kind else {
-                break 'inst arg_symbol.found.kind.to_kind_name();
-            };
-            if !is_referable_generic_arg_symbol(&arg_symbol.found, &base.namespace) {
-                return Some(AnalyzerError::unresolvable_generic_argument(
-                    &arg.to_string(),
-                    &arg.range,
-                    &base.token.into(),
-                ));
-            }
+    let bound_symbol = bound.resolve_inst_bound(bound_namespace).ok()?;
 
-            let Ok(type_symbol) =
-                symbol_table::resolve((&inst.type_name.mangled_path(), namespace))
-            else {
-                return None;
-            };
-
-            let Some(proto_symbol) = type_symbol.found.proto() else {
-                break 'inst type_symbol.found.kind.to_kind_name();
-            };
-
-            if proto_symbol.id == required.id {
-                return None;
-            }
-
-            proto_symbol.kind.to_kind_name()
-        }
-    } else {
-        arg.kind.to_string()
-    };
-
-    Some(AnalyzerError::mismatch_type(
-        &arg.to_string(),
-        &format!("inst {}", required.token),
-        &actual,
-        &arg.range,
-    ))
-}
-
-fn check_generic_proto_arg(
-    arg: &GenericSymbolPath,
-    namespace: &Namespace,
-    bound: &GenericBoundKind,
-    base: &Symbol,
-) -> Option<AnalyzerError> {
-    let required = bound.resolve_proto_bound(&base.namespace)?;
-    let arg_symbol = if arg.is_resolvable() {
-        let symbol = symbol_table::resolve((&arg.generic_path(), namespace)).ok();
-        if symbol.is_some() {
-            symbol
-        } else {
-            return None;
-        }
-    } else {
-        None
-    };
-    let (arg_type, type_symbol) = if let Some(x) = &arg_symbol {
-        let proto_symbol = x.found.proto();
-        if proto_symbol.is_some() {
-            (None, proto_symbol)
-        } else if let Some(r#type) = x.found.kind.get_type() {
-            r#type
-                .trace_user_defined(Some(&x.found.namespace))
-                .map(|(x, y)| (Some(x), y))
-                .unwrap_or((None, None))
-        } else if let Some(alias_target) = resolve_alias(&x.found) {
-            (None, Some(alias_target))
-        } else {
-            (None, None)
-        }
-    } else {
-        (None, None)
-    };
-
-    let expected = match &required {
-        ProtoBound::ProtoModule(r)
-        | ProtoBound::ProtoInterface(r)
-        | ProtoBound::ProtoPackage(r) => {
-            if type_symbol.as_ref().map(|x| x.id == r.id).unwrap_or(false) {
-                None
-            } else {
-                Some(format!("proto {}", r.token))
-            }
-        }
-        ProtoBound::Enum((r, _)) => {
-            let is_matched = if let Some(arg_symbol) = arg_symbol.as_ref() {
-                if let SymbolKind::EnumMember(_) = arg_symbol.found.kind {
-                    arg_symbol
-                        .found
-                        .get_parent()
-                        .map(|x| x.id == r.id)
-                        .unwrap_or(false)
-                } else {
-                    type_symbol.as_ref().map(|x| x.id == r.id).unwrap_or(false)
-                }
-            } else {
-                false
-            };
-            if is_matched {
-                None
-            } else {
-                Some(format!("{}", r.token))
-            }
-        }
-        ProtoBound::Struct((r, _)) | ProtoBound::Union((r, _)) => {
-            if type_symbol.as_ref().map(|x| x.id == r.id).unwrap_or(false) {
-                None
-            } else {
-                Some(format!("{}", r.token))
-            }
-        }
-        ProtoBound::FactorType(param_type) => {
-            let is_matched = if let Some(arg_type) = arg_type.as_ref() {
-                match_fixed_type(arg_type, param_type)
-            } else if let Some(arg_symbol) = arg_symbol.as_ref() {
-                match &arg_symbol.found.kind {
-                    SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) => true,
-                    SymbolKind::GenericParameter(x) => x
-                        .bound
-                        .resolve_proto_bound(&arg_symbol.found.namespace)
-                        .map(|x| x.is_variable_type())
-                        .unwrap_or(false),
-                    _ => false,
-                }
-            } else {
-                // if `arg_symbol` is none,
-                // it means that the given generic arg is a literal
-                true
-            };
-            if is_matched {
-                None
-            } else {
-                Some(format!("{param_type}"))
-            }
-        }
-    };
-
-    if let Some(expected) = expected {
-        let actual = if let Some(type_symbol) = type_symbol {
-            type_symbol.kind.to_kind_name()
-        } else {
-            arg.kind.to_string()
-        };
+    if !arg.r#type.is_interface_instance() {
         return Some(AnalyzerError::mismatch_type(
-            &arg.to_string(),
-            &expected,
-            &actual,
-            &arg.range,
+            &arg.token.end.to_string(),
+            &format!("inst {}", bound_symbol.token),
+            &arg.r#type.to_string(),
+            &arg.token,
         ));
     }
 
-    if required.is_variable_type()
-        && !base.is_unbound_function()
-        && !arg_symbol
-            .map(|x| is_referable_generic_arg(&x.full_path, &base.namespace))
-            .unwrap_or(true)
-    {
-        return Some(AnalyzerError::unresolvable_generic_argument(
-            &arg.to_string(),
-            &arg.range,
-            &base.token.into(),
+    let proto_symbol = if let Some(sig) = arg.r#type.kind.signature() {
+        let component = symbol_table::get(sig.symbol).unwrap();
+        let Some(proto) = component.proto() else {
+            return Some(AnalyzerError::mismatch_type(
+                &arg.token.end.to_string(),
+                &format!("inst {}", bound_symbol.token),
+                &component.kind.to_kind_name(),
+                &arg.token,
+            ));
+        };
+        proto
+    } else {
+        unreachable!()
+    };
+
+    if proto_symbol.id != bound_symbol.id {
+        return Some(AnalyzerError::mismatch_type(
+            &arg.token.end.to_string(),
+            &format!("inst {}", bound_symbol.token),
+            &proto_symbol.kind.to_kind_name(),
+            &arg.token,
         ));
     }
 
     None
 }
 
-fn resolve_alias(symbol: &Symbol) -> Option<Symbol> {
-    let target_path = symbol.alias_target(true)?;
-    let target_symbol =
-        symbol_table::resolve((&target_path.generic_path(), &symbol.namespace)).ok()?;
-    if let Some(proto) = target_symbol.found.proto() {
-        Some(proto)
+fn check_generic_proto_arg(
+    context: &mut Context,
+    arg: &Comptime,
+    bound: &GenericBoundKind,
+    bound_namespace: &Namespace,
+) -> Option<AnalyzerError> {
+    let proto_bound = bound.resolve_proto_bound(bound_namespace).ok()?;
+    let result = match &proto_bound {
+        ProtoBound::ProtoModule(r)
+        | ProtoBound::ProtoInterface(r)
+        | ProtoBound::ProtoPackage(r) => {
+            let proto = match &arg.r#type.kind {
+                ir::TypeKind::Module(sig)
+                | ir::TypeKind::Interface(sig)
+                | ir::TypeKind::Package(sig) => {
+                    let component = symbol_table::get(sig.symbol).unwrap();
+                    component.proto()
+                }
+                _ => None,
+            };
+            if let Some(proto) = &proto
+                && proto.id == r.id
+            {
+                None
+            } else {
+                let actual = proto.map(|x| x.kind.to_kind_name());
+                Some((format!("proto {}", r.token), actual))
+            }
+        }
+        ProtoBound::Enum((r, _)) | ProtoBound::Struct((r, _)) | ProtoBound::Union((r, _)) => {
+            let is_matches = match &arg.r#type.kind {
+                ir::TypeKind::Enum(x) => x.id == r.id,
+                ir::TypeKind::Struct(x) => x.id == r.id,
+                ir::TypeKind::Union(x) => x.id == r.id,
+                _ => false,
+            };
+            if is_matches {
+                None
+            } else {
+                Some((format!("{}", r.token), None))
+            }
+        }
+        ProtoBound::FactorType(r) => {
+            let param_type = r.to_ir_type(context, TypePosition::Generic).ok()?;
+            if param_type.compatible(arg) {
+                None
+            } else {
+                Some((format!("{}", r), None))
+            }
+        }
+    };
+
+    if let Some((expected, actual)) = result {
+        let actual = actual.unwrap_or(arg.r#type.to_string());
+        Some(AnalyzerError::mismatch_type(
+            &arg.token.end.to_string(),
+            &expected,
+            &actual,
+            &arg.token,
+        ))
     } else {
-        Some((*target_symbol.found).clone())
+        None
     }
 }
 
-fn match_fixed_type(arg_type: &SymType, param_type: &SymType) -> bool {
-    if arg_type.modifier.len() != param_type.modifier.len() {
-        return false;
-    }
+fn eval_generic_arg(context: &mut Context, path: &GenericSymbolPath) -> Option<Comptime> {
+    let allow_component_as_factor = context.allow_component_as_factor;
 
-    for i in 0..arg_type.modifier.len() {
-        if arg_type.modifier[i].kind != param_type.modifier[i].kind {
-            return false;
-        }
-    }
+    context.allow_component_as_factor = true;
+    let range = path.range;
+    let ret = eval_factor_path(
+        context,
+        path.clone(),
+        VarPathSelect::default(),
+        false,
+        range,
+    );
+    context.allow_component_as_factor = allow_component_as_factor;
 
-    if !arg_type.width.is_empty() || !arg_type.array.is_empty() {
-        return false;
-    }
-
-    if matches!(
-        param_type.kind,
-        TypeKind::BBool | TypeKind::LBool | TypeKind::String
-    ) {
-        arg_type.kind == param_type.kind
-    } else {
-        arg_type.kind.is_fixed()
-    }
+    ret.map(|x| x.comptime().clone()).ok()
 }
 
 pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath) {
@@ -399,7 +315,7 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
                 && !symbol.found.is_unbound_function()
             {
                 let definition_token = context.in_unbound_func.unwrap();
-                context.insert_error(AnalyzerError::unresolvable_generic_reference(
+                context.insert_error(AnalyzerError::unresolvable_generic_expression(
                     &path.to_string(),
                     &path.range,
                     &definition_token.into(),
@@ -407,33 +323,72 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
             }
 
             for (i, arg) in args.iter().enumerate() {
-                if let Some(param) = params.get(i) {
-                    let bound = &param.1.bound;
-                    match bound {
-                        GenericBoundKind::Type => {
-                            if let Some(err) =
-                                check_generic_type_arg(arg, &namespace, &symbol.found)
-                            {
-                                context.insert_error(err);
-                            }
-                        }
+                let Some(param) = params.get(i) else {
+                    continue;
+                };
+                let bound = &param.1.bound;
+
+                let mut arg = context.resolve_path(arg.clone());
+                arg.unalias();
+
+                if let Some(error) =
+                    check_referable_path(&arg, Some(&symbol.found), symbol.found.token.into())
+                {
+                    context.insert_error(error);
+                    continue;
+                }
+
+                if let Some(expr) = eval_generic_arg(context, &arg).as_ref() {
+                    let error = match bound {
+                        GenericBoundKind::Type => check_generic_type_arg(expr),
                         GenericBoundKind::Inst(_) => {
-                            if let Some(err) =
-                                check_generic_inst_arg(arg, &namespace, bound, &symbol.found)
-                            {
-                                context.insert_error(err);
-                            }
+                            check_generic_inst_arg(expr, bound, &symbol.found.namespace)
                         }
                         GenericBoundKind::Proto(_) => {
-                            if let Some(err) =
-                                check_generic_proto_arg(arg, &namespace, bound, &symbol.found)
-                            {
-                                context.insert_error(err);
-                            }
+                            check_generic_proto_arg(context, expr, bound, &symbol.found.namespace)
                         }
+                    };
+                    if let Some(error) = error {
+                        context.insert_error(error);
                     }
                 }
             }
         }
+    }
+}
+
+pub fn check_generic_expression(
+    context: &mut Context,
+    expression: &Expression,
+    bound: &GenericBoundKind,
+    base: Option<&Symbol>,
+    token: TokenRange,
+) {
+    if let Some(error) = check_referable_generic_expression(context, expression, base, token) {
+        context.insert_error(error);
+        return;
+    }
+
+    let Some((expression, _)) = eval_generic_expr(context, expression).ok() else {
+        return;
+    };
+
+    let bound_namespace = if let Some(base) = base {
+        &base.namespace
+    } else if let Some(namespce) = context.currnet_namespace() {
+        &namespce.clone()
+    } else {
+        &Namespace::default()
+    };
+
+    let error = match bound {
+        GenericBoundKind::Type => check_generic_type_arg(&expression),
+        GenericBoundKind::Inst(_) => check_generic_inst_arg(&expression, bound, bound_namespace),
+        GenericBoundKind::Proto(_) => {
+            check_generic_proto_arg(context, &expression, bound, bound_namespace)
+        }
+    };
+    if let Some(error) = error {
+        context.insert_error(error);
     }
 }

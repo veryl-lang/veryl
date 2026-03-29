@@ -1,18 +1,19 @@
 use crate::HashMap;
 use crate::attribute::EnumEncodingItem;
 use crate::conv::Context;
-use crate::conv::utils::{TypePosition, eval_size, eval_type};
+use crate::conv::utils::{TypePosition, eval_generic_expr, eval_size, eval_type};
 use crate::definition_table::DefinitionId;
 use crate::ir::{self, Shape};
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol_path::{GenericSymbolPath, SymbolPath};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table::{self, Import};
+use crate::value::Value;
 use std::cell::RefCell;
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use veryl_parser::Stringifier;
-use veryl_parser::resource_table::{PathId, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{self as syntax_tree, ArrayType};
 use veryl_parser::veryl_token::{Token, VerylToken};
@@ -289,7 +290,7 @@ impl Symbol {
                 Symbol::trace_component_symbol(&symbol)
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(ProtoBound::ProtoPackage(x)) =
+                if let Ok(ProtoBound::ProtoPackage(x)) =
                     x.bound.resolve_proto_bound(&symbol.namespace)
                 {
                     Symbol::trace_component_symbol(&x)
@@ -353,7 +354,7 @@ impl Symbol {
     pub fn generic_table(&self, arguments: &[GenericSymbolPath]) -> GenericTable {
         let params = self.generic_parameters();
         let n_args = arguments.len();
-        let mut ret = HashMap::default();
+        let mut map = GenericMap::default();
 
         let match_arity = if params.len() > n_args {
             params[n_args].1.default_value.is_some()
@@ -363,20 +364,114 @@ impl Symbol {
         if !match_arity {
             // Too many or too few generic args are given.
             // Return empty generic table.
-            return ret;
+            return map.map;
         }
 
         for (i, arg) in arguments.iter().enumerate() {
             if let Some((p, _)) = params.get(i) {
-                ret.insert(*p, arg.clone());
+                map.map.insert(*p, arg.clone());
             }
         }
 
         for param in params.iter().skip(n_args) {
-            ret.insert(param.0, param.1.default_value.as_ref().unwrap().clone());
+            map.map
+                .insert(param.0, param.1.default_value.as_ref().unwrap().clone());
         }
 
-        ret
+        let consts = self.generic_consts();
+        if !consts.is_empty() {
+            let namespace = self.inner_namespace();
+            for (name, r#const) in &consts {
+                let maps = vec![map.clone()];
+                if let Some(mut path) = Self::expr_to_generic_symbol_path(&r#const.value, &maps) {
+                    path.resolve_imported(&namespace, Some(&maps));
+                    map.map.insert(*name, path);
+                }
+            }
+        }
+
+        map.map
+    }
+
+    fn expr_to_generic_symbol_path(
+        expr: &syntax_tree::Expression,
+        maps: &[GenericMap],
+    ) -> Option<GenericSymbolPath> {
+        fn eval_value(
+            context: &mut Context,
+            expr: &syntax_tree::Expression,
+        ) -> Option<(Value, TokenRange)> {
+            let (comptime, _) = eval_generic_expr(context, expr).ok()?;
+            comptime
+                .get_value()
+                .cloned()
+                .ok()
+                .map(|x| (x, comptime.token))
+        }
+
+        if let Some(factor) = expr.unwrap_factor() {
+            match factor {
+                syntax_tree::Factor::Number(x) => return Some(x.number.as_ref().into()),
+                syntax_tree::Factor::BooleanLiteral(x) => {
+                    return Some(x.boolean_literal.as_ref().into());
+                }
+                syntax_tree::Factor::IdentifierFactor(x) => {
+                    if x.identifier_factor.identifier_factor_opt.is_none() {
+                        return Some(x.identifier_factor.expression_identifier.as_ref().into());
+                    }
+                }
+                syntax_tree::Factor::LParenExpressionRParen(x) => {
+                    return Self::expr_to_generic_symbol_path(&x.expression, maps);
+                }
+                syntax_tree::Factor::TypeExpression(x) => {
+                    return Self::expr_to_generic_symbol_path(&x.type_expression.expression, maps);
+                }
+                syntax_tree::Factor::FactorTypeFactor(x) => {
+                    match x.factor_type_factor.factor_type.factor_type_group.as_ref() {
+                        syntax_tree::FactorTypeGroup::FixedType(x) => {
+                            return Some(x.fixed_type.as_ref().into());
+                        }
+                        syntax_tree::FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
+                            let mut width = Vec::new();
+                            if let Some(x) = &x.factor_type_opt {
+                                let mut context = Context::default();
+                                context.push_generic_map(maps.to_vec());
+
+                                for expr in Vec::from(x.width.as_ref()) {
+                                    if let Some((x, _)) = eval_value(&mut context, expr)
+                                        && let Some(x) = x.to_usize()
+                                    {
+                                        width.push(x);
+                                    } else {
+                                        return None;
+                                    }
+                                }
+                            }
+
+                            let path = (x.variable_type.as_ref(), &width).into();
+                            return Some(path);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        };
+
+        let mut context = Context::default();
+        context.push_generic_map(maps.to_vec());
+        if let Some((value, token)) = eval_value(&mut context, expr)
+            && !value.is_xz()
+        {
+            let text = format!("{}", value.payload());
+            let text = resource_table::insert_str(&text);
+            let token = Token::generate(text, token.beg.source.get_path().unwrap());
+
+            let mut path: GenericSymbolPath = (&token).into();
+            path.kind = GenericSymbolPathKind::ValueLiteral;
+            Some(path)
+        } else {
+            None
+        }
     }
 
     pub fn generic_parameters(&self) -> Vec<(StrId, GenericParameterProperty)> {
@@ -444,6 +539,45 @@ impl Symbol {
         }
     }
 
+    pub fn generic_consts(&self) -> Vec<(StrId, GenericConstProperty)> {
+        fn get_generic_const(id: SymbolId) -> (StrId, GenericConstProperty) {
+            let symbol = symbol_table::get(id).unwrap();
+            if let SymbolKind::GenericConst(x) = symbol.kind {
+                (symbol.token.text, x)
+            } else {
+                unreachable!()
+            }
+        }
+
+        match &self.kind {
+            SymbolKind::Function(x) => x
+                .generic_consts
+                .iter()
+                .map(|x| get_generic_const(*x))
+                .collect(),
+            SymbolKind::Module(x) => x
+                .generic_consts
+                .iter()
+                .map(|x| get_generic_const(*x))
+                .collect(),
+            SymbolKind::Interface(x) => x
+                .generic_consts
+                .iter()
+                .map(|x| get_generic_const(*x))
+                .collect(),
+            SymbolKind::Package(x) => x
+                .generic_consts
+                .iter()
+                .map(|x| get_generic_const(*x))
+                .collect(),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                symbol.generic_consts()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn generic_references(&self) -> Vec<GenericSymbolPath> {
         let references = match &self.kind {
             SymbolKind::Function(x) => &x.generic_references,
@@ -475,6 +609,11 @@ impl Symbol {
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
                 return symbol.found.proto();
             }
+            SymbolKind::ProtoAliasModule(x) => {
+                return symbol_table::resolve((&x.target.generic_path(), &self.namespace))
+                    .map(|x| (*x.found).clone())
+                    .ok();
+            }
             SymbolKind::Interface(x) => {
                 if let Some(proto) = &x.proto {
                     return symbol_table::resolve((&proto.generic_path(), &self.namespace))
@@ -489,6 +628,11 @@ impl Symbol {
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
                 return symbol.found.proto();
             }
+            SymbolKind::ProtoAliasInterface(x) => {
+                return symbol_table::resolve((&x.target.generic_path(), &self.namespace))
+                    .map(|x| (*x.found).clone())
+                    .ok();
+            }
             SymbolKind::Package(x) => {
                 if let Some(proto) = &x.proto {
                     return symbol_table::resolve((&proto.generic_path(), &self.namespace))
@@ -501,8 +645,13 @@ impl Symbol {
                     symbol_table::resolve((&x.target.generic_path(), &self.namespace)).ok()?;
                 return symbol.found.proto();
             }
+            SymbolKind::ProtoAliasPackage(x) => {
+                return symbol_table::resolve((&x.target.generic_path(), &self.namespace))
+                    .map(|x| (*x.found).clone())
+                    .ok();
+            }
             SymbolKind::GenericParameter(x) => {
-                let proto = x.bound.resolve_proto_bound(&self.namespace)?;
+                let proto = x.bound.resolve_proto_bound(&self.namespace).ok()?;
                 return proto.get_symbol();
             }
             _ => {}
@@ -532,8 +681,7 @@ impl Symbol {
                 return symbol.is_module(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(ProtoBound::ProtoModule(x)) =
-                    x.bound.resolve_proto_bound(&self.namespace)
+                if let Ok(ProtoBound::ProtoModule(x)) = x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_module(true);
                 }
@@ -547,8 +695,7 @@ impl Symbol {
         match &self.kind {
             SymbolKind::ProtoModule(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
-                if let Some(ProtoBound::ProtoModule(x)) =
-                    x.bound.resolve_proto_bound(&self.namespace)
+                if let Ok(ProtoBound::ProtoModule(x)) = x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_proto_module(trace_generic_param);
                 }
@@ -567,7 +714,7 @@ impl Symbol {
                 return symbol.is_interface(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(ProtoBound::ProtoInterface(x)) =
+                if let Ok(ProtoBound::ProtoInterface(x)) =
                     x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_interface(true);
@@ -589,7 +736,7 @@ impl Symbol {
             }
             SymbolKind::ProtoInterface(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
-                if let Some(ProtoBound::ProtoInterface(x)) =
+                if let Ok(ProtoBound::ProtoInterface(x)) =
                     x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x
@@ -610,7 +757,7 @@ impl Symbol {
                 return symbol.is_package(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(ProtoBound::ProtoPackage(x)) =
+                if let Ok(ProtoBound::ProtoPackage(x)) =
                     x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_package(true);
@@ -637,7 +784,7 @@ impl Symbol {
                 return symbol.is_component(false);
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(ProtoBound::ProtoInterface(x)) =
+                if let Ok(ProtoBound::ProtoInterface(x)) =
                     x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_component(true);
@@ -652,7 +799,7 @@ impl Symbol {
         match &self.kind {
             SymbolKind::ProtoPackage(_) => return true,
             SymbolKind::GenericParameter(x) if trace_generic_param => {
-                if let Some(ProtoBound::ProtoPackage(x)) =
+                if let Ok(ProtoBound::ProtoPackage(x)) =
                     x.bound.resolve_proto_bound(&self.namespace)
                 {
                     return x.is_proto_package(trace_generic_param);
@@ -701,6 +848,7 @@ impl Symbol {
             SymbolKind::Parameter(x) => matches!(x.r#type.kind, TypeKind::Type),
             SymbolKind::ProtoConst(x) => matches!(x.r#type.kind, TypeKind::Type),
             SymbolKind::GenericParameter(x) => matches!(x.bound, GenericBoundKind::Type),
+            SymbolKind::GenericConst(x) => matches!(x.bound, GenericBoundKind::Type),
             SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
                 .map(|x| x.is_variable_type())
                 .unwrap_or(false),
@@ -713,6 +861,13 @@ impl Symbol {
             SymbolKind::Parameter(x) => &x.r#type.kind,
             SymbolKind::ProtoConst(x) => &x.r#type.kind,
             SymbolKind::GenericParameter(x) => {
+                if let GenericBoundKind::Proto(x) = &x.bound {
+                    &x.kind
+                } else {
+                    return matches!(x.bound, GenericBoundKind::Type);
+                }
+            }
+            SymbolKind::GenericConst(x) => {
                 if let GenericBoundKind::Proto(x) = &x.bound {
                     &x.kind
                 } else {
@@ -808,6 +963,7 @@ pub enum SymbolKind {
     Namespace,
     SystemFunction(SystemFuncitonProperty),
     GenericParameter(GenericParameterProperty),
+    GenericConst(GenericConstProperty),
     GenericInstance(GenericInstanceProperty),
     ClockDomain,
     Test(TestProperty),
@@ -864,6 +1020,7 @@ impl SymbolKind {
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction(_) => "system function".to_string(),
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
+            SymbolKind::GenericConst(_) => "generic const".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
             SymbolKind::Test(_) => "test".to_string(),
@@ -1136,6 +1293,7 @@ impl fmt::Display for SymbolKind {
             SymbolKind::Namespace => "namespace".to_string(),
             SymbolKind::SystemFunction(_) => "system function".to_string(),
             SymbolKind::GenericParameter(_) => "generic parameter".to_string(),
+            SymbolKind::GenericConst(_) => "generic const".to_string(),
             SymbolKind::GenericInstance(_) => "generic instance".to_string(),
             SymbolKind::ClockDomain => "clock domain".to_string(),
             SymbolKind::Test(_) => "test".to_string(),
@@ -2120,6 +2278,7 @@ pub struct ModuleProperty {
     pub range: TokenRange,
     pub proto: Option<GenericSymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
+    pub generic_consts: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub ports: Vec<Port>,
@@ -2147,6 +2306,7 @@ pub struct InterfaceProperty {
     pub range: TokenRange,
     pub proto: Option<GenericSymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
+    pub generic_consts: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub members: Vec<SymbolId>,
@@ -2170,6 +2330,7 @@ pub struct FunctionProperty {
     pub affiliation: Affiliation,
     pub range: TokenRange,
     pub generic_parameters: Vec<SymbolId>,
+    pub generic_consts: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub ports: Vec<Port>,
     pub ret: Option<Type>,
@@ -2259,6 +2420,7 @@ pub struct PackageProperty {
     pub range: TokenRange,
     pub proto: Option<GenericSymbolPath>,
     pub generic_parameters: Vec<SymbolId>,
+    pub generic_consts: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
     pub members: Vec<SymbolId>,
 }
@@ -2368,7 +2530,7 @@ pub struct ModportFunctionMemberProperty {
 #[derive(Debug, Clone)]
 pub enum GenericBoundKind {
     Type,
-    Inst(SymbolPath),
+    Inst(GenericSymbolPath),
     Proto(Box<Type>),
 }
 
@@ -2412,35 +2574,46 @@ impl GenericBoundKind {
         self.to_string() == other.to_string()
     }
 
-    pub fn resolve_inst_bound(&self, namespace: &Namespace) -> Option<Symbol> {
+    pub fn resolve_inst_bound(&self, namespace: &Namespace) -> Result<Symbol, Option<SymbolId>> {
         let GenericBoundKind::Inst(path) = self else {
-            return None;
+            return Err(None);
         };
 
-        symbol_table::resolve((path, namespace))
-            .ok()
-            .map(|x| (*x.found).clone())
+        if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), namespace)) {
+            if symbol.found.is_proto_interface(false, true) {
+                Ok((*symbol.found).clone())
+            } else {
+                Err(Some(symbol.found.id))
+            }
+        } else {
+            Err(None)
+        }
     }
 
-    pub fn resolve_proto_bound(&self, namespace: &Namespace) -> Option<ProtoBound> {
+    pub fn resolve_proto_bound(
+        &self,
+        namespace: &Namespace,
+    ) -> Result<ProtoBound, Option<SymbolId>> {
         let GenericBoundKind::Proto(proto) = self else {
-            return None;
+            return Err(None);
         };
 
-        let (r#type, symbol) = proto.trace_user_defined(Some(namespace))?;
+        let Some((r#type, symbol)) = proto.trace_user_defined(Some(namespace)) else {
+            return Err(None);
+        };
         if symbol.is_none() {
-            return Some(ProtoBound::FactorType(r#type));
+            return Ok(ProtoBound::FactorType(r#type));
         }
 
         let symbol = symbol.unwrap();
         match &symbol.kind {
-            SymbolKind::ProtoModule(_) => Some(ProtoBound::ProtoModule(symbol)),
-            SymbolKind::ProtoInterface(_) => Some(ProtoBound::ProtoInterface(symbol)),
-            SymbolKind::ProtoPackage(_) => Some(ProtoBound::ProtoPackage(symbol)),
-            SymbolKind::Enum(_) => Some(ProtoBound::Enum((symbol, r#type))),
-            SymbolKind::Struct(_) => Some(ProtoBound::Struct((symbol, r#type))),
-            SymbolKind::Union(_) => Some(ProtoBound::Union((symbol, r#type))),
-            _ => None,
+            SymbolKind::ProtoModule(_) => Ok(ProtoBound::ProtoModule(symbol)),
+            SymbolKind::ProtoInterface(_) => Ok(ProtoBound::ProtoInterface(symbol)),
+            SymbolKind::ProtoPackage(_) => Ok(ProtoBound::ProtoPackage(symbol)),
+            SymbolKind::Enum(_) => Ok(ProtoBound::Enum((symbol, r#type))),
+            SymbolKind::Struct(_) => Ok(ProtoBound::Struct((symbol, r#type))),
+            SymbolKind::Union(_) => Ok(ProtoBound::Union((symbol, r#type))),
+            _ => Err(Some(symbol.id)),
         }
     }
 }
@@ -2460,6 +2633,12 @@ impl fmt::Display for GenericBoundKind {
 pub struct GenericParameterProperty {
     pub bound: GenericBoundKind,
     pub default_value: Option<GenericSymbolPath>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericConstProperty {
+    pub bound: GenericBoundKind,
+    pub value: syntax_tree::Expression,
 }
 
 #[derive(Debug, Clone)]
