@@ -243,6 +243,9 @@ impl ProtoModule {
         let ff_commit_entries =
             collect_ff_commit_entries(&self.module_variable_meta, self.use_4state);
 
+        #[cfg(debug_assertions)]
+        self.validate_offsets();
+
         Module {
             name: self.name,
             ports: self.ports.clone(),
@@ -255,6 +258,99 @@ impl ProtoModule {
             required_comb_passes: self.required_comb_passes,
             ff_commit_entries,
         }
+    }
+
+    /// Validate that all variable offsets in statements are within buffer bounds.
+    #[cfg(debug_assertions)]
+    fn validate_offsets(&self) {
+        let ff_bytes = self.ff_bytes;
+        let comb_bytes = self.comb_bytes;
+        let use_4state = self.use_4state;
+
+        let check = |off: &VarOffset, context: &str| {
+            let raw = off.raw() as usize;
+            if off.is_ff() {
+                assert!(
+                    raw < ff_bytes || ff_bytes == 0,
+                    "validate_offsets [{}]: ff offset {} >= ff_bytes {} (module={})",
+                    context,
+                    raw,
+                    ff_bytes,
+                    self.name,
+                );
+            } else {
+                assert!(
+                    raw < comb_bytes || comb_bytes == 0,
+                    "validate_offsets [{}]: comb offset {} >= comb_bytes {} (module={})",
+                    context,
+                    raw,
+                    comb_bytes,
+                    self.name,
+                );
+            }
+        };
+
+        let validate_stmts = |stmts: &ProtoStatements, label: &str| {
+            for block in &stmts.0 {
+                if let ProtoStatementBlock::Interpreted(proto) = block {
+                    for s in proto {
+                        let mut ins = vec![];
+                        let mut outs = vec![];
+                        s.gather_variable_offsets(&mut ins, &mut outs);
+                        for off in ins.iter().chain(outs.iter()) {
+                            check(off, label);
+                        }
+                    }
+                }
+            }
+        };
+
+        for (event, stmts) in &self.event_statements {
+            validate_stmts(stmts, &format!("event {event:?}"));
+        }
+        validate_stmts(&self.comb_statements, "comb");
+
+        // Validate variable metadata offsets
+        validate_meta_offsets(&self.module_variable_meta, ff_bytes, comb_bytes, use_4state);
+    }
+}
+
+#[cfg(debug_assertions)]
+fn validate_meta_offsets(
+    meta: &ModuleVariableMeta,
+    ff_bytes: usize,
+    comb_bytes: usize,
+    use_4state: bool,
+) {
+    for (id, var_meta) in &meta.variable_meta {
+        let vs = crate::ir::variable::value_size(var_meta.native_bytes, use_4state);
+        for (i, elem) in var_meta.elements.iter().enumerate() {
+            let off = elem.current_offset() as usize;
+            if elem.is_ff() {
+                assert!(
+                    off + vs * 2 <= ff_bytes,
+                    "validate_meta: ff var {:?}[{}] offset {} + vs*2 {} > ff_bytes {}",
+                    id,
+                    i,
+                    off,
+                    vs * 2,
+                    ff_bytes,
+                );
+            } else {
+                assert!(
+                    off + vs <= comb_bytes,
+                    "validate_meta: comb var {:?}[{}] offset {} + vs {} > comb_bytes {}",
+                    id,
+                    i,
+                    off,
+                    vs,
+                    comb_bytes,
+                );
+            }
+        }
+    }
+    for child in &meta.children {
+        validate_meta_offsets(child, ff_bytes, comb_bytes, use_4state);
     }
 }
 

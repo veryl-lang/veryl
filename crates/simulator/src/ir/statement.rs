@@ -1036,11 +1036,14 @@ impl AssignStatement {
 
 impl AssignDynamicStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
+        if self.dst_num_elements == 0 {
+            return;
+        }
         let idx_val = self.dst_index_expr.eval(mask_cache);
         let idx = idx_val
             .to_usize()
             .unwrap_or(0)
-            .min(self.dst_num_elements - 1);
+            .min(self.dst_num_elements.saturating_sub(1));
         let dst = unsafe { self.dst_base_ptr.offset(self.dst_stride * idx as isize) };
 
         let value = self.expr.eval(mask_cache);

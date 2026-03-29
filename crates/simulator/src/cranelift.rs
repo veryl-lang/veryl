@@ -121,7 +121,7 @@ pub fn call_helper_ret(
 pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
-        nb as u32,
+        u32::try_from(nb).expect("alloc_wide_slot: nb exceeds u32::MAX"),
         8,
     ));
     builder.ins().stack_addr(I64, slot, 0)

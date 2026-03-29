@@ -554,8 +554,14 @@ impl Expression {
                 width,
                 signed,
             } => {
+                if *num_elements == 0 {
+                    return Value::new(0, *width, *signed);
+                }
                 let idx_val = index_expr.eval(mask_cache);
-                let idx = idx_val.to_usize().unwrap_or(0).min(*num_elements - 1);
+                let idx = idx_val
+                    .to_usize()
+                    .unwrap_or(0)
+                    .min(num_elements.saturating_sub(1));
                 #[cfg(debug_assertions)]
                 debug_assert!(
                     stride.checked_mul(idx as isize).is_some(),

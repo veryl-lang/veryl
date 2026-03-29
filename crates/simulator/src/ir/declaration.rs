@@ -300,10 +300,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut own_new_assigns: Vec<ProtoStatement> = vec![];
 
         for decl in &child_module.declarations {
-            let proto_decl: ProtoDeclaration = match Conv::conv(context, decl) {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
+            let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
             for (event, mut stmts) in proto_decl.event_statements {
                 all_event_statements
