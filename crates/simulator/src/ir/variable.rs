@@ -74,7 +74,7 @@ pub fn read_payload(ptr: *const u8, nb: usize) -> u64 {
         match nb {
             4 => (ptr as *const u32).read_unaligned() as u64,
             8 => (ptr as *const u64).read_unaligned(),
-            _ => unreachable!(),
+            _ => unreachable!("read_payload called with nb={}, expected 4 or 8", nb),
         }
     }
 }
@@ -92,7 +92,7 @@ pub fn write_payload(ptr: *mut u8, nb: usize, val: u64) {
         match nb {
             4 => (ptr as *mut u32).write_unaligned(val as u32),
             8 => (ptr as *mut u64).write_unaligned(val),
-            _ => unreachable!(),
+            _ => unreachable!("write_payload called with nb={}, expected 4 or 8", nb),
         }
     }
 }
