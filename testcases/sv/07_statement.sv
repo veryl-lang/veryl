@@ -1,7 +1,7 @@
 module veryl_testcase_Module07;
-    logic a  ;
-    logic aa ;
-    logic clk; always_comb clk = 1;
+    logic signed a  ;
+    logic        aa ;
+    logic        clk; always_comb clk = 1;
 
     always_comb begin
         // assignment statement
@@ -81,18 +81,18 @@ module veryl_testcase_Module07;
         end
     end
 
-    logic a00;
-    logic a01;
-    logic a02;
-    logic a03;
-    logic a04;
-    logic a05;
-    logic a06;
-    logic a07;
-    logic a08;
-    logic a09;
-    logic a10;
-    logic a11;
+    logic        a00;
+    logic        a01;
+    logic        a02;
+    logic        a03;
+    logic        a04;
+    logic        a05;
+    logic        a06;
+    logic        a07;
+    logic        a08;
+    logic        a09;
+    logic signed a10;
+    logic signed a11;
     always_ff @ (posedge clk) begin
         a00 <= a00 + (1);
         a01 <= a01 - (1);

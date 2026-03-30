@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unsigned_arith_shift (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unsigned_arith_shift)
+
+  ⚠ Arithmetic shift on unsigned operand has no effect different from logical shift
+   ╭─[../../testcases/error/unsigned_arith_shift.veryl:2:24]
+ 1 │ module unsigned_arith_shift {
+ 2 │     let _a: logic<8> = 8'd1 <<< 2;
+   ·                        ──┬─
+   ·                          ╰── Error location
+ 3 │ }
+   ╰────
+  help: consider using logical shift (<<, >>) or casting the operand to signed

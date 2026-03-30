@@ -1,7 +1,7 @@
 module Module07 {
-    var a  : logic;
-    var aa : logic;
-    let clk: clock = 1;
+    var a  : signed logic;
+    var aa : logic       ;
+    let clk: clock        = 1;
 
     always_comb {
         // assignment statement
@@ -81,18 +81,18 @@ module Module07 {
         }
     }
 
-    var a00: logic;
-    var a01: logic;
-    var a02: logic;
-    var a03: logic;
-    var a04: logic;
-    var a05: logic;
-    var a06: logic;
-    var a07: logic;
-    var a08: logic;
-    var a09: logic;
-    var a10: logic;
-    var a11: logic;
+    var a00: logic       ;
+    var a01: logic       ;
+    var a02: logic       ;
+    var a03: logic       ;
+    var a04: logic       ;
+    var a05: logic       ;
+    var a06: logic       ;
+    var a07: logic       ;
+    var a08: logic       ;
+    var a09: logic       ;
+    var a10: signed logic;
+    var a11: signed logic;
     always_ff (clk) {
         a00 +=   1;
         a01 -=   1;
