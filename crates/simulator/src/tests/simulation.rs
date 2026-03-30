@@ -10043,3 +10043,73 @@ fn write_and_display_mixed() {
         assert_eq!(output, "no newline with newline\n");
     }
 }
+
+// Regression: concatenation in case condition was compiled with wrong element
+// widths in JIT because eval_comptime was not called on the case target
+// expression, leaving bit-select widths unresolved (full variable width).
+#[test]
+fn case_concat_bit_select() {
+    let code = r#"
+    module Top (
+        a  : input  logic<16>,
+        out: output logic<8> ,
+    ) {
+        always_comb {
+            case {a[12], a[6:5]} {
+                3'b111 : out = 8'd7;
+                3'b110 : out = 8'd6;
+                3'b101 : out = 8'd5;
+                3'b100 : out = 8'd4;
+                3'b011 : out = 8'd3;
+                3'b010 : out = 8'd2;
+                3'b001 : out = 8'd1;
+                3'b000 : out = 8'd0;
+                default: out = 8'hFF;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // bit12=1, bit6=1, bit5=1 => {1,11} = 7
+        sim.set("a", Value::new(0x1060, 16, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("out").unwrap(),
+            Value::new(7, 8, false),
+            "config={config:?}: a=0x1060",
+        );
+
+        // bit12=1, bit6=1, bit5=0 => {1,10} = 6
+        sim.set("a", Value::new(0x1040, 16, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("out").unwrap(),
+            Value::new(6, 8, false),
+            "config={config:?}: a=0x1040",
+        );
+
+        // bit12=0, bit6=1, bit5=1 => {0,11} = 3
+        sim.set("a", Value::new(0x0060, 16, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("out").unwrap(),
+            Value::new(3, 8, false),
+            "config={config:?}: a=0x0060",
+        );
+
+        // bit12=0, bit6=0, bit5=0 => {0,00} = 0
+        sim.set("a", Value::new(0x0000, 16, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("out").unwrap(),
+            Value::new(0, 8, false),
+            "config={config:?}: a=0x0000",
+        );
+    }
+}

@@ -680,7 +680,8 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
             return Ok(ir::StatementBlock::default());
         }
 
-        let tgt: ir::Expression = Conv::conv(context, value.expression.as_ref())?;
+        let mut tgt: ir::Expression = Conv::conv(context, value.expression.as_ref())?;
+        tgt.eval_comptime(context, None);
         let mut ret = ir::StatementBlock::default();
 
         for item in &value.case_statement_list {

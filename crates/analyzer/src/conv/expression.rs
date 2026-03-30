@@ -514,8 +514,9 @@ impl Conv<&Factor> for ir::Expression {
                 Ok(ir::Expression::ArrayLiteral(ret, comptime))
             }
             Factor::CaseExpression(x) => {
-                let tgt: ir::Expression =
+                let mut tgt: ir::Expression =
                     Conv::conv(context, x.case_expression.expression.as_ref())?;
+                tgt.eval_comptime(context, None);
                 let exp: ir::Expression =
                     Conv::conv(context, x.case_expression.expression0.as_ref())?;
                 let defaul: ir::Expression =
@@ -679,14 +680,16 @@ impl Conv<&Factor> for ir::Expression {
                 }
             }
             Factor::InsideExpression(x) => {
-                let exp: ir::Expression =
+                let mut exp: ir::Expression =
                     Conv::conv(context, x.inside_expression.expression.as_ref())?;
+                exp.eval_comptime(context, None);
                 let ret = range_list(context, &exp, x.inside_expression.range_list.as_ref())?;
                 Ok(ret)
             }
             Factor::OutsideExpression(x) => {
-                let exp: ir::Expression =
+                let mut exp: ir::Expression =
                     Conv::conv(context, x.outside_expression.expression.as_ref())?;
+                exp.eval_comptime(context, None);
                 let ret = range_list(context, &exp, x.outside_expression.range_list.as_ref())?;
                 let comptime = Box::new(Comptime::create_unknown(token));
                 Ok(ir::Expression::Unary(Op::LogicNot, Box::new(ret), comptime))
