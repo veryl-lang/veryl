@@ -22,6 +22,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::SystemTime;
 use url::Url;
 use veryl_path::{PathSet, ignore_already_exists};
 
@@ -282,6 +283,12 @@ impl Metadata {
     pub fn save_build_info(&mut self) -> Result<(), MetadataError> {
         let build_info = self.project_build_info_path();
         self.build_info.save(&build_info)
+    }
+
+    pub fn add_generated_file(&mut self, path: PathBuf) {
+        self.build_info
+            .generated_files
+            .insert(path, SystemTime::now());
     }
 
     pub fn paths<T: AsRef<Path>>(

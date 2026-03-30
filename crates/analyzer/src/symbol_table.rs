@@ -1307,10 +1307,12 @@ impl SymbolTable {
                             (name, dir.to_string())
                         })
                         .collect();
+                    let path = symbol.token.source.get_path()?;
                     Some(DocTestTarget {
                         module_name: symbol.token.text,
                         wavedrom_json,
                         ports,
+                        path,
                     })
                 } else {
                     None

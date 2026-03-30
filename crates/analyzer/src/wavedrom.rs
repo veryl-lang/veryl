@@ -1,7 +1,7 @@
 use crate::AnalyzerError;
 use crate::analyzer_error::InvalidWavedromKind;
 use crate::symbol::WavedromBlock;
-use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::Token;
 
@@ -134,6 +134,7 @@ pub struct DocTestTarget {
     pub module_name: StrId,
     pub wavedrom_json: String,
     pub ports: Vec<(String, String)>,
+    pub path: PathId,
 }
 
 /// Build a TokenRange pointing to a specific source line by computing its byte offset.

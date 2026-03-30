@@ -1,5 +1,6 @@
 use crate::ir::{ModuleVariables, Value, read_native_value};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use vcd::{self, SimulationCommand, TimescaleUnit};
 
@@ -22,16 +23,21 @@ pub enum VarHandle {
     Fst(fst_writer::FstSignalId),
 }
 
-pub enum WaveDumper {
+pub struct WaveDumper {
+    kind: WaveDumperKind,
+    path: Option<PathBuf>,
+}
+
+enum WaveDumperKind {
     Vcd(VcdDumper),
     Fst(Box<FstDumper>),
 }
 
-pub struct VcdDumper {
+struct VcdDumper {
     writer: vcd::Writer<Box<dyn Write + Send>>,
 }
 
-pub struct FstDumper {
+struct FstDumper {
     state: FstState,
 }
 
@@ -43,9 +49,12 @@ enum FstState {
 
 impl WaveDumper {
     pub fn new_vcd(io: Box<dyn Write + Send>) -> Self {
-        WaveDumper::Vcd(VcdDumper {
-            writer: vcd::Writer::new(io),
-        })
+        WaveDumper {
+            kind: WaveDumperKind::Vcd(VcdDumper {
+                writer: vcd::Writer::new(io),
+            }),
+            path: None,
+        }
     }
 
     pub fn new_fst(path: &str) -> Self {
@@ -57,28 +66,44 @@ impl WaveDumper {
             file_type: fst_writer::FstFileType::Verilog,
         };
         let header = fst_writer::open_fst(path, &info).expect("failed to create FST file");
-        WaveDumper::Fst(Box::new(FstDumper {
-            state: FstState::Header(header),
-        }))
+        WaveDumper {
+            kind: WaveDumperKind::Fst(Box::new(FstDumper {
+                state: FstState::Header(header),
+            })),
+            path: None,
+        }
+    }
+
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.path = Some(path);
+        self
+    }
+
+    pub fn path(&self) -> Option<&PathBuf> {
+        self.path.as_ref()
+    }
+
+    pub fn into_path(self) -> Option<PathBuf> {
+        self.path
     }
 
     pub fn timescale(&mut self) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.timescale(1, TimescaleUnit::US).unwrap();
             }
-            WaveDumper::Fst(_) => {
+            WaveDumperKind::Fst(_) => {
                 // Already set in FstInfo during construction
             }
         }
     }
 
     pub fn add_module(&mut self, name: &str) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.add_module(name).unwrap();
             }
-            WaveDumper::Fst(f) => match &mut f.state {
+            WaveDumperKind::Fst(f) => match &mut f.state {
                 FstState::Header(h) => {
                     h.scope(name, "", fst_writer::FstScopeType::Module).unwrap();
                 }
@@ -88,12 +113,12 @@ impl WaveDumper {
     }
 
     pub fn add_wire(&mut self, width: u32, name: &str) -> VarHandle {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 let code = v.writer.add_wire(width, name).unwrap();
                 VarHandle::Vcd(code)
             }
-            WaveDumper::Fst(f) => match &mut f.state {
+            WaveDumperKind::Fst(f) => match &mut f.state {
                 FstState::Header(h) => {
                     let id = h
                         .var(
@@ -112,11 +137,11 @@ impl WaveDumper {
     }
 
     pub fn upscope(&mut self) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.upscope().unwrap();
             }
-            WaveDumper::Fst(f) => match &mut f.state {
+            WaveDumperKind::Fst(f) => match &mut f.state {
                 FstState::Header(h) => {
                     h.up_scope().unwrap();
                 }
@@ -126,11 +151,11 @@ impl WaveDumper {
     }
 
     pub fn finish_header(&mut self) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.enddefinitions().unwrap();
             }
-            WaveDumper::Fst(f) => {
+            WaveDumperKind::Fst(f) => {
                 let old = std::mem::replace(&mut f.state, FstState::Transitioning);
                 match old {
                     FstState::Header(h) => {
@@ -144,33 +169,33 @@ impl WaveDumper {
     }
 
     pub fn begin_dumpvars(&mut self) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.begin(SimulationCommand::Dumpvars).unwrap();
             }
-            WaveDumper::Fst(_) => {
+            WaveDumperKind::Fst(_) => {
                 // no-op for FST
             }
         }
     }
 
     pub fn end_dumpvars(&mut self) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.end().unwrap();
             }
-            WaveDumper::Fst(_) => {
+            WaveDumperKind::Fst(_) => {
                 // no-op for FST
             }
         }
     }
 
     pub fn timestamp(&mut self, time: u64) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 v.writer.timestamp(time).unwrap();
             }
-            WaveDumper::Fst(f) => match &mut f.state {
+            WaveDumperKind::Fst(f) => match &mut f.state {
                 FstState::Body(b) => {
                     b.time_change(time).unwrap();
                 }
@@ -180,14 +205,14 @@ impl WaveDumper {
     }
 
     pub fn change_vector(&mut self, handle: VarHandle, value: &Value) {
-        match self {
-            WaveDumper::Vcd(v) => {
+        match &mut self.kind {
+            WaveDumperKind::Vcd(v) => {
                 let VarHandle::Vcd(code) = handle else {
                     panic!("VCD dumper received non-VCD handle");
                 };
                 v.writer.change_vector(code, value).unwrap();
             }
-            WaveDumper::Fst(f) => {
+            WaveDumperKind::Fst(f) => {
                 let VarHandle::Fst(id) = handle else {
                     panic!("FST dumper received non-FST handle");
                 };
