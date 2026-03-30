@@ -1592,7 +1592,10 @@ pub fn eval_external_symbol(
 
             return Ok(ir::Factor::Value(x));
         }
-        SymbolKind::Enum(_) | SymbolKind::Struct(_) | SymbolKind::Union(_) => {
+        SymbolKind::Enum(_)
+        | SymbolKind::Struct(_)
+        | SymbolKind::Union(_)
+        | SymbolKind::TypeDef(_) => {
             let r#type = symbol::Type {
                 modifier: vec![],
                 kind: symbol::TypeKind::UserDefined(symbol::UserDefinedType { path, symbol: None }),
