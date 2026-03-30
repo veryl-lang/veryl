@@ -5,6 +5,8 @@ module veryl_testcase_Module38;
 
     typedef bit [8-1:0] octbyte [8];
 
+    localparam int unsigned WORD_BITS = $bits(word_t);
+
     regfile_t rf   ;
     always_comb rf[0] = '0;
     always_comb rf[1] = '0;
