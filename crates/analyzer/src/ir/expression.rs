@@ -1089,6 +1089,34 @@ mod tests {
         Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
+    fn signed_bit(width: usize) -> Box<Expression> {
+        let ret = Comptime {
+            value: ValueVariant::Unknown,
+            r#type: Type {
+                kind: TypeKind::Bit,
+                width: Shape::new(vec![Some(width)]),
+                signed: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        Box::new(Expression::Term(Box::new(Factor::Value(ret))))
+    }
+
+    fn signed_logic(width: usize) -> Box<Expression> {
+        let ret = Comptime {
+            value: ValueVariant::Unknown,
+            r#type: Type {
+                kind: TypeKind::Logic,
+                width: Shape::new(vec![Some(width)]),
+                signed: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        Box::new(Expression::Term(Box::new(Factor::Value(ret))))
+    }
+
     fn value(value: usize) -> Box<Expression> {
         let ret = Comptime {
             value: ValueVariant::Numeric(Value::new(value as u64, 32, false)),
@@ -1180,9 +1208,9 @@ mod tests {
         let x06 = eval_comptime_binary(&mut context, bit(1), Op::LogicAnd, bit(1));
         let x07 = eval_comptime_binary(&mut context, bit(1), Op::LogicAnd, logic(1));
         let x08 = eval_comptime_binary(&mut context, logic(1), Op::LogicAnd, logic(1));
-        let x09 = eval_comptime_binary(&mut context, bit(4), Op::ArithShiftL, bit(3));
-        let x10 = eval_comptime_binary(&mut context, bit(4), Op::ArithShiftL, logic(3));
-        let x11 = eval_comptime_binary(&mut context, logic(4), Op::ArithShiftL, logic(3));
+        let x09 = eval_comptime_binary(&mut context, signed_bit(4), Op::ArithShiftL, bit(3));
+        let x10 = eval_comptime_binary(&mut context, signed_bit(4), Op::ArithShiftL, logic(3));
+        let x11 = eval_comptime_binary(&mut context, signed_logic(4), Op::ArithShiftL, logic(3));
 
         let errors = context.drain_errors();
         assert!(errors.is_empty());
@@ -1196,9 +1224,9 @@ mod tests {
         assert_eq!(format!("{}", x06.r#type), "bit<1>");
         assert_eq!(format!("{}", x07.r#type), "logic<1>");
         assert_eq!(format!("{}", x08.r#type), "logic<1>");
-        assert_eq!(format!("{}", x09.r#type), "bit<4>");
-        assert_eq!(format!("{}", x10.r#type), "bit<4>");
-        assert_eq!(format!("{}", x11.r#type), "logic<4>");
+        assert_eq!(format!("{}", x09.r#type), "signed bit<4>");
+        assert_eq!(format!("{}", x10.r#type), "signed bit<4>");
+        assert_eq!(format!("{}", x11.r#type), "signed logic<4>");
     }
 
     #[test]

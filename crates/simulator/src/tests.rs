@@ -38,7 +38,13 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
     dbg!(&errors);
     let errors: Vec<_> = errors
         .drain(0..)
-        .filter(|x| !matches!(x, AnalyzerError::InvalidLogicalOperand { .. }))
+        .filter(|x| {
+            !matches!(
+                x,
+                AnalyzerError::InvalidLogicalOperand { .. }
+                    | AnalyzerError::UnsignedArithShift { .. }
+            )
+        })
         .collect();
     assert!(errors.is_empty());
 
@@ -94,7 +100,13 @@ fn analyze_multi_file_prj(
     dbg!(&all_errors);
     let errors: Vec<_> = all_errors
         .drain(0..)
-        .filter(|x| !matches!(x, AnalyzerError::InvalidLogicalOperand { .. }))
+        .filter(|x| {
+            !matches!(
+                x,
+                AnalyzerError::InvalidLogicalOperand { .. }
+                    | AnalyzerError::UnsignedArithShift { .. }
+            )
+        })
         .collect();
     assert!(errors.is_empty());
 

@@ -393,6 +393,21 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Warning),
+        code(unsigned_arith_shift),
+        help("consider using logical shift (<<, >>) or casting the operand to signed"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("Arithmetic shift on unsigned operand has no effect different from logical shift")]
+    UnsignedArithShift {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Error),
         code(invalid_lsb),
         help("remove lsb"),
@@ -1569,6 +1584,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
             AnalyzerError::InvalidLogicalOperand { token_source, .. } => *token_source,
+            AnalyzerError::UnsignedArithShift { token_source, .. } => *token_source,
             AnalyzerError::InvalidLsb { token_source, .. } => *token_source,
             AnalyzerError::InvalidModifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidModportItem { token_source, .. } => *token_source,
@@ -1849,6 +1865,13 @@ impl AnalyzerError {
         };
         AnalyzerError::InvalidLogicalOperand {
             kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn unsigned_arith_shift(token: &TokenRange) -> Self {
+        AnalyzerError::UnsignedArithShift {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

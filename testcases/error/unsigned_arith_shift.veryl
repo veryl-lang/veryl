@@ -1,0 +1,3 @@
+module unsigned_arith_shift {
+    let _a: logic<8> = 8'd1 <<< 2;
+}

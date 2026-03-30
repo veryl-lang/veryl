@@ -280,6 +280,14 @@ impl Op {
             }
         }
 
+        // arithmetic shift on unsigned operand is meaningless
+        if matches!(self, Op::ArithShiftL | Op::ArithShiftR)
+            && !x.r#type.is_unknown()
+            && !x.r#type.signed
+        {
+            context.insert_error(AnalyzerError::unsigned_arith_shift(&x.token));
+        }
+
         check_clock_domain(context, x, y, &dst.token.beg);
 
         let x_width = x.r#type.total_width();
