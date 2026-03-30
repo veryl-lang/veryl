@@ -9548,3 +9548,300 @@ fn comb_4state_arithmetic() {
     assert_eq!(sum.payload_u64(), 8);
     assert!(!sum.is_xz(), "sum should be clean after both inputs set");
 }
+
+// ============================================================
+// JIT/interpreter consistency tests: mixed mode, load cache,
+// store elimination, wide values, 4-state, dynamic indexing
+// ============================================================
+
+/// $display (can_build_binary=false) splits the comb block into
+/// [Compiled, Interpreted, Compiled]. Verifies the block boundary handoff.
+#[test]
+fn dual_jit_mixed_display_block() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        b: input  logic<32>,
+        x: output logic<32>,
+        y: output logic<32>,
+    ) {
+        var mid: logic<32>;
+        always_comb {
+            mid = a + b;
+            $display("mid=%d", mid);
+            x = mid * 2;
+            y = mid + 100;
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for i in 0u64..10 {
+            dual.set("a", Value::new(i * 10, 32, false));
+            dual.set("b", Value::new(i * 5, 32, false));
+            dual.step_synthetic();
+            let mid = i * 10 + i * 5;
+            assert_eq!(dual.get("x").unwrap(), Value::new(mid * 2, 32, false));
+            assert_eq!(dual.get("y").unwrap(), Value::new(mid + 100, 32, false));
+        }
+    });
+}
+
+/// Load CSE cache: write then read the same variable within a single JIT block.
+/// JIT uses cached value; interpreter re-reads from memory.
+#[test]
+fn dual_jit_load_cache_read_after_write() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        x: output logic<32>,
+    ) {
+        var t1: logic<32>;
+        var t2: logic<32>;
+        always_comb {
+            t1 = a + 1;
+            t2 = t1 + 1;
+            x = t2 + t1;
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for a in 0u64..20 {
+            dual.set("a", Value::new(a, 32, false));
+            dual.step_synthetic();
+            assert_eq!(dual.get("x").unwrap(), Value::new(2 * a + 3, 32, false));
+        }
+    });
+}
+
+/// Store elimination: internal comb variable in child module has its store
+/// eliminated in JIT (forwarded via load_cache only).
+#[test]
+fn dual_jit_store_elimination_internal_comb() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a:   input  logic<32>,
+        out: output logic<32>,
+    ) {
+        inst u: Inner (
+            clk,
+            rst,
+            a,
+            out,
+        );
+    }
+
+    module Inner (
+        clk: input  clock,
+        rst: input  reset,
+        a:   input  logic<32>,
+        out: output logic<32>,
+    ) {
+        var mid: logic<32>;
+        always_comb {
+            mid = a * 3;
+        }
+        always_ff {
+            if_reset {
+                out = 0;
+            } else {
+                out = mid + 10;
+            }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        assert_eq!(dual.get("out").unwrap(), Value::new(0, 32, false));
+
+        for a in 1u64..10 {
+            dual.set("a", Value::new(a, 32, false));
+            dual.step(&jclk, &iclk);
+            assert_eq!(dual.get("out").unwrap(), Value::new(a * 3 + 10, 32, false));
+        }
+    });
+}
+
+/// 96-bit operations: JIT uses I128, interpreter uses BigUint.
+#[test]
+fn dual_jit_wide_96bit_operations() {
+    let code = r#"
+    module Top (
+        a: input  logic<96>,
+        b: input  logic<96>,
+        sum:     output logic<96>,
+        and_out: output logic<96>,
+        xor_out: output logic<96>,
+    ) {
+        always_comb {
+            sum     = a + b;
+            and_out = a & b;
+            xor_out = a ^ b;
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let a = Value::new(0xDEAD_BEEF_CAFE_BABE, 96, false);
+        let b = Value::new(0x1234_5678_9ABC_DEF0, 96, false);
+        dual.set("a", a);
+        dual.set("b", b);
+        dual.step_synthetic();
+
+        let expected_sum = Value::new(
+            0xDEAD_BEEF_CAFE_BABEu64.wrapping_add(0x1234_5678_9ABC_DEF0),
+            96,
+            false,
+        );
+        assert_eq!(dual.get("sum").unwrap(), expected_sum);
+
+        let expected_and = Value::new(0xDEAD_BEEF_CAFE_BABE & 0x1234_5678_9ABC_DEF0, 96, false);
+        assert_eq!(dual.get("and_out").unwrap(), expected_and);
+
+        let expected_xor = Value::new(0xDEAD_BEEF_CAFE_BABE ^ 0x1234_5678_9ABC_DEF0, 96, false);
+        assert_eq!(dual.get("xor_out").unwrap(), expected_xor);
+    });
+}
+
+/// 4-state BitAnd/BitOr mask propagation (X & 0 = 0, X | 1 = 1).
+#[test]
+fn dual_jit_4state_bitand_mask() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        and_out: output logic<8>,
+        or_out:  output logic<8>,
+    ) {
+        always_comb {
+            and_out = a & b;
+            or_out  = a | b;
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        // a is unset (X in 4-state), b has strategic 0-bits to test X & 0 = 0
+        dual.set("b", Value::new(0x0F, 8, false));
+        dual.step_synthetic();
+
+        dual.set("a", Value::new(0xAB, 8, false));
+        dual.step_synthetic();
+        assert_eq!(
+            dual.get("and_out").unwrap(),
+            Value::new(0xAB & 0x0F, 8, false)
+        );
+        assert_eq!(
+            dual.get("or_out").unwrap(),
+            Value::new(0xAB | 0x0F, 8, false)
+        );
+    });
+}
+
+/// Dynamic array indexing: JIT inline pointer arithmetic vs interpreter eval.
+#[test]
+fn dual_jit_dynamic_index_read() {
+    let code = r#"
+    module Top (
+        idx: input  logic<2>,
+        o  : output logic<8>,
+    ) {
+        var arr: logic<8> [4];
+
+        assign arr[0] = 10;
+        assign arr[1] = 20;
+        assign arr[2] = 30;
+        assign arr[3] = 40;
+        assign o = arr[idx];
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for idx in 0u64..4 {
+            dual.set("idx", Value::new(idx, 2, false));
+            dual.step_synthetic();
+            assert_eq!(dual.get("o").unwrap(), Value::new((idx + 1) * 10, 8, false));
+        }
+    });
+}
+
+/// If-statement inside JIT: load_cache is cleared at branch entry.
+#[test]
+fn dual_jit_if_load_cache_boundary() {
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        a:   input  logic<32>,
+        out: output logic<32>,
+    ) {
+        var mid: logic<32>;
+        always_comb {
+            mid = a + 1;
+            if sel {
+                out = mid + 10;
+            } else {
+                out = mid + 20;
+            }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        for a in 0u64..20 {
+            dual.set("a", Value::new(a, 32, false));
+            dual.set("sel", Value::new(1, 1, false));
+            dual.step_synthetic();
+            assert_eq!(dual.get("out").unwrap(), Value::new(a + 11, 32, false));
+
+            dual.set("sel", Value::new(0, 1, false));
+            dual.step_synthetic();
+            assert_eq!(dual.get("out").unwrap(), Value::new(a + 21, 32, false));
+        }
+    });
+}
+
+/// Wide dynamic array assign (>64 bits, can_build_binary=false) mixed with
+/// JIT-compilable statements in the same comb block.
+#[test]
+fn dual_jit_wide_dynamic_assign_mixed() {
+    let code = r#"
+    module Top (
+        sel:      input  logic<2>,
+        val:      input  logic<96>,
+        a:        input  logic<32>,
+        out:      output logic<32>,
+        wide_out: output logic<96>,
+    ) {
+        var mem: logic<96> [4];
+        always_comb {
+            mem[sel] = val;
+            out = a + 1;
+            wide_out = mem[0];
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        dual.set("sel", Value::new(0, 2, false));
+        dual.set("val", Value::new(0xCAFEBABE, 96, false));
+        dual.set("a", Value::new(42, 32, false));
+        dual.step_synthetic();
+        assert_eq!(dual.get("out").unwrap(), Value::new(43, 32, false));
+        assert_eq!(
+            dual.get("wide_out").unwrap(),
+            Value::new(0xCAFEBABE, 96, false)
+        );
+
+        dual.set("sel", Value::new(1, 2, false));
+        dual.set("val", Value::new(0xDEADBEEF, 96, false));
+        dual.set("a", Value::new(99, 32, false));
+        dual.step_synthetic();
+        assert_eq!(dual.get("out").unwrap(), Value::new(100, 32, false));
+    });
+}
