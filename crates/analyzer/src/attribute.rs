@@ -20,6 +20,7 @@ pub enum Attribute {
     Align(Vec<AlignItem>),
     Format(Vec<FormatItem>),
     Expand(Vec<ExpandItem>),
+    Ignore,
 }
 
 impl Attribute {
@@ -92,6 +93,7 @@ impl fmt::Display for Attribute {
                 }
                 format!("expand({arg})")
             }
+            Attribute::Ignore => String::from("ignore"),
         };
         text.fmt(f)
     }
@@ -189,6 +191,7 @@ struct Pattern {
     pub skip: StrId,
     pub expand: StrId,
     pub modport: StrId,
+    pub ignore: StrId,
 }
 
 impl Pattern {
@@ -223,6 +226,7 @@ impl Pattern {
             skip: resource_table::insert_str("skip"),
             expand: resource_table::insert_str("expand"),
             modport: resource_table::insert_str("modport"),
+            ignore: resource_table::insert_str("ignore"),
         }
     }
 }
@@ -422,6 +426,13 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Err(err)
                 } else {
                     Ok(Attribute::Expand(items))
+                }
+            }
+            x if x == pat.ignore => {
+                if value.attribute_opt.is_some() {
+                    Err(AttributeError::MismatchArgs("no argument".to_string()))
+                } else {
+                    Ok(Attribute::Ignore)
                 }
             }
             _ => Err(AttributeError::UnknownAttribute),
