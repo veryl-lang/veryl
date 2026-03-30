@@ -2,9 +2,12 @@ use crate::HashSet;
 use crate::cranelift::Context as CraneliftContext;
 use crate::cranelift::FuncPtr;
 use crate::ir::context::{Context as ConvContext, Conv};
-use crate::ir::expression::build_linear_index_expr;
 use crate::ir::expression::{
-    ExpressionContext, band_const, gen_mask_for_width, gen_mask_range_128, iconst_128,
+    DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, band_const, gen_mask_for_width,
+    gen_mask_range_128, iconst_128,
+};
+use crate::ir::expression::{
+    build_dynamic_bit_select, build_dynamic_select_shift, build_linear_index_expr,
 };
 use crate::ir::variable::{
     VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
@@ -101,6 +104,7 @@ pub struct AssignDynamicStatement {
     pub dst_native_bytes: usize,
     pub dst_use_4state: bool,
     pub select: Option<(usize, usize)>,
+    pub dynamic_select: Option<DynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
 }
@@ -354,6 +358,7 @@ pub struct ProtoAssignDynamicStatement {
     pub dst_index_expr: ProtoExpression,
     pub dst_width: usize,
     pub select: Option<(usize, usize)>,
+    pub dynamic_select: Option<ProtoDynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: ProtoExpression,
     /// Canonical (current) base byte offset for FF variables.
@@ -362,9 +367,18 @@ pub struct ProtoAssignDynamicStatement {
 
 impl ProtoAssignDynamicStatement {
     pub fn can_build_binary(&self) -> bool {
-        self.dst_width <= 64
-            && self.expr.can_build_binary()
-            && self.dst_index_expr.can_build_binary()
+        if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
+            return false;
+        }
+        if let Some(dyn_sel) = &self.dynamic_select {
+            let full_width = dyn_sel.elem_width * dyn_sel.num_elements;
+            if full_width > 128 || !dyn_sel.index_expr.can_build_binary() {
+                return false;
+            }
+            full_width <= 64
+        } else {
+            self.dst_width <= 64
+        }
     }
 
     pub fn build_binary(
@@ -415,7 +429,47 @@ impl ProtoAssignDynamicStatement {
         let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
-        if let Some((beg, end)) = self.select {
+        if let Some(dyn_sel) = &self.dynamic_select {
+            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            let load_type = if nb == 4 { I32 } else { I64 };
+
+            let payload = builder.ins().ishl(payload, shift);
+
+            let elem_mask = gen_mask_for_width(dyn_sel.elem_width);
+            let mask_val = builder.ins().iconst(I64, elem_mask as i64);
+            let dyn_mask = builder.ins().ishl(mask_val, shift);
+            let not_mask = builder.ins().bnot(dyn_mask);
+
+            let org = builder.ins().load(load_type, load_mem_flag, addr, 0);
+            let org = if nb == 4 {
+                builder.ins().uextend(I64, org)
+            } else {
+                org
+            };
+            let org = builder.ins().band(org, not_mask);
+            let result = builder.ins().bor(payload, org);
+            if nb == 4 {
+                builder.ins().istore32(store_mem_flag, result, addr, 0);
+            } else {
+                builder.ins().store(store_mem_flag, result, addr, 0);
+            }
+            if let Some(mask_xz) = mask_xz {
+                let mask_xz = builder.ins().ishl(mask_xz, shift);
+                let org = builder.ins().load(load_type, load_mem_flag, addr, nb_i32);
+                let org = if nb == 4 {
+                    builder.ins().uextend(I64, org)
+                } else {
+                    org
+                };
+                let org = builder.ins().band(org, not_mask);
+                let result = builder.ins().bor(mask_xz, org);
+                if nb == 4 {
+                    builder.ins().istore32(store_mem_flag, result, addr, nb_i32);
+                } else {
+                    builder.ins().store(store_mem_flag, result, addr, nb_i32);
+                }
+            }
+        } else if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
             let load_type = if nb == 4 { I32 } else { I64 };
 
@@ -429,7 +483,6 @@ impl ProtoAssignDynamicStatement {
             let org = builder.ins().band_imm(org, !mask as i64);
             let result = builder.ins().bor(payload, org);
             if nb == 4 {
-                // istore32 expects I64 and truncates internally
                 builder.ins().istore32(store_mem_flag, result, addr, 0);
             } else {
                 builder.ins().store(store_mem_flag, result, addr, 0);
@@ -558,6 +611,9 @@ impl ProtoStatement {
                     x.dst_ff_current_offset += ff_delta;
                 }
                 x.expr.adjust_offsets(ff_delta, comb_delta);
+                if let Some(dyn_sel) = &mut x.dynamic_select {
+                    dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
+                }
             }
             ProtoStatement::AssignDynamic(x) => {
                 x.dst_base = x.dst_base.adjust(ff_delta, comb_delta);
@@ -566,6 +622,9 @@ impl ProtoStatement {
                 }
                 x.dst_index_expr.adjust_offsets(ff_delta, comb_delta);
                 x.expr.adjust_offsets(ff_delta, comb_delta);
+                if let Some(dyn_sel) = &mut x.dynamic_select {
+                    dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
+                }
             }
             ProtoStatement::If(x) => {
                 if let Some(cond) = &mut x.cond {
@@ -661,11 +720,17 @@ impl ProtoStatement {
         match self {
             ProtoStatement::Assign(x) => {
                 x.expr.gather_variable_offsets(inputs);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets(inputs);
+                }
                 outputs.push(x.dst);
             }
             ProtoStatement::AssignDynamic(x) => {
                 x.dst_index_expr.gather_variable_offsets(inputs);
                 x.expr.gather_variable_offsets(inputs);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets(inputs);
+                }
                 // Emit only base + last offset to represent the entire array as
                 // a single dependency unit.  Per-element expansion caused O(N²)
                 // blowup in analyze_dependency for large arrays.
@@ -820,6 +885,18 @@ impl ProtoStatement {
                         comb_len,
                         use_4state,
                     );
+                    let dynamic_select =
+                        x.dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
+                            index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )),
+                            elem_width: dyn_sel.elem_width,
+                            num_elements: dyn_sel.num_elements,
+                        });
                     Statement::AssignDynamic(AssignDynamicStatement {
                         dst_base_ptr,
                         dst_stride: x.dst_stride,
@@ -829,6 +906,7 @@ impl ProtoStatement {
                         dst_native_bytes: nb,
                         dst_use_4state: use_4state,
                         select: x.select,
+                        dynamic_select,
                         rhs_select: x.rhs_select,
                         expr,
                     })
@@ -988,6 +1066,7 @@ pub struct AssignStatement {
     pub dst_native_bytes: usize,
     pub dst_use_4state: bool,
     pub select: Option<(usize, usize)>,
+    pub dynamic_select: Option<DynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
 }
@@ -1000,7 +1079,34 @@ impl AssignStatement {
         } else {
             value
         };
-        if let Some((beg, end)) = self.select {
+        if let Some(dyn_sel) = &self.dynamic_select {
+            let idx = dyn_sel
+                .index_expr
+                .eval(mask_cache)
+                .to_usize()
+                .unwrap_or(0)
+                .min(dyn_sel.num_elements.saturating_sub(1));
+            let end = idx * dyn_sel.elem_width;
+            let beg = end + dyn_sel.elem_width - 1;
+            let mut current = unsafe {
+                read_native_value(
+                    self.dst,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    self.dst_width as u32,
+                    false,
+                )
+            };
+            current.assign(value, beg, end);
+            unsafe {
+                write_native_value(
+                    self.dst,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    &current,
+                );
+            }
+        } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
                 read_native_value(
                     self.dst,
@@ -1030,6 +1136,9 @@ impl AssignStatement {
 
     pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         self.expr.gather_variable(inputs, outputs);
+        if let Some(dyn_sel) = &self.dynamic_select {
+            dyn_sel.index_expr.gather_variable(inputs, &mut vec![]);
+        }
         outputs.push(self.dst);
     }
 }
@@ -1052,7 +1161,29 @@ impl AssignDynamicStatement {
         } else {
             value
         };
-        if let Some((beg, end)) = self.select {
+        if let Some(dyn_sel) = &self.dynamic_select {
+            let dyn_idx = dyn_sel
+                .index_expr
+                .eval(mask_cache)
+                .to_usize()
+                .unwrap_or(0)
+                .min(dyn_sel.num_elements.saturating_sub(1));
+            let end = dyn_idx * dyn_sel.elem_width;
+            let beg = end + dyn_sel.elem_width - 1;
+            let mut current = unsafe {
+                read_native_value(
+                    dst,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    self.dst_width as u32,
+                    false,
+                )
+            };
+            current.assign(value, beg, end);
+            unsafe {
+                write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
+            };
+        } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
                 read_native_value(
                     dst,
@@ -1076,6 +1207,9 @@ impl AssignDynamicStatement {
     pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         self.dst_index_expr.gather_variable(inputs, &mut vec![]);
         self.expr.gather_variable(inputs, &mut vec![]);
+        if let Some(dyn_sel) = &self.dynamic_select {
+            dyn_sel.index_expr.gather_variable(inputs, &mut vec![]);
+        }
         for i in 0..self.dst_num_elements {
             let ptr =
                 unsafe { self.dst_base_ptr.offset(self.dst_stride * i as isize) as *const u8 };
@@ -1089,6 +1223,7 @@ pub struct ProtoAssignStatement {
     pub dst: VarOffset,
     pub dst_width: usize,
     pub select: Option<(usize, usize)>,
+    pub dynamic_select: Option<ProtoDynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: ProtoExpression,
     /// Canonical (current) byte offset for FF variables.
@@ -1102,6 +1237,12 @@ pub struct ProtoAssignStatement {
 impl ProtoAssignStatement {
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() {
+            return false;
+        }
+        if let Some(dyn_sel) = &self.dynamic_select
+            && (dyn_sel.elem_width * dyn_sel.num_elements > 128
+                || !dyn_sel.index_expr.can_build_binary())
+        {
             return false;
         }
         true
@@ -1152,12 +1293,28 @@ impl ProtoAssignStatement {
                 use_4state,
             );
 
+            let dynamic_select = self
+                .dynamic_select
+                .as_ref()
+                .map(|dyn_sel| DynamicBitSelect {
+                    index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    )),
+                    elem_width: dyn_sel.elem_width,
+                    num_elements: dyn_sel.num_elements,
+                });
+
             AssignStatement {
                 dst,
                 dst_width: self.dst_width,
                 dst_native_bytes: nb,
                 dst_use_4state: use_4state,
                 select: self.select,
+                dynamic_select,
                 rhs_select: self.rhs_select,
                 expr,
             }
@@ -1222,7 +1379,99 @@ impl ProtoAssignStatement {
         let dst_offset = self.dst.raw() as i32;
         let cache_key = self.dst;
 
-        if let Some((beg, end)) = self.select {
+        if let Some(dyn_sel) = &self.dynamic_select {
+            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+
+            let payload = builder.ins().ishl(payload, shift);
+
+            // Dynamic mask: elem_mask << shift, then invert
+            let elem_mask = gen_mask_for_width(dyn_sel.elem_width);
+            let mask_val = if wide {
+                iconst_128(builder, elem_mask)
+            } else {
+                builder.ins().iconst(I64, elem_mask as i64)
+            };
+            let dyn_mask = builder.ins().ishl(mask_val, shift);
+            let not_mask = builder.ins().bnot(dyn_mask);
+
+            let load_type = if nb == 16 {
+                I128
+            } else if nb == 4 {
+                I32
+            } else {
+                I64
+            };
+
+            let (org_payload, org_mask_xz) = if !context.disable_load_cache
+                && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
+            {
+                (cached_p, cached_m)
+            } else {
+                let p = builder
+                    .ins()
+                    .load(load_type, load_mem_flag, base_addr, dst_offset);
+                let p = if nb == 4 {
+                    builder.ins().uextend(I64, p)
+                } else {
+                    p
+                };
+                let m = if context.use_4state {
+                    let m = builder.ins().load(
+                        load_type,
+                        load_mem_flag,
+                        base_addr,
+                        dst_offset + nb_i32,
+                    );
+                    Some(if nb == 4 {
+                        builder.ins().uextend(I64, m)
+                    } else {
+                        m
+                    })
+                } else {
+                    None
+                };
+                (p, m)
+            };
+
+            let org = builder.ins().band(org_payload, not_mask);
+            let result = builder.ins().bor(payload, org);
+            if nb == 4 {
+                builder
+                    .ins()
+                    .istore32(store_mem_flag, result, base_addr, dst_offset);
+            } else {
+                builder
+                    .ins()
+                    .store(store_mem_flag, result, base_addr, dst_offset);
+            }
+
+            let result_mask_xz = if let Some(mask_xz) = mask_xz {
+                let mask_xz = builder.ins().ishl(mask_xz, shift);
+                let z = if wide { context.zero_128 } else { context.zero };
+                let org_m = org_mask_xz.unwrap_or(z);
+                let org_m = builder.ins().band(org_m, not_mask);
+                let result_m = builder.ins().bor(mask_xz, org_m);
+                if nb == 4 {
+                    builder.ins().istore32(
+                        store_mem_flag,
+                        result_m,
+                        base_addr,
+                        dst_offset + nb_i32,
+                    );
+                } else {
+                    builder
+                        .ins()
+                        .store(store_mem_flag, result_m, base_addr, dst_offset + nb_i32);
+                }
+                Some(result_m)
+            } else {
+                None
+            };
+
+            context
+                .load_cache
+                .insert(cache_key, (result, result_mask_xz));
+        } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
 
@@ -1941,6 +2190,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     dst: dst_var,
                     dst_width,
                     select,
+                    dynamic_select: None,
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_offset: element.current_offset(),
@@ -1972,6 +2222,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     dst_index_expr: index_proto,
                     dst_width,
                     select,
+                    dynamic_select: None,
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_base_offset: base_current,
@@ -2025,22 +2276,49 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         let id = dst.id;
         let in_initial = context.in_initial;
 
-        let scope = context.scope();
-        let meta = scope.variable_meta.get(&id).unwrap();
-        let select = if !dst.select.is_empty() {
-            dst.select
-                .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
-        } else {
-            None
+        let (select, dst_width, const_index, need_dynamic_select, width_shape, kind_width) = {
+            let scope = context.scope();
+            let meta = scope.variable_meta.get(&id).unwrap();
+            let select = if !dst.select.is_empty() {
+                dst.select
+                    .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
+            } else {
+                None
+            };
+            let dst_width = meta.width;
+            let const_index = if dst.index.is_const() {
+                dst.index.eval_value(&mut scope.analyzer_context)
+            } else {
+                None
+            };
+            let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
+            let select = if need_dynamic { None } else { select };
+            let width_shape = meta.r#type.width.clone();
+            let kind_width = meta.r#type.kind.width().unwrap_or(1);
+            (
+                select,
+                dst_width,
+                const_index,
+                need_dynamic,
+                width_shape,
+                kind_width,
+            )
         };
-        let dst_width = meta.width;
-        let const_index = if dst.index.is_const() {
-            dst.index.eval_value(&mut scope.analyzer_context)
+
+        let dynamic_select = if need_dynamic_select {
+            Some(build_dynamic_bit_select(
+                context,
+                &width_shape,
+                &dst.select,
+                kind_width,
+            )?)
         } else {
             None
         };
 
         if let Some(idx_vals) = const_index {
+            let scope = context.scope();
+            let meta = scope.variable_meta.get(&id).unwrap();
             let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
             let element = &meta.elements[index];
             let is_ff = element.is_ff();
@@ -2062,6 +2340,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 dst,
                 dst_width,
                 select,
+                dynamic_select,
                 rhs_select: None,
                 expr,
                 dst_ff_current_offset: current_offset,
@@ -2069,6 +2348,8 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             }))
         } else {
             // Dynamic index
+            let scope = context.scope();
+            let meta = scope.variable_meta.get(&id).unwrap();
             let array_shape = meta.r#type.array.clone();
             let dyn_info = meta.dynamic_index_info().unwrap();
             let num_elements = meta.elements.len();
@@ -2094,6 +2375,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 dst_index_expr: index_proto,
                 dst_width,
                 select,
+                dynamic_select,
                 rhs_select: None,
                 expr,
                 dst_ff_current_base_offset: base_current,
@@ -2105,34 +2387,74 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 impl Conv<&air::AssignStatement> for ProtoAssignStatement {
     fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
-        let scope = context.scope();
 
         // TODO multiple dst
         let dst = &src.dst[0];
-
         let id = dst.id;
-        let meta = scope.variable_meta.get(&id).unwrap();
 
-        let index = dst.index.eval_value(&mut scope.analyzer_context).unwrap();
-        let index = meta.r#type.array.calc_index(&index).unwrap();
+        let (
+            _index,
+            select,
+            is_ff,
+            current_offset,
+            next_offset,
+            dst_width,
+            need_dynamic_select,
+            width_shape,
+            kind_width,
+        ) = {
+            let scope = context.scope();
+            let meta = scope.variable_meta.get(&id).unwrap();
 
-        let select = if !dst.select.is_empty() {
-            dst.select
-                .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
+            let index = dst.index.eval_value(&mut scope.analyzer_context).unwrap();
+            let index = meta.r#type.array.calc_index(&index).unwrap();
+
+            let select = if !dst.select.is_empty() {
+                dst.select
+                    .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
+            } else {
+                None
+            };
+
+            let element = &meta.elements[index];
+            let is_ff = element.is_ff();
+            let current_offset = element.current_offset();
+            let next_offset = element.next_offset;
+            let dst_width = meta.width;
+            let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
+            let select = if need_dynamic { None } else { select };
+            let width_shape = meta.r#type.width.clone();
+            let kind_width = meta.r#type.kind.width().unwrap_or(1);
+            (
+                index,
+                select,
+                is_ff,
+                current_offset,
+                next_offset,
+                dst_width,
+                need_dynamic,
+                width_shape,
+                kind_width,
+            )
+        };
+
+        let dynamic_select = if need_dynamic_select {
+            Some(build_dynamic_bit_select(
+                context,
+                &width_shape,
+                &dst.select,
+                kind_width,
+            )?)
         } else {
             None
         };
 
-        let element = &meta.elements[index];
-        let is_ff = element.is_ff();
-        let current_offset = element.current_offset();
-        let dst_width = meta.width;
         // FF assignment writes to next, but in initial block writes to current
         let dst_var = if is_ff {
             if in_initial {
                 VarOffset::Ff(current_offset)
             } else {
-                VarOffset::Ff(element.next_offset)
+                VarOffset::Ff(next_offset)
             }
         } else {
             VarOffset::Comb(current_offset)
@@ -2144,6 +2466,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             dst: dst_var,
             dst_width,
             select,
+            dynamic_select,
             rhs_select: None,
             expr,
             dst_ff_current_offset: current_offset,
@@ -2244,6 +2567,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 dst: element.current,
                 dst_width: meta.width,
                 select: None,
+                dynamic_select: None,
                 rhs_select: None,
                 expr: proto_expr,
                 dst_ff_current_offset: 0, // not FF
@@ -2269,6 +2593,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             let arg_expr = ProtoExpression::Variable {
                 var_offset: arg_element.current,
                 select: None,
+                dynamic_select: None,
                 width: arg_meta.width,
                 expr_context: ExpressionContext {
                     width: arg_meta.width,
@@ -2299,6 +2624,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     dst: dst_var,
                     dst_width: dst_meta.width,
                     select,
+                    dynamic_select: None,
                     rhs_select: None,
                     expr: arg_expr.clone(),
                     dst_ff_current_offset: dst_element.current_offset(),

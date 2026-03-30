@@ -97,11 +97,12 @@ fn substitute_expr(
         ProtoExpression::Variable {
             var_offset,
             select,
+            dynamic_select,
             width,
             expr_context,
         } => {
             if let Some(inlined) = inline_map.get(&var_offset) {
-                if select.is_none() {
+                if select.is_none() && dynamic_select.is_none() {
                     // Direct substitution
                     inlined.clone()
                 } else {
@@ -110,6 +111,7 @@ fn substitute_expr(
                     ProtoExpression::Variable {
                         var_offset,
                         select,
+                        dynamic_select,
                         width,
                         expr_context,
                     }
@@ -118,6 +120,7 @@ fn substitute_expr(
                 ProtoExpression::Variable {
                     var_offset,
                     select,
+                    dynamic_select,
                     width,
                     expr_context,
                 }
@@ -179,6 +182,7 @@ fn substitute_expr(
             index_expr,
             num_elements,
             select,
+            dynamic_select,
             width,
             expr_context,
         } => ProtoExpression::DynamicVariable {
@@ -187,6 +191,7 @@ fn substitute_expr(
             index_expr: Box::new(substitute_expr(*index_expr, inline_map)),
             num_elements,
             select,
+            dynamic_select,
             width,
             expr_context,
         },

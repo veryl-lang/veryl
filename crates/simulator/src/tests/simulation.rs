@@ -9845,3 +9845,114 @@ fn dual_jit_wide_dynamic_assign_mixed() {
         assert_eq!(dual.get("out").unwrap(), Value::new(100, 32, false));
     });
 }
+
+#[test]
+fn packed_array_dynamic_bit_select_read() {
+    let code = r#"
+    module Top (
+        a  : input  logic<4, 8>,
+        idx: input  logic<2>,
+        o  : output logic<8>,
+    ) {
+        assign o = a[idx];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // a = 0xDDCCBBAA, packed as [3]=0xDD [2]=0xCC [1]=0xBB [0]=0xAA
+        sim.set("a", Value::new(0xDDCCBBAA, 32, false));
+        sim.set("idx", Value::new(0, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xAA, 8, false));
+
+        sim.set("idx", Value::new(1, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xBB, 8, false));
+
+        sim.set("idx", Value::new(2, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xCC, 8, false));
+
+        sim.set("idx", Value::new(3, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xDD, 8, false));
+    }
+}
+
+#[test]
+fn packed_array_single_bit_dynamic_select() {
+    let code = r#"
+    module Top (
+        a  : input  logic<8>,
+        idx: input  logic<3>,
+        o  : output logic,
+    ) {
+        assign o = a[idx];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // 0b10110010: bit0=0, bit1=1, bit2=0, bit3=0, bit4=1, bit5=1, bit6=0, bit7=1
+        let expected_bits: [u64; 8] = [0, 1, 0, 0, 1, 1, 0, 1];
+        for i in 0..8u64 {
+            sim.set("a", Value::new(0b10110010, 8, false));
+            sim.set("idx", Value::new(i, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected_bits[i as usize], 1, false),
+                "bit {} mismatch",
+                i,
+            );
+        }
+    }
+}
+
+#[test]
+fn packed_array_3d_dynamic_select() {
+    let code = r#"
+    module Top (
+        a  : input  logic<2, 3, 4>,
+        idx: input  logic,
+        o  : output logic<3, 4>,
+    ) {
+        assign o = a[idx];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // a = 0xABCDEF: a[0] = bits[11:0] = 0xDEF, a[1] = bits[23:12] = 0xABC
+        sim.set("a", Value::new(0xABCDEF, 24, false));
+
+        sim.set("idx", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xDEF, 12, false),
+            "a[0] mismatch",
+        );
+
+        sim.set("idx", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xABC, 12, false),
+            "a[1] mismatch",
+        );
+    }
+}
