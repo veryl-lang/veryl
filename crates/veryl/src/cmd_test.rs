@@ -47,6 +47,26 @@ impl CmdTest {
         let tests = symbol_table::get_tests(&metadata.project.name);
         let doc_tests = symbol_table::get_doc_tests(&metadata.project.name);
 
+        let total_tests = tests.len();
+        let tests: Vec<_> = if self.opt.include_ignored {
+            tests
+        } else if self.opt.ignored {
+            tests
+                .into_iter()
+                .filter(|(_, property)| property.ignored)
+                .collect()
+        } else {
+            tests
+                .into_iter()
+                .filter(|(_, property)| !property.ignored)
+                .collect()
+        };
+        let ignored_count = total_tests - tests.len();
+
+        if ignored_count > 0 {
+            info!("{ignored_count} test(s) ignored");
+        }
+
         let (tests, doc_tests) = if let Some(ref filter) = self.opt.test {
             let tests: Vec<_> = tests
                 .into_iter()
@@ -233,11 +253,17 @@ impl CmdTest {
             }
         }
 
+        let ignored_msg = if ignored_count > 0 {
+            format!(", {ignored_count} ignored")
+        } else {
+            String::new()
+        };
+        let summary = format!("Completed tests : {success} passed, {failure} failed{ignored_msg}");
         if failure == 0 {
-            info!("Completed tests : {success} passed, {failure} failed");
+            info!("{summary}");
             Ok(true)
         } else {
-            error!("Completed tests : {success} passed, {failure} failed");
+            error!("{summary}");
             Ok(false)
         }
     }

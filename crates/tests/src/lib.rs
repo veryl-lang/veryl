@@ -677,7 +677,7 @@ mod native_test {
     fn test() {
         let (native_tests, ir) = analyze_native_tests();
 
-        for (test_name, test_prop) in &native_tests {
+        for (test_name, test_prop) in native_tests.iter().filter(|(_, p)| !p.ignored) {
             let test_str = resource_table::get_str_value(*test_name).unwrap_or_default();
             let top_name = if let Some(top) = &test_prop.top {
                 resource_table::get_str_value(*top).unwrap_or_default()
@@ -759,7 +759,7 @@ mod native_test {
         let (native_tests, ir) = analyze_native_tests();
         let config = Config::default();
 
-        for (test_name, test_prop) in &native_tests {
+        for (test_name, test_prop) in native_tests.iter().filter(|(_, p)| !p.ignored) {
             let test_str = resource_table::get_str_value(*test_name).unwrap_or_default();
             let top_name = if let Some(top) = &test_prop.top {
                 resource_table::get_str_value(*top).unwrap_or_default()
@@ -791,6 +791,46 @@ mod native_test {
                     );
                 });
             });
+        }
+    }
+
+    #[test]
+    fn test_ignored_attribute() {
+        let (native_tests, ir) = analyze_native_tests();
+
+        let ignored_tests: Vec<_> = native_tests.iter().filter(|(_, p)| p.ignored).collect();
+        assert!(
+            !ignored_tests.is_empty(),
+            "expected at least one ignored test"
+        );
+
+        let non_ignored_tests: Vec<_> = native_tests.iter().filter(|(_, p)| !p.ignored).collect();
+        assert!(
+            !non_ignored_tests.is_empty(),
+            "expected at least one non-ignored test"
+        );
+
+        for (test_name, test_prop) in &ignored_tests {
+            let test_str = resource_table::get_str_value(*test_name).unwrap_or_default();
+            let top_name = if let Some(top) = &test_prop.top {
+                resource_table::get_str_value(*top).unwrap_or_default()
+            } else {
+                test_str.clone()
+            };
+
+            let config = Config::default();
+            let top_str_id =
+                resource_table::get_str_id(top_name.clone()).expect("top module not found");
+            let sim_ir = build_ir(&ir, top_str_id, &config)
+                .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
+            let module_name = sim_ir.name.to_string();
+            let result = run_native_testbench(sim_ir, None, module_name)
+                .unwrap_or_else(|e| panic!("testbench error for {test_str}: {e}"));
+            assert_eq!(
+                result,
+                TestResult::Pass,
+                "ignored native test {test_str} should still pass when explicitly run"
+            );
         }
     }
 

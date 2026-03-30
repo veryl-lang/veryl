@@ -2482,6 +2482,7 @@ pub struct TestProperty {
     pub r#type: TestType,
     pub path: PathId,
     pub top: Option<StrId>,
+    pub ignored: bool,
 }
 
 #[derive(Debug, Clone)]

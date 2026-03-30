@@ -1949,25 +1949,34 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
 
                 let definition = definition_table::insert(Definition::Module(arg.clone()));
-                // Check for #[test(native)] attribute on module declaration
+                // Check for #[test(native)] and #[ignore] attributes on module declaration
                 let test = (|| {
                     let attrs = attribute_table::get(&arg.module.module_token.token);
-                    for attr in attrs {
+                    let mut test_attr = None;
+                    let mut ignored = false;
+                    for attr in &attrs {
                         if let Attr::Test(_, top) = attr {
-                            let path = if let TokenSource::File { path, .. } =
-                                arg.identifier.identifier_token.token.source
-                            {
-                                path
-                            } else {
-                                continue;
-                            };
-                            let top = top.or(Some(name));
-                            return Some(TestProperty {
-                                r#type: TestType::Native,
-                                path,
-                                top,
-                            });
+                            test_attr = Some(*top);
                         }
+                        if matches!(attr, Attr::Ignore) {
+                            ignored = true;
+                        }
+                    }
+                    if let Some(top) = test_attr {
+                        let path = if let TokenSource::File { path, .. } =
+                            arg.identifier.identifier_token.token.source
+                        {
+                            path
+                        } else {
+                            return None;
+                        };
+                        let top = top.or(Some(name));
+                        return Some(TestProperty {
+                            r#type: TestType::Native,
+                            path,
+                            top,
+                            ignored,
+                        });
                     }
                     None
                 })();
@@ -2477,11 +2486,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::After => {
                 let way = arg.identifier.identifier_token.to_string();
                 let mut test_attr = None;
+                let mut ignored = false;
 
                 let attrs = attribute_table::get(&arg.embed.embed_token.token);
-                for attr in attrs {
+                for attr in &attrs {
                     if let Attr::Test(x, y) = attr {
-                        test_attr = Some((x, y));
+                        test_attr = Some((*x, *y));
+                    }
+                    if matches!(attr, Attr::Ignore) {
+                        ignored = true;
                     }
                 }
 
@@ -2508,7 +2521,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         ));
                     }
 
-                    let property = TestProperty { r#type, path, top };
+                    let property = TestProperty {
+                        r#type,
+                        path,
+                        top,
+                        ignored,
+                    };
                     (token, SymbolKind::Test(property))
                 } else {
                     let (name, _) =
@@ -2531,11 +2549,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
         if let HandlerPoint::Before = self.point {
             let way = arg.identifier.identifier_token.to_string();
             let mut test_attr = None;
+            let mut ignored = false;
 
             let attrs = attribute_table::get(&arg.include.include_token.token);
-            for attr in attrs {
+            for attr in &attrs {
                 if let Attr::Test(x, y) = attr {
-                    test_attr = Some((x, y));
+                    test_attr = Some((*x, *y));
+                }
+                if matches!(attr, Attr::Ignore) {
+                    ignored = true;
                 }
             }
 
@@ -2560,7 +2582,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     ));
                 }
 
-                let property = TestProperty { r#type, path, top };
+                let property = TestProperty {
+                    r#type,
+                    path,
+                    top,
+                    ignored,
+                };
                 self.insert_symbol(&token, SymbolKind::Test(property), false);
             }
         }

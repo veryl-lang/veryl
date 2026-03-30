@@ -1,0 +1,35 @@
+module IgnoredCounter (
+    clk: input  clock    ,
+    rst: input  reset    ,
+    cnt: output logic<32>,
+) {
+    always_ff {
+        if_reset {
+            cnt = 0;
+        } else {
+            cnt += 1;
+        }
+    }
+}
+
+#[test(test_ignored_counter)]
+#[ignore]
+module test_ignored_counter {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen;
+
+    var cnt: logic<32>;
+
+    inst dut: IgnoredCounter (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
+
+    initial {
+        rst.assert(clk);
+        clk.next  (10);
+        $assert   (cnt == 32'd10);
+        $finish   ();
+    }
+}

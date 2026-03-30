@@ -180,6 +180,14 @@ pub struct OptTest {
     /// Disable FF classification optimization (force all always_ff variables to FF)
     #[arg(long)]
     pub disable_ff_opt: bool,
+
+    /// Run only ignored tests
+    #[arg(long)]
+    pub ignored: bool,
+
+    /// Run both ignored and non-ignored tests
+    #[arg(long)]
+    pub include_ignored: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
