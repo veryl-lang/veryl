@@ -94,7 +94,7 @@ impl Signature {
             }
         }
 
-        if path.is_generic() {
+        if !context.in_generic && path.is_generic() {
             let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
             path.resolve_imported(&namespace, None);
 

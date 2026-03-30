@@ -655,6 +655,33 @@ fn cyclic_type_dependency() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package proto_pkg {
+        const A: u32;
+        const B: u32;
+    }
+    package pkg::<a: u32, b: u32> for proto_pkg {
+        const A: u32 = a;
+        const B: u32 = b;
+    }
+    interface if_a::<PKG: proto_pkg> {
+        var a: logic<PKG::A>;
+        var b: logic<PKG::B>;
+        modport mp {
+            ..output
+        }
+    }
+    module module_a::<PKG: proto_pkg> {
+        inst ifa: if_a::<pkg::<PKG::B, PKG::A>>;
+    }
+    module module_b {
+        inst u: module_a::<pkg::<1, 2>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
