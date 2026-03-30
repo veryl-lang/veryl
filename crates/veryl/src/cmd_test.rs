@@ -3,11 +3,12 @@ use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{OptBuild, OptTest};
 use log::{error, info, warn};
 use miette::Result;
+use std::path::PathBuf;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
 use veryl_metadata::WaveFormFormat;
-use veryl_metadata::{FilelistType, Metadata, SimType};
-use veryl_parser::resource_table;
+use veryl_metadata::{FilelistType, Metadata, SimType, WaveFormTarget};
+use veryl_parser::resource_table::{self, PathId};
 use veryl_simulator::ir::{Config, Ir, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
@@ -25,6 +26,44 @@ struct NativeTestJob {
     module_name: String,
     sim_ir: Ir,
     dump: Option<WaveDumper>,
+}
+
+fn wave_output_path(name: &str, test_path: PathId, metadata: &Metadata) -> PathBuf {
+    let target_name = format!("{}.{}", name, metadata.test.waveform_format.extension());
+    match &metadata.test.waveform_target {
+        WaveFormTarget::Target => PathBuf::from(test_path.to_string())
+            .parent()
+            .unwrap()
+            .join(target_name),
+        WaveFormTarget::Directory { path } => path.join(target_name),
+    }
+}
+
+fn create_wave_dumper(
+    name: &str,
+    test_path: PathId,
+    metadata: &Metadata,
+) -> std::result::Result<WaveDumper, SimulatorError> {
+    let path = wave_output_path(name, test_path, metadata);
+    if let Some(parent) = path.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| SimulatorError::IoError {
+            message: format!("failed to create directory {}: {e}", parent.display()),
+        })?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    info!("  Dumping waveform to {}", path_str);
+    let dumper = match metadata.test.waveform_format {
+        WaveFormFormat::Vcd => {
+            let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
+                message: format!("failed to create waveform file {}: {e}", path.display()),
+            })?;
+            WaveDumper::new_vcd(Box::new(file))
+        }
+        WaveFormFormat::Fst => WaveDumper::new_fst(&path_str),
+    };
+    Ok(dumper.with_path(path))
 }
 
 impl CmdTest {
@@ -71,8 +110,7 @@ impl CmdTest {
             let tests: Vec<_> = tests
                 .into_iter()
                 .filter(|(test, _)| {
-                    let name =
-                        veryl_parser::resource_table::get_str_value(*test).unwrap_or_default();
+                    let name = test.to_string();
                     name.contains(filter.as_str())
                 })
                 .collect();
@@ -80,7 +118,7 @@ impl CmdTest {
             let doc_tests: Vec<_> = doc_tests
                 .into_iter()
                 .filter(|dt| {
-                    let name = resource_table::get_str_value(dt.module_name).unwrap_or_default();
+                    let name = dt.module_name.to_string();
                     name.contains(filter.as_str())
                 })
                 .collect();
@@ -116,8 +154,7 @@ impl CmdTest {
         for (test, property) in &tests {
             match property.r#type {
                 TestType::Native => {
-                    let test_name =
-                        veryl_parser::resource_table::get_str_value(*test).unwrap_or_default();
+                    let test_name = test.to_string();
                     info!("Building IR for test ({test_name})");
 
                     match prepare_native_test(
@@ -125,7 +162,8 @@ impl CmdTest {
                         &test_name,
                         &property.top,
                         &self.opt,
-                        metadata.test.waveform_format,
+                        property.path,
+                        metadata,
                         &config,
                         &mut proto_cache,
                     ) {
@@ -152,7 +190,7 @@ impl CmdTest {
 
             type JobResult = (
                 String,
-                std::result::Result<TestResult, SimulatorError>,
+                std::result::Result<(TestResult, Option<PathBuf>), SimulatorError>,
                 String,
             );
             let results: Vec<Vec<JobResult>> = std::thread::scope(|s| {
@@ -167,8 +205,10 @@ impl CmdTest {
                                 let job = queue.lock().unwrap().next();
                                 let Some(job) = job else { break };
                                 output_buffer::enable();
+                                let wave_path = job.dump.as_ref().and_then(|d| d.path().cloned());
                                 let result =
                                     run_native_testbench(job.sim_ir, job.dump, job.module_name);
+                                let result = result.map(|r| (r, wave_path));
                                 let output = output_buffer::take();
                                 thread_results.push((job.test_name, result, output));
                             }
@@ -185,11 +225,14 @@ impl CmdTest {
                     print!("{output}");
                 }
                 match result {
-                    Ok(TestResult::Pass) => {
+                    Ok((TestResult::Pass, wave_path)) => {
                         info!("Succeeded test ({test_name})");
                         success += 1;
+                        if let Some(path) = wave_path {
+                            metadata.add_generated_file(path);
+                        }
                     }
-                    Ok(TestResult::Fail(msg)) => {
+                    Ok((TestResult::Fail(msg), _)) => {
                         error!("Failed test ({test_name}): {msg}");
                         failure += 1;
                     }
@@ -218,33 +261,37 @@ impl CmdTest {
 
             if runner.run(metadata, *test, property.top, property.path, self.opt.wave)? {
                 success += 1;
+                if self.opt.wave {
+                    let test_name = test.to_string();
+                    let path = wave_output_path(&test_name, property.path, metadata);
+                    metadata.add_generated_file(path);
+                }
             } else {
                 failure += 1;
             }
         }
 
-        // Run doc tests
         for dt in &doc_tests {
-            let module_name = resource_table::get_str_value(dt.module_name).unwrap_or_default();
+            let module_name = dt.module_name.to_string();
             info!("Executing doc test ({module_name})");
 
-            let wave_format = if self.opt.wave {
-                Some(metadata.test.waveform_format)
-            } else {
-                None
-            };
             match run_doc_test(
                 &ir,
                 &module_name,
                 &dt.wavedrom_json,
                 &dt.ports,
-                wave_format,
+                self.opt.wave,
+                dt.path,
+                metadata,
                 &config,
                 &mut proto_cache,
             ) {
-                Ok(()) => {
+                Ok(wave_path) => {
                     info!("Succeeded doc test ({module_name})");
                     success += 1;
+                    if let Some(path) = wave_path {
+                        metadata.add_generated_file(path);
+                    }
                 }
                 Err(e) => {
                     error!("Failed doc test ({module_name}): {e}");
@@ -259,6 +306,13 @@ impl CmdTest {
             String::new()
         };
         let summary = format!("Completed tests : {success} passed, {failure} failed{ignored_msg}");
+
+        if self.opt.wave {
+            metadata
+                .save_build_info()
+                .map_err(|e| miette::miette!("{e}"))?;
+        }
+
         if failure == 0 {
             info!("{summary}");
             Ok(true)
@@ -269,17 +323,19 @@ impl CmdTest {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_native_test(
     ir: &veryl_analyzer::ir::Ir,
     test_name: &str,
     top: &Option<resource_table::StrId>,
     opt: &OptTest,
-    waveform_format: WaveFormFormat,
+    test_path: PathId,
+    metadata: &Metadata,
     config: &Config,
     cache: &mut ProtoModuleCache,
 ) -> std::result::Result<NativeTestJob, SimulatorError> {
     let top_name = if let Some(top_str) = top {
-        resource_table::get_str_value(*top_str).unwrap_or_default()
+        top_str.to_string()
     } else {
         test_name.to_string()
     };
@@ -293,18 +349,8 @@ fn prepare_native_test(
 
     let module_name = sim_ir.name.to_string();
 
-    let dump: Option<WaveDumper> = if opt.wave {
-        let path = format!("{}.{}", test_name, waveform_format.extension());
-        info!("  Dumping waveform to {}", path);
-        match waveform_format {
-            WaveFormFormat::Vcd => {
-                let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
-                    message: format!("failed to create waveform file {path}: {e}"),
-                })?;
-                Some(WaveDumper::new_vcd(Box::new(file)))
-            }
-            WaveFormFormat::Fst => Some(WaveDumper::new_fst(&path)),
-        }
+    let dump = if opt.wave {
+        Some(create_wave_dumper(test_name, test_path, metadata)?)
     } else {
         None
     };
@@ -317,15 +363,18 @@ fn prepare_native_test(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_doc_test(
     ir: &veryl_analyzer::ir::Ir,
     module_name: &str,
     wavedrom_json: &str,
     ports: &[(String, String)],
-    wave_format: Option<WaveFormFormat>,
+    wave: bool,
+    source_path: PathId,
+    metadata: &Metadata,
     config: &Config,
     cache: &mut ProtoModuleCache,
-) -> std::result::Result<(), SimulatorError> {
+) -> std::result::Result<Option<PathBuf>, SimulatorError> {
     let mut scenario = parse_wavedrom(wavedrom_json).map_err(|e| SimulatorError::TestFailed {
         message: format!("WaveDrom parse error in {module_name}: {e}"),
     })?;
@@ -338,18 +387,9 @@ fn run_doc_test(
     })?;
     let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
 
-    let dump: Option<WaveDumper> = if let Some(format) = wave_format {
-        let path = format!("{}_doc.{}", module_name, format.extension());
-        info!("  Dumping waveform to {}", path);
-        match format {
-            WaveFormFormat::Vcd => {
-                let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
-                    message: format!("failed to create waveform file {path}: {e}"),
-                })?;
-                Some(WaveDumper::new_vcd(Box::new(file)))
-            }
-            WaveFormFormat::Fst => Some(WaveDumper::new_fst(&path)),
-        }
+    let dump = if wave {
+        let doc_name = format!("{}_doc", module_name);
+        Some(create_wave_dumper(&doc_name, source_path, metadata)?)
     } else {
         None
     };
@@ -406,7 +446,10 @@ fn run_doc_test(
     );
 
     match result {
-        TestResult::Pass => Ok(()),
+        TestResult::Pass => {
+            let wave_path = sim.dump.and_then(|d| d.into_path());
+            Ok(wave_path)
+        }
         TestResult::Fail(msg) => Err(SimulatorError::TestFailed { message: msg }),
     }
 }
