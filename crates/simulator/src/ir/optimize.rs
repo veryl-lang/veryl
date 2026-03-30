@@ -68,7 +68,8 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
             }
         }
         ProtoStatement::SystemFunctionCall(x) => match x {
-            ProtoSystemFunctionCall::Display { args, .. } => {
+            ProtoSystemFunctionCall::Display { args, .. }
+            | ProtoSystemFunctionCall::Write { args, .. } => {
                 for arg in args {
                     count_expr_reads(arg, counts);
                 }
