@@ -836,6 +836,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         let parent_expr = ProtoExpression::Variable {
                             var_offset: parent_element.current,
                             select: None,
+                            dynamic_select: None,
                             width: child_meta.width,
                             expr_context: ExpressionContext {
                                 width: child_meta.width,
@@ -846,6 +847,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             dst: child_element.current,
                             dst_width: child_meta.width,
                             select: None,
+                            dynamic_select: None,
                             rhs_select: None,
                             expr: parent_expr,
                             dst_ff_current_offset: 0, // not FF
@@ -861,6 +863,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     dst: element.current,
                     dst_width: child_meta.width,
                     select: None,
+                    dynamic_select: None,
                     rhs_select: None,
                     expr: proto_expr.clone(),
                     dst_ff_current_offset: 0, // not FF
@@ -909,6 +912,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let child_expr = ProtoExpression::Variable {
                         var_offset: child_element.current,
                         select: None,
+                        dynamic_select: None,
                         width: child_meta.width,
                         expr_context: ExpressionContext {
                             width: child_meta.width,
@@ -926,6 +930,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         dst: dst_var,
                         dst_width: parent_meta.width,
                         select: None,
+                        dynamic_select: None,
                         rhs_select: None,
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset(),

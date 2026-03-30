@@ -437,6 +437,7 @@ pub enum Expression {
         native_bytes: usize,
         use_4state: bool,
         select: Option<(usize, usize)>,
+        dynamic_select: Option<DynamicBitSelect>,
         width: usize,
         signed: bool,
     },
@@ -470,6 +471,7 @@ pub enum Expression {
         index_expr: Box<Expression>,
         num_elements: usize,
         select: Option<(usize, usize)>,
+        dynamic_select: Option<DynamicBitSelect>,
         width: usize,
         signed: bool,
     },
@@ -486,13 +488,24 @@ impl Expression {
                 native_bytes,
                 use_4state,
                 select,
+                dynamic_select,
                 width,
                 signed,
             } => {
                 let val = unsafe {
                     read_native_value(*value, *native_bytes, *use_4state, *width as u32, *signed)
                 };
-                if let Some((beg, end)) = select {
+                if let Some(dyn_sel) = dynamic_select {
+                    let idx = dyn_sel
+                        .index_expr
+                        .eval(mask_cache)
+                        .to_usize()
+                        .unwrap_or(0)
+                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let end = idx * dyn_sel.elem_width;
+                    let beg = end + dyn_sel.elem_width - 1;
+                    val.select(beg, end)
+                } else if let Some((beg, end)) = select {
                     val.select(*beg, *end)
                 } else {
                     val
@@ -551,6 +564,7 @@ impl Expression {
                 index_expr,
                 num_elements,
                 select,
+                dynamic_select,
                 width,
                 signed,
             } => {
@@ -571,7 +585,17 @@ impl Expression {
                 let value = unsafe {
                     read_native_value(ptr, *native_bytes, *use_4state, *width as u32, *signed)
                 };
-                if let Some((beg, end)) = select {
+                if let Some(dyn_sel) = dynamic_select {
+                    let idx = dyn_sel
+                        .index_expr
+                        .eval(mask_cache)
+                        .to_usize()
+                        .unwrap_or(0)
+                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let end = idx * dyn_sel.elem_width;
+                    let beg = end + dyn_sel.elem_width - 1;
+                    value.select(beg, end)
+                } else if let Some((beg, end)) = select {
                     value.select(*beg, *end)
                 } else {
                     value
@@ -589,7 +613,16 @@ impl Expression {
     #[allow(clippy::only_used_in_recursion)]
     pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
         match self {
-            Expression::Variable { value, .. } => inputs.push(*value),
+            Expression::Variable {
+                value,
+                dynamic_select,
+                ..
+            } => {
+                inputs.push(*value);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable(inputs, outputs);
+                }
+            }
             Expression::Value { .. } => (),
             Expression::Unary { x, .. } => {
                 x.gather_variable(inputs, outputs);
@@ -617,9 +650,13 @@ impl Expression {
                 stride,
                 index_expr,
                 num_elements,
+                dynamic_select,
                 ..
             } => {
                 index_expr.gather_variable(inputs, outputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable(inputs, outputs);
+                }
                 for i in 0..*num_elements {
                     let ptr = unsafe { (*base_ptr).offset(*stride * i as isize) };
                     inputs.push(ptr);
@@ -632,7 +669,16 @@ impl Expression {
 impl ProtoExpression {
     pub fn gather_variable_offsets(&self, inputs: &mut Vec<VarOffset>) {
         match self {
-            ProtoExpression::Variable { var_offset, .. } => inputs.push(*var_offset),
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select,
+                ..
+            } => {
+                inputs.push(*var_offset);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets(inputs);
+                }
+            }
             ProtoExpression::Value { .. } => (),
             ProtoExpression::Unary { x, .. } => x.gather_variable_offsets(inputs),
             ProtoExpression::Binary { x, y, .. } => {
@@ -659,9 +705,13 @@ impl ProtoExpression {
                 stride,
                 index_expr,
                 num_elements,
+                dynamic_select,
                 ..
             } => {
                 index_expr.gather_variable_offsets(inputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets(inputs);
+                }
                 // Emit only the base offset to represent the entire array as a
                 // single dependency unit.  Per-element expansion caused O(N²)
                 // blowup in analyze_dependency for large arrays.
@@ -680,11 +730,29 @@ impl ProtoExpression {
     }
 }
 
+/// Dynamic bit selection for packed arrays.
+/// At runtime: end = index * elem_width, beg = end + elem_width - 1
+#[derive(Clone, Debug)]
+pub struct ProtoDynamicBitSelect {
+    pub index_expr: Box<ProtoExpression>,
+    pub elem_width: usize,
+    pub num_elements: usize,
+}
+
+/// Runtime dynamic bit selection (after apply_values_ptr).
+#[derive(Clone, Debug)]
+pub struct DynamicBitSelect {
+    pub index_expr: Box<Expression>,
+    pub elem_width: usize,
+    pub num_elements: usize,
+}
+
 #[derive(Clone, Debug)]
 pub enum ProtoExpression {
     Variable {
         var_offset: VarOffset,
         select: Option<(usize, usize)>,
+        dynamic_select: Option<ProtoDynamicBitSelect>,
         width: usize,
         expr_context: ExpressionContext,
     },
@@ -724,6 +792,7 @@ pub enum ProtoExpression {
         index_expr: Box<ProtoExpression>,
         num_elements: usize,
         select: Option<(usize, usize)>,
+        dynamic_select: Option<ProtoDynamicBitSelect>,
         width: usize,
         expr_context: ExpressionContext,
     },
@@ -734,16 +803,27 @@ impl ProtoExpression {
     /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
     pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
         match self {
-            ProtoExpression::Variable { var_offset, .. } => {
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select,
+                ..
+            } => {
                 *var_offset = var_offset.adjust(ff_delta, comb_delta);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
+                }
             }
             ProtoExpression::DynamicVariable {
                 base_offset,
                 index_expr,
+                dynamic_select,
                 ..
             } => {
                 *base_offset = base_offset.adjust(ff_delta, comb_delta);
                 index_expr.adjust_offsets(ff_delta, comb_delta);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
+                }
             }
             ProtoExpression::Unary { x, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
@@ -773,7 +853,9 @@ impl ProtoExpression {
 
     pub fn can_build_binary(&self) -> bool {
         match self {
-            ProtoExpression::Variable { .. } => true,
+            ProtoExpression::Variable {
+                dynamic_select, ..
+            } => dynamic_select.is_none(),
             ProtoExpression::Value { .. } => true,
             ProtoExpression::Unary { op, x, .. } => {
                 x.can_build_binary()
@@ -844,7 +926,11 @@ impl ProtoExpression {
                     && true_expr.can_build_binary()
                     && false_expr.can_build_binary()
             }
-            ProtoExpression::DynamicVariable { index_expr, .. } => index_expr.can_build_binary(),
+            ProtoExpression::DynamicVariable {
+                index_expr,
+                dynamic_select,
+                ..
+            } => dynamic_select.is_none() && index_expr.can_build_binary(),
         }
     }
 
@@ -951,17 +1037,21 @@ impl ProtoExpression {
                 ProtoExpression::Variable {
                     var_offset,
                     select,
+                    dynamic_select,
                     width,
                     expr_context,
-                    ..
                 } => {
                     // When select is present, width is the select output width
                     // (e.g., 1 for x[63]). But native_bytes must cover the FULL
                     // variable so that read_native_value reads all bytes needed
                     // for the bit-select to work correctly.
-                    let read_width = match select {
-                        Some((beg, _)) => std::cmp::max(*width, *beg + 1),
-                        None => *width,
+                    let read_width = if let Some(dyn_sel) = dynamic_select {
+                        dyn_sel.elem_width * dyn_sel.num_elements
+                    } else {
+                        match select {
+                            Some((beg, _)) => std::cmp::max(*width, *beg + 1),
+                            None => *width,
+                        }
                     };
                     let nb = calc_native_bytes(read_width);
                     let vs = if use_4state { nb * 2 } else { nb };
@@ -994,11 +1084,27 @@ impl ProtoExpression {
                         );
                         (comb_values_ptr as *const u8).add(var_offset.raw() as usize)
                     };
+                    let dynamic_select = if let Some(dyn_sel) = dynamic_select {
+                        Some(DynamicBitSelect {
+                            index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )),
+                            elem_width: dyn_sel.elem_width,
+                            num_elements: dyn_sel.num_elements,
+                        })
+                    } else {
+                        None
+                    };
                     Expression::Variable {
                         value,
                         native_bytes: nb,
                         use_4state,
                         select: *select,
+                        dynamic_select,
                         width: *width,
                         signed: expr_context.signed,
                     }
@@ -1108,9 +1214,9 @@ impl ProtoExpression {
                     index_expr,
                     num_elements,
                     select,
+                    dynamic_select,
                     width,
                     expr_context,
-                    ..
                 } => {
                     let nb = calc_native_bytes(*width);
                     let vs = if use_4state { nb * 2 } else { nb };
@@ -1144,6 +1250,21 @@ impl ProtoExpression {
                         comb_len,
                         use_4state,
                     );
+                    let dynamic_select = if let Some(dyn_sel) = dynamic_select {
+                        Some(DynamicBitSelect {
+                            index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )),
+                            elem_width: dyn_sel.elem_width,
+                            num_elements: dyn_sel.num_elements,
+                        })
+                    } else {
+                        None
+                    };
                     Expression::DynamicVariable {
                         base_ptr,
                         native_bytes: nb,
@@ -1152,6 +1273,7 @@ impl ProtoExpression {
                         index_expr: Box::new(index_expr),
                         num_elements: *num_elements,
                         select: *select,
+                        dynamic_select,
                         width: *width,
                         signed: expr_context.signed,
                     }
@@ -3454,6 +3576,93 @@ pub fn build_linear_index_expr(
     Ok(ret.expect("non-empty array must produce index expression"))
 }
 
+/// Build a ProtoDynamicBitSelect from a VarSelect that contains variable expressions.
+pub fn build_dynamic_bit_select(
+    context: &mut ConvContext,
+    width_shape: &veryl_analyzer::ir::ShapeRef,
+    select: &air::VarSelect,
+    kind_width: usize,
+) -> Result<ProtoDynamicBitSelect, SimulatorError> {
+    let select_dims = select.dimension();
+
+    // Consumed = first select_dims dims (outermost), remaining = the rest (innermost).
+    // elem_width = product of remaining dims * kind_width.
+    // num_elements = product of consumed dims.
+    let mut elem_width = kind_width;
+    for i in select_dims..width_shape.dims() {
+        if let Some(Some(d)) = width_shape.get(i) {
+            elem_width *= d;
+        }
+    }
+
+    let mut num_elements = 1;
+    for i in 0..select_dims {
+        if let Some(Some(d)) = width_shape.get(i) {
+            num_elements *= d;
+        }
+    }
+
+    let index_width = 32;
+    let index_expr_context = ExpressionContext {
+        width: index_width,
+        signed: false,
+    };
+
+    let mut ret: Option<ProtoExpression> = None;
+    let mut base: usize = 1;
+
+    let consumed_dims: Vec<usize> = (0..select_dims)
+        .map(|i| width_shape.get(i).unwrap().unwrap())
+        .collect();
+
+    for (i, &dim_size) in consumed_dims.iter().enumerate().rev() {
+        let idx_proto: ProtoExpression = Conv::conv(context, &select.0[i])?;
+
+        let mul_expr = if base == 1 {
+            idx_proto
+        } else {
+            let base_val = ProtoExpression::Value {
+                value: Value::new(base as u64, index_width, false),
+                width: index_width,
+                expr_context: index_expr_context,
+            };
+            ProtoExpression::Binary {
+                x: Box::new(idx_proto),
+                op: crate::ir::Op::Mul,
+                y: Box::new(base_val),
+                width: index_width,
+                expr_context: index_expr_context,
+            }
+        };
+
+        ret = Some(if let Some(prev) = ret {
+            ProtoExpression::Binary {
+                x: Box::new(prev),
+                op: crate::ir::Op::Add,
+                y: Box::new(mul_expr),
+                width: index_width,
+                expr_context: index_expr_context,
+            }
+        } else {
+            mul_expr
+        });
+
+        base *= dim_size;
+    }
+
+    let index_expr = ret.unwrap_or(ProtoExpression::Value {
+        value: Value::new(0, index_width, false),
+        width: index_width,
+        expr_context: index_expr_context,
+    });
+
+    Ok(ProtoDynamicBitSelect {
+        index_expr: Box::new(index_expr),
+        elem_width,
+        num_elements,
+    })
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut ConvContext, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
@@ -3463,31 +3672,57 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     // Try constant index first
-                    let scope = context.scope();
-                    let meta = scope.variable_meta.get(id).unwrap();
-                    let select_val = if !select.is_empty() {
-                        select.eval_value(&mut scope.analyzer_context, &comptime.r#type, false)
-                    } else {
-                        None
+                    let (select_val, const_index, need_dynamic_select, width_shape, kind_width) = {
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(id).unwrap();
+                        let select_val = if !select.is_empty() {
+                            select.eval_value(
+                                &mut scope.analyzer_context,
+                                &comptime.r#type,
+                                false,
+                            )
+                        } else {
+                            None
+                        };
+                        let const_index = if index.is_const() {
+                            index.eval_value(&mut scope.analyzer_context)
+                        } else {
+                            None
+                        };
+                        let need_dynamic = !select.is_empty() && !select.is_const();
+                        let select_val = if need_dynamic { None } else { select_val };
+                        let width_shape = meta.r#type.width.clone();
+                        let kind_width = meta.r#type.kind.width().unwrap_or(1);
+                        (select_val, const_index, need_dynamic, width_shape, kind_width)
                     };
-                    let const_index = if index.is_const() {
-                        index.eval_value(&mut scope.analyzer_context)
+                    let dynamic_select = if need_dynamic_select {
+                        Some(build_dynamic_bit_select(
+                            context,
+                            &width_shape,
+                            select,
+                            kind_width,
+                        )?)
                     } else {
                         None
                     };
 
                     if let Some(idx_vals) = const_index {
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(id).unwrap();
                         let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                         let element = &meta.elements[index];
 
                         Ok(ProtoExpression::Variable {
                             var_offset: element.current,
                             select: select_val,
+                            dynamic_select,
                             width,
                             expr_context,
                         })
                     } else {
                         // Dynamic index: build linear index ProtoExpression directly
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(id).unwrap();
                         let array_shape = meta.r#type.array.clone();
                         let dyn_info = meta.dynamic_index_info().unwrap();
                         let num_elements = meta.elements.len();
@@ -3501,6 +3736,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             index_expr: Box::new(index_proto),
                             num_elements,
                             select: select_val,
+                            dynamic_select,
                             width,
                             expr_context,
                         })
@@ -3551,6 +3787,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     Ok(ProtoExpression::Variable {
                         var_offset: element.current,
                         select: None,
+                        dynamic_select: None,
                         width,
                         expr_context,
                     })
