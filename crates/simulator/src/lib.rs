@@ -1,3 +1,4 @@
+#[cfg(not(target_family = "wasm"))]
 pub mod cranelift;
 pub mod ir;
 pub mod output_buffer;
@@ -11,6 +12,8 @@ pub mod wide_ops;
 pub use ir::Config;
 pub use simulator::Simulator;
 pub use simulator_error::SimulatorError;
+
+pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8);
 
 #[cfg(test)]
 mod tests;

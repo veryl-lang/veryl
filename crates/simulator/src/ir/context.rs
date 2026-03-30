@@ -1,6 +1,6 @@
+use crate::FuncPtr;
 use crate::HashMap;
 use crate::HashSet;
-use crate::cranelift::FuncPtr;
 use crate::ir::Config;
 use crate::ir::ProtoStatement;
 use crate::ir::VarId;
@@ -9,7 +9,6 @@ use crate::ir::event::Event;
 use crate::ir::statement::StmtDep;
 use crate::ir::variable::VarOffset;
 use crate::simulator_error::SimulatorError;
-use memmap2::Mmap;
 use veryl_parser::resource_table::StrId;
 
 pub struct ScopeContext {
@@ -51,7 +50,7 @@ pub struct JitCacheEntry {
 pub struct Context {
     pub config: Config,
     pub scope_contexts: Vec<ScopeContext>,
-    pub binary: Vec<Mmap>,
+    pub binary: Vec<super::BinaryStorage>,
     pub ff_total_bytes: usize,
     pub comb_total_bytes: usize,
     pub pending_statements: Vec<ProtoStatement>,

@@ -3,6 +3,7 @@ mod declaration;
 mod event;
 mod expression;
 mod module;
+#[cfg(not(target_family = "wasm"))]
 mod optimize;
 mod statement;
 mod variable;
@@ -27,12 +28,18 @@ pub use veryl_analyzer::value::Value;
 use crate::HashMap;
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
+#[cfg(not(target_family = "wasm"))]
 use memmap2::Mmap;
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
+
+#[cfg(not(target_family = "wasm"))]
+type BinaryStorage = Mmap;
+#[cfg(target_family = "wasm")]
+type BinaryStorage = ();
 
 pub struct Ir {
     pub name: StrId,
@@ -56,13 +63,13 @@ pub struct Ir {
     pub disable_ff_opt: bool,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
     /// instances created from the same cached `ProtoModule` can share the binary.
-    _binary: Arc<Vec<Mmap>>,
+    _binary: Arc<Vec<BinaryStorage>>,
 }
 
 impl Ir {
     pub fn from_module(
         module: Module,
-        binary: Vec<Mmap>,
+        binary: Vec<BinaryStorage>,
         config: &Config,
         token: TokenRange,
     ) -> Ir {
@@ -71,7 +78,7 @@ impl Ir {
 
     pub fn from_module_arc(
         module: Module,
-        binary: Arc<Vec<Mmap>>,
+        binary: Arc<Vec<BinaryStorage>>,
         config: &Config,
         token: TokenRange,
     ) -> Ir {
@@ -254,7 +261,7 @@ impl Ir {
 
 // SAFETY: Each Ir exclusively owns its ff_values/comb_values buffers.
 // Raw pointers in Statements point into these buffers — no cross-Ir aliasing.
-// _binary (Arc<Vec<Mmap>>) keeps JIT code pages alive.
+// _binary (Arc<Vec<BinaryStorage>>) keeps JIT code pages alive.
 // NOTE: Ir is intentionally NOT Sync. Sharing &Ir across threads would allow
 // concurrent mutation of ff_values/comb_values via interior raw pointers.
 unsafe impl Send for Ir {}
@@ -281,7 +288,7 @@ pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, Simulat
 
 struct CacheEntry {
     proto: ProtoModule,
-    binary: Arc<Vec<Mmap>>,
+    binary: Arc<Vec<BinaryStorage>>,
     token: TokenRange,
 }
 
@@ -291,8 +298,8 @@ struct CacheEntry {
 pub struct ProtoModuleCache {
     entries: HashMap<StrId, CacheEntry>,
     shared_jit_cache: HashMap<StrId, context::JitCacheEntry>,
-    /// Keeps Mmap pages alive so function pointers in shared_jit_cache remain valid.
-    shared_binaries: Vec<Arc<Vec<Mmap>>>,
+    /// Keeps JIT binary pages alive so function pointers in shared_jit_cache remain valid.
+    shared_binaries: Vec<Arc<Vec<BinaryStorage>>>,
 }
 
 pub fn build_ir_cached(
@@ -364,8 +371,13 @@ impl Config {
     pub fn all() -> Vec<Config> {
         let mut ret = vec![];
 
+        #[cfg(not(target_family = "wasm"))]
+        let jit_options = [false, true];
+        #[cfg(target_family = "wasm")]
+        let jit_options = [false];
+
         for use_4state in [false, true] {
-            for use_jit in [false, true] {
+            for use_jit in jit_options {
                 for disable_ff_opt in [false, true] {
                     ret.push(Config {
                         use_4state,

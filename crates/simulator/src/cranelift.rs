@@ -12,7 +12,7 @@ use cranelift::prelude::*;
 use indent::indent_all_by;
 use target_lexicon::Triple;
 
-pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8);
+pub use crate::FuncPtr;
 
 /// Signature kinds for helper function calls via call_indirect.
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]

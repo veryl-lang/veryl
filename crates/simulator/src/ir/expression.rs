@@ -1,3 +1,4 @@
+#[cfg(not(target_family = "wasm"))]
 use crate::cranelift::{
     Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
 };
@@ -5,16 +6,24 @@ use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes, read_native_value};
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
+#[cfg(not(target_family = "wasm"))]
 use crate::wide_ops;
+#[cfg(not(target_family = "wasm"))]
 use cranelift::codegen::ir::BlockArg;
+#[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::Value as CraneliftValue;
+#[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::types::{I32, I64, I128};
+#[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::ir as air;
-use veryl_analyzer::value::{MaskCache, ValueU64};
+use veryl_analyzer::value::MaskCache;
+#[cfg(not(target_family = "wasm"))]
+use veryl_analyzer::value::ValueU64;
 
 /// Build an I128 constant from a u128 value.
 /// Since `iconst` only accepts Imm64, we build I128 via `iconcat(lo, hi)`.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn iconst_128(builder: &mut FunctionBuilder, val: u128) -> CraneliftValue {
     let lo = builder.ins().iconst(I64, val as u64 as i64);
     let hi = builder.ins().iconst(I64, (val >> 64) as u64 as i64);
@@ -22,6 +31,7 @@ pub(crate) fn iconst_128(builder: &mut FunctionBuilder, val: u128) -> CraneliftV
 }
 
 /// Generate a bitmask for the given width as u128.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn gen_mask_128(width: usize) -> u128 {
     if width >= 128 {
         u128::MAX
@@ -31,11 +41,13 @@ pub(crate) fn gen_mask_128(width: usize) -> u128 {
 }
 
 /// Generate a bitmask for a bit range [beg:end] as u128.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn gen_mask_range_128(beg: usize, end: usize) -> u128 {
     gen_mask_128(beg - end + 1) << end
 }
 
 /// Apply a 128-bit bitmask to a value.
+#[cfg(not(target_family = "wasm"))]
 fn apply_mask_128(
     builder: &mut FunctionBuilder,
     val: CraneliftValue,
@@ -46,6 +58,7 @@ fn apply_mask_128(
 }
 
 /// Create a zero constant of the appropriate type.
+#[cfg(not(target_family = "wasm"))]
 fn zero_for_width(
     context: &CraneliftContext,
     _builder: &mut FunctionBuilder,
@@ -59,6 +72,7 @@ fn zero_for_width(
 }
 
 /// bxor with a constant. Uses bxor_imm for I64, explicit const for I128.
+#[cfg(not(target_family = "wasm"))]
 fn bxor_const(
     builder: &mut FunctionBuilder,
     val: CraneliftValue,
@@ -74,6 +88,7 @@ fn bxor_const(
 }
 
 /// band with a constant. Uses band_imm for I64, explicit const for I128.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn band_const(
     builder: &mut FunctionBuilder,
     val: CraneliftValue,
@@ -89,6 +104,7 @@ pub(crate) fn band_const(
 }
 
 /// bor with a constant. Uses bor_imm for I64, explicit const for I128.
+#[cfg(not(target_family = "wasm"))]
 fn bor_const(
     builder: &mut FunctionBuilder,
     val: CraneliftValue,
@@ -104,6 +120,7 @@ fn bor_const(
 }
 
 /// iadd with a small constant. Uses iadd_imm for I64, explicit const for I128.
+#[cfg(not(target_family = "wasm"))]
 fn iadd_const(
     builder: &mut FunctionBuilder,
     val: CraneliftValue,
@@ -119,6 +136,7 @@ fn iadd_const(
 }
 
 /// icmp with a constant. Uses icmp_imm for I64, explicit const for I128.
+#[cfg(not(target_family = "wasm"))]
 fn icmp_const(
     builder: &mut FunctionBuilder,
     cc: IntCC,
@@ -135,6 +153,7 @@ fn icmp_const(
 }
 
 /// Create a constant of the correct width.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn iconst_for_width(
     builder: &mut FunctionBuilder,
     val: u128,
@@ -148,6 +167,7 @@ pub(crate) fn iconst_for_width(
 }
 
 /// Generate a mask for the given width, returning a u128.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn gen_mask_for_width(width: usize) -> u128 {
     if width >= 128 {
         u128::MAX
@@ -159,6 +179,7 @@ pub(crate) fn gen_mask_for_width(width: usize) -> u128 {
 }
 
 /// JIT: compute clamped index and shift amount for dynamic bit select.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn build_dynamic_select_shift(
     dyn_sel: &ProtoDynamicBitSelect,
     context: &mut CraneliftContext,
@@ -178,11 +199,13 @@ pub(crate) fn build_dynamic_select_shift(
 // ── Wide (>128-bit) helper utilities ────────────────────────────────
 
 /// Returns true if this width requires pointer-based wide representation.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn is_wide_ptr(width: usize) -> bool {
     width > 128
 }
 
 /// Allocate a wide stack slot and zero-fill it.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> CraneliftValue {
     let ptr = alloc_wide_slot(builder, nb);
     let zero = builder.ins().iconst(I64, 0);
@@ -196,6 +219,7 @@ pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> Crane
 
 /// Promote a narrow register value to a wide pointer (store into stack slot).
 /// If already wide (>128 bit), returns as-is.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn ensure_wide_ptr_val(
     builder: &mut FunctionBuilder,
     val: CraneliftValue,
@@ -215,6 +239,7 @@ pub(crate) fn ensure_wide_ptr_val(
 ///
 /// Converts extern "C" function pointers to usize via a two-step cast
 /// (fn → *const () → usize) to satisfy both the compiler and clippy.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod wide_fn_addrs {
     use crate::wide_ops;
 
@@ -298,6 +323,7 @@ pub(crate) mod wide_fn_addrs {
 }
 
 /// Emit a wide bitwise binary op via helper call.
+#[cfg(not(target_family = "wasm"))]
 fn emit_wide_binary_op(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -319,6 +345,7 @@ fn emit_wide_binary_op(
 }
 
 /// Emit a wide unary op via helper call.
+#[cfg(not(target_family = "wasm"))]
 fn emit_wide_unary_op(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -339,6 +366,7 @@ fn emit_wide_unary_op(
 }
 
 /// Build a wide constant from u64 digit values, stored in a stack slot.
+#[cfg(not(target_family = "wasm"))]
 fn emit_wide_const(builder: &mut FunctionBuilder, digits: &[u64], nb: usize) -> CraneliftValue {
     let ptr = alloc_wide_slot(builder, nb);
     let n_words = nb / 8;
@@ -353,6 +381,7 @@ fn emit_wide_const(builder: &mut FunctionBuilder, digits: &[u64], nb: usize) -> 
 }
 
 /// Apply width mask to a wide buffer (clear bits >= width).
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn emit_wide_apply_mask(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -373,6 +402,7 @@ pub(crate) fn emit_wide_apply_mask(
 }
 
 /// Check if a wide mask_xz buffer is nonzero. Returns an I8 truth value.
+#[cfg(not(target_family = "wasm"))]
 fn emit_wide_is_nonzero(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -391,6 +421,7 @@ fn emit_wide_is_nonzero(
 }
 
 /// Create a wide all-ones mask for the given width (ones in [0..width), zeros above).
+#[cfg(not(target_family = "wasm"))]
 fn emit_wide_fill_ones(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -412,6 +443,7 @@ fn emit_wide_fill_ones(
 }
 
 /// Conditionally select between two wide values word-by-word.
+#[cfg(not(target_family = "wasm"))]
 fn emit_wide_select(
     builder: &mut FunctionBuilder,
     cond: CraneliftValue,
@@ -868,6 +900,7 @@ impl ProtoExpression {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoExpression::Variable { dynamic_select, .. } => match dynamic_select {
@@ -1304,6 +1337,7 @@ impl ProtoExpression {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn build_binary(
         &self,
         context: &mut CraneliftContext,
@@ -2655,6 +2689,7 @@ impl ProtoExpression {
 
     // ── Wide (>128-bit) build_binary implementations ───────────────
 
+    #[cfg(not(target_family = "wasm"))]
     fn build_binary_wide_unary(
         &self,
         context: &mut CraneliftContext,
@@ -2833,6 +2868,7 @@ impl ProtoExpression {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn build_binary_wide_binary(
         &self,
         context: &mut CraneliftContext,
@@ -3092,6 +3128,7 @@ impl ProtoExpression {
     }
 
     /// Build 4-state mask_xz for wide binary ops.
+    #[cfg(not(target_family = "wasm"))]
     fn build_wide_4state_binary_mask(
         &self,
         context: &mut CraneliftContext,
@@ -3285,6 +3322,7 @@ impl ProtoExpression {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn build_binary_wide_concat(
         &self,
         context: &mut CraneliftContext,
@@ -3381,6 +3419,7 @@ impl ProtoExpression {
         Some((acc, acc_xz))
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn build_binary_wide_ternary(
         &self,
         context: &mut CraneliftContext,
@@ -3455,6 +3494,7 @@ impl ProtoExpression {
 }
 
 /// Operand info for wide 4-state mask computation.
+#[cfg(not(target_family = "wasm"))]
 struct WideOperandPair {
     x_mask_xz: Option<CraneliftValue>,
     y_mask_xz: Option<CraneliftValue>,
@@ -3467,6 +3507,7 @@ struct WideOperandPair {
 }
 
 /// Check if either wide operand has nonzero mask_xz. Returns an I8 truth value.
+#[cfg(not(target_family = "wasm"))]
 fn wide_any_xz(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -3503,6 +3544,7 @@ fn wide_any_xz(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn expand_sign(
     dst_width: usize,
     src_width: usize,
@@ -3525,6 +3567,7 @@ fn expand_sign(
     (payload, mask_xz)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn shift_mask_xz(
     op: &Op,
     signed: bool,
