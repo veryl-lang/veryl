@@ -1,12 +1,18 @@
 use crate::HashMap;
 use crate::HashSet;
+#[cfg(not(target_family = "wasm"))]
 use crate::cranelift;
-use crate::ir::context::{Context, Conv, JitCacheEntry, JitCachedFunc, ScopeContext};
+use crate::ir::context::{Context, Conv, ScopeContext};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::context::{JitCacheEntry, JitCachedFunc};
 use crate::ir::expression::ExpressionContext;
-use crate::ir::statement::{CompiledBlockStatement, ProtoAssignStatement};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::statement::CompiledBlockStatement;
+use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use crate::simulator_error::SimulatorError;
+#[cfg(not(target_family = "wasm"))]
 use std::collections::VecDeque;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
@@ -14,9 +20,11 @@ use veryl_parser::token_range::TokenRange;
 /// Collect variable offsets from statements, filtering out internal variables
 /// (those that appear in both inputs and outputs) to avoid dependency cycles
 /// when the compiled block is used in analyze_dependency.
+#[cfg(not(target_family = "wasm"))]
 type VarOffsets = Vec<VarOffset>;
 
 /// Collect canonical (current) FF offsets written by these statements.
+#[cfg(not(target_family = "wasm"))]
 fn gather_ff_canonical(stmts: &[ProtoStatement]) -> Vec<isize> {
     let mut result = HashSet::default();
     for s in stmts {
@@ -25,6 +33,7 @@ fn gather_ff_canonical(stmts: &[ProtoStatement]) -> Vec<isize> {
     result.into_iter().collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets) {
     let mut all_inputs = vec![];
     let mut all_outputs = vec![];
@@ -52,6 +61,7 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
 /// are skipped to avoid false cycles.
 ///
 /// Falls back to source order if a cycle is detected.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let n = statements.len();
     if n <= 1 {
@@ -340,7 +350,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // JIT cache: reuse compiled code across instances of the same module type.
         // ff_start and comb_start are already byte offsets.
+        #[allow(unused_mut)]
         let mut full_internal_comb: Option<Vec<ProtoStatement>> = None;
+        #[cfg(not(target_family = "wasm"))]
         if context.config.use_jit {
             let ff_start_bytes = ff_start;
             let comb_start_bytes = comb_start;

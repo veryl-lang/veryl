@@ -1,5 +1,6 @@
 use crate::HashMap;
 use crate::HashSet;
+#[cfg(not(target_family = "wasm"))]
 use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::variable::{
@@ -356,8 +357,10 @@ fn validate_meta_offsets(
 
 /// Maximum number of statements per JIT function.
 /// Keeps regalloc2 cost manageable (O(N^2) in SSA variable count).
+#[cfg(not(target_family = "wasm"))]
 const JIT_CHUNK_SIZE: usize = 256;
 
+#[cfg(not(target_family = "wasm"))]
 fn try_jit_group(
     context: &mut Context,
     blocks: &mut Vec<ProtoStatementBlock>,
@@ -380,6 +383,12 @@ fn try_jit_group(
     }
 }
 
+#[cfg(target_family = "wasm")]
+fn try_jit(_context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+    ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)])
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
     if !context.config.use_jit {
         return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
@@ -424,6 +433,12 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
 /// JIT with load_cache disabled for unified comb.
 /// CompiledBlocks (child comb functions) may modify comb values between
 /// cached loads, so load_cache must be disabled for correctness.
+#[cfg(target_family = "wasm")]
+fn try_jit_no_cache(_context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+    ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)])
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
     if !context.config.use_jit {
         return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);

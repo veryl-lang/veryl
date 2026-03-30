@@ -12,7 +12,6 @@ edition.workspace     = true
 
 [dependencies]
 clap           = {workspace = true}
-cranelift      = "0.130.0"
 daggy          = {workspace = true}
 fst-writer     = {workspace = true}
 fxhash         = {workspace = true}
@@ -21,15 +20,18 @@ log            = {workspace = true}
 miette         = {workspace = true}
 serde_json     = {workspace = true}
 thiserror      = {workspace = true}
-memmap2        = "0.9.9"
 num-traits     = {workspace = true}
-target-lexicon = "0.13.4"
 toml           = {workspace = true}
 vcd            = {workspace = true}
 veryl-analyzer = {version = "0.19.0", path = "../analyzer"}
 veryl-metadata = {version = "0.19.0", path = "../metadata"}
 veryl-parser   = {version = "0.19.0", path = "../parser"}
 veryl-path     = {version = "0.19.0", path = "../path"}
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+cranelift      = "0.130.0"
+memmap2        = "0.9.9"
+target-lexicon = "0.13.4"
 
 [dev-dependencies]
 criterion = {workspace = true}

@@ -1,13 +1,15 @@
+use crate::FuncPtr;
 use crate::HashSet;
+#[cfg(not(target_family = "wasm"))]
 use crate::cranelift::Context as CraneliftContext;
-use crate::cranelift::FuncPtr;
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::expression::{
-    DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, band_const, gen_mask_for_width,
-    gen_mask_range_128, iconst_128,
+    DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
+    build_linear_index_expr,
 };
+#[cfg(not(target_family = "wasm"))]
 use crate::ir::expression::{
-    build_dynamic_bit_select, build_dynamic_select_shift, build_linear_index_expr,
+    band_const, build_dynamic_select_shift, gen_mask_for_width, gen_mask_range_128, iconst_128,
 };
 use crate::ir::variable::{
     VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
@@ -15,13 +17,17 @@ use crate::ir::variable::{
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
 use crate::simulator_error::SimulatorError;
+#[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::types::{I32, I64, I128};
+#[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::conv::utils::eval_array_literal;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::FunctionCall;
 use veryl_analyzer::ir::{SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant};
-use veryl_analyzer::value::{MaskCache, ValueU64};
+use veryl_analyzer::value::MaskCache;
+#[cfg(not(target_family = "wasm"))]
+use veryl_analyzer::value::ValueU64;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -366,6 +372,7 @@ pub struct ProtoAssignDynamicStatement {
 }
 
 impl ProtoAssignDynamicStatement {
+    #[cfg(not(target_family = "wasm"))]
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
             return false;
@@ -381,6 +388,7 @@ impl ProtoAssignDynamicStatement {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn build_binary(
         &self,
         context: &mut CraneliftContext,
@@ -682,6 +690,7 @@ impl ProtoStatement {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoStatement::Assign(x) => x.can_build_binary(),
@@ -1037,6 +1046,7 @@ impl ProtoStatement {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn build_binary(
         &self,
         context: &mut CraneliftContext,
@@ -1235,6 +1245,7 @@ pub struct ProtoAssignStatement {
 }
 
 impl ProtoAssignStatement {
+    #[cfg(not(target_family = "wasm"))]
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() {
             return false;
@@ -1321,6 +1332,7 @@ impl ProtoAssignStatement {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn build_binary(
         &self,
         context: &mut CraneliftContext,
@@ -1691,6 +1703,7 @@ impl ProtoAssignStatement {
     }
 
     /// Wide (>128-bit) store: copy from expression pointer to destination memory.
+    #[cfg(not(target_family = "wasm"))]
     fn build_binary_wide(
         &self,
         context: &mut CraneliftContext,
@@ -1816,6 +1829,7 @@ pub struct ProtoIfStatement {
 }
 
 impl ProtoIfStatement {
+    #[cfg(not(target_family = "wasm"))]
     pub fn can_build_binary(&self) -> bool {
         if let Some(cond) = &self.cond
             && !cond.can_build_binary()
@@ -1863,6 +1877,7 @@ impl ProtoIfStatement {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn build_binary(
         &self,
         context: &mut CraneliftContext,
