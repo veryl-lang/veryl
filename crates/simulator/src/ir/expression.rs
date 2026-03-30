@@ -158,6 +158,23 @@ pub(crate) fn gen_mask_for_width(width: usize) -> u128 {
     }
 }
 
+/// JIT: compute clamped index and shift amount for dynamic bit select.
+pub(crate) fn build_dynamic_select_shift(
+    dyn_sel: &ProtoDynamicBitSelect,
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+) -> Option<CraneliftValue> {
+    let (idx_payload, _) = dyn_sel.index_expr.build_binary(context, builder)?;
+    let num_elem = builder.ins().iconst(I64, dyn_sel.num_elements as i64);
+    let max_idx = builder.ins().iconst(I64, (dyn_sel.num_elements - 1) as i64);
+    let in_bounds = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, idx_payload, num_elem);
+    let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
+    let shift = builder.ins().imul_imm(clamped, dyn_sel.elem_width as i64);
+    Some(shift)
+}
+
 // ── Wide (>128-bit) helper utilities ────────────────────────────────
 
 /// Returns true if this width requires pointer-based wide representation.
@@ -853,9 +870,13 @@ impl ProtoExpression {
 
     pub fn can_build_binary(&self) -> bool {
         match self {
-            ProtoExpression::Variable {
-                dynamic_select, ..
-            } => dynamic_select.is_none(),
+            ProtoExpression::Variable { dynamic_select, .. } => match dynamic_select {
+                Some(dyn_sel) => {
+                    dyn_sel.elem_width * dyn_sel.num_elements <= 128
+                        && dyn_sel.index_expr.can_build_binary()
+                }
+                None => true,
+            },
             ProtoExpression::Value { .. } => true,
             ProtoExpression::Unary { op, x, .. } => {
                 x.can_build_binary()
@@ -930,7 +951,16 @@ impl ProtoExpression {
                 index_expr,
                 dynamic_select,
                 ..
-            } => dynamic_select.is_none() && index_expr.can_build_binary(),
+            } => {
+                let dyn_ok = match dynamic_select {
+                    Some(dyn_sel) => {
+                        dyn_sel.elem_width * dyn_sel.num_elements <= 128
+                            && dyn_sel.index_expr.can_build_binary()
+                    }
+                    None => true,
+                };
+                dyn_ok && index_expr.can_build_binary()
+            }
         }
     }
 
@@ -1084,21 +1114,17 @@ impl ProtoExpression {
                         );
                         (comb_values_ptr as *const u8).add(var_offset.raw() as usize)
                     };
-                    let dynamic_select = if let Some(dyn_sel) = dynamic_select {
-                        Some(DynamicBitSelect {
-                            index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
-                                ff_values_ptr,
-                                ff_len,
-                                comb_values_ptr,
-                                comb_len,
-                                use_4state,
-                            )),
-                            elem_width: dyn_sel.elem_width,
-                            num_elements: dyn_sel.num_elements,
-                        })
-                    } else {
-                        None
-                    };
+                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
+                        index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        )),
+                        elem_width: dyn_sel.elem_width,
+                        num_elements: dyn_sel.num_elements,
+                    });
                     Expression::Variable {
                         value,
                         native_bytes: nb,
@@ -1250,21 +1276,17 @@ impl ProtoExpression {
                         comb_len,
                         use_4state,
                     );
-                    let dynamic_select = if let Some(dyn_sel) = dynamic_select {
-                        Some(DynamicBitSelect {
-                            index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
-                                ff_values_ptr,
-                                ff_len,
-                                comb_values_ptr,
-                                comb_len,
-                                use_4state,
-                            )),
-                            elem_width: dyn_sel.elem_width,
-                            num_elements: dyn_sel.num_elements,
-                        })
-                    } else {
-                        None
-                    };
+                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
+                        index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        )),
+                        elem_width: dyn_sel.elem_width,
+                        num_elements: dyn_sel.num_elements,
+                    });
                     Expression::DynamicVariable {
                         base_ptr,
                         native_bytes: nb,
@@ -1290,6 +1312,7 @@ impl ProtoExpression {
         match self {
             ProtoExpression::Variable {
                 var_offset,
+                dynamic_select,
                 width,
                 select,
                 ..
@@ -1305,7 +1328,7 @@ impl ProtoExpression {
                     let ptr = builder.ins().iadd_imm(base_addr, var_offset.raw() as i64);
 
                     // Select on >128-bit values: fall back to interpreter
-                    if select.is_some() {
+                    if select.is_some() || dynamic_select.is_some() {
                         return None;
                     }
 
@@ -1318,11 +1341,14 @@ impl ProtoExpression {
                     return Some((ptr, mask_xz));
                 }
 
-                // When select is present, width is the select output width.
                 // native_bytes must cover the full variable for correct bit-select.
-                let read_width = match select {
-                    Some((beg, _)) => std::cmp::max(*width, *beg + 1),
-                    None => *width,
+                let read_width = if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.elem_width * dyn_sel.num_elements
+                } else {
+                    match select {
+                        Some((beg, _)) => std::cmp::max(*width, *beg + 1),
+                        None => *width,
+                    }
                 };
                 let nb = calc_native_bytes(read_width);
                 let offset = var_offset.raw() as i32;
@@ -1378,7 +1404,17 @@ impl ProtoExpression {
                     (payload, mask_xz)
                 };
 
-                if let Some((beg, end)) = select {
+                if let Some(dyn_sel) = dynamic_select {
+                    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+                    let mask = gen_mask_for_width(dyn_sel.elem_width);
+                    payload = builder.ins().ushr(payload, shift);
+                    payload = band_const(builder, payload, mask, wide);
+                    if context.use_4state {
+                        let mxz = mask_xz.unwrap();
+                        let mxz = builder.ins().ushr(mxz, shift);
+                        mask_xz = Some(band_const(builder, mxz, mask, wide));
+                    }
+                } else if let Some((beg, end)) = select {
                     let select_width = beg - end + 1;
 
                     if wide {
@@ -2520,6 +2556,7 @@ impl ProtoExpression {
                 index_expr,
                 num_elements,
                 select,
+                dynamic_select,
                 width,
                 ..
             } => {
@@ -2579,7 +2616,17 @@ impl ProtoExpression {
                     None
                 };
 
-                if let Some((beg, end)) = select {
+                if let Some(dyn_sel) = dynamic_select {
+                    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+                    let mask = gen_mask_for_width(dyn_sel.elem_width);
+                    payload = builder.ins().ushr(payload, shift);
+                    payload = band_const(builder, payload, mask, wide);
+                    if context.use_4state {
+                        let mxz = mask_xz.unwrap();
+                        let mxz = builder.ins().ushr(mxz, shift);
+                        mask_xz = Some(band_const(builder, mxz, mask, wide));
+                    }
+                } else if let Some((beg, end)) = select {
                     let select_width = beg - end + 1;
                     if wide {
                         let mask = gen_mask_128(select_width);
@@ -3676,11 +3723,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
                         let select_val = if !select.is_empty() {
-                            select.eval_value(
-                                &mut scope.analyzer_context,
-                                &comptime.r#type,
-                                false,
-                            )
+                            select.eval_value(&mut scope.analyzer_context, &comptime.r#type, false)
                         } else {
                             None
                         };
@@ -3693,7 +3736,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let select_val = if need_dynamic { None } else { select_val };
                         let width_shape = meta.r#type.width.clone();
                         let kind_width = meta.r#type.kind.width().unwrap_or(1);
-                        (select_val, const_index, need_dynamic, width_shape, kind_width)
+                        (
+                            select_val,
+                            const_index,
+                            need_dynamic,
+                            width_shape,
+                            kind_width,
+                        )
                     };
                     let dynamic_select = if need_dynamic_select {
                         Some(build_dynamic_bit_select(
