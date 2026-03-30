@@ -1,4 +1,5 @@
 use super::*;
+use crate::output_buffer;
 
 #[test]
 fn simple_comb() {
@@ -9954,5 +9955,91 @@ fn packed_array_3d_dynamic_select() {
             Value::new(0xABC, 12, false),
             "a[1] mismatch",
         );
+    }
+}
+
+#[test]
+fn write_no_newline() {
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            $write("hello ");
+            $write("world");
+        }
+    }
+    "#;
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(output, "hello world");
+    }
+}
+
+#[test]
+fn write_format_specifiers() {
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            $write("hex=%h dec=%d", 8'hAB, 8'd42);
+        }
+    }
+    "#;
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(output, "hex=ab dec=42");
+    }
+}
+
+#[test]
+fn write_no_format_string() {
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            $write(8'hFF, 4'b1010);
+        }
+    }
+    "#;
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(output, "ff a");
+    }
+}
+
+#[test]
+fn write_and_display_mixed() {
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            $write("no newline ");
+            $display("with newline");
+        }
+    }
+    "#;
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(output, "no newline with newline\n");
     }
 }

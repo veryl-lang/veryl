@@ -1,4 +1,4 @@
-//! Thread-local output buffer for `$display` statements.
+//! Thread-local output buffer for `$display` / `$write` statements.
 //! Prevents interleaved output during parallel test execution.
 
 use std::cell::RefCell;
@@ -15,6 +15,17 @@ pub fn enable() {
 
 pub fn take() -> String {
     BUFFER.with(|b| b.borrow_mut().take().unwrap_or_default())
+}
+
+pub fn print(s: &str) {
+    BUFFER.with(|b| {
+        let mut borrow = b.borrow_mut();
+        if let Some(buf) = borrow.as_mut() {
+            buf.push_str(s);
+        } else {
+            print!("{s}");
+        }
+    });
 }
 
 pub fn println(s: &str) {

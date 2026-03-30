@@ -54,6 +54,7 @@ pub enum SystemFunctionKind {
     Onehot(Input),
     Readmemh(Input, Output),
     Display(Vec<Input>),
+    Write(Vec<Input>),
     Assert(Input, Option<Input>),
     Finish,
     Signed(Input),
@@ -196,6 +197,16 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
+            "$write" => {
+                let inputs: Vec<Input> = args
+                    .into_iter()
+                    .map(|arg| create_input(context, name, None, arg))
+                    .collect();
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Write(inputs),
+                    comptime,
+                })
+            }
             "$assert" => {
                 if args.is_empty() || args.len() > 2 {
                     return Err(ir_error!(token));
@@ -295,6 +306,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Readmemh(_, _) => None,
             SystemFunctionKind::Display(_) => None,
+            SystemFunctionKind::Write(_) => None,
             SystemFunctionKind::Assert(_, _) => None,
             SystemFunctionKind::Finish => None,
             SystemFunctionKind::Signed(x) | SystemFunctionKind::Unsigned(x) => {
@@ -318,6 +330,7 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Readmemh(_, _) => self.comptime.clone(),
             SystemFunctionKind::Display(_) => self.comptime.clone(),
+            SystemFunctionKind::Write(_) => self.comptime.clone(),
             SystemFunctionKind::Assert(_, _) => self.comptime.clone(),
             SystemFunctionKind::Finish => self.comptime.clone(),
             SystemFunctionKind::Signed(_) | SystemFunctionKind::Unsigned(_) => {
@@ -355,6 +368,10 @@ impl fmt::Display for SystemFunctionCall {
             SystemFunctionKind::Display(args) => {
                 let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
                 format!("$display({})", args_str.join(", ")).fmt(f)
+            }
+            SystemFunctionKind::Write(args) => {
+                let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
+                format!("$write({})", args_str.join(", ")).fmt(f)
             }
             SystemFunctionKind::Assert(cond, msg) => {
                 if let Some(msg) = msg {

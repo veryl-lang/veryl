@@ -87,6 +87,10 @@ pub enum SystemFunctionCall {
         format_str: String,
         args: Vec<Expression>,
     },
+    Write {
+        format_str: String,
+        args: Vec<Expression>,
+    },
     Readmemh {
         filename: String,
         /// (current_ptr, next_ptr, native_bytes, use_4state)
@@ -292,6 +296,18 @@ impl SystemFunctionCall {
                     output_buffer::println(&output);
                 }
             }
+            SystemFunctionCall::Write { format_str, args } => {
+                let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
+                if format_str.is_empty() {
+                    let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
+                    output_buffer::print(&parts.join(" "));
+                } else if values.is_empty() {
+                    output_buffer::print(format_str);
+                } else {
+                    let output = format_display_string(format_str, &values);
+                    output_buffer::print(&output);
+                }
+            }
             SystemFunctionCall::Readmemh {
                 filename,
                 elements,
@@ -322,7 +338,7 @@ impl SystemFunctionCall {
 
     pub fn gather_variable(&self, inputs: &mut Vec<*const u8>) {
         match self {
-            SystemFunctionCall::Display { args, .. } => {
+            SystemFunctionCall::Display { args, .. } | SystemFunctionCall::Write { args, .. } => {
                 for e in args {
                     let mut dummy_outputs = vec![];
                     e.gather_variable(inputs, &mut dummy_outputs);
@@ -341,6 +357,10 @@ impl SystemFunctionCall {
 #[derive(Clone, Debug)]
 pub enum ProtoSystemFunctionCall {
     Display {
+        format_str: String,
+        args: Vec<ProtoExpression>,
+    },
+    Write {
         format_str: String,
         args: Vec<ProtoExpression>,
     },
@@ -646,7 +666,8 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::SystemFunctionCall(x) => match x {
-                ProtoSystemFunctionCall::Display { args, .. } => {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
                     for arg in args {
                         arg.adjust_offsets(ff_delta, comb_delta);
                     }
@@ -764,7 +785,8 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::SystemFunctionCall(x) => match x {
-                ProtoSystemFunctionCall::Display { args, .. } => {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
                     for arg in args {
                         arg.gather_variable_offsets(inputs);
                     }
@@ -981,6 +1003,24 @@ impl ProtoStatement {
                         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
                             condition,
                             message: message.clone(),
+                        })
+                    }
+                    ProtoSystemFunctionCall::Write { format_str, args } => {
+                        let args = args
+                            .iter()
+                            .map(|a| {
+                                a.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            })
+                            .collect();
+                        Statement::SystemFunctionCall(SystemFunctionCall::Write {
+                            format_str: format_str.clone(),
+                            args,
                         })
                     }
                     ProtoSystemFunctionCall::Finish => {
@@ -2011,6 +2051,15 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         },
                     )]
                 }
+                SystemFunctionKind::Write(inputs) => {
+                    let (format_str, exprs) = extract_display_args(context, inputs).unwrap();
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Write {
+                            format_str,
+                            args: exprs,
+                        },
+                    )]
+                }
                 SystemFunctionKind::Readmemh(input, output) => {
                     let raw = extract_string_value(&input.0).unwrap();
                     let filename = raw.trim_matches('"').to_string();
@@ -2051,7 +2100,9 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         ProtoSystemFunctionCall::Finish,
                     )]
                 }
-                _ => panic!("unhandled SystemFunctionKind"),
+                _ => {
+                    return Err(SimulatorError::unsupported_description(&x.comptime.token));
+                }
             },
             air::Statement::TbMethodCall(x) => {
                 let method = match &x.method {
