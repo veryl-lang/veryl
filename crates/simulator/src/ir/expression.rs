@@ -1084,15 +1084,15 @@ impl ProtoExpression {
                         }
                     };
                     let nb = calc_native_bytes(read_width);
-                    let vs = if use_4state { nb * 2 } else { nb };
+                    let _vs = if use_4state { nb * 2 } else { nb };
                     let value = if var_offset.is_ff() {
                         #[cfg(debug_assertions)]
                         debug_assert!(
-                            (var_offset.raw() as usize) + vs <= ff_len,
+                            (var_offset.raw() as usize) + _vs <= ff_len,
                             "apply_values_ptr: ff offset {} + vs {} > ff_len {} \
                              (width={}, read_width={}, select={:?})",
                             var_offset.raw(),
-                            vs,
+                            _vs,
                             ff_len,
                             width,
                             read_width,
@@ -1102,11 +1102,11 @@ impl ProtoExpression {
                     } else {
                         #[cfg(debug_assertions)]
                         debug_assert!(
-                            (var_offset.raw() as usize) + vs <= comb_len,
+                            (var_offset.raw() as usize) + _vs <= comb_len,
                             "apply_values_ptr: comb offset {} + vs {} > comb_len {} \
                              (width={}, read_width={}, select={:?})",
                             var_offset.raw(),
-                            vs,
+                            _vs,
                             comb_len,
                             width,
                             read_width,
@@ -1245,14 +1245,14 @@ impl ProtoExpression {
                     expr_context,
                 } => {
                     let nb = calc_native_bytes(*width);
-                    let vs = if use_4state { nb * 2 } else { nb };
+                    let _vs = if use_4state { nb * 2 } else { nb };
                     let base_ptr = if base_offset.is_ff() {
                         #[cfg(debug_assertions)]
                         debug_assert!(
-                            (base_offset.raw() as usize) + vs * *num_elements <= ff_len,
+                            (base_offset.raw() as usize) + _vs * *num_elements <= ff_len,
                             "apply_values_ptr: DynVar ff base_offset {} + vs {} * num {} > ff_len {}",
                             base_offset.raw(),
-                            vs,
+                            _vs,
                             num_elements,
                             ff_len,
                         );
@@ -1260,10 +1260,10 @@ impl ProtoExpression {
                     } else {
                         #[cfg(debug_assertions)]
                         debug_assert!(
-                            (base_offset.raw() as usize) + vs * *num_elements <= comb_len,
+                            (base_offset.raw() as usize) + _vs * *num_elements <= comb_len,
                             "apply_values_ptr: DynVar comb base_offset {} + vs {} * num {} > comb_len {}",
                             base_offset.raw(),
-                            vs,
+                            _vs,
                             num_elements,
                             comb_len,
                         );

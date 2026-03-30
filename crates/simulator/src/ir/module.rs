@@ -84,17 +84,17 @@ fn fill_buffers_recursive(
     for (_, meta) in &sorted {
         for (element, initial) in meta.elements.iter().zip(meta.initial_values.iter()) {
             let nb = element.native_bytes;
-            let vs = value_size(nb, use_4state);
+            let _vs = value_size(nb, use_4state);
             if element.is_ff() {
                 #[cfg(debug_assertions)]
                 {
                     let off = element.current_offset() as usize;
                     debug_assert!(
-                        off + vs <= ff_values.len(),
+                        off + _vs <= ff_values.len(),
                         "FF current_offset out of bounds"
                     );
                     debug_assert!(
-                        element.next_offset as usize + vs <= ff_values.len(),
+                        element.next_offset as usize + _vs <= ff_values.len(),
                         "FF next_offset out of bounds"
                     );
                 }
@@ -108,7 +108,7 @@ fn fill_buffers_recursive(
             } else {
                 #[cfg(debug_assertions)]
                 debug_assert!(
-                    element.current_offset() as usize + vs <= comb_values.len(),
+                    element.current_offset() as usize + _vs <= comb_values.len(),
                     "Comb current_offset out of bounds"
                 );
                 let cur =

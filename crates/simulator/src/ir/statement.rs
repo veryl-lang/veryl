@@ -1260,14 +1260,14 @@ impl ProtoAssignStatement {
     ) -> AssignStatement {
         unsafe {
             let nb = calc_native_bytes(self.dst_width);
-            let vs = if use_4state { nb * 2 } else { nb };
+            let _vs = if use_4state { nb * 2 } else { nb };
             let dst = if self.dst.is_ff() {
                 #[cfg(debug_assertions)]
                 debug_assert!(
-                    (self.dst.raw() as usize) + vs <= ff_len,
+                    (self.dst.raw() as usize) + _vs <= ff_len,
                     "apply_values_ptr Assign: ff dst {} + vs {} > ff_len {} (width={})",
                     self.dst.raw(),
-                    vs,
+                    _vs,
                     ff_len,
                     self.dst_width,
                 );
@@ -1275,10 +1275,10 @@ impl ProtoAssignStatement {
             } else {
                 #[cfg(debug_assertions)]
                 debug_assert!(
-                    (self.dst.raw() as usize) + vs <= comb_len,
+                    (self.dst.raw() as usize) + _vs <= comb_len,
                     "apply_values_ptr Assign: comb dst {} + vs {} > comb_len {} (width={})",
                     self.dst.raw(),
-                    vs,
+                    _vs,
                     comb_len,
                     self.dst_width,
                 );
