@@ -236,7 +236,13 @@ fn build_binary_inner(
     }
 
     let mut control_plane = ControlPlane::default();
-    let code = ctx.compile(&*isa, &mut control_plane).unwrap();
+    let code = match ctx.compile(&*isa, &mut control_plane) {
+        Ok(code) => code,
+        Err(err) => {
+            log::warn!("JIT compilation failed, falling back to interpreter: {err:?}");
+            return None;
+        }
+    };
 
     if config.dump_asm
         && let Some(disasm) = &code.vcode
