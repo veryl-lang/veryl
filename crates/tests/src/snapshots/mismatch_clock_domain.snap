@@ -1,19 +1,17 @@
 ---
 source: crates/tests/src/lib.rs
+assertion_line: 362
 expression: out
 ---
 mismatch_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain)
 
   × Clock domain crossing is detected
-   ╭─[../../testcases/error/mismatch_clock_domain.veryl:3:9]
- 2 │     let a: 'v logic = 0;
- 3 │     var b: 'w logic;
-   ·         ┬
-   ·         ╰── clock domain 'w
+   ╭─[../../testcases/error/mismatch_clock_domain.veryl:5:12]
  4 │ 
  5 │     assign b = a;
-   ·                ┬
-   ·                ╰── clock domain 'v
+   ·            ┬   ┬
+   ·            │   ╰── clock domain 'v
+   ·            ╰── clock domain 'w
  6 │ }
    ╰────
   help:
