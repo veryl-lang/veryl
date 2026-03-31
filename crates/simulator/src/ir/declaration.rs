@@ -5,7 +5,7 @@ use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 #[cfg(not(target_family = "wasm"))]
 use crate::ir::context::{JitCacheEntry, JitCachedFunc};
-use crate::ir::expression::ExpressionContext;
+use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 #[cfg(not(target_family = "wasm"))]
 use crate::ir::statement::CompiledBlockStatement;
 use crate::ir::statement::ProtoAssignStatement;
@@ -894,12 +894,59 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for (child_var_id, parent_dst) in output.id.iter().zip(output.dst.iter()) {
                 let child_meta = child_variable_meta.get(child_var_id).unwrap();
 
+                let (
+                    parent_index,
+                    parent_select,
+                    parent_width,
+                    parent_need_dynamic,
+                    parent_width_shape,
+                    parent_kind_width,
+                ) = {
+                    let parent_scope = context.scope();
+                    let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
+                    let parent_index = parent_dst
+                        .index
+                        .eval_value(&mut parent_scope.analyzer_context)
+                        .unwrap();
+
+                    let select = if !parent_dst.select.is_empty() {
+                        parent_dst.select.eval_value(
+                            &mut parent_scope.analyzer_context,
+                            &parent_dst.comptime.r#type,
+                            false,
+                        )
+                    } else {
+                        None
+                    };
+                    let need_dynamic =
+                        !parent_dst.select.is_empty() && !parent_dst.select.is_const();
+                    let select = if need_dynamic { None } else { select };
+                    let width = parent_meta.width;
+                    let width_shape = parent_meta.r#type.width.clone();
+                    let kind_width = parent_meta.r#type.kind.width().unwrap_or(1);
+                    (
+                        parent_index,
+                        select,
+                        width,
+                        need_dynamic,
+                        width_shape,
+                        kind_width,
+                    )
+                };
+
+                let parent_dynamic_select = if parent_need_dynamic {
+                    Some(build_dynamic_bit_select(
+                        context,
+                        &parent_width_shape,
+                        &parent_dst.select,
+                        parent_kind_width,
+                    )?)
+                } else {
+                    None
+                };
+
                 let parent_scope = context.scope();
                 let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
-                let parent_index = parent_dst
-                    .index
-                    .eval_value(&mut parent_scope.analyzer_context)
-                    .unwrap();
 
                 // Determine which parent elements to connect.
                 // When the parent destination has no index and the variable is an
@@ -940,9 +987,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
                     let stmt = ProtoStatement::Assign(ProtoAssignStatement {
                         dst: dst_var,
-                        dst_width: parent_meta.width,
-                        select: None,
-                        dynamic_select: None,
+                        dst_width: parent_width,
+                        select: parent_select,
+                        dynamic_select: parent_dynamic_select.clone(),
                         rhs_select: None,
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset(),
