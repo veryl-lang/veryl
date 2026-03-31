@@ -1,7 +1,7 @@
 use crate::conv::utils::{
-    TypePosition, argument_list, case_condition, eval_assign_statement, eval_expr, eval_for_range,
-    eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
-    switch_condition, tb_method_call,
+    TypePosition, argument_list, build_for_range, build_for_statement, case_condition,
+    eval_assign_statement, eval_expr, eval_for_range, eval_variable, expand_connect,
+    expand_connect_const, function_call, get_return_str, switch_condition, tb_method_call,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -619,14 +619,19 @@ impl Conv<&ForStatement> for ir::StatementBlock {
             );
         }
 
-        let mut ret = ir::StatementBlock::default();
-
         let step = value
             .for_statement_opt0
             .as_ref()
             .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
 
+        if context.in_sequential_block {
+            let for_range = build_for_range(context, &value.range, rev, step)?;
+            return build_for_statement(context, value, &r#type, clock_domain, for_range, token);
+        }
+
         let range = eval_for_range(context, &value.range, rev, step, token)?;
+
+        let mut ret = ir::StatementBlock::default();
 
         for i in range {
             let label = format!("[{}]", i);

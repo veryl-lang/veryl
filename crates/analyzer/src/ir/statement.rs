@@ -3,8 +3,8 @@ use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
 use crate::ir::{
-    Comptime, Expression, FfTable, FunctionCall, SystemFunctionCall, VarId, VarIndex, VarPath,
-    VarSelect,
+    Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, Type, VarId, VarIndex,
+    VarPath, VarSelect,
 };
 use crate::value::ValueBigUint;
 use indent::indent_all_by;
@@ -21,11 +21,46 @@ pub enum Statement {
     Assign(AssignStatement),
     If(IfStatement),
     IfReset(IfResetStatement),
+    For(ForStatement),
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     TbMethodCall(TbMethodCall),
     Unsupported(TokenRange),
     Null,
+}
+
+#[derive(Clone)]
+pub struct ForStatement {
+    pub var_id: VarId,
+    pub var_name: StrId,
+    pub var_type: Type,
+    pub range: ForRange,
+    pub body: Vec<Statement>,
+    pub token: TokenRange,
+}
+
+/// Loop iteration range representation.
+#[derive(Clone, Debug)]
+pub enum ForRange {
+    /// start..end with additive step (default step=1)
+    Forward {
+        start: usize,
+        end: usize,
+        step: usize,
+    },
+    /// (start..end).rev() with additive step (default step=1)
+    Reverse {
+        start: usize,
+        end: usize,
+        step: usize,
+    },
+    /// start..end with arbitrary step operator (e.g., step *= 2)
+    Stepped {
+        start: usize,
+        end: usize,
+        step: usize,
+        op: Op,
+    },
 }
 
 #[derive(Clone)]
@@ -57,6 +92,7 @@ impl Statement {
             Statement::Assign(x) => x.eval_value(context),
             Statement::If(_) => (),
             Statement::IfReset(_) => (),
+            Statement::For(_) => (),
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => {
                 x.eval_value(context);
@@ -82,6 +118,11 @@ impl Statement {
                 x.eval_assign(context, assign_table, assign_context)
             }
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
+            Statement::For(x) => {
+                for s in &x.body {
+                    s.eval_assign(context, assign_table, assign_context, base_tables);
+                }
+            }
             Statement::TbMethodCall(_) => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
@@ -94,7 +135,8 @@ impl Statement {
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None),
-            Statement::TbMethodCall(_)
+            Statement::For(_)
+            | Statement::TbMethodCall(_)
             | Statement::SystemFunctionCall(_)
             | Statement::Unsupported(_)
             | Statement::Null => (),
@@ -121,7 +163,7 @@ impl Statement {
                 }
             }
             Statement::FunctionCall(x) => x.gather_ff_comb_assign(context, table, decl),
-            _ => {}
+            _ => (),
         }
     }
 
@@ -132,6 +174,7 @@ impl Statement {
             Statement::IfReset(x) => x.set_index(index),
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
+            Statement::For(_) => (),
             Statement::TbMethodCall(_) => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
@@ -163,6 +206,39 @@ impl fmt::Display for Statement {
                     }
                 }
             },
+            Statement::For(x) => {
+                match &x.range {
+                    ForRange::Forward { start, end, step } if *step == 1 => {
+                        writeln!(f, "for {} in {}..{} {{", x.var_name, start, end)?;
+                    }
+                    ForRange::Forward { start, end, step } => {
+                        writeln!(
+                            f,
+                            "for {} in {}..{} step += {} {{",
+                            x.var_name, start, end, step
+                        )?;
+                    }
+                    ForRange::Reverse { start, end, .. } => {
+                        writeln!(f, "for {} in rev {}..{} {{", x.var_name, start, end)?;
+                    }
+                    ForRange::Stepped {
+                        start,
+                        end,
+                        step,
+                        op,
+                    } => {
+                        writeln!(
+                            f,
+                            "for {} in {}..{} step {op}= {} {{",
+                            x.var_name, start, end, step
+                        )?;
+                    }
+                }
+                for s in &x.body {
+                    writeln!(f, "  {s}")?;
+                }
+                write!(f, "}}")
+            }
             Statement::Unsupported(_) => "/* unsupported */".fmt(f),
             Statement::Null => "".fmt(f),
         }

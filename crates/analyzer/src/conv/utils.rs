@@ -1207,6 +1207,96 @@ fn eval_for_range_inner(
     }
 }
 
+/// Build a `ForRange` from syntactic elements of a for-loop.
+pub fn build_for_range(
+    context: &mut Context,
+    range: &Range,
+    rev: bool,
+    step: Option<(&AssignmentOperator, &Expression)>,
+) -> IrResult<ir::ForRange> {
+    let (beg, end) = eval_range(context, range)?;
+
+    if let Some((op, expr)) = step {
+        let mut step_expr: ir::Expression = Conv::conv(context, expr)?;
+        let step_comptime = step_expr.eval_comptime(context, None);
+        let step_val = step_comptime.get_value()?.to_usize().unwrap_or(0);
+        let op: ir::Op = Conv::conv(context, op)?;
+
+        if matches!(op, ir::Op::Add) {
+            Ok(ir::ForRange::Forward {
+                start: beg,
+                end,
+                step: step_val,
+            })
+        } else {
+            Ok(ir::ForRange::Stepped {
+                start: beg,
+                end,
+                step: step_val,
+                op,
+            })
+        }
+    } else if rev {
+        Ok(ir::ForRange::Reverse {
+            start: beg,
+            end,
+            step: 1,
+        })
+    } else {
+        Ok(ir::ForRange::Forward {
+            start: beg,
+            end,
+            step: 1,
+        })
+    }
+}
+
+/// Convert a `ForStatement` AST node into a runtime `ir::Statement::For`
+/// (used in initial blocks to avoid loop unrolling).
+pub fn build_for_statement(
+    context: &mut Context,
+    value: &ForStatement,
+    r#type: &ir::Type,
+    clock_domain: ClockDomain,
+    for_range: ir::ForRange,
+    token: TokenRange,
+) -> IrResult<ir::StatementBlock> {
+    let var_name = value.identifier.text();
+
+    let index = value.identifier.text();
+    let path = VarPath::new(index);
+    let kind = VarKind::Const;
+    let mut comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
+    if let Some(total_width) = r#type.total_width() {
+        comptime.value = ir::ValueVariant::Numeric(Value::new(0, total_width, r#type.signed));
+    }
+
+    let loop_var_id = context.insert_var_path(path.clone(), comptime.clone());
+    let variable = Variable::new(
+        loop_var_id,
+        path,
+        kind,
+        comptime.r#type.clone(),
+        vec![comptime.get_value().unwrap().clone()],
+        context.get_affiliation(),
+        &token,
+    );
+    context.insert_variable(loop_var_id, variable);
+
+    let body: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+
+    Ok(ir::StatementBlock(vec![ir::Statement::For(
+        ir::ForStatement {
+            var_id: loop_var_id,
+            var_name,
+            var_type: r#type.clone(),
+            range: for_range,
+            body: body.0,
+            token,
+        },
+    )]))
+}
+
 pub fn eval_function_call(
     context: &mut Context,
     value: &IdentifierFactor,

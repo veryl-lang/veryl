@@ -1,7 +1,7 @@
 use crate::HashMap;
 use crate::ir::{
-    Event, Expression, Ir, ModuleVariables, Statement, SystemFunctionCall, TbMethodKind, Value,
-    VarId, VarPath,
+    Event, Expression, Ir, ModuleVariables, SimForRange, Statement, SystemFunctionCall,
+    TbMethodKind, Value, VarId, VarPath, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
@@ -42,9 +42,19 @@ pub enum TestbenchStatement {
     For {
         count: u64,
         body: Vec<TestbenchStatement>,
+        loop_var: Option<LoopVariable>,
     },
     /// $finish
     Finish,
+}
+
+pub struct LoopVariable {
+    pub ptr: *mut u8,
+    pub native_bytes: usize,
+    pub use_4state: bool,
+    pub width: usize,
+    pub signed: bool,
+    pub range: SimForRange,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -254,6 +264,25 @@ fn convert_stmt(
                 TestbenchStatement::Stmt(stmt.clone())
             }
         }
+        Statement::For(for_stmt) => {
+            let body = for_stmt
+                .body
+                .iter()
+                .map(|s| convert_stmt(s, event_map, clock_periods, default_reset_duration))
+                .collect();
+            TestbenchStatement::For {
+                count: 0, // unused when loop_var is Some
+                body,
+                loop_var: Some(LoopVariable {
+                    ptr: for_stmt.var_ptr,
+                    native_bytes: for_stmt.var_native_bytes,
+                    use_4state: for_stmt.var_use_4state,
+                    width: for_stmt.var_width,
+                    signed: for_stmt.var_signed,
+                    range: for_stmt.range.clone(),
+                }),
+            }
+        }
         other => TestbenchStatement::Stmt(other.clone()),
     }
 }
@@ -454,11 +483,62 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 exec(sim, else_block)
             }
         }
-        TestbenchStatement::For { count, body } => {
-            for _ in 0..*count {
-                let result = exec(sim, body);
-                if result.should_stop() {
-                    return result;
+        TestbenchStatement::For {
+            count,
+            body,
+            loop_var,
+        } => {
+            if let Some(lv) = loop_var {
+                let mut step_body = |i: u64| -> ExecResult {
+                    let val = Value::new(i, lv.width, lv.signed);
+                    unsafe {
+                        write_native_value(lv.ptr, lv.native_bytes, lv.use_4state, &val);
+                    }
+                    exec(sim, body)
+                };
+                match &lv.range {
+                    SimForRange::Forward { start, end, step } => {
+                        let mut i = *start;
+                        while i < *end {
+                            let result = step_body(i);
+                            if result.should_stop() {
+                                return result;
+                            }
+                            i += step;
+                        }
+                    }
+                    SimForRange::Reverse { start, end, step } => {
+                        let mut i = *end;
+                        while i > *start {
+                            i -= step;
+                            let result = step_body(i);
+                            if result.should_stop() {
+                                return result;
+                            }
+                        }
+                    }
+                    SimForRange::Stepped {
+                        start,
+                        end,
+                        step,
+                        op,
+                    } => {
+                        let mut i = *start;
+                        while i < *end {
+                            let result = step_body(i);
+                            if result.should_stop() {
+                                return result;
+                            }
+                            i = op.eval(i as usize, *step as usize) as u64;
+                        }
+                    }
+                }
+            } else {
+                for _ in 0..*count {
+                    let result = exec(sim, body);
+                    if result.should_stop() {
+                        return result;
+                    }
                 }
             }
             ExecResult::Continue

@@ -56,6 +56,7 @@ pub struct Context {
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub in_test_module: bool,
+    pub in_sequential_block: bool,
     pub in_unbound_func: Option<Token>,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,

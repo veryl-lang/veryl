@@ -85,6 +85,11 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
                 *counts.entry(*off).or_insert(0) += 1;
             }
         }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                count_stmt_reads(s, counts);
+            }
+        }
         ProtoStatement::TbMethodCall { .. } => {}
     }
 }
