@@ -1,0 +1,17 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 362
+expression: out
+---
+mismatch_clock_domain (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_clock_domain)
+
+  × Clock domain crossing is detected
+    ╭─[../../testcases/error/mismatch_clock_domain_connect.veryl:17:13]
+ 16 │ ) {
+ 17 │     connect a_if <> b_if;
+    ·             ──┬─    ──┬─
+    ·               │       ╰── clock domain 'b
+    ·               ╰── clock domain 'a
+ 18 │ }
+    ╰────
+  help:

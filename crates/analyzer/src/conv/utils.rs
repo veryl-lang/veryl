@@ -368,12 +368,14 @@ pub fn eval_assign_statement(
         }
     }
 
-    check_clock_domain(context, &dst.comptime, comptime, &token.beg);
+    let mut dst_comptime_for_cdc = dst.comptime.clone();
+    dst_comptime_for_cdc.token = dst.token;
+    check_clock_domain(context, &dst_comptime_for_cdc, comptime, &token.beg);
 
     if context.is_affiliated(Affiliation::AlwaysFf)
         && let Some(clock) = context.current_clock.clone()
     {
-        check_clock_domain(context, &dst.comptime, &clock, &token.beg);
+        check_clock_domain(context, &dst_comptime_for_cdc, &clock, &token.beg);
     }
 
     let width = dst.total_width(context);
@@ -2157,6 +2159,14 @@ pub fn expand_connect(
                     // TODO direction error
                     return Ok(ret);
                 };
+
+                if let Some((_, mut dst_comptime)) = context.find_path(&dst.0)
+                    && let Some((_, mut src_comptime)) = context.find_path(&src.0)
+                {
+                    dst_comptime.token = dst.2;
+                    src_comptime.token = src.2;
+                    check_clock_domain(context, &dst_comptime, &src_comptime, &token.beg);
+                }
 
                 if let Some(src) = src.to_expression(context)
                     && let Some(dst) = dst.to_assign_destination(context, false)

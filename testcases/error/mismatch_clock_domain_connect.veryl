@@ -1,0 +1,18 @@
+interface Interface_mismatch_clock_domain_connect {
+    var data: logic;
+
+    modport master {
+        data: output,
+    }
+
+    modport slave {
+        data: input,
+    }
+}
+
+module mismatch_clock_domain_connect (
+    a_if: modport 'a Interface_mismatch_clock_domain_connect::master,
+    b_if: modport 'b Interface_mismatch_clock_domain_connect::slave,
+) {
+    connect a_if <> b_if;
+}
