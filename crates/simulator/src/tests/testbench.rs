@@ -38,6 +38,7 @@ fn testbench_counter_clock_next() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
             TestbenchStatement::Finish,
         ];
@@ -126,6 +127,7 @@ fn testbench_for_loop() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
             TestbenchStatement::Finish,
         ];
@@ -174,6 +176,7 @@ fn testbench_finish_stops_execution() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
             TestbenchStatement::Finish,
             // This should not execute
@@ -185,6 +188,7 @@ fn testbench_finish_stops_execution() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
         ];
 
@@ -751,6 +755,7 @@ fn testbench_vcd_clock_reset_waveform() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
         ];
 
@@ -894,6 +899,7 @@ fn testbench_fst_clock_reset_waveform() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
         ];
 
@@ -1047,6 +1053,7 @@ fn testbench_array_input_port() {
                     high_time: 1,
                     low_time: 1,
                 }],
+                loop_var: None,
             },
             TestbenchStatement::Finish,
         ];

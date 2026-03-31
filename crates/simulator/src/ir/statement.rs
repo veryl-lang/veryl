@@ -144,10 +144,22 @@ pub enum TbMethodKind {
 }
 
 #[derive(Clone)]
+pub struct ForStatement {
+    pub var_ptr: *mut u8,
+    pub var_native_bytes: usize,
+    pub var_use_4state: bool,
+    pub var_width: usize,
+    pub var_signed: bool,
+    pub range: SimForRange,
+    pub body: Vec<Statement>,
+}
+
+#[derive(Clone)]
 pub enum Statement {
     Assign(AssignStatement),
     AssignDynamic(AssignDynamicStatement),
     If(IfStatement),
+    For(ForStatement),
     Binary(FuncPtr, *const u8, *const u8),
     BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
     SystemFunctionCall(SystemFunctionCall),
@@ -160,6 +172,7 @@ unsafe impl Send for Statement {}
 unsafe impl Send for AssignStatement {}
 unsafe impl Send for AssignDynamicStatement {}
 unsafe impl Send for IfStatement {}
+unsafe impl Send for ForStatement {}
 unsafe impl Send for SystemFunctionCall {}
 
 impl Statement {
@@ -175,6 +188,7 @@ impl Statement {
             Statement::Assign(_) => "Assign",
             Statement::AssignDynamic(_) => "AssignDynamic",
             Statement::If(_) => "If",
+            Statement::For(_) => "For",
             Statement::Binary(_, _, _) => "Binary",
             Statement::BinaryBatch(_, _) => "BinaryBatch",
             Statement::SystemFunctionCall(_) => "SystemFunctionCall",
@@ -187,6 +201,45 @@ impl Statement {
             Statement::Assign(x) => x.eval_step(mask_cache),
             Statement::AssignDynamic(x) => x.eval_step(mask_cache),
             Statement::If(x) => x.eval_step(mask_cache),
+            Statement::For(x) => {
+                let mut step_body = |i: u64| {
+                    let val = Value::new(i, x.var_width, x.var_signed);
+                    unsafe {
+                        write_native_value(x.var_ptr, x.var_native_bytes, x.var_use_4state, &val);
+                    }
+                    for s in &x.body {
+                        s.eval_step(mask_cache);
+                    }
+                };
+                match &x.range {
+                    SimForRange::Forward { start, end, step } => {
+                        let mut i = *start;
+                        while i < *end {
+                            step_body(i);
+                            i += step;
+                        }
+                    }
+                    SimForRange::Reverse { start, end, step } => {
+                        let mut i = *end;
+                        while i > *start {
+                            i -= step;
+                            step_body(i);
+                        }
+                    }
+                    SimForRange::Stepped {
+                        start,
+                        end,
+                        step,
+                        op,
+                    } => {
+                        let mut i = *start;
+                        while i < *end {
+                            step_body(i);
+                            i = op.eval(i as usize, *step as usize) as u64;
+                        }
+                    }
+                }
+            }
             Statement::Binary(func, ff_values, comb_values) => unsafe {
                 func(*ff_values, *comb_values);
             },
@@ -205,6 +258,11 @@ impl Statement {
             Statement::Assign(x) => x.gather_variable(inputs, outputs),
             Statement::AssignDynamic(x) => x.gather_variable(inputs, outputs),
             Statement::If(x) => x.gather_variable(inputs, outputs),
+            Statement::For(x) => {
+                for s in &x.body {
+                    s.gather_variable(inputs, outputs);
+                }
+            }
             Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) => (),
             Statement::SystemFunctionCall(x) => x.gather_variable(inputs),
             Statement::TbMethodCall { .. } => (),
@@ -616,10 +674,41 @@ pub struct CompiledBlockStatement {
 }
 
 #[derive(Clone, Debug)]
+pub enum SimForRange {
+    Forward {
+        start: u64,
+        end: u64,
+        step: u64,
+    },
+    Reverse {
+        start: u64,
+        end: u64,
+        step: u64,
+    },
+    Stepped {
+        start: u64,
+        end: u64,
+        step: u64,
+        op: air::Op,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtoForStatement {
+    pub var_offset: VarOffset,
+    pub var_width: usize,
+    pub var_native_bytes: usize,
+    pub var_signed: bool,
+    pub range: SimForRange,
+    pub body: Vec<ProtoStatement>,
+}
+
+#[derive(Clone, Debug)]
 pub enum ProtoStatement {
     Assign(ProtoAssignStatement),
     AssignDynamic(ProtoAssignDynamicStatement),
     If(ProtoIfStatement),
+    For(ProtoForStatement),
     SystemFunctionCall(ProtoSystemFunctionCall),
     CompiledBlock(CompiledBlockStatement),
     TbMethodCall {
@@ -693,6 +782,12 @@ impl ProtoStatement {
                 // CompiledBlocks use ff_delta_bytes/comb_delta_bytes at runtime.
                 // Their original_stmts should be adjusted separately if needed.
             }
+            ProtoStatement::For(x) => {
+                x.var_offset = x.var_offset.adjust(ff_delta, comb_delta);
+                for s in &mut x.body {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
             ProtoStatement::TbMethodCall { method, .. } => match method {
                 ProtoTbMethodKind::ClockNext { count, period } => {
                     if let Some(c) = count {
@@ -717,6 +812,7 @@ impl ProtoStatement {
             ProtoStatement::Assign(x) => x.can_build_binary(),
             ProtoStatement::AssignDynamic(x) => x.can_build_binary(),
             ProtoStatement::If(x) => x.can_build_binary(),
+            ProtoStatement::For(_) => false,
             ProtoStatement::SystemFunctionCall(_) => false,
             ProtoStatement::CompiledBlock(_) => false,
             ProtoStatement::TbMethodCall { .. } => false,
@@ -831,6 +927,11 @@ impl ProtoStatement {
                     }
                 }
             }
+            ProtoStatement::For(x) => {
+                for s in &x.body {
+                    s.gather_variable_offsets(inputs, outputs);
+                }
+            }
             ProtoStatement::TbMethodCall { .. } => {}
         }
     }
@@ -862,6 +963,11 @@ impl ProtoStatement {
                     result.extend(s.gather_ff_canonical_offsets());
                 }
                 for s in &x.false_side {
+                    result.extend(s.gather_ff_canonical_offsets());
+                }
+            }
+            ProtoStatement::For(x) => {
+                for s in &x.body {
                     result.extend(s.gather_ff_canonical_offsets());
                 }
             }
@@ -1038,6 +1144,35 @@ impl ProtoStatement {
                         (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes);
                     Statement::Binary(x.func, adjusted_ff, adjusted_comb)
                 }
+                ProtoStatement::For(x) => {
+                    let var_ptr = if x.var_offset.is_ff() {
+                        ff_values_ptr.offset(x.var_offset.raw())
+                    } else {
+                        comb_values_ptr.offset(x.var_offset.raw())
+                    };
+                    let body = x
+                        .body
+                        .iter()
+                        .map(|s| {
+                            s.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )
+                        })
+                        .collect();
+                    Statement::For(ForStatement {
+                        var_ptr,
+                        var_native_bytes: x.var_native_bytes,
+                        var_use_4state: use_4state,
+                        var_width: x.var_width,
+                        var_signed: x.var_signed,
+                        range: x.range.clone(),
+                        body,
+                    })
+                }
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
                         ProtoTbMethodKind::ClockNext { count, period } => {
@@ -1102,6 +1237,7 @@ impl ProtoStatement {
                 result
             }
             ProtoStatement::If(x) => x.build_binary(context, builder, is_last),
+            ProtoStatement::For(_) => None,
             ProtoStatement::SystemFunctionCall(_) => None,
             ProtoStatement::CompiledBlock(_) => None,
             ProtoStatement::TbMethodCall { .. } => None,
@@ -2135,6 +2271,56 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     inst: x.inst,
                     method,
                 }]
+            }
+            air::Statement::For(x) => {
+                let scope = context.scope();
+                let meta = scope
+                    .variable_meta
+                    .get(&x.var_id)
+                    .ok_or_else(|| SimulatorError::unsupported_description(&x.token))?;
+                let var_offset = meta.elements[0].current;
+                let var_width = meta.width;
+                let var_native_bytes = meta.native_bytes;
+                let var_signed = x.var_type.signed;
+
+                let mut body = vec![];
+                for stmt in &x.body {
+                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
+                    body.extend(stmts);
+                }
+
+                let range = match &x.range {
+                    air::ForRange::Forward { start, end, step } => SimForRange::Forward {
+                        start: *start as u64,
+                        end: *end as u64,
+                        step: *step as u64,
+                    },
+                    air::ForRange::Reverse { start, end, step } => SimForRange::Reverse {
+                        start: *start as u64,
+                        end: *end as u64,
+                        step: *step as u64,
+                    },
+                    air::ForRange::Stepped {
+                        start,
+                        end,
+                        step,
+                        op,
+                    } => SimForRange::Stepped {
+                        start: *start as u64,
+                        end: *end as u64,
+                        step: *step as u64,
+                        op: *op,
+                    },
+                };
+
+                vec![ProtoStatement::For(ProtoForStatement {
+                    var_offset,
+                    var_width,
+                    var_native_bytes,
+                    var_signed,
+                    range,
+                    body,
+                })]
             }
             air::Statement::Unsupported(token) => {
                 return Err(SimulatorError::unsupported_description(token));

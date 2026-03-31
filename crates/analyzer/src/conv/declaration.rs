@@ -1080,7 +1080,9 @@ impl Conv<&EnumDeclaration> for () {
 
 impl Conv<&InitialDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InitialDeclaration) -> IrResult<Self> {
+        context.in_sequential_block = true;
         let statements: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+        context.in_sequential_block = false;
         Ok(ir::Declaration::Initial(ir::InitialDeclaration {
             statements: statements.0,
         }))
@@ -1089,7 +1091,9 @@ impl Conv<&InitialDeclaration> for ir::Declaration {
 
 impl Conv<&FinalDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &FinalDeclaration) -> IrResult<Self> {
+        context.in_sequential_block = true;
         let statements: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+        context.in_sequential_block = false;
         Ok(ir::Declaration::Final(ir::FinalDeclaration {
             statements: statements.0,
         }))
