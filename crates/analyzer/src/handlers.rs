@@ -28,11 +28,11 @@ pub struct Pass1Handlers {
 }
 
 impl Pass1Handlers {
-    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
+    pub fn new(build_opt: &Build, lint_opt: &Lint, is_dependency: bool) -> Self {
         Self {
             check_attribute: CheckAttribute::new(),
             check_embed_include: CheckEmbedInclude::new(),
-            check_identifier: CheckIdentifier::new(lint_opt),
+            check_identifier: CheckIdentifier::new(lint_opt, is_dependency),
             check_statement: CheckStatement::new(),
             check_unsafe: CheckUnsafe::new(),
             create_literal_table: CreateLiteralTable::new(),
