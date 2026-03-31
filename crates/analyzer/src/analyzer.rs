@@ -21,9 +21,9 @@ pub struct AnalyzerPass1 {
 }
 
 impl AnalyzerPass1 {
-    pub fn new(build_opt: &Build, lint_opt: &Lint) -> Self {
+    pub fn new(build_opt: &Build, lint_opt: &Lint, is_dependency: bool) -> Self {
         AnalyzerPass1 {
-            handlers: Pass1Handlers::new(build_opt, lint_opt),
+            handlers: Pass1Handlers::new(build_opt, lint_opt, is_dependency),
         }
     }
 }
@@ -35,6 +35,7 @@ impl VerylWalker for AnalyzerPass1 {
 }
 
 pub struct Analyzer {
+    project_name: String,
     build_opt: Build,
     lint_opt: Lint,
 }
@@ -73,6 +74,7 @@ impl Analyzer {
             }
         }
         Analyzer {
+            project_name: metadata.project.name.clone(),
             build_opt: metadata.build.clone(),
             lint_opt: metadata.lint.clone(),
         }
@@ -81,8 +83,9 @@ impl Analyzer {
     pub fn analyze_pass1(&self, project_name: &str, input: &Veryl) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
+        let is_dependency = project_name != self.project_name;
         namespace_table::set_default(&[project_name.into()]);
-        let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt);
+        let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt, is_dependency);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 

@@ -10,6 +10,7 @@ use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 pub struct CheckIdentifier {
     pub errors: Vec<AnalyzerError>,
     lint_opt: Lint,
+    is_dependency: bool,
     point: HandlerPoint,
     in_always_comb: bool,
     in_always_ff: bool,
@@ -45,9 +46,10 @@ enum Kind {
 }
 
 impl CheckIdentifier {
-    pub fn new(lint_opt: &Lint) -> Self {
+    pub fn new(lint_opt: &Lint, is_dependency: bool) -> Self {
         Self {
             lint_opt: lint_opt.clone(),
+            is_dependency,
             errors: Vec::new(),
             point: HandlerPoint::Before,
             in_always_comb: false,
@@ -58,6 +60,37 @@ impl CheckIdentifier {
     }
 
     fn check(&mut self, token: &Token, kind: Kind) {
+        let identifier = token.to_string();
+
+        if !matches!(kind, Kind::ClockDomain) && is_anonymous_token(token) {
+            self.errors
+                .push(AnalyzerError::anonymous_identifier_usage(&token.into()));
+        }
+
+        if identifier.starts_with("__") {
+            self.errors.push(AnalyzerError::reserved_identifier(
+                &identifier,
+                &token.into(),
+            ));
+        }
+
+        if is_sv_keyword(&identifier) {
+            self.errors
+                .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
+        }
+
+        if let Some(x) = identifier.strip_prefix("r#")
+            && is_sv_keyword(x)
+        {
+            self.errors
+                .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
+        }
+
+        // Skip naming convention checks for dependencies
+        if self.is_dependency {
+            return;
+        }
+
         let opt = &self.lint_opt.naming;
 
         let prefix = match kind {
@@ -194,32 +227,6 @@ impl CheckIdentifier {
             Kind::Var => &opt.re_forbidden_var,
             Kind::Wire => &opt.re_forbidden_wire,
         };
-
-        let identifier = token.to_string();
-
-        if !matches!(kind, Kind::ClockDomain) && is_anonymous_token(token) {
-            self.errors
-                .push(AnalyzerError::anonymous_identifier_usage(&token.into()));
-        }
-
-        if identifier.starts_with("__") {
-            self.errors.push(AnalyzerError::reserved_identifier(
-                &identifier,
-                &token.into(),
-            ));
-        }
-
-        if is_sv_keyword(&identifier) {
-            self.errors
-                .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
-        }
-
-        if let Some(x) = identifier.strip_prefix("r#")
-            && is_sv_keyword(x)
-        {
-            self.errors
-                .push(AnalyzerError::sv_keyword_usage(&identifier, &token.into()))
-        }
 
         if let Some(prefix) = prefix
             && !identifier.starts_with(prefix)
