@@ -2431,3 +2431,59 @@ fn operator_precedence() {
 
     check_ir(code, exp);
 }
+
+#[test]
+fn array_literal_default_only() {
+    // Regression: '{default: expr} must produce exactly target_len elements,
+    // not target_len + 1 (the old code computed remaining as target_len - (x.len()-1)
+    // which was off-by-one when x.len() == 1).
+    let code = r#"
+    module ModuleA {
+        let a: logic[4] = '{default: 0};
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  let var0[0](a): logic = 1'hx;
+  let var0[1](a): logic = 1'hx;
+  let var0[2](a): logic = 1'hx;
+  let var0[3](a): logic = 1'hx;
+
+  comb {
+    var0[32'h00000000] = 32'sh00000000;
+    var0[32'h00000001] = 32'sh00000000;
+    var0[32'h00000002] = 32'sh00000000;
+    var0[32'h00000003] = 32'sh00000000;
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
+fn array_literal_default_with_explicit() {
+    // When mixing explicit elements with default, the explicit count must be subtracted.
+    let code = r#"
+    module ModuleA {
+        let a: logic[4] = '{42, default: 0};
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  let var0[0](a): logic = 1'hx;
+  let var0[1](a): logic = 1'hx;
+  let var0[2](a): logic = 1'hx;
+  let var0[3](a): logic = 1'hx;
+
+  comb {
+    var0[32'h00000000] = 32'sh0000002a;
+    var0[32'h00000001] = 32'sh00000000;
+    var0[32'h00000002] = 32'sh00000000;
+    var0[32'h00000003] = 32'sh00000000;
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
