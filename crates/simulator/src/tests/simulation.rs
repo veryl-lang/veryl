@@ -10113,3 +10113,92 @@ fn case_concat_bit_select() {
         );
     }
 }
+
+/// Instance output connected to individual bits of a wider signal (issue #2437).
+#[test]
+fn inst_output_bit_select() {
+    let code = r#"
+    module Top (
+        r: output logic<2>,
+    ) {
+        inst r1: One (
+            o: r[1],
+        );
+        inst r0: One (
+            o: r[0],
+        );
+    }
+    module One (
+        o: output logic,
+    ) {
+        assign o = 1;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.ensure_comb_updated();
+        let result = sim.get("r").unwrap().payload_u64();
+        assert_eq!(
+            result, 0b11,
+            "JIT={} 4st={}: expected 0b11 got 0b{:b}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+/// Instance input connected to individual bits of a wider signal.
+#[test]
+fn inst_input_bit_select() {
+    let code = r#"
+    module Top (
+        a: input logic<2>,
+        r: output logic<2>,
+    ) {
+        inst u1: Pass (
+            i: a[1],
+            o: r[1],
+        );
+        inst u0: Pass (
+            i: a[0],
+            o: r[0],
+        );
+    }
+    module Pass (
+        i: input  logic,
+        o: output logic,
+    ) {
+        assign o = i;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0b10, 2, false));
+        sim.ensure_comb_updated();
+        let result = sim.get("r").unwrap().payload_u64();
+        assert_eq!(
+            result, 0b10,
+            "JIT={} 4st={}: a=0b10 expected r=0b10 got 0b{:b}",
+            config.use_jit, config.use_4state, result
+        );
+
+        sim.set("a", Value::new(0b01, 2, false));
+        sim.ensure_comb_updated();
+        let result = sim.get("r").unwrap().payload_u64();
+        assert_eq!(
+            result, 0b01,
+            "JIT={} 4st={}: a=0b01 expected r=0b01 got 0b{:b}",
+            config.use_jit, config.use_4state, result
+        );
+
+        sim.set("a", Value::new(0b11, 2, false));
+        sim.ensure_comb_updated();
+        let result = sim.get("r").unwrap().payload_u64();
+        assert_eq!(
+            result, 0b11,
+            "JIT={} 4st={}: a=0b11 expected r=0b11 got 0b{:b}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
