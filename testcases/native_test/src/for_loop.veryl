@@ -1,0 +1,88 @@
+module CounterForLoop (
+    clk: input  clock    ,
+    rst: input  reset    ,
+    cnt: output logic<32>,
+) {
+    always_ff {
+        if_reset {
+            cnt = 0;
+        } else {
+            cnt += 1;
+        }
+    }
+}
+
+#[test(test_for_loop)]
+module test_for_loop {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen;
+
+    var cnt: logic<32>;
+
+    inst dut: CounterForLoop (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
+
+    initial {
+        rst.assert(clk);
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        for _i: u32 in 0..5 {
+            clk.next();
+        }
+        $assert(cnt == 32'd15);
+        $finish();
+    }
+}
+
+#[test(test_for_loop_step)]
+module test_for_loop_step {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen;
+
+    var cnt: logic<32>;
+
+    inst dut: CounterForLoop (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
+
+    initial {
+        rst.assert(clk);
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        for _i: u32 in 0..10 step += 2 {
+            clk.next(2);
+        }
+        $assert(cnt == 32'd20);
+        $finish();
+    }
+}
+
+#[test(test_for_loop_rev)]
+module test_for_loop_rev {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen;
+
+    var cnt: logic<32>;
+
+    inst dut: CounterForLoop (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
+
+    initial {
+        rst.assert(clk);
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        for _i: i32 in rev 0..5 {
+            clk.next();
+        }
+        $assert(cnt == 32'd15);
+        $finish();
+    }
+}
