@@ -1,0 +1,102 @@
+pub function min::<T: type> (
+    a: input T,
+    b: input T,
+) -> T {
+    if a <= b {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+pub function max::<T: type> (
+    a: input T,
+    b: input T,
+) -> T {
+    if a >= b {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+#[test(test_min_max)]
+module test_min_max {
+    inst u_clock: $tb::clock_gen;
+
+    type T = logic<2>;
+
+    var a: T;
+    var b: T;
+    var c: T;
+    var d: T;
+
+    always_comb {
+        c = min::<T>(a, b);
+        d = max::<T>(a, b);
+    }
+
+    initial {
+        a            = 0;
+        b            = 0;
+        u_clock.next();
+        $assert     (c == 0);
+        $assert     (d == 0);
+
+        a            = 0;
+        b            = 1;
+        u_clock.next();
+        $assert     (c == 0);
+        $assert     (d == 1);
+
+        a            = 1;
+        b            = 0;
+        u_clock.next();
+        $assert     (c == 0);
+        $assert     (d == 1);
+
+        a            = 1;
+        b            = 1;
+        u_clock.next();
+        $assert     (c == 1);
+        $assert     (d == 1);
+
+        a            = 1;
+        b            = 2;
+        u_clock.next();
+        $assert     (c == 1);
+        $assert     (d == 2);
+
+        a            = 2;
+        b            = 1;
+        u_clock.next();
+        $assert     (c == 1);
+        $assert     (d == 2);
+
+        a            = 2;
+        b            = 2;
+        u_clock.next();
+        $assert     (c == 2);
+        $assert     (d == 2);
+
+        a            = 2;
+        b            = 3;
+        u_clock.next();
+        $assert     (c == 2);
+        $assert     (d == 3);
+
+        a            = 3;
+        b            = 2;
+        u_clock.next();
+        $assert     (c == 2);
+        $assert     (d == 3);
+
+        a            = 3;
+        b            = 3;
+        u_clock.next();
+        $assert     (c == 3);
+        $assert     (d == 3);
+
+        $finish();
+    }
+}
