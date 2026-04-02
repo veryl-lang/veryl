@@ -62,7 +62,7 @@ scnr2           = "0.5.1"
 semver          = {version = "1.0", features = ["serde"]}
 serde           = {version = "1.0", features = ["derive"]}
 serde_json      = "1.0"
-similar         = {version = "2.7.0", features = ["text", "inline"]}
+similar         = {version = "3.0.0", features = ["text", "inline"]}
 smallvec        = "1.15"
 strnum_bitwidth = "0.1.2"
 tempfile        = "3.26"
