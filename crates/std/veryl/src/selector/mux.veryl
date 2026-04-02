@@ -1,4 +1,107 @@
-import selector_pkg::*;
+pub function select_binary::<N: p32, T: type,> (
+    sel : input logic<selector_pkg::calc_binary_select_width(N)>,
+    data: input T    <N>                                        ,
+) -> T {
+    return data[sel];
+}
+
+pub function select_vector::<N: p32, T: type,> (
+    sel : input logic<N>,
+    data: input T    <N>,
+) -> T {
+    const DEPTH: u32 = $clog2(N);
+
+    var current_n: u32     ;
+    var current_s: logic<N>;
+    var current_d: T    <N>;
+    var next_n   : u32     ;
+    var next_s   : logic<N>;
+    var next_d   : T    <N>;
+
+    next_n = N;
+    next_s = sel;
+    next_d = data;
+    for _i: u32 in 0..DEPTH {
+        current_n = next_n;
+        current_s = next_s;
+        current_d = next_d;
+
+        next_n = (current_n / 2) + (current_n % 2);
+        for j: u32   in 0..next_n {
+            var select_even: logic;
+
+            if (j + 1) == next_n && (current_n % 2) == 1 {
+                select_even = true;
+            } else {
+                select_even = current_s[2 * j + 0];
+            }
+
+            if select_even {
+                next_s[j] = current_s[2 * j + 0];
+                next_d[j] = current_d[2 * j + 0];
+            } else {
+                next_s[j] = current_s[2 * j + 1];
+                next_d[j] = current_d[2 * j + 1];
+            }
+        }
+    }
+
+    return next_d[0];
+}
+
+pub function select_onehot::<N: p32, T: type,> (
+    sel : input logic<N>,
+    data: input T    <N>,
+) -> T {
+    const DEPTH: u32 = $clog2(N);
+
+    var current_n: u32   ;
+    var current_d: T  <N>;
+    var next_n   : u32   ;
+    var next_d   : T  <N>;
+
+    next_n = N;
+    for i: u32 in 0..N {
+        if sel[i] {
+            next_d[i] = data[i];
+        } else {
+            next_d[i] = 0 as T;
+        }
+    }
+
+    for _i: u32 in 0..DEPTH {
+        current_n = next_n;
+        current_d = next_d;
+
+        next_n = (current_n / 2) + (current_n % 2);
+        for j: u32 in 0..next_n {
+            if (j + 1) == next_n && (current_n % 2) == 1 {
+                next_d[j] = current_d[2 * j + 0];
+            } else {
+                next_d[j] = (current_d[2 * j + 0] | current_d[2 * j + 1]) as T;
+            }
+        }
+    }
+
+    return next_d[0];
+}
+
+pub function select::<KIND: selector_pkg::selector_kind, N: p32, T: type,> (
+    sel : input logic<selector_pkg::calc_select_width(N, KIND)>,
+    data: input T    <N>                                       ,
+) -> T {
+    const BINARY_SEL_WIDTH: u32 = selector_pkg::calc_binary_select_width(N);
+
+    if N == 1 {
+        return data[0];
+    } else if KIND == selector_pkg::selector_kind::BINARY {
+        return select_binary::<N, T>(sel as BINARY_SEL_WIDTH, data);
+    } else if KIND == selector_pkg::selector_kind::VECTOR {
+        return select_vector::<N, T>(sel as N, data);
+    } else {
+        return select_onehot::<N, T>(sel as N, data);
+    }
+}
 
 pub module mux #(
     param WIDTH       : u32           = 1                               ,
@@ -11,89 +114,9 @@ pub module mux #(
     i_data  : input  DATA_TYPE<ENTRIES>     ,
     o_data  : output DATA_TYPE              ,
 ) {
-    const BINARY_SELECT_WIDTH: u32 = calc_binary_select_width(ENTRIES);
-    const MAX_DEPTH          : u32 = $clog2(ENTRIES);
+    import selector_pkg::*;
 
-    function binary_mux (
-        select: input logic    <BINARY_SELECT_WIDTH>,
-        data  : input DATA_TYPE<ENTRIES>            ,
-    ) -> DATA_TYPE {
-        return data[select];
-    }
-
-    function vector_mux (
-        select: input logic    <ENTRIES>,
-        data  : input DATA_TYPE<ENTRIES>,
-    ) -> DATA_TYPE {
-        var current_n     : u32               ;
-        var current_select: logic    <ENTRIES>;
-        var current_data  : DATA_TYPE<ENTRIES>;
-        var next_n        : u32               ;
-        var next_select   : logic    <ENTRIES>;
-        var next_data     : DATA_TYPE<ENTRIES>;
-
-        next_n      = ENTRIES;
-        next_select = select;
-        next_data   = data;
-        for _i: u32 in 0..MAX_DEPTH {
-            current_n      = next_n;
-            current_select = next_select;
-            current_data   = next_data;
-
-            next_n = (current_n / 2) + (current_n % 2);
-            for j: u32   in 0..next_n {
-                let select_even: logic = current_select[2 * j + 0] || ((j + 1) == next_n && (current_n % 2) == 1);
-                if select_even {
-                    next_select[j] = current_select[2 * j + 0];
-                    next_data[j]   = current_data[2 * j + 0];
-                } else {
-                    next_select[j] = current_select[2 * j + 1];
-                    next_data[j]   = current_data[2 * j + 1];
-                }
-            }
-        }
-
-        return next_data[0];
-    }
-
-    function onehot_mux (
-        select: input logic    <ENTRIES>,
-        data  : input DATA_TYPE<ENTRIES>,
-    ) -> DATA_TYPE {
-        var current_n   : u32               ;
-        var current_data: DATA_TYPE<ENTRIES>;
-        var next_n      : u32               ;
-        var next_data   : DATA_TYPE<ENTRIES>;
-
-        next_n = ENTRIES;
-        for i: u32 in 0..ENTRIES {
-            next_data[i] = {select[i] repeat $bits(DATA_TYPE)} & data[i];
-        }
-
-        for _i: u32 in 0..MAX_DEPTH {
-            current_n    = next_n;
-            current_data = next_data;
-
-            next_n = (current_n / 2) + (current_n % 2);
-            for j: u32 in 0..current_n {
-                if (j + 1) == next_n && ((current_n % 2) == 1) {
-                    next_data[j] = current_data[2 * j + 0];
-                } else {
-                    next_data[j] = current_data[2 * j + 0] | current_data[2 * j + 1];
-                }
-            }
-        }
-
-        return next_data[0];
-    }
-
-    if ENTRIES <= 1 :g_mux {
-        assign o_data = i_data[0];
-    } else if KIND == selector_kind::BINARY {
-        assign o_data = binary_mux(i_select, i_data);
-    } else if KIND == selector_kind::VECTOR {
-        assign o_data = vector_mux(i_select, i_data);
-    } else {
-        assign o_data = onehot_mux(i_select, i_data);
+    always_comb {
+        o_data = select::<KIND, ENTRIES, DATA_TYPE>(i_select, i_data);
     }
 }
