@@ -2152,7 +2152,13 @@ impl Emitter {
         let path: GenericSymbolPath = arg.into();
 
         let (result, path) = self.resolve_generic_path(&path, None);
-        if result.is_ok() || self.bound_namespace.is_none() {
+        // GenericParameter resolved in the function namespace takes priority over the caller,
+        // so fall through to the bound_namespace lookup to find the actual generic argument.
+        let is_generic_param = result
+            .as_ref()
+            .ok()
+            .is_some_and(|r| matches!(r.found.kind, SymbolKind::GenericParameter(_)));
+        if (result.is_ok() && !is_generic_param) || self.bound_namespace.is_none() {
             return (result, path);
         }
 
