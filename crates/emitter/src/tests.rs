@@ -3016,22 +3016,21 @@ fn emit_unbound_function() {
     ) -> logic<W> {
         return a + b;
     }
-    function func_abc::<W: u32> (
+    function func_abc::<W: u32, C: u32> (
         a: input logic<W>,
         b: input logic<W>,
-        c: input logic<W>,
     ) -> logic<W> {
-        return func_ab::<W>(a, b) + c;
+        const C_VALUE: bit<W> = C;
+        return func_ab::<W>(a, b) + C_VALUE;
     }
     module ModuleA #(
         param WIDTH: u32 = 8,
     )(
         a: input  logic<WIDTH>,
         b: input  logic<WIDTH>,
-        c: input  logic<WIDTH>,
-        d: output logic<WIDTH>,
+        c: output logic<WIDTH>,
     ) {
-        assign d = func_abc::<WIDTH>(a, b, c);
+        assign d = func_abc::<WIDTH, 2>(a, b);
     }
     "#;
 
@@ -3043,10 +3042,9 @@ module prj_ModuleA #(
 ) (
     input  var logic [WIDTH-1:0] a,
     input  var logic [WIDTH-1:0] b,
-    input  var logic [WIDTH-1:0] c,
-    output var logic [WIDTH-1:0] d
+    output var logic [WIDTH-1:0] c
 );
-    always_comb d = __func_abc__WIDTH(a, b, c);
+    assign d = __func_abc__WIDTH__2(a, b);
 
     function automatic logic [WIDTH-1:0] __func_ab__WIDTH(
         input var logic [WIDTH-1:0] a,
@@ -3054,12 +3052,12 @@ module prj_ModuleA #(
     ) ;
         return a + b;
     endfunction
-    function automatic logic [WIDTH-1:0] __func_abc__WIDTH(
+    function automatic logic [WIDTH-1:0] __func_abc__WIDTH__2(
         input var logic [WIDTH-1:0] a,
-        input var logic [WIDTH-1:0] b,
-        input var logic [WIDTH-1:0] c
+        input var logic [WIDTH-1:0] b
     ) ;
-        return __func_ab__WIDTH(a, b) + c;
+        localparam bit [WIDTH-1:0] C_VALUE = 2;
+        return __func_ab__WIDTH(a, b) + C_VALUE;
     endfunction
 endmodule
 //# sourceMappingURL=test.sv.map

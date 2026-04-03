@@ -5910,6 +5910,7 @@ pub fn symbol_string(
         | SymbolKind::Enum(_) => {
             let visible = if let Some(bound_namespace) = &context.bound_namespace {
                 bound_namespace.included(symbol_namespace)
+                    || namespace.included(symbol_namespace)
                     || symbol.imported.iter().any(|x| x.namespace == namespace)
             } else {
                 namespace.included(symbol_namespace)
