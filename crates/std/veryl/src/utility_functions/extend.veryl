@@ -1,0 +1,74 @@
+pub function zero_extend::<FROM_TYPE: type, TO_TYPE: type,> (
+    from: input FROM_TYPE,
+) -> TO_TYPE {
+    const FROM_WIDTH  : p32 = $bits(FROM_TYPE);
+    const TO_WIDTH    : p32 = $bits(TO_TYPE);
+    const EXTEND_WIDTH: u32 = if TO_WIDTH >= FROM_WIDTH ? TO_WIDTH - FROM_WIDTH : 0;
+    return {1'b0 repeat EXTEND_WIDTH, from} as TO_TYPE;
+}
+
+pub function one_extend::<FROM_TYPE: type, TO_TYPE: type,> (
+    from: input FROM_TYPE,
+) -> TO_TYPE {
+    const FROM_WIDTH  : p32 = $bits(FROM_TYPE);
+    const TO_WIDTH    : p32 = $bits(TO_TYPE);
+    const EXTEND_WIDTH: u32 = if TO_WIDTH >= FROM_WIDTH ? TO_WIDTH - FROM_WIDTH : 0;
+    return {1'b1 repeat EXTEND_WIDTH, from} as TO_TYPE;
+}
+
+pub function sign_extend::<FROM_TYPE: type, TO_TYPE: type,> (
+    from: input FROM_TYPE,
+) -> TO_TYPE {
+    const FROM_WIDTH  : p32 = $bits(FROM_TYPE);
+    const TO_WIDTH    : p32 = $bits(TO_TYPE);
+    const SIGN_POS    : u32 = FROM_WIDTH - 1;
+    const EXTEND_WIDTH: u32 = if TO_WIDTH >= FROM_WIDTH ? TO_WIDTH - FROM_WIDTH : 0;
+    return {from[SIGN_POS] repeat EXTEND_WIDTH, from} as TO_TYPE;
+}
+
+#[test(test_extend)]
+module test_extend {
+    inst u_clock: $tb::clock_gen;
+
+    type FROM_TYPE = logic<2>;
+    type TO_TYPE   = logic<4>;
+
+    var a: FROM_TYPE;
+    var b: TO_TYPE  ;
+    var c: TO_TYPE  ;
+    var d: TO_TYPE  ;
+
+    always_comb {
+        b = zero_extend::<FROM_TYPE, TO_TYPE>(a);
+        c = one_extend::<FROM_TYPE, TO_TYPE>(a);
+        d = sign_extend::<FROM_TYPE, TO_TYPE>(a);
+    }
+
+    initial {
+        a            = 0;
+        u_clock.next();
+        $assert     (b == {2'b00, a});
+        $assert     (c == {2'b11, a});
+        $assert     (d == {2'b00, a});
+
+        a            = 1;
+        u_clock.next();
+        $assert     (b == {2'b00, a});
+        $assert     (c == {2'b11, a});
+        $assert     (d == {2'b00, a});
+
+        a            = 2;
+        u_clock.next();
+        $assert     (b == {2'b00, a});
+        $assert     (c == {2'b11, a});
+        $assert     (d == {2'b11, a});
+
+        a            = 3;
+        u_clock.next();
+        $assert     (b == {2'b00, a});
+        $assert     (c == {2'b11, a});
+        $assert     (d == {2'b11, a});
+
+        $finish();
+    }
+}
