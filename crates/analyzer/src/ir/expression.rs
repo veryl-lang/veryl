@@ -273,8 +273,14 @@ impl Expression {
             Expression::Term(x) => x.eval_value(context),
             Expression::Unary(op, x, _) => {
                 let ret = x.eval_value(context)?;
-                let ret = op.eval_value_unary(&ret, context_width, signed, &mut context.mask_cache);
-                Some(ret)
+                let x_kind = &x.comptime().r#type.kind;
+                if x_kind.is_float() {
+                    op.eval_float_unary(&ret, x_kind)
+                } else {
+                    let ret =
+                        op.eval_value_unary(&ret, context_width, signed, &mut context.mask_cache);
+                    Some(ret)
+                }
             }
             Expression::Binary(x, op, y, comptime) => {
                 if op == &Op::As {
@@ -284,13 +290,21 @@ impl Expression {
                     return Some(convert_cast(val, src_kind, dst_kind, context_width));
                 }
 
+                let x_kind = x.comptime().r#type.kind.clone();
                 let x = x.eval_value(context)?;
-
                 let y = y.eval_value(context)?;
-
-                let ret =
-                    op.eval_value_binary(&x, &y, context_width, signed, &mut context.mask_cache);
-                Some(ret)
+                if x_kind.is_float() {
+                    op.eval_float_binary(&x, &y, &x_kind)
+                } else {
+                    let ret = op.eval_value_binary(
+                        &x,
+                        &y,
+                        context_width,
+                        signed,
+                        &mut context.mask_cache,
+                    );
+                    Some(ret)
+                }
             }
             Expression::Ternary(x, y, z, _) => {
                 let x = x.eval_value(context)?;

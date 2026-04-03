@@ -3899,11 +3899,24 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
             },
             air::Expression::Unary(op, x, comptime) => {
+                let x_kind = x.comptime().r#type.kind.clone();
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
-                // Constant folding for unary operations
+                // Float constant folding
+                if x_kind.is_float()
+                    && let ProtoExpression::Value { value: xv, .. } = &x
+                    && let Some(result) = op.eval_float_unary(xv, &x_kind)
+                {
+                    return Ok(ProtoExpression::Value {
+                        value: result,
+                        width,
+                        expr_context,
+                    });
+                }
+
+                // Integer constant folding
                 if let ProtoExpression::Value {
                     value: xv @ Value::U64(_),
                     ..
@@ -3954,12 +3967,28 @@ impl Conv<&air::Expression> for ProtoExpression {
                     return Conv::conv(context, x.as_ref());
                 }
 
+                let x_kind = x.comptime().r#type.kind.clone();
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
-                // Constant folding: evaluate at compile time if both operands are constants
+                // Float constant folding
+                if x_kind.is_float()
+                    && let (
+                        ProtoExpression::Value { value: xv, .. },
+                        ProtoExpression::Value { value: yv, .. },
+                    ) = (&x, &y)
+                    && let Some(result) = op.eval_float_binary(xv, yv, &x_kind)
+                {
+                    return Ok(ProtoExpression::Value {
+                        value: result,
+                        width,
+                        expr_context,
+                    });
+                }
+
+                // Integer constant folding
                 if let (
                     ProtoExpression::Value {
                         value: xv @ Value::U64(_),

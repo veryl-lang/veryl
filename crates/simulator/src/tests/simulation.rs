@@ -10202,3 +10202,90 @@ fn inst_input_bit_select() {
         );
     }
 }
+
+#[test]
+fn float_const_arithmetic() {
+    let code_mul = r#"
+    module Top (
+        out: output logic<64>,
+    ) {
+        const R: i64 = (3.0 * 2.0) as i64;
+        assign out = R;
+    }
+    "#;
+
+    {
+        let config = Config::default();
+        let ir = analyze(code_mul, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let result = sim.get("out").unwrap().payload_u64();
+        assert_eq!(result, 6, "3.0 * 2.0 as i64 = {}", result);
+    }
+
+    let code_full = r#"
+    module Top (
+        out: output logic<64>,
+    ) {
+        const STEP : i64 = ((440.0 * 281474976710656.0) / 50000000.0) as i64;
+        assign out = STEP;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code_full, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let result = sim.get("out").unwrap().payload_u64();
+        assert_eq!(
+            result, 2476979795,
+            "JIT={} 4st={}: expected 2476979795 got {}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
+
+/// Regression test for https://github.com/veryl-lang/veryl/issues/2454
+#[test]
+fn issue_2454_f64_to_int_cast() {
+    let code = r#"
+    package Repro {
+        type step_t = signed logic<48>;
+
+        function step_from_hz(
+            system_clk_hz: input u32,
+            freq_hz      : input f64,
+        ) -> step_t {
+            const SCALE   : f64 = 281474976710656.0;
+            let   step_f64: f64 = (freq_hz * SCALE) / system_clk_hz as f64;
+            let   rounded : i64 = step_f64 as i64;
+            return rounded as step_t;
+        }
+    }
+
+    module Top (
+        out: output logic<48>,
+    ) {
+        const STEP: Repro::step_t = Repro::step_from_hz(50_000_000, 440.0);
+        assign out = STEP;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let result = sim.get("out").unwrap().payload_u64();
+        assert_eq!(
+            result, 2476979795,
+            "issue_2454: JIT={} 4st={}: expected 2476979795 got {}",
+            config.use_jit, config.use_4state, result
+        );
+    }
+}
