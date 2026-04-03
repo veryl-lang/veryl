@@ -1,0 +1,56 @@
+pub function truncate::<FROM_TYPE: type, TO_TYPE: type,> (
+    from: input FROM_TYPE,
+) -> TO_TYPE {
+    return from as TO_TYPE;
+}
+
+#[test(test_truncate)]
+module test_truncate {
+    inst u_clock: $tb::clock_gen;
+
+    type FROM_TYPE = logic<3>;
+    type TO_TYPE   = logic<2>;
+
+    var a: FROM_TYPE;
+    var b: TO_TYPE  ;
+
+    always_comb {
+        b = truncate::<FROM_TYPE, TO_TYPE>(a);
+    }
+
+    initial {
+        a            = 0;
+        u_clock.next();
+        $assert     (b == 2'd0);
+
+        a            = 1;
+        u_clock.next();
+        $assert     (b == 2'd1);
+
+        a            = 2;
+        u_clock.next();
+        $assert     (b == 2'd2);
+
+        a            = 3;
+        u_clock.next();
+        $assert     (b == 2'd3);
+
+        a            = 4;
+        u_clock.next();
+        $assert     (b == 2'd0);
+
+        a            = 5;
+        u_clock.next();
+        $assert     (b == 2'd1);
+
+        a            = 6;
+        u_clock.next();
+        $assert     (b == 2'd2);
+
+        a            = 7;
+        u_clock.next();
+        $assert     (b == 2'd3);
+
+        $finish();
+    }
+}
