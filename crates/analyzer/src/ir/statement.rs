@@ -90,7 +90,7 @@ impl Statement {
         // TODO
         match self {
             Statement::Assign(x) => x.eval_value(context),
-            Statement::If(_) => (),
+            Statement::If(x) => x.eval_value(context),
             Statement::IfReset(_) => (),
             Statement::For(_) => (),
             Statement::SystemFunctionCall(_) => (),
@@ -467,6 +467,20 @@ pub struct IfStatement {
 }
 
 impl IfStatement {
+    pub fn eval_value(&self, context: &mut Context) {
+        if let Some(cond) = self.cond.eval_value(context) {
+            if cond.to_usize().unwrap_or(0) != 0 {
+                for stmt in &self.true_side {
+                    stmt.eval_value(context);
+                }
+            } else {
+                for stmt in &self.false_side {
+                    stmt.eval_value(context);
+                }
+            }
+        }
+    }
+
     pub fn insert_leaf_false(&mut self, false_side: Vec<Statement>) {
         if self.false_side.is_empty() {
             self.false_side = false_side;

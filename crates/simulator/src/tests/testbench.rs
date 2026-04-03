@@ -1280,3 +1280,125 @@ fn tb_dual_clock() {
         );
     }
 }
+
+#[test]
+fn tb_const_function_with_if() {
+    // A const parameter computed by a function containing if/else
+    // must be correctly evaluated so that port widths are resolved.
+    let code = r#"
+    package pkg {
+        function calc_width(kind: input u32) -> u32 {
+            if kind == 0 {
+                return 4;
+            } else {
+                return 8;
+            }
+        }
+    }
+
+    module Dut #(
+        param KIND: u32 = 0,
+        const W: u32 = pkg::calc_width(KIND),
+    ) (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        i_val: input  logic<W>,
+        o_val: output logic<W>,
+    ) {
+        assign o_val = i_val;
+    }
+
+    #[test(test_const_if)]
+    module test_const_if {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        var i_val: logic<4>;
+        var o_val: logic<4>;
+
+        inst dut: Dut #(KIND: 0) (
+            clk, rst, i_val, o_val,
+        );
+
+        initial {
+            rst.assert(clk);
+            i_val = 4'd9;
+            clk.next(1);
+            $assert(o_val == 4'd9, "const if eval failed");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_const_if");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_const_function_with_if failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn tb_2d_packed_select() {
+    // Selecting a row from a 2D packed type.
+    // `h: logic<2, 3>` is 6 bits.  `h[0]` must select the first
+    // 3-bit row (bits [2:0]), not just bit 0.
+    let code = r#"
+    module Test2dPacked (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        o_val: output logic<3>,
+    ) {
+        var h: logic<2, 3>;
+        assign h[0][0] = 1'b1;
+        assign h[0][1] = 1'b0;
+        assign h[0][2] = 1'b1;
+        assign h[1][0] = 1'b0;
+        assign h[1][1] = 1'b1;
+        assign h[1][2] = 1'b1;
+
+        assign o_val = h[0];
+    }
+
+    #[test(test_2d)]
+    module test_2d {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+        var o_val: logic<3>;
+        inst dut: Test2dPacked(clk, rst, o_val);
+        initial {
+            rst.assert(clk);
+            clk.next(1);
+            $assert(o_val == 3'b101, "h[0] should be 101");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_2d");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_2d_packed_select failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

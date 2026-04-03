@@ -3766,7 +3766,10 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
                         let select_val = if !select.is_empty() {
-                            select.eval_value(&mut scope.analyzer_context, &comptime.r#type, false)
+                            // Use the variable's original type (from meta) rather
+                            // than comptime.r#type, which may have had its width
+                            // dimensions drained by gather_context/eval_comptime.
+                            select.eval_value(&mut scope.analyzer_context, &meta.r#type, false)
                         } else {
                             None
                         };
