@@ -1,6 +1,7 @@
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
+use crate::ir::utils::convert_cast;
 use crate::ir::{
     Comptime, ExpressionContext, FfTable, FunctionCall, Op, SystemFunctionCall, Type, ValueVariant,
     VarId, VarIndex, VarSelect,
@@ -275,12 +276,15 @@ impl Expression {
                 let ret = op.eval_value_unary(&ret, context_width, signed, &mut context.mask_cache);
                 Some(ret)
             }
-            Expression::Binary(x, op, y, _) => {
-                let x = x.eval_value(context)?;
-
+            Expression::Binary(x, op, y, comptime) => {
                 if op == &Op::As {
-                    return Some(x);
+                    let src_kind = &x.comptime().r#type.kind;
+                    let dst_kind = &comptime.r#type.kind;
+                    let val = x.eval_value(context)?;
+                    return Some(convert_cast(val, src_kind, dst_kind, context_width));
                 }
+
+                let x = x.eval_value(context)?;
 
                 let y = y.eval_value(context)?;
 

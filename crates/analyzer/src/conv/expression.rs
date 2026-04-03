@@ -272,8 +272,8 @@ impl Conv<&FactorType> for ir::Factor {
                     FixedType::I16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), true, false),
                     FixedType::I32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), true, false),
                     FixedType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true, false),
-                    FixedType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, false),
-                    FixedType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, false),
+                    FixedType::F32(_) => (TypeKind::F32, Shape::new(vec![Some(32)]), false, false),
+                    FixedType::F64(_) => (TypeKind::F64, Shape::new(vec![Some(64)]), false, false),
                     FixedType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
                     FixedType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
                     FixedType::Strin(_) => {
@@ -333,8 +333,8 @@ impl Conv<&CastingType> for ir::Factor {
                 CastingType::I16(_) => (TypeKind::Bit, Shape::new(vec![Some(16)]), true, false),
                 CastingType::I32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), true, false),
                 CastingType::I64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), true, false),
-                CastingType::F32(_) => (TypeKind::Bit, Shape::new(vec![Some(32)]), false, false),
-                CastingType::F64(_) => (TypeKind::Bit, Shape::new(vec![Some(64)]), false, false),
+                CastingType::F32(_) => (TypeKind::F32, Shape::new(vec![Some(32)]), false, false),
+                CastingType::F64(_) => (TypeKind::F64, Shape::new(vec![Some(64)]), false, false),
                 CastingType::BBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
                 CastingType::LBool(_) => (TypeKind::Bit, Shape::new(vec![Some(1)]), false, false),
                 CastingType::Clock(_) => (TypeKind::Clock, Shape::new(vec![Some(1)]), false, false),
@@ -844,7 +844,7 @@ impl Conv<&RealNumber> for Comptime {
             RealNumber::FixedPoint(x) => {
                 let value: Value = x.fixed_point.as_ref().into();
                 let r#type = Type {
-                    kind: TypeKind::Bit,
+                    kind: TypeKind::F64,
                     width: Shape::new(vec![Some(64)]),
                     ..Default::default()
                 };
@@ -861,7 +861,7 @@ impl Conv<&RealNumber> for Comptime {
             RealNumber::Exponent(x) => {
                 let value: Value = x.exponent.as_ref().into();
                 let r#type = Type {
-                    kind: TypeKind::Bit,
+                    kind: TypeKind::F64,
                     width: Shape::new(vec![Some(64)]),
                     ..Default::default()
                 };
