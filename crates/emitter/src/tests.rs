@@ -3010,6 +3010,42 @@ endmodule
 #[test]
 fn emit_unbound_function() {
     let code = r#"
+function func::<A: u32>() -> u32 {
+    return A;
+}
+module ModuleA #(
+    param A: u32 = 0,
+) {
+    let _a: u32 = func::<A>();
+}
+"#;
+
+    let expect = r#"
+
+module prj_ModuleA #(
+    parameter int unsigned A = 0
+);
+    int unsigned _a; always_comb _a = __func__A();
+
+    function automatic int unsigned __func__A() ;
+        return A;
+    endfunction
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
     function func_ab::<W: u32>(
         a: input logic<W>,
         b: input logic<W>,
