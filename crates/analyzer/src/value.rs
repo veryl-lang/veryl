@@ -1791,7 +1791,7 @@ impl MaskCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::Op;
+    use crate::ir::{Op, TypeKind};
     use std::str::FromStr;
 
     #[test]
@@ -4890,5 +4890,122 @@ mod tests {
     fn test_byte_value_to_string_non_byte_aligned() {
         let v = Value::new(0x41, 7, false);
         assert_eq!(byte_value_to_string(&v), None);
+    }
+
+    fn f64_val(f: f64) -> Value {
+        Value::new(f.to_bits(), 64, false)
+    }
+
+    fn val_to_f64(v: &Value) -> f64 {
+        f64::from_bits(v.to_u64().unwrap())
+    }
+
+    #[test]
+    fn float_binary_arithmetic() {
+        let a = f64_val(440.0);
+        let b = f64_val(281474976710656.0); // 2^48
+        let c = f64_val(50_000_000.0);
+
+        let r = Op::Mul.eval_float_binary(&a, &b, &TypeKind::F64).unwrap();
+        assert_eq!(val_to_f64(&r), 440.0 * 281474976710656.0);
+
+        let r = Op::Div.eval_float_binary(&r, &c, &TypeKind::F64).unwrap();
+        assert_eq!(val_to_f64(&r), (440.0 * 281474976710656.0) / 50_000_000.0);
+        assert_eq!(val_to_f64(&r) as i64, 2476979795);
+
+        let r = Op::Add
+            .eval_float_binary(&f64_val(1.5), &f64_val(2.25), &TypeKind::F64)
+            .unwrap();
+        assert_eq!(val_to_f64(&r), 3.75);
+
+        let r = Op::Sub
+            .eval_float_binary(&f64_val(10.0), &f64_val(3.5), &TypeKind::F64)
+            .unwrap();
+        assert_eq!(val_to_f64(&r), 6.5);
+
+        let r = Op::Rem
+            .eval_float_binary(&f64_val(10.0), &f64_val(3.0), &TypeKind::F64)
+            .unwrap();
+        assert_eq!(val_to_f64(&r), 1.0);
+
+        let r = Op::Pow
+            .eval_float_binary(&f64_val(2.0), &f64_val(10.0), &TypeKind::F64)
+            .unwrap();
+        assert_eq!(val_to_f64(&r), 1024.0);
+    }
+
+    #[test]
+    fn float_binary_comparison() {
+        let a = f64_val(1.0);
+        let b = f64_val(2.0);
+
+        assert_eq!(
+            Op::Less.eval_float_binary(&a, &b, &TypeKind::F64).unwrap(),
+            Value::new(1, 1, false)
+        );
+        assert_eq!(
+            Op::Greater
+                .eval_float_binary(&a, &b, &TypeKind::F64)
+                .unwrap(),
+            Value::new(0, 1, false)
+        );
+        assert_eq!(
+            Op::Eq.eval_float_binary(&a, &a, &TypeKind::F64).unwrap(),
+            Value::new(1, 1, false)
+        );
+        assert_eq!(
+            Op::Ne.eval_float_binary(&a, &b, &TypeKind::F64).unwrap(),
+            Value::new(1, 1, false)
+        );
+        assert_eq!(
+            Op::LessEq
+                .eval_float_binary(&a, &a, &TypeKind::F64)
+                .unwrap(),
+            Value::new(1, 1, false)
+        );
+        assert_eq!(
+            Op::GreaterEq
+                .eval_float_binary(&b, &a, &TypeKind::F64)
+                .unwrap(),
+            Value::new(1, 1, false)
+        );
+    }
+
+    #[test]
+    fn float_unary() {
+        let a = f64_val(42.0);
+
+        let r = Op::Add.eval_float_unary(&a, &TypeKind::F64).unwrap();
+        assert_eq!(val_to_f64(&r), 42.0);
+
+        let r = Op::Sub.eval_float_unary(&a, &TypeKind::F64).unwrap();
+        assert_eq!(val_to_f64(&r), -42.0);
+    }
+
+    #[test]
+    fn float_div_by_zero() {
+        let a = f64_val(1.0);
+        let zero = f64_val(0.0);
+        assert!(
+            Op::Div
+                .eval_float_binary(&a, &zero, &TypeKind::F64)
+                .is_none()
+        );
+        assert!(
+            Op::Rem
+                .eval_float_binary(&a, &zero, &TypeKind::F64)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn float_unsupported_op() {
+        let a = f64_val(1.0);
+        assert!(
+            Op::BitAnd
+                .eval_float_binary(&a, &a, &TypeKind::F64)
+                .is_none()
+        );
+        assert!(Op::BitNot.eval_float_unary(&a, &TypeKind::F64).is_none());
     }
 }

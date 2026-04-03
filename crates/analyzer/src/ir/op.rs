@@ -313,13 +313,24 @@ impl Op {
                     dst.r#type.kind = TypeKind::Logic;
                 }
             }
-            Op::Pow
-            | Op::Div
-            | Op::Rem
-            | Op::Mul
-            | Op::Add
-            | Op::Sub
-            | Op::LessEq
+            Op::Pow | Op::Div | Op::Rem | Op::Mul | Op::Add | Op::Sub => {
+                if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
+                    dst.r#type.kind = y.r#type.kind.clone();
+                } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
+                    dst.r#type.kind = x.r#type.kind.clone();
+                } else if x.r#type.kind.is_float() || y.r#type.kind.is_float() {
+                    dst.r#type.kind = if x.r#type.kind.is_float() {
+                        x.r#type.kind.clone()
+                    } else {
+                        y.r#type.kind.clone()
+                    };
+                } else if x.r#type.is_2state() && y.r#type.is_2state() {
+                    dst.r#type.kind = TypeKind::Bit;
+                } else {
+                    dst.r#type.kind = TypeKind::Logic;
+                }
+            }
+            Op::LessEq
             | Op::GreaterEq
             | Op::Less
             | Op::Greater
@@ -1508,6 +1519,82 @@ impl Op {
                 x.clone()
             }
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn eval_float_binary(&self, x: &Value, y: &Value, kind: &TypeKind) -> Option<Value> {
+        let (xf, yf) = match kind {
+            TypeKind::F64 => (f64::from_bits(x.to_u64()?), f64::from_bits(y.to_u64()?)),
+            TypeKind::F32 => (
+                f32::from_bits(x.to_u64()? as u32) as f64,
+                f32::from_bits(y.to_u64()? as u32) as f64,
+            ),
+            _ => return None,
+        };
+
+        let arith = match self {
+            Op::Add => Some(xf + yf),
+            Op::Sub => Some(xf - yf),
+            Op::Mul => Some(xf * yf),
+            Op::Div => {
+                if yf != 0.0 {
+                    Some(xf / yf)
+                } else {
+                    None
+                }
+            }
+            Op::Rem => {
+                if yf != 0.0 {
+                    Some(xf % yf)
+                } else {
+                    None
+                }
+            }
+            Op::Pow => Some(xf.powf(yf)),
+            _ => None,
+        };
+        if let Some(f) = arith {
+            return Some(match kind {
+                TypeKind::F32 => Value::new((f as f32).to_bits() as u64, 32, false),
+                _ => Value::new(f.to_bits(), 64, false),
+            });
+        }
+
+        let cmp = match self {
+            Op::Eq => Some(xf == yf),
+            Op::Ne => Some(xf != yf),
+            Op::Less => Some(xf < yf),
+            Op::Greater => Some(xf > yf),
+            Op::LessEq => Some(xf <= yf),
+            Op::GreaterEq => Some(xf >= yf),
+            _ => None,
+        };
+        if let Some(b) = cmp {
+            return Some(Value::new(b as u64, 1, false));
+        }
+
+        None
+    }
+
+    pub fn eval_float_unary(&self, x: &Value, kind: &TypeKind) -> Option<Value> {
+        match kind {
+            TypeKind::F64 => {
+                let f = f64::from_bits(x.to_u64()?);
+                match self {
+                    Op::Add => Some(Value::new(f.to_bits(), 64, false)),
+                    Op::Sub => Some(Value::new((-f).to_bits(), 64, false)),
+                    _ => None,
+                }
+            }
+            TypeKind::F32 => {
+                let f = f32::from_bits(x.to_u64()? as u32);
+                match self {
+                    Op::Add => Some(Value::new(f.to_bits() as u64, 32, false)),
+                    Op::Sub => Some(Value::new((-f).to_bits() as u64, 32, false)),
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 }
