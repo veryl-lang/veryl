@@ -3928,9 +3928,29 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             air::Expression::Binary(x, op, y, comptime) => {
-                // Op::As is a type cast: just return the left operand unchanged.
-                // The right operand is a type, not a runtime value.
                 if matches!(op, Op::As) {
+                    let src_kind = &x.comptime().r#type.kind;
+                    let dst_kind = &comptime.r#type.kind;
+                    let src_float = src_kind.is_float();
+                    let dst_float = dst_kind.is_float();
+
+                    if src_float != dst_float {
+                        let proto = Conv::conv(context, x.as_ref())?;
+                        let dst_width = comptime.expr_context.width;
+                        if let ProtoExpression::Value { value: val, .. } = &proto {
+                            let converted =
+                                air::convert_cast(val.clone(), src_kind, dst_kind, dst_width);
+                            let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                            return Ok(ProtoExpression::Value {
+                                value: converted,
+                                width: dst_width,
+                                expr_context,
+                            });
+                        }
+                        // Non-constant float<->int: fall through (pass unchanged for now)
+                        return Ok(proto);
+                    }
+
                     return Conv::conv(context, x.as_ref());
                 }
 

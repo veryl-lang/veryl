@@ -37,6 +37,7 @@ pub use statement::{
     Statement, StatementBlock, TbMethod, TbMethodCall,
 };
 pub use system_function::{Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind};
+pub use utils::convert_cast;
 pub use variable::{
     VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, VarSelectOp, Variable,
     VariableInfo,

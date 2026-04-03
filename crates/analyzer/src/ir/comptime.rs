@@ -350,7 +350,7 @@ impl Type {
             TypeKind::Union(x) => x.is_2state(),
             TypeKind::Enum(x) => x.is_2state(),
             _ => {
-                matches!(self.kind, TypeKind::Bit)
+                matches!(self.kind, TypeKind::Bit | TypeKind::F32 | TypeKind::F64)
             }
         }
     }
@@ -638,8 +638,8 @@ impl From<&TypeLiteral> for Type {
             TypeLiteral::Clock => TypeKind::Clock,
             TypeLiteral::ClockPosedge => TypeKind::ClockPosedge,
             TypeLiteral::ClockNegedge => TypeKind::ClockNegedge,
-            TypeLiteral::F32 => TypeKind::Bit,
-            TypeLiteral::F64 => TypeKind::Bit,
+            TypeLiteral::F32 => TypeKind::F32,
+            TypeLiteral::F64 => TypeKind::F64,
             TypeLiteral::I8 => TypeKind::Bit,
             TypeLiteral::I16 => TypeKind::Bit,
             TypeLiteral::I32 => TypeKind::Bit,
@@ -734,6 +734,8 @@ pub enum TypeKind {
     ResetSyncHigh,
     ResetSyncLow,
     Bit,
+    F32,
+    F64,
     Logic,
     Struct(TypeKindStruct),
     Union(TypeKindUnion),
@@ -761,6 +763,8 @@ impl TypeKind {
             | TypeKind::ResetSyncHigh
             | TypeKind::ResetSyncLow
             | TypeKind::Bit
+            | TypeKind::F32
+            | TypeKind::F64
             | TypeKind::Logic
             | TypeKind::Type
             | TypeKind::String
@@ -774,6 +778,10 @@ impl TypeKind {
             TypeKind::Enum(x) => x.width(),
             TypeKind::Void => None,
         }
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self, TypeKind::F32 | TypeKind::F64)
     }
 
     pub fn signature(&self) -> Option<Signature> {
@@ -797,6 +805,8 @@ impl fmt::Display for TypeKind {
             TypeKind::ResetSyncHigh => "reset_sync_high".fmt(f),
             TypeKind::ResetSyncLow => "reset_sync_low".fmt(f),
             TypeKind::Bit => "bit".fmt(f),
+            TypeKind::F32 => "f32".fmt(f),
+            TypeKind::F64 => "f64".fmt(f),
             TypeKind::Logic => "logic".fmt(f),
             TypeKind::Struct(x) => x.fmt(f),
             TypeKind::Union(x) => x.fmt(f),

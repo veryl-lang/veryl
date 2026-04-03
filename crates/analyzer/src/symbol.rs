@@ -1398,9 +1398,9 @@ impl Type {
             | TypeKind::I8
             | TypeKind::I16
             | TypeKind::I32
-            | TypeKind::I64
-            | TypeKind::F32
-            | TypeKind::F64 => ir::TypeKind::Bit,
+            | TypeKind::I64 => ir::TypeKind::Bit,
+            TypeKind::F32 => ir::TypeKind::F32,
+            TypeKind::F64 => ir::TypeKind::F64,
             TypeKind::LBool | TypeKind::Logic => ir::TypeKind::Logic,
             TypeKind::Type => ir::TypeKind::Type,
             TypeKind::String => ir::TypeKind::String,
