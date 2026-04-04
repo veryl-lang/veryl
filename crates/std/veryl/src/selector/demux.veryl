@@ -1,4 +1,59 @@
-import selector_pkg::*;
+pub function distribute_binary::<
+    N: p32 ,
+    T: type,
+> (
+    sel         : input logic<selector_pkg::calc_binary_select_width(N)>,
+    data        : input T                                               ,
+    default_data: input T                                               ,
+) -> T<N> {
+    var result: T<N>;
+
+    for i: u32 in 0..N {
+        result[i] = default_data;
+    }
+    result[sel] = data;
+
+    return result;
+}
+
+pub function distribute_vector::<
+    N: p32 ,
+    T: type,
+> (
+    sel         : input logic<N>,
+    data        : input T       ,
+    default_data: input T       ,
+) -> T<N> {
+    var result: T<N>;
+
+    for i: u32 in 0..N {
+        if sel[i] {
+            result[i] = data;
+        } else {
+            result[i] = default_data;
+        }
+    }
+
+    return result;
+}
+
+pub function distribute::<
+    KIND: selector_pkg::selector_kind,
+    N   : p32                        ,
+    T   : type                       ,
+> (
+    sel         : input logic<selector_pkg::calc_select_width(N, KIND)>,
+    data        : input T                                              ,
+    default_data: input T                                              ,
+) -> T<N> {
+    const BINARY_SEL_WIDTH: u32 = selector_pkg::calc_binary_select_width(N);
+
+    if KIND == selector_pkg::selector_kind::BINARY {
+        return distribute_binary::<N, T>(sel as BINARY_SEL_WIDTH, data, default_data);
+    } else {
+        return distribute_vector::<N, T>(sel as N, data, default_data);
+    }
+}
 
 pub module demux #(
     param WIDTH       : u32           = 1                               ,
@@ -12,17 +67,9 @@ pub module demux #(
     i_data  : input  DATA_TYPE              ,
     o_data  : output DATA_TYPE<ENTRIES>     ,
 ) {
-    if KIND == selector_kind::BINARY :g_demux {
-        always_comb {
-            for i: u32 in 0..ENTRIES {
-                o_data[i] = if i_select == i as SELECT_WIDTH ? i_data : DEFUALT_DATA;
-            }
-        }
-    } else {
-        always_comb {
-            for i: u32 in 0..ENTRIES {
-                o_data[i] = if i_select[i] ? i_data : DEFUALT_DATA;
-            }
-        }
+    import selector_pkg::*;
+
+    always_comb {
+        o_data = distribute::<KIND, ENTRIES, DATA_TYPE>(i_select, i_data, DEFUALT_DATA);
     }
 }
