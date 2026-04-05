@@ -76,6 +76,7 @@ pub enum TokenType {
     Final,
     For,
     Function,
+    Gen,
     I8,
     I16,
     I32,
@@ -169,6 +170,7 @@ impl TokenType {
                 | TokenType::Final
                 | TokenType::For
                 | TokenType::Function
+                | TokenType::Gen
                 | TokenType::I8
                 | TokenType::I16
                 | TokenType::I32
@@ -308,6 +310,7 @@ impl From<&str> for TokenType {
             "FinalTerm" => TokenType::Final,
             "ForTerm" => TokenType::For,
             "FunctionTerm" => TokenType::Function,
+            "GenTerm" => TokenType::Gen,
             "I8Term" => TokenType::I8,
             "I16Term" => TokenType::I16,
             "I32Term" => TokenType::I32,
@@ -451,6 +454,7 @@ impl std::fmt::Display for TokenType {
             TokenType::Final => "final",
             TokenType::For => "for",
             TokenType::Function => "function",
+            TokenType::Gen => "gen",
             TokenType::I8 => "i8",
             TokenType::I16 => "i16",
             TokenType::I32 => "i32",

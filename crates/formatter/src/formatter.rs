@@ -1533,6 +1533,35 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'GenDeclaration'
+    fn gen_declaration(&mut self, arg: &GenDeclaration) {
+        self.align_start(align_kind::VAR_KEYWORD);
+        self.r#gen(&arg.r#gen);
+        self.align_finish(align_kind::VAR_KEYWORD);
+        self.space(1);
+        self.align_start(align_kind::IDENTIFIER);
+        self.identifier(&arg.identifier);
+        self.align_finish(align_kind::IDENTIFIER);
+        self.colon(&arg.colon);
+        self.space(1);
+        self.align_start(align_kind::TYPE);
+        match &*arg.gen_declaration_group {
+            GenDeclarationGroup::Type(x) => self.r#type(&x.r#type),
+            GenDeclarationGroup::GenericProtoBound(x) => match &*x.generic_proto_bound {
+                GenericProtoBound::ScopedIdentifier(x) => {
+                    self.scoped_identifier(&x.scoped_identifier)
+                }
+                GenericProtoBound::FixedType(x) => self.fixed_type(&x.fixed_type),
+            },
+        }
+        self.align_finish(align_kind::TYPE);
+        self.space(1);
+        self.equ(&arg.equ);
+        self.space(1);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'TypeDefDeclaration'
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) {
         self.r#type(&arg.r#type);

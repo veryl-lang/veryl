@@ -72,8 +72,10 @@ impl Align {
     }
 
     pub fn start_item(&mut self) {
-        self.enable = true;
-        self.width = 0;
+        if !self.enable {
+            self.enable = true;
+            self.width = 0;
+        }
     }
 
     fn token(&mut self, x: &VerylToken) {
