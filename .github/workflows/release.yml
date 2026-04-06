@@ -16,11 +16,11 @@ jobs:
 
     steps:
     - name: Setup Rust
-      uses: hecrj/setup-rust-action@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        rust-version: ${{ matrix.rust }}
+        toolchain: ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v6
       with:
         submodules: 'true'
     - name: Setup MUSL
@@ -56,7 +56,7 @@ jobs:
       if: matrix.os == 'windows-11-arm'
       run: make release_win_aarch64
     - name: Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         generate_release_notes: true
         files: "*.zip\n*.rpm"
@@ -71,11 +71,11 @@ jobs:
         working-directory: support/vscode
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v6
       with:
         submodules: 'true'
     - name: Install Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v6
       with:
         node-version: 20.x
     - run: npm install
@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Repository Dispatch
-      uses: peter-evans/repository-dispatch@v1
+      uses: peter-evans/repository-dispatch@v4
       with:
         token: ${{ secrets.VERYL_DOCKER_PAT }}
         repository: veryl-lang/docker
@@ -104,8 +104,8 @@ jobs:
       run:
         working-directory: support/highlightjs
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
