@@ -19,11 +19,11 @@ jobs:
 
     steps:
     - name: Setup Rust
-      uses: hecrj/setup-rust-action@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        rust-version: ${{ matrix.rust }}
+        toolchain: ${{ matrix.rust }}
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v6
       with:
         submodules: 'true'
     - name: Setup MUSL

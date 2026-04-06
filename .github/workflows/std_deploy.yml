@@ -11,7 +11,7 @@ jobs:
   std:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -23,7 +23,7 @@ jobs:
         run: ../../../target/release-verylup/veryl doc
         working-directory: crates/std/veryl
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: std
           path: crates/std/veryl/target/doc/
@@ -36,14 +36,14 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Download std
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: std
           path: public
       - name: Deploy
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cname: std.veryl-lang.org
@@ -56,14 +56,14 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Download std
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: std
           path: public
       - name: Deploy
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cname: std.veryl-lang.org
