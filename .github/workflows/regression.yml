@@ -93,7 +93,7 @@ jobs:
       - name: Setup veryl
         run:  cargo build --profile release-verylup
       - name: Setup verilator
-        uses: veryl-lang/setup-verilator@v1
+        uses: veryl-lang/setup-verilator@v2
       - name: Format check
         run: ../../../target/release-verylup/veryl fmt --check
         working-directory: crates/std/veryl
@@ -116,7 +116,7 @@ jobs:
       - name: Setup veryl
         run:  cargo build --profile release-verylup
       - name: Setup verilator
-        uses: veryl-lang/setup-verilator@v1
+        uses: veryl-lang/setup-verilator@v2
       - name: Test cocotb 1.9.2
         run: |
           pip install "cocotb==1.9.2"
