@@ -3968,24 +3968,42 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
 
                 let x_kind = x.comptime().r#type.kind.clone();
+                let y_kind = y.comptime().r#type.kind.clone();
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                 // Float constant folding
-                if x_kind.is_float()
+                if (x_kind.is_float() || y_kind.is_float())
                     && let (
                         ProtoExpression::Value { value: xv, .. },
                         ProtoExpression::Value { value: yv, .. },
                     ) = (&x, &y)
-                    && let Some(result) = op.eval_float_binary(xv, yv, &x_kind)
                 {
-                    return Ok(ProtoExpression::Value {
-                        value: result,
-                        width,
-                        expr_context,
-                    });
+                    let float_kind = if x_kind.is_float() { &x_kind } else { &y_kind };
+                    let float_width = if matches!(float_kind, air::TypeKind::F32) {
+                        32
+                    } else {
+                        64
+                    };
+                    let xv = if !x_kind.is_float() {
+                        air::convert_cast(xv.clone(), &x_kind, float_kind, float_width)
+                    } else {
+                        xv.clone()
+                    };
+                    let yv = if !y_kind.is_float() {
+                        air::convert_cast(yv.clone(), &y_kind, float_kind, float_width)
+                    } else {
+                        yv.clone()
+                    };
+                    if let Some(result) = op.eval_float_binary(&xv, &yv, float_kind) {
+                        return Ok(ProtoExpression::Value {
+                            value: result,
+                            width,
+                            expr_context,
+                        });
+                    }
                 }
 
                 // Integer constant folding

@@ -3,8 +3,8 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::utils::convert_cast;
 use crate::ir::{
-    Comptime, ExpressionContext, FfTable, FunctionCall, Op, SystemFunctionCall, Type, ValueVariant,
-    VarId, VarIndex, VarSelect,
+    Comptime, ExpressionContext, FfTable, FunctionCall, Op, SystemFunctionCall, Type, TypeKind,
+    ValueVariant, VarId, VarIndex, VarSelect,
 };
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
@@ -291,10 +291,27 @@ impl Expression {
                 }
 
                 let x_kind = x.comptime().r#type.kind.clone();
+                let y_kind = y.comptime().r#type.kind.clone();
                 let x = x.eval_value(context)?;
                 let y = y.eval_value(context)?;
-                if x_kind.is_float() {
-                    op.eval_float_binary(&x, &y, &x_kind)
+                if x_kind.is_float() || y_kind.is_float() {
+                    let float_kind = if x_kind.is_float() { &x_kind } else { &y_kind };
+                    let float_width = if matches!(float_kind, TypeKind::F32) {
+                        32
+                    } else {
+                        64
+                    };
+                    let x = if !x_kind.is_float() {
+                        convert_cast(x, &x_kind, float_kind, float_width)
+                    } else {
+                        x
+                    };
+                    let y = if !y_kind.is_float() {
+                        convert_cast(y, &y_kind, float_kind, float_width)
+                    } else {
+                        y
+                    };
+                    op.eval_float_binary(&x, &y, float_kind)
                 } else {
                     let ret = op.eval_value_binary(
                         &x,
@@ -1072,6 +1089,16 @@ mod tests {
         assert_eq!(format!("{:x}", x5), "1'h1");
         assert_eq!(format!("{:x}", x6), "1'h0");
         assert_eq!(format!("{:x}", x7), "1'h1");
+    }
+
+    #[test]
+    fn mixed_int_float_pow() {
+        let x0 = calc_expression("2 ** (41 as f64)", None);
+        let x1 = calc_expression("2 ** ((48 - 7) as f64)", None);
+
+        let expected = 2.0_f64.powf(41.0).to_bits();
+        assert_eq!(x0.to_u64(), Some(expected), "2 ** (41 as f64)");
+        assert_eq!(x1.to_u64(), Some(expected), "2 ** ((48-7) as f64)");
     }
 
     #[test]
