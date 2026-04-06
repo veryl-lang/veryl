@@ -1,18 +1,15 @@
 use crate::veryl_grammar_trait::*;
 use crate::veryl_token::{Token, VerylToken};
 use crate::veryl_walker::VerylWalker;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_grammar_trait::Identifier as NewIdentifier;
 use veryl_parser::veryl_grammar_trait::Veryl as NewVeryl;
 use veryl_parser::veryl_walker::VerylWalker as NewVerylWalker;
 
-#[cfg(target_os = "windows")]
-const NEWLINE: &str = "\r\n";
-#[cfg(not(target_os = "windows"))]
-const NEWLINE: &str = "\n";
-
 pub struct Migrator {
+    format_opt: Format,
+    newline: &'static str,
     string: String,
     line: u32,
     column: u32,
@@ -21,6 +18,8 @@ pub struct Migrator {
 impl Default for Migrator {
     fn default() -> Self {
         Self {
+            format_opt: Format::default(),
+            newline: "\n",
             string: String::new(),
             line: 1,
             column: 1,
@@ -29,13 +28,15 @@ impl Default for Migrator {
 }
 
 impl Migrator {
-    pub fn new(_metadata: &Metadata) -> Self {
+    pub fn new(metadata: &Metadata) -> Self {
         Self {
+            format_opt: metadata.format.clone(),
             ..Default::default()
         }
     }
 
-    pub fn migrate(&mut self, input: &Veryl) {
+    pub fn migrate(&mut self, input: &Veryl, raw_input: &str) {
+        self.newline = self.format_opt.newline_style.newline_str(raw_input);
         self.veryl(input);
     }
 
@@ -57,7 +58,7 @@ impl Migrator {
         self.column += spaces;
 
         for _ in 0..newlines {
-            self.str(NEWLINE);
+            self.str(self.newline);
         }
         self.str(&" ".repeat(spaces as usize));
 

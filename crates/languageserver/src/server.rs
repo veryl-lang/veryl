@@ -596,7 +596,8 @@ impl Server {
             let line = rope.len_lines() as u32;
             if let Some(parser) = self.parser_map.get(path.as_ref()) {
                 let mut formatter = Formatter::new(&metadata);
-                formatter.format(&parser.veryl);
+                let raw_input: String = String::from(&*rope);
+                formatter.format(&parser.veryl, &raw_input);
 
                 let text_edit = TextEdit {
                     range: Range::new(Position::new(0, 0), Position::new(line, u32::MAX)),

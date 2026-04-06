@@ -9,11 +9,6 @@ use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, VerylToken};
 use veryl_parser::veryl_walker::VerylWalker;
 
-#[cfg(target_os = "windows")]
-const NEWLINE: &str = "\r\n";
-#[cfg(not(target_os = "windows"))]
-const NEWLINE: &str = "\n";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     Emit,
@@ -23,6 +18,7 @@ enum Mode {
 pub struct Formatter {
     mode: Mode,
     format_opt: Format,
+    newline: &'static str,
     string: String,
     indent: usize,
     line: u32,
@@ -45,6 +41,7 @@ impl Default for Formatter {
         Self {
             mode: Mode::Emit,
             format_opt: Format::default(),
+            newline: "\n",
             string: String::new(),
             indent: 0,
             line: 1,
@@ -72,7 +69,8 @@ impl Formatter {
         }
     }
 
-    pub fn format(&mut self, input: &Veryl) {
+    pub fn format(&mut self, input: &Veryl, raw_input: &str) {
+        self.newline = self.format_opt.newline_style.newline_str(raw_input);
         if self.format_opt.vertical_align {
             self.mode = Mode::Align;
             self.veryl(input);
@@ -129,7 +127,7 @@ impl Formatter {
 
             self.unindent();
             if !self.consumed_next_newline {
-                self.str(NEWLINE);
+                self.str(self.newline);
             } else {
                 self.consumed_next_newline = false;
             }
@@ -149,7 +147,7 @@ impl Formatter {
 
             self.unindent();
             if !self.consumed_next_newline {
-                self.str(NEWLINE);
+                self.str(self.newline);
             } else {
                 self.consumed_next_newline = false;
             }
@@ -175,7 +173,7 @@ impl Formatter {
 
             self.unindent();
             if !self.consumed_next_newline {
-                self.str(NEWLINE);
+                self.str(self.newline);
             } else {
                 self.consumed_next_newline = false;
             }
@@ -252,7 +250,7 @@ impl Formatter {
                     }
                     for _ in 0..x.line - self.line {
                         self.unindent();
-                        self.str(NEWLINE);
+                        self.str(self.newline);
                         self.indent();
                     }
                     self.push_token(x);
@@ -262,7 +260,7 @@ impl Formatter {
                 }
                 if self.consumed_next_newline {
                     self.unindent();
-                    self.str(NEWLINE);
+                    self.str(self.newline);
                     self.indent();
                 }
             }
@@ -455,7 +453,7 @@ impl Formatter {
             };
 
             for _ in 0..delta_line {
-                string.push_str(NEWLINE);
+                string.push_str(self.newline);
             }
             for _ in 0..delta_column {
                 string.push(' ');

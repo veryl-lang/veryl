@@ -43,14 +43,14 @@ impl CmdMigrate {
             if migrate {
                 let parser = OldParser::parse(&input, &path.src)?;
                 let mut migrator = Migrator::new(metadata);
-                migrator.migrate(&parser.veryl);
+                migrator.migrate(&parser.veryl, &input);
 
                 let parser = Parser::parse(migrator.as_str(), &path.src)?;
                 let analyzer = Analyzer::new(metadata);
                 let _ = analyzer.analyze_pass1(&path.prj, &parser.veryl);
 
                 let mut formatter = Formatter::new(metadata);
-                formatter.format(&parser.veryl);
+                formatter.format(&parser.veryl, migrator.as_str());
 
                 let pass = input.as_str() == formatter.as_str();
 

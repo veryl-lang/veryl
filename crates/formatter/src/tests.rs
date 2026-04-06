@@ -14,14 +14,8 @@ fn format(metadata: &Metadata, code: &str) -> String {
     analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None);
 
     let mut formatter = Formatter::new(metadata);
-    formatter.format(&parser.veryl);
-    let result = formatter.as_str().to_string();
-
-    if cfg!(windows) {
-        result.replace("\r\n", "\n")
-    } else {
-        result
-    }
+    formatter.format(&parser.veryl, code);
+    formatter.as_str().to_string()
 }
 
 #[test]

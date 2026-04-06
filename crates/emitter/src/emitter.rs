@@ -28,11 +28,6 @@ use veryl_parser::veryl_token::{Token, TokenSource, VerylToken, is_anonymous_tok
 use veryl_parser::veryl_walker::VerylWalker;
 use veryl_sourcemap::SourceMap;
 
-#[cfg(target_os = "windows")]
-const NEWLINE: &str = "\r\n";
-#[cfg(not(target_os = "windows"))]
-const NEWLINE: &str = "\n";
-
 pub enum AttributeType {
     Ifdef,
     Sv,
@@ -50,6 +45,7 @@ pub struct Emitter {
     project_name: Option<StrId>,
     build_opt: Build,
     format_opt: Format,
+    newline: &'static str,
     string: String,
     indent: usize,
     src_line: u32,
@@ -105,6 +101,7 @@ impl Default for Emitter {
             project_name: None,
             build_opt: Build::default(),
             format_opt: Format::default(),
+            newline: "\n",
             string: String::new(),
             force_duplicated: false,
             indent: 0,
@@ -176,7 +173,8 @@ impl Emitter {
         }
     }
 
-    pub fn emit(&mut self, project_name: &str, input: &Veryl) {
+    pub fn emit(&mut self, project_name: &str, input: &Veryl, raw_input: &str) {
+        self.newline = self.format_opt.newline_style.newline_str(raw_input);
         namespace_table::set_default(&[project_name.into()]);
         if self.format_opt.vertical_align {
             self.mode = Mode::Align;
@@ -264,7 +262,7 @@ impl Emitter {
 
             self.unindent();
             if !self.consumed_next_newline {
-                self.str(NEWLINE);
+                self.str(self.newline);
             } else {
                 self.consumed_next_newline = false;
             }
@@ -284,7 +282,7 @@ impl Emitter {
 
             self.unindent();
             if !self.consumed_next_newline {
-                self.str(NEWLINE);
+                self.str(self.newline);
             } else {
                 self.consumed_next_newline = false;
             }
@@ -304,7 +302,7 @@ impl Emitter {
 
             self.unindent();
             if !self.consumed_next_newline {
-                self.str(NEWLINE);
+                self.str(self.newline);
             } else {
                 self.consumed_next_newline = false;
             }
@@ -407,7 +405,7 @@ impl Emitter {
             }
             for _ in 0..x.line - self.src_line {
                 self.unindent();
-                self.str(NEWLINE);
+                self.str(self.newline);
                 self.indent();
             }
             self.push_token(x);
@@ -417,7 +415,7 @@ impl Emitter {
         }
         if self.consumed_next_newline {
             self.unindent();
-            self.str(NEWLINE);
+            self.str(self.newline);
             self.indent();
         }
     }
@@ -2353,7 +2351,7 @@ impl VerylWalker for Emitter {
 
             let trailing_endif = format!(
                 "`endif{}{}",
-                NEWLINE,
+                self.newline,
                 " ".repeat(self.indent * self.format_opt.indent_width)
             );
             let mut additional_endif = 0;
@@ -3814,7 +3812,7 @@ impl VerylWalker for Emitter {
                 let remove_endif = elsif_else && self.string.trim_end().ends_with("`endif");
                 if remove_endif {
                     self.unindent();
-                    self.truncate(self.string.len() - format!("`endif{NEWLINE}").len());
+                    self.truncate(self.string.len() - format!("`endif{}", self.newline).len());
                 }
 
                 self.consume_adjust_line(&arg.identifier.identifier_token.token);
@@ -3875,8 +3873,8 @@ impl VerylWalker for Emitter {
                         test_name
                     );
 
-                    if cfg!(windows) {
-                        wavedump = wavedump.replace("\n", NEWLINE);
+                    if self.newline != "\n" {
+                        wavedump = wavedump.replace("\n", self.newline);
                     }
 
                     self.str(&wavedump);
