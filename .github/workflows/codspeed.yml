@@ -39,5 +39,5 @@ jobs:
         uses: CodSpeedHQ/action@v4
         with:
           run: cargo codspeed run -p ${{ matrix.package }}
-          mode: "instrumentation"
+          mode: "simulation"
           token: ${{ secrets.CODSPEED_TOKEN }}
