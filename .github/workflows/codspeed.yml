@@ -27,6 +27,11 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-codspeed"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
       - name: Build the benchmark target(s)
         run: cargo codspeed build -p ${{ matrix.package }} --bench benchmark
 

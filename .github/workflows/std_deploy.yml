@@ -14,10 +14,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Setup veryl
-        run:  cargo install --path crates/veryl
+        run:  cargo build --profile release-verylup
       - name: Build doc
-        run: veryl doc
+        run: ../../../target/release-verylup/veryl doc
         working-directory: crates/std/veryl
       - name: Upload artifact
         uses: actions/upload-artifact@v4
