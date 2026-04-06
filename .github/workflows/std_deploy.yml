@@ -15,7 +15,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}"
+          shared-key: "${{ runner.os }}-release"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Setup veryl
         run:  cargo build --profile release-verylup

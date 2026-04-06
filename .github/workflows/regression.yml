@@ -36,7 +36,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}-debug"
+          shared-key: "${{ runner.os }}-debug"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run tests
         run: cargo test --locked --target ${{ matrix.target }}
@@ -50,7 +50,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}-debug"
+          shared-key: "${{ runner.os }}-debug"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run gen_sv
         run: make gen_sv
@@ -76,7 +76,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}-debug"
+          shared-key: "${{ runner.os }}-clippy"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run clippy
         run: cargo clippy -- -D warnings
@@ -88,7 +88,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}-release"
+          shared-key: "${{ runner.os }}-release"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Setup veryl
         run:  cargo build --profile release-verylup
@@ -111,7 +111,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}-release"
+          shared-key: "${{ runner.os }}-release"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Setup veryl
         run:  cargo build --profile release-verylup
@@ -135,7 +135,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-${{ runner.os }}-highlightgen"
+          shared-key: "${{ runner.os }}-highlightgen"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run highlightgen
         run: cargo run --bin highlightgen -- check
