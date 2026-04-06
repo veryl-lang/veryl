@@ -7382,6 +7382,25 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    function func::<N: p32> {
+        const DEPTH: u32 = $clog2(N);
+        var n: u32;
+        for i: u32 in 0..DEPTH {
+            n = i;
+        }
+    }
+    module ModuleA {
+        const ENTRIES: u32 = 2;
+        always_comb {
+            func::<ENTRIES>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
