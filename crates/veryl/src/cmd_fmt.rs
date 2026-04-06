@@ -33,7 +33,7 @@ impl CmdFmt {
             let _ = analyzer.analyze_pass1(&path.prj, &parser.veryl);
 
             let mut formatter = Formatter::new(metadata);
-            formatter.format(&parser.veryl);
+            formatter.format(&parser.veryl, &input);
 
             let pass = input.as_str() == formatter.as_str();
 

@@ -23,7 +23,7 @@ fn emit(metadata: &Metadata, code: &str) -> String {
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
     );
-    emitter.emit(&"prj", &parser.veryl);
+    emitter.emit(&"prj", &parser.veryl, code);
     emitter.as_str().to_string()
 }
 
@@ -96,11 +96,7 @@ endmodule
     metadata.build.reset_high_prefix = Some("rst_high_".to_string());
     metadata.build.reset_high_suffix = Some("_rst_high".to_string());
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -174,11 +170,7 @@ endmodule
     metadata.build.reset_low_prefix = Some("rst_low_".to_string());
     metadata.build.reset_low_suffix = Some("_rst_low".to_string());
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -221,11 +213,7 @@ endmodule
     metadata.build.clock_posedge_suffix = Some("_p".to_string());
     metadata.build.reset_low_suffix = Some("_x".to_string());
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -270,11 +258,7 @@ endmodule
     metadata.build.clock_posedge_suffix = Some("_p".to_string());
     metadata.build.reset_low_suffix = Some("_x".to_string());
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -315,11 +299,7 @@ endinterface
 
     metadata.build.omit_project_prefix = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -380,11 +360,7 @@ endmodule
     metadata.build.omit_project_prefix = true;
     metadata.build.expand_inside_operation = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -415,11 +391,7 @@ endmodule
     metadata.build.omit_project_prefix = true;
     metadata.build.expand_inside_operation = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -466,11 +438,7 @@ endmodule
     metadata.build.omit_project_prefix = true;
     metadata.build.expand_inside_operation = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -506,11 +474,7 @@ endmodule
 
     metadata.build.reset_type = ResetType::AsyncHigh;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -546,11 +510,7 @@ endmodule
 
     metadata.build.reset_type = ResetType::SyncLow;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -724,11 +684,7 @@ endmodule
 
     metadata.build.emit_cond_type = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -823,11 +779,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -918,11 +870,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 
@@ -1001,11 +949,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 
@@ -1096,11 +1040,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -1162,11 +1102,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -1204,11 +1140,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 
@@ -1277,11 +1209,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -1463,11 +1391,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -1695,11 +1619,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -1932,11 +1852,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2057,11 +1973,7 @@ endmodule
 
     metadata.build.flatten_array_interface = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     assert_eq!(ret, expect);
 }
@@ -2109,11 +2021,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2168,11 +2076,7 @@ endmodule
 
     metadata.build.hashed_mangled_name = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2218,11 +2122,7 @@ endmodule
 
     metadata.build.hashed_mangled_name = true;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2276,11 +2176,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2331,11 +2227,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2372,11 +2264,7 @@ endpackage
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2420,11 +2308,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2484,11 +2368,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2520,11 +2400,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2557,11 +2433,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2611,11 +2483,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2688,11 +2556,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2746,11 +2610,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2779,11 +2639,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2808,11 +2664,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2849,11 +2701,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2878,11 +2726,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2905,11 +2749,7 @@ endmodule
     metadata.format.vertical_align = false;
     metadata.format.max_width = 20;
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -2997,11 +2837,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -3036,11 +2872,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -3101,11 +2933,7 @@ endmodule
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = if cfg!(windows) {
-        emit(&metadata, code).replace("\r\n", "\n")
-    } else {
-        emit(&metadata, code)
-    };
+    let ret = emit(&metadata, code);
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);

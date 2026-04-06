@@ -6,12 +6,8 @@ use veryl_metadata::Metadata;
 fn migrate(code: &str, exp: &str) {
     let parser = Parser::parse(&code, &"").unwrap();
     let mut migrator = Migrator::new(&Metadata::create_default("prj").unwrap());
-    migrator.migrate(&parser.veryl);
-    if cfg!(windows) {
-        assert_eq!(migrator.as_str().replace("\r\n", "\n"), exp);
-    } else {
-        assert_eq!(migrator.as_str(), exp);
-    }
+    migrator.migrate(&parser.veryl, code);
+    assert_eq!(migrator.as_str(), exp);
 }
 
 #[test]

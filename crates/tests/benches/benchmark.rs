@@ -58,7 +58,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter_with_large_drop(|| {
             let parser = Parser::parse(black_box(&text), &"").unwrap();
             let mut formatter = Formatter::new(&metadata);
-            formatter.format(&parser.veryl);
+            formatter.format(&parser.veryl, &text);
         })
     });
     group.bench_function("analyze", |b| {

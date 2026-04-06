@@ -167,7 +167,7 @@ impl Preprocessor for Veryl {
                                         }
 
                                         let mut formatter = Formatter::new(&metadata);
-                                        formatter.format(&ret.veryl);
+                                        formatter.format(&ret.veryl, x.as_ref());
 
                                         if x != formatter.as_str() {
                                             eprintln!("veryl format failed : {path}:{line}:{col}");

@@ -142,7 +142,7 @@ mod formatter {
         let analyzer = Analyzer::new(&metadata);
         let _ = analyzer.analyze_pass1(&prj, &ret.veryl);
         let mut formatter = Formatter::new(&metadata);
-        formatter.format(&ret.veryl);
+        formatter.format(&ret.veryl, &input);
         assert_eq!(original, formatter.as_str());
     }
 
@@ -214,29 +214,30 @@ mod emitter {
             .iter()
             .map(|(src, _, _)| {
                 let input = fs::read_to_string(&src).unwrap();
-                Parser::parse(&input, &src).unwrap()
+                let parsed = Parser::parse(&input, &src).unwrap();
+                (input, parsed)
             })
             .collect();
 
         let mut context = Context::default();
-        for result in &parse_results {
+        for (_, result) in &parse_results {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
             let _ = analyzer.analyze_pass1(&prj, &result.veryl);
         }
         let _ = Analyzer::analyze_post_pass1();
-        for result in &parse_results {
+        for (_, result) in &parse_results {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
             let _ = analyzer.analyze_pass2(&prj, &result.veryl, &mut context, None);
         }
 
-        for (i, result) in parse_results.iter().enumerate() {
+        for (i, (input, result)) in parse_results.iter().enumerate() {
             let (src, dst, map) = &file_paths[i];
             let prj = &metadata.project.name;
 
             let mut emitter = Emitter::new(&metadata, src, dst, map);
-            emitter.emit(&prj, &result.veryl);
+            emitter.emit(&prj, &result.veryl, input);
 
             let out_code = emitter.as_str();
             let ref_code = fs::read_to_string(dst).unwrap();
@@ -244,10 +245,13 @@ mod emitter {
             assert_eq!(ref_code, out_code);
 
             let out_map = String::from_utf8(emitter.source_map().to_bytes().unwrap()).unwrap();
+            let ref_map = fs::read_to_string(map).unwrap();
+            // On Windows with autocrlf, emitter uses \r\n (detected from input),
+            // so source map contains \\r\\n, but the reference file has \\n
             let ref_map = if cfg!(target_os = "windows") {
-                fs::read_to_string(map).unwrap().replace("\\n", "\\r\\n")
+                ref_map.replace("\\n", "\\r\\n")
             } else {
-                fs::read_to_string(map).unwrap()
+                ref_map
             };
 
             assert_eq!(ref_map, out_map);

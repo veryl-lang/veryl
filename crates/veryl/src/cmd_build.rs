@@ -126,7 +126,7 @@ impl CmdBuild {
                 };
 
                 let mut emitter = Emitter::new(metadata, &path.src, &dst, &map);
-                emitter.emit(&path.prj, &context.parser.veryl);
+                emitter.emit(&path.prj, &context.parser.veryl, &context.input);
 
                 let dst_dir = dst.parent().unwrap();
                 if !dst_dir.exists() {
