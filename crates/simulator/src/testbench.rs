@@ -101,6 +101,39 @@ fn find_var_id_by_name(module_variables: &ModuleVariables, name: StrId) -> Optio
     None
 }
 
+/// Recursively collect $tb method call instances from statements,
+/// including those nested inside For loops and If blocks.
+fn collect_tb_insts(
+    stmts: &[Statement],
+    clock_insts: &mut Vec<StrId>,
+    reset_insts: &mut Vec<StrId>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Statement::TbMethodCall { inst, method } => match method {
+                TbMethodKind::ClockNext { .. } => {
+                    if !clock_insts.contains(inst) {
+                        clock_insts.push(*inst);
+                    }
+                }
+                TbMethodKind::ResetAssert { .. } => {
+                    if !reset_insts.contains(inst) {
+                        reset_insts.push(*inst);
+                    }
+                }
+            },
+            Statement::For(for_stmt) => {
+                collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
+            }
+            Statement::If(if_stmt) => {
+                collect_tb_insts(&if_stmt.true_side, clock_insts, reset_insts);
+                collect_tb_insts(&if_stmt.false_side, clock_insts, reset_insts);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Build a mapping from $tb instance names (StrId) to their corresponding Events.
 pub fn build_event_map(
     event_statements: &HashMap<Event, Vec<Statement>>,
@@ -109,22 +142,7 @@ pub fn build_event_map(
     let mut clock_insts: Vec<StrId> = Vec::new();
     let mut reset_insts: Vec<StrId> = Vec::new();
     for stmts in event_statements.values() {
-        for stmt in stmts {
-            if let Statement::TbMethodCall { inst, method } = stmt {
-                match method {
-                    TbMethodKind::ClockNext { .. } => {
-                        if !clock_insts.contains(inst) {
-                            clock_insts.push(*inst);
-                        }
-                    }
-                    TbMethodKind::ResetAssert { .. } => {
-                        if !reset_insts.contains(inst) {
-                            reset_insts.push(*inst);
-                        }
-                    }
-                }
-            }
-        }
+        collect_tb_insts(stmts, &mut clock_insts, &mut reset_insts);
     }
 
     let mut event_map = HashMap::default();
@@ -148,20 +166,35 @@ fn compute_half_periods(period: u64) -> (u64, u64) {
     (p.div_ceil(2), p / 2)
 }
 
+fn collect_clock_periods(stmts: &[Statement], periods: &mut HashMap<StrId, u64>) {
+    for stmt in stmts {
+        match stmt {
+            Statement::TbMethodCall { inst, method } => {
+                if let TbMethodKind::ClockNext { period, .. } = method
+                    && let Some(expr) = period
+                {
+                    let val = expr.eval(&mut MaskCache::default());
+                    periods.entry(*inst).or_insert(val.payload_u64());
+                }
+            }
+            Statement::For(for_stmt) => {
+                collect_clock_periods(&for_stmt.body, periods);
+            }
+            Statement::If(if_stmt) => {
+                collect_clock_periods(&if_stmt.true_side, periods);
+                collect_clock_periods(&if_stmt.false_side, periods);
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn build_clock_periods(
     event_statements: &HashMap<Event, Vec<Statement>>,
 ) -> HashMap<StrId, u64> {
     let mut periods = HashMap::default();
     for stmts in event_statements.values() {
-        for stmt in stmts {
-            if let Statement::TbMethodCall { inst, method } = stmt
-                && let TbMethodKind::ClockNext { period, .. } = method
-                && let Some(expr) = period
-            {
-                let val = expr.eval(&mut MaskCache::default());
-                periods.entry(*inst).or_insert(val.payload_u64());
-            }
-        }
+        collect_clock_periods(stmts, &mut periods);
     }
     periods
 }
