@@ -2395,15 +2395,22 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
 
             for path in &generic_arg_paths {
                 // Copy var path referenced as resolved generic arg from the given context
-                if let Some(x) = context.find_path(path) {
-                    local_context.var_paths.insert(path.clone(), x);
+                if let Some((var_id, comptime)) = context.find_path(path)
+                    && let Some(var) = context.variables.get(&var_id)
+                {
+                    local_context
+                        .var_paths
+                        .insert(path.clone(), (var_id, comptime));
+                    local_context.variables.insert(var_id, var.clone());
                 }
             }
 
             let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
 
             for path in &generic_arg_paths {
-                local_context.var_paths.remove(path);
+                if let Some((var_id, _)) = local_context.var_paths.remove(path) {
+                    local_context.variables.remove(&var_id);
+                }
             }
 
             context.extract_function(&mut local_context, &path.path, &array);

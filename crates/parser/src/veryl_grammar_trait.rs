@@ -807,6 +807,9 @@ impl DescriptionItem {
                     PublicDescriptionItem::PackageDeclaration(x) => {
                         x.package_declaration.package_declaration_opt.is_some()
                     }
+                    PublicDescriptionItem::FunctionDeclaration(x) => {
+                        x.function_declaration.function_declaration_opt.is_some()
+                    }
                     _ => false,
                 }
             }
