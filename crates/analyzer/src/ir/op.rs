@@ -168,6 +168,7 @@ impl Op {
                 }
             }
             Op::As => ExpressionContext {
+                width: x.width,
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
                 ..Default::default()

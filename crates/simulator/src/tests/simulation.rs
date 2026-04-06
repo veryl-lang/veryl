@@ -10289,3 +10289,70 @@ fn issue_2454_f64_to_int_cast() {
         );
     }
 }
+
+/// Regression test for https://github.com/veryl-lang/veryl/issues/2454 (reopened)
+/// Mixed integer-float binary operations must promote the integer operand to float.
+#[test]
+fn issue_2454_mixed_int_float_binary() {
+    let code_pow = r#"
+    module Top (
+        out: output logic<64>,
+    ) {
+        const SCALE: i64 = (2 ** ((48 - 7) as f64)) as i64;
+        assign out = SCALE;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code_pow, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let result = sim.get("out").unwrap().payload_u64();
+        assert_eq!(
+            result,
+            1u64 << 41,
+            "2 ** ((48-7) as f64): JIT={} 4st={}: expected {} got {}",
+            config.use_jit,
+            config.use_4state,
+            1u64 << 41,
+            result
+        );
+    }
+
+    let code_step = r#"
+    package Repro {
+        function step32_from_hz(
+            system_clk_hz: input u32,
+            freq         : input f64,
+        ) -> u32 {
+            const N_SHIFT: i32 = 7;
+            const SCALE  : f64 = 2 ** ((48 - N_SHIFT) as f64);
+            let step_f64 : f64 = (freq * SCALE) / system_clk_hz as f64;
+            let rounded  : u32 = step_f64 as u32;
+            return rounded;
+        }
+    }
+
+    module Top (
+        out: output logic<32>,
+    ) {
+        const STEP: u32 = Repro::step32_from_hz(50_000_000, 440.0);
+        assign out = STEP;
+    }
+    "#;
+
+    // Expected: (440.0 * 2^41) / 50_000_000 = 19351404 (truncated)
+    let expected: u64 = ((440.0_f64 * (1u64 << 41) as f64) / 50_000_000.0) as u64;
+
+    for config in Config::all() {
+        let ir = analyze(code_step, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let result = sim.get("out").unwrap().payload_u64();
+        assert_eq!(
+            result, expected,
+            "step32_from_hz(440Hz): JIT={} 4st={}: expected {} got {}",
+            config.use_jit, config.use_4state, expected, result
+        );
+    }
+}
