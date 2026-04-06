@@ -24,12 +24,12 @@ jobs:
         uses: moonrepo/setup-rust@v1
         with:
           channel: stable
-          cache-target: release
+          cache: false
           bins: cargo-codspeed
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "${{ runner.os }}-codspeed"
+          shared-key: "${{ runner.os }}-codspeed-${{ matrix.package }}"
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Build the benchmark target(s)

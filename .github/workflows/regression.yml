@@ -36,7 +36,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "${{ runner.os }}-debug"
+          shared-key: "${{ runner.os }}-test"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run tests
         run: cargo test --locked --target ${{ matrix.target }}
@@ -50,7 +50,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "${{ runner.os }}-debug"
+          shared-key: "${{ runner.os }}-gen_sv"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run gen_sv
         run: make gen_sv
