@@ -35,6 +35,9 @@ jobs:
           toolchain: ${{ matrix.rust }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-debug"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run tests
         run: cargo test --locked --target ${{ matrix.target }}
 
@@ -46,6 +49,9 @@ jobs:
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-debug"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run gen_sv
         run: make gen_sv
       - name: Check gen_sv
@@ -58,7 +64,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
       - name: Run rustfmt
         run: cargo fmt -- --check
 
@@ -70,6 +75,9 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-debug"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
@@ -79,18 +87,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-release"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Setup veryl
-        run:  cargo install --path crates/veryl
+        run:  cargo build --profile release-verylup
       - name: Setup verilator
         uses: veryl-lang/setup-verilator@v1
       - name: Format check
-        run: veryl fmt --check
+        run: ../../../target/release-verylup/veryl fmt --check
         working-directory: crates/std/veryl
       - name: Build check
-        run: veryl check
+        run: ../../../target/release-verylup/veryl check
         working-directory: crates/std/veryl
       - name: Test
-        run: veryl test --sim verilator
+        run: ../../../target/release-verylup/veryl test --sim verilator
         working-directory: crates/std/veryl
 
   cocotb:
@@ -99,18 +110,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-release"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Setup veryl
-        run:  cargo install --path crates/veryl
+        run:  cargo build --profile release-verylup
       - name: Setup verilator
         uses: veryl-lang/setup-verilator@v1
       - name: Test cocotb 1.9.2
         run: |
           pip install "cocotb==1.9.2"
-          veryl test --sim verilator testcases/veryl/67_cocotb.veryl
+          target/release-verylup/veryl test --sim verilator testcases/veryl/67_cocotb.veryl
       - name: Test cocotb 2.0.0
         run: |
           pip install "cocotb==2.0.0"
-          veryl test --sim verilator testcases/veryl/67_cocotb.veryl
+          target/release-verylup/veryl test --sim verilator testcases/veryl/67_cocotb.veryl
 
   highlightgen:
     runs-on: ubuntu-latest
@@ -120,5 +134,8 @@ jobs:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-${{ runner.os }}-highlightgen"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run highlightgen
         run: cargo run --bin highlightgen -- check
