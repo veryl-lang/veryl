@@ -10286,6 +10286,26 @@ fn mixed_struct_union_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package pkg::<T: type> {
+        struct Struct {
+            x: T,
+        }
+        function make () -> Struct {
+            return 0;
+        }
+    }
+    package types {
+        type T = bit;
+    }
+    module top () {
+        let _: pkg::<types::T>::Struct = pkg::<types::T>::make();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

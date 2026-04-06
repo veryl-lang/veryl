@@ -2,7 +2,7 @@ use crate::conv::Context;
 use crate::ir::ValueVariant;
 use crate::symbol::GenericMap;
 use crate::symbol::{GenericBoundKind, SymbolId, SymbolKind, TypeKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::GenericSymbolPath;
 use crate::{namespace_table, symbol_table};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -40,15 +40,15 @@ impl Signature {
         let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
         path.resolve_imported(&namespace, None);
         path.unalias();
-        let symbol = symbol_table::resolve(&path).ok()?;
 
-        let symbol = match &symbol.found.kind {
+        let symbol = symbol_table::resolve(&path).ok()?;
+        let mut sig = match &symbol.found.kind {
             SymbolKind::Module(_)
             | SymbolKind::Interface(_)
             | SymbolKind::Modport(_)
             | SymbolKind::Function(_)
-            | SymbolKind::SystemVerilog => (*symbol.found).clone(),
-            SymbolKind::ModportFunctionMember(x) => symbol_table::get(x.function).unwrap(),
+            | SymbolKind::SystemVerilog => Self::new(symbol.found.id),
+            SymbolKind::ModportFunctionMember(x) => Self::new(x.function),
             SymbolKind::GenericParameter(_) => {
                 let path = context.resolve_path(path.clone());
                 let symbol = symbol_table::resolve(&path).ok()?;
@@ -64,13 +64,13 @@ impl Signature {
                         return None;
                     }
                 }
-                (*symbol.found).clone()
+                Self::new(symbol.found.id)
             }
             SymbolKind::ProtoFunction(_) => {
                 let resolved = context.resolve_path(path.clone());
                 let symbol = symbol_table::resolve(&resolved).ok()?;
                 match &symbol.found.kind {
-                    SymbolKind::Function(_) => (*symbol.found).clone(),
+                    SymbolKind::Function(_) => Self::new(symbol.found.id),
                     _ => return None,
                 }
             }
@@ -78,90 +78,50 @@ impl Signature {
                 let symbol = symbol_table::resolve(&x.target).ok()?;
                 return Some(Signature::new(symbol.found.id));
             }
-            _ => {
-                return None;
-            }
+            _ => return None,
         };
 
-        let mut sig = Signature::new(symbol.id);
+        if !context.in_generic {
+            // Apply default value
+            for (i, id) in symbol.full_path.iter().enumerate() {
+                let path_symbol = if (i + 1) == symbol.full_path.len() {
+                    symbol_table::get(sig.symbol).unwrap()
+                } else {
+                    symbol_table::get(*id).unwrap()
+                };
 
-        let generic_args = path.paths[0].arguments.len();
-        for (i, (_, default_value)) in symbol.generic_parameters().iter().enumerate() {
-            if i >= generic_args
-                && let Some(x) = &default_value.default_value
-            {
-                path.paths[0].arguments.push(x.clone());
+                let params = path_symbol.generic_parameters();
+                let n_args = path.paths[i].arguments.len();
+                for (_, default_value) in params.iter().skip(n_args) {
+                    if let Some(default_value) = &default_value.default_value {
+                        path.paths[i].arguments.push(default_value.clone())
+                    }
+                }
             }
-        }
 
-        if !context.in_generic && path.is_generic() {
-            let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
-            path.resolve_imported(&namespace, None);
+            if path.is_generic() {
+                let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
+                path.resolve_imported(&namespace, None);
 
-            // apply generic parameters in this context
-            let path = context.resolve_path(path);
+                // Apply generic map
+                let path = context.resolve_path(path);
 
-            let mut x: SymbolPathNamespace = (&path).into();
-            x.0 = path.mangled_path();
-            if let Ok(symbol) = symbol_table::resolve(&x) {
-                match &symbol.found.kind {
-                    SymbolKind::GenericInstance(x) => {
-                        let base = symbol_table::get(x.base).unwrap();
-                        let params = base.kind.get_generic_parameters();
+                let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
+                if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), &namespace)) {
+                    for id in &symbol.full_path {
+                        let symbol = symbol_table::get(*id).unwrap();
+                        let SymbolKind::GenericInstance(inst) = &symbol.kind else {
+                            continue;
+                        };
 
-                        if params.len() == x.arguments.len() {
-                            for (i, p) in params.iter().enumerate() {
-                                let p = symbol_table::get(*p).unwrap();
-                                let name = p.token.text;
-                                sig.add_generic_parameter(name, x.arguments[i].clone());
+                        let base = symbol_table::get(inst.base).unwrap();
+                        let params = base.generic_parameters();
+                        if inst.arguments.len() == params.len() {
+                            for (i, (name, _)) in params.iter().enumerate() {
+                                sig.add_generic_parameter(*name, inst.arguments[i].clone());
                             }
                         }
                     }
-                    SymbolKind::Module(x) => {
-                        for (i, p) in x.generic_parameters.iter().enumerate() {
-                            let p = symbol_table::get(*p).unwrap();
-                            let name = p.token.text;
-                            sig.add_generic_parameter(
-                                name,
-                                path.paths.last().unwrap().arguments[i].clone(),
-                            );
-                        }
-                    }
-                    SymbolKind::Interface(x) => {
-                        for (i, p) in x.generic_parameters.iter().enumerate() {
-                            let p = symbol_table::get(*p).unwrap();
-                            let name = p.token.text;
-                            sig.add_generic_parameter(
-                                name,
-                                path.paths.last().unwrap().arguments[i].clone(),
-                            );
-                        }
-                    }
-                    _ => (),
-                }
-            } else {
-                match &symbol.kind {
-                    SymbolKind::Module(x) => {
-                        for (i, p) in x.generic_parameters.iter().enumerate() {
-                            let p = symbol_table::get(*p).unwrap();
-                            let name = p.token.text;
-                            sig.add_generic_parameter(
-                                name,
-                                path.paths.last().unwrap().arguments[i].clone(),
-                            );
-                        }
-                    }
-                    SymbolKind::Interface(x) => {
-                        for (i, p) in x.generic_parameters.iter().enumerate() {
-                            let p = symbol_table::get(*p).unwrap();
-                            let name = p.token.text;
-                            sig.add_generic_parameter(
-                                name,
-                                path.paths.last().unwrap().arguments[i].clone(),
-                            );
-                        }
-                    }
-                    _ => (),
                 }
             }
         }
