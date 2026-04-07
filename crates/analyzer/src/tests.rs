@@ -5828,6 +5828,93 @@ fn unknown_embed_way() {
 }
 
 #[test]
+fn member_access_on_array() {
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic,
+        }
+        var x: StructA[10];
+        let _y: logic = x.a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MemberAccessOnArray { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic,
+        }
+        var x: StructA[10];
+        let _y: logic = x[0].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MemberAccessOnArray { .. }))
+    );
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic,
+        }
+        var x: StructA;
+        let _y: logic = x.a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MemberAccessOnArray { .. }))
+    );
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic,
+        }
+        var x: StructA[10, 20];
+        let _y: logic = x[0].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MemberAccessOnArray { .. }))
+    );
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic,
+        }
+        var x: StructA[10, 20];
+        let _y: logic = x[0][0].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MemberAccessOnArray { .. }))
+    );
+}
+
+#[test]
 fn unknown_member() {
     let code = r#"
     module ModuleA {

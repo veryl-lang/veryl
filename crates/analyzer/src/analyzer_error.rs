@@ -657,6 +657,24 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(member_access_on_array),
+        help("\"{name}\" has {array_dims} array dimension(s); index all of them before accessing member \"{member}\""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{name}\" is an array; index it before accessing member \"{member}\"")]
+    MemberAccessOnArray {
+        name: String,
+        member: String,
+        array_dims: usize,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(mismatch_assignment),
         help(""),
@@ -1600,6 +1618,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidTypeDeclaration { token_source, .. } => *token_source,
             AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
             AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
+            AnalyzerError::MemberAccessOnArray { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
             AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
@@ -2005,6 +2024,21 @@ impl AnalyzerError {
     }
     pub fn last_item_with_define(token: &TokenRange) -> Self {
         AnalyzerError::LastItemWithDefine {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn member_access_on_array(
+        name: &str,
+        member: &str,
+        array_dims: usize,
+        token: &TokenRange,
+    ) -> Self {
+        AnalyzerError::MemberAccessOnArray {
+            name: name.to_string(),
+            member: member.to_string(),
+            array_dims,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

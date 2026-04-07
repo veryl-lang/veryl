@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 366
+expression: out
+---
+member_access_on_array (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#member_access_on_array)
+
+  × "x" is an array; index it before accessing member "a"
+   ╭─[../../testcases/error/member_access_on_array.veryl:7:21]
+ 6 │     var x: A[10];
+ 7 │     let _y: logic = x.a;
+   ·                     ─┬─
+   ·                      ╰── Error location
+ 8 │     let _z: logic = x[0].a;
+   ╰────
+  help: "x" has 1 array dimension(s); index all of them before accessing member "a"

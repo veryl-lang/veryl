@@ -489,6 +489,37 @@ impl ReferenceTable {
         }
     }
 
+    fn check_array_member_access(
+        &mut self,
+        path: &GenericSymbolPath,
+        namespace: &Namespace,
+        selects_per_component: &[usize],
+    ) {
+        for i in 0..path.len().saturating_sub(1) {
+            let base_path = path.base_path(i);
+            if let Ok(symbol) = symbol_table::resolve((&base_path, namespace))
+                && let Some(r#type) = symbol.found.kind.get_type()
+            {
+                let array_dims = r#type.array.len();
+                let applied_selects = selects_per_component.get(i).copied().unwrap_or(0);
+                if applied_selects < array_dims {
+                    let member_name = if i + 1 < path.len() {
+                        path.paths[i + 1].base.to_string()
+                    } else {
+                        String::new()
+                    };
+                    self.errors.push(AnalyzerError::member_access_on_array(
+                        &symbol.found.token.to_string(),
+                        &member_name,
+                        array_dims,
+                        &path.range,
+                    ));
+                    return;
+                }
+            }
+        }
+    }
+
     fn check_complex_identifier(
         &mut self,
         path: &GenericSymbolPath,
@@ -512,7 +543,19 @@ impl ReferenceTable {
                 }
                 ReferenceCandidate::HierarchicalIdentifier { arg, namespace } => {
                     let token = arg.identifier.identifier_token.token;
-                    self.check_complex_identifier(&arg.into(), namespace, &token, false);
+                    let path: GenericSymbolPath = arg.into();
+                    self.check_complex_identifier(&path, namespace, &token, false);
+                    if !arg.hierarchical_identifier_list0.is_empty() {
+                        let ns = namespace_table::get(token.id).unwrap_or(namespace.clone());
+                        let mut selects = vec![0usize; path.len()];
+                        selects[0] = arg.hierarchical_identifier_list.len();
+                        for (j, member) in arg.hierarchical_identifier_list0.iter().enumerate() {
+                            if 1 + j < selects.len() {
+                                selects[1 + j] = member.hierarchical_identifier_list0_list.len();
+                            }
+                        }
+                        self.check_array_member_access(&path, &ns, &selects);
+                    }
                 }
                 ReferenceCandidate::ScopedIdentifier {
                     arg,
@@ -529,7 +572,23 @@ impl ReferenceTable {
                 }
                 ReferenceCandidate::ExpressionIdentifier { arg, namespace } => {
                     let token = arg.scoped_identifier.identifier().token;
-                    self.check_complex_identifier(&arg.into(), namespace, &token, false);
+                    let path: GenericSymbolPath = arg.into();
+                    self.check_complex_identifier(&path, namespace, &token, false);
+                    if !arg.expression_identifier_list0.is_empty() {
+                        let ns = namespace_table::get(token.id).unwrap_or(namespace.clone());
+                        let scoped_len = arg.scoped_identifier.scoped_identifier_list.len() + 1;
+                        let mut selects = vec![0usize; path.len()];
+                        if scoped_len <= selects.len() {
+                            selects[scoped_len - 1] = arg.expression_identifier_list.len();
+                        }
+                        for (j, member) in arg.expression_identifier_list0.iter().enumerate() {
+                            if scoped_len + j < selects.len() {
+                                selects[scoped_len + j] =
+                                    member.expression_identifier_list0_list.len();
+                            }
+                        }
+                        self.check_array_member_access(&path, &ns, &selects);
+                    }
                 }
                 ReferenceCandidate::GenericArgIdentifier { arg, namespace } => {
                     let token = arg.scoped_identifier.identifier().token;
