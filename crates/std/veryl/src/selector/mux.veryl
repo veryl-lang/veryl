@@ -1,11 +1,11 @@
-pub function select_binary::<N: p32, T: type,> (
+pub function select_binary::<N: p32, T: type> (
     sel : input logic<selector_pkg::calc_binary_select_width(N)>,
     data: input T    <N>                                        ,
 ) -> T {
     return data[sel];
 }
 
-pub function select_vector::<N: p32, T: type,> (
+pub function select_vector::<N: p32, T: type> (
     sel : input logic<N>,
     data: input T    <N>,
 ) -> T {
@@ -49,7 +49,7 @@ pub function select_vector::<N: p32, T: type,> (
     return next_d[0];
 }
 
-pub function select_onehot::<N: p32, T: type,> (
+pub function select_onehot::<N: p32, T: type> (
     sel : input logic<N>,
     data: input T    <N>,
 ) -> T {
@@ -86,7 +86,7 @@ pub function select_onehot::<N: p32, T: type,> (
     return next_d[0];
 }
 
-pub function select::<KIND: selector_pkg::selector_kind, N: p32, T: type,> (
+pub function select::<KIND: selector_pkg::selector_kind, N: p32, T: type> (
     sel : input logic<selector_pkg::calc_select_width(N, KIND)>,
     data: input T    <N>                                       ,
 ) -> T {

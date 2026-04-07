@@ -1,4 +1,4 @@
-pub function dispatch_binary::<N: p32, T: type,> (
+pub function dispatch_binary::<N: p32, T: type> (
     sel         : input logic<selector_pkg::calc_binary_select_width(N)>,
     data        : input T                                               ,
     default_data: input T                                               ,
@@ -13,7 +13,7 @@ pub function dispatch_binary::<N: p32, T: type,> (
     return result;
 }
 
-pub function dispatch_vector::<N: p32, T: type,> (
+pub function dispatch_vector::<N: p32, T: type> (
     sel         : input logic<N>,
     data        : input T       ,
     default_data: input T       ,
@@ -31,7 +31,7 @@ pub function dispatch_vector::<N: p32, T: type,> (
     return result;
 }
 
-pub function dispatch::<KIND: selector_pkg::selector_kind, N: p32, T: type,> (
+pub function dispatch::<KIND: selector_pkg::selector_kind, N: p32, T: type> (
     sel         : input logic<selector_pkg::calc_select_width(N, KIND)>,
     data        : input T                                              ,
     default_data: input T                                              ,

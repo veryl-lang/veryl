@@ -2105,30 +2105,105 @@ impl VerylWalker for Formatter {
         }
     }
 
+    /// Semantic action for non-terminal 'WithGenericParameter'
+    fn with_generic_parameter(&mut self, arg: &WithGenericParameter) {
+        if arg.colon_colon_l_angle.line() != arg.r_angle.line() {
+            self.multi_line_start();
+        }
+        self.colon_colon_l_angle(&arg.colon_colon_l_angle);
+        if self.multi_line() {
+            self.newline_push();
+        }
+
+        self.with_generic_parameter_list(&arg.with_generic_parameter_list);
+
+        if self.multi_line() {
+            self.newline_pop();
+            self.align_reset();
+        }
+        self.r_angle(&arg.r_angle);
+        if arg.colon_colon_l_angle.line() != arg.r_angle.line() {
+            self.multi_line_finish();
+        }
+    }
+
     /// Semantic action for non-terminal 'WithGenericParameterList'
     fn with_generic_parameter_list(&mut self, arg: &WithGenericParameterList) {
         self.with_generic_parameter_item(&arg.with_generic_parameter_item);
         for x in &arg.with_generic_parameter_list_list {
             self.comma(&x.comma);
-            self.space(1);
+            if self.multi_line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
             self.with_generic_parameter_item(&x.with_generic_parameter_item);
         }
-        if let Some(ref x) = arg.with_generic_parameter_list_opt {
-            self.comma(&x.comma);
+        if self.multi_line() {
+            if let Some(ref x) = arg.with_generic_parameter_list_opt {
+                self.comma(&x.comma);
+            } else {
+                self.str(",");
+            }
         }
     }
 
     /// Semantic action for non-terminal 'WithGenericParameterItem'
     fn with_generic_parameter_item(&mut self, arg: &WithGenericParameterItem) {
+        if self.multi_line() {
+            self.align_start(align_kind::IDENTIFIER);
+        }
         self.identifier(&arg.identifier);
+        if self.multi_line() {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
         self.colon(&arg.colon);
         self.space(1);
+        if self.multi_line() {
+            self.align_start(align_kind::TYPE);
+        }
         self.generic_bound(&arg.generic_bound);
+        if self.multi_line() {
+            self.align_finish(align_kind::TYPE);
+        }
         if let Some(ref x) = arg.with_generic_parameter_item_opt {
             self.space(1);
             self.equ(&x.equ);
             self.space(1);
+            if self.multi_line() {
+                self.align_start(align_kind::EXPRESSION);
+            }
             self.with_generic_argument_item(&x.with_generic_argument_item);
+            if self.multi_line() {
+                self.align_finish(align_kind::EXPRESSION);
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'WithGenericArgument'
+    fn with_generic_argument(&mut self, arg: &WithGenericArgument) {
+        let multi_line = arg.with_generic_argument_opt.is_some()
+            && arg.colon_colon_l_angle.line() != arg.r_angle.line();
+
+        if multi_line {
+            self.multi_line_start();
+        }
+        self.colon_colon_l_angle(&arg.colon_colon_l_angle);
+        if self.multi_line() {
+            self.newline_push();
+        }
+
+        if let Some(x) = &arg.with_generic_argument_opt {
+            self.with_generic_argument_list(&x.with_generic_argument_list);
+        }
+
+        if self.multi_line() {
+            self.newline_pop();
+            self.align_reset();
+        }
+        self.r_angle(&arg.r_angle);
+        if multi_line {
+            self.multi_line_finish();
         }
     }
 
@@ -2137,11 +2212,43 @@ impl VerylWalker for Formatter {
         self.with_generic_argument_item(&arg.with_generic_argument_item);
         for x in &arg.with_generic_argument_list_list {
             self.comma(&x.comma);
-            self.space(1);
+            if self.multi_line() {
+                self.newline();
+            } else {
+                self.space(1);
+            }
             self.with_generic_argument_item(&x.with_generic_argument_item);
         }
-        if let Some(ref x) = arg.with_generic_argument_list_opt {
-            self.comma(&x.comma);
+        if self.multi_line() {
+            if let Some(ref x) = arg.with_generic_argument_list_opt {
+                self.comma(&x.comma);
+            } else {
+                self.str(",");
+            }
+        }
+    }
+
+    /// Semantic action for non-terminal 'WithGenericArgumentItem'
+    fn with_generic_argument_item(&mut self, arg: &WithGenericArgumentItem) {
+        if self.multi_line() {
+            self.align_start(align_kind::EXPRESSION);
+        }
+        match arg {
+            WithGenericArgumentItem::GenericArgIdentifier(x) => {
+                self.generic_arg_identifier(&x.generic_arg_identifier);
+            }
+            WithGenericArgumentItem::FixedType(x) => {
+                self.fixed_type(&x.fixed_type);
+            }
+            WithGenericArgumentItem::Number(x) => {
+                self.number(&x.number);
+            }
+            WithGenericArgumentItem::BooleanLiteral(x) => {
+                self.boolean_literal(&x.boolean_literal);
+            }
+        }
+        if self.multi_line() {
+            self.align_finish(align_kind::EXPRESSION);
         }
     }
 

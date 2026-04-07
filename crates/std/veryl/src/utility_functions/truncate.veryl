@@ -1,4 +1,4 @@
-pub function truncate::<FROM_TYPE: type, TO_TYPE: type,> (
+pub function truncate::<FROM_TYPE: type, TO_TYPE: type> (
     from: input FROM_TYPE,
 ) -> TO_TYPE {
     return from as TO_TYPE;
