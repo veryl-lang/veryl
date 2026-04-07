@@ -221,11 +221,17 @@ impl Op {
         }
 
         match self {
-            Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor | Op::BitNand | Op::BitNor => {
+            Op::BitAnd
+            | Op::BitOr
+            | Op::BitXor
+            | Op::BitXnor
+            | Op::BitNand
+            | Op::BitNor
+            | Op::LogicNot => {
                 dst.r#type.signed = false;
                 dst.r#type.width = Shape::new(vec![Some(1)]);
             }
-            Op::BitNot | Op::LogicNot => {
+            Op::BitNot => {
                 dst.r#type.signed = false;
             }
             Op::Add | Op::Sub => (),
