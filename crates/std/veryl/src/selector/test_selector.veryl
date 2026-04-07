@@ -55,7 +55,7 @@ module test_binary_mux;
 endmodule
 }}}
 
-#[test(test_binary_vector)]
+#[test(test_vector_mux)]
 embed (inline) sv{{{
 module test_vector_mux;
   import std_selector_pkg::*;
