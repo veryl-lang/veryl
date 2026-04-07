@@ -211,3 +211,56 @@ fn const_above_let_alignment() {
     let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn format_generic_list() {
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module ModuleA::<A : a_type, AA: u32,> {}
+"#;
+
+    let expect = r#"module ModuleA::<A: a_type, AA: u32> {}
+"#;
+
+    let ret = format(&metadata, &code);
+    assert_eq!(ret, expect);
+
+    let code = r#"module ModuleA::<
+    A: a_type,
+    AA: u32
+> {}
+"#;
+
+    let expect = r#"module ModuleA::<
+    A : a_type,
+    AA: u32   ,
+> {}
+"#;
+
+    let ret = format(&metadata, &code);
+    assert_eq!(ret, expect);
+
+    let code = r#"alias module ModuleA = ModuleB::<8, 16,>;
+"#;
+
+    let expect = r#"alias module ModuleA = ModuleB::<8, 16>;
+"#;
+
+    let ret = format(&metadata, &code);
+    assert_eq!(ret, expect);
+
+    let code = r#"alias module ModuleB = ModuleC::<
+    8,
+    16
+>;
+"#;
+
+    let expect = r#"alias module ModuleB = ModuleC::<
+    8 ,
+    16,
+>;
+"#;
+
+    let ret = format(&metadata, &code);
+    assert_eq!(ret, expect);
+}

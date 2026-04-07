@@ -1,4 +1,4 @@
-pub function zero_extend::<FROM_TYPE: type, TO_TYPE: type,> (
+pub function zero_extend::<FROM_TYPE: type, TO_TYPE: type> (
     from: input FROM_TYPE,
 ) -> TO_TYPE {
     const FROM_WIDTH  : p32 = $bits(FROM_TYPE);
@@ -7,7 +7,7 @@ pub function zero_extend::<FROM_TYPE: type, TO_TYPE: type,> (
     return {1'b0 repeat EXTEND_WIDTH, from} as TO_TYPE;
 }
 
-pub function one_extend::<FROM_TYPE: type, TO_TYPE: type,> (
+pub function one_extend::<FROM_TYPE: type, TO_TYPE: type> (
     from: input FROM_TYPE,
 ) -> TO_TYPE {
     const FROM_WIDTH  : p32 = $bits(FROM_TYPE);
@@ -16,7 +16,7 @@ pub function one_extend::<FROM_TYPE: type, TO_TYPE: type,> (
     return {1'b1 repeat EXTEND_WIDTH, from} as TO_TYPE;
 }
 
-pub function sign_extend::<FROM_TYPE: type, TO_TYPE: type,> (
+pub function sign_extend::<FROM_TYPE: type, TO_TYPE: type> (
     from: input FROM_TYPE,
 ) -> TO_TYPE {
     const FROM_WIDTH  : p32 = $bits(FROM_TYPE);
