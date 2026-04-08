@@ -36,7 +36,7 @@ fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
             return resolve_inst_type(&InstTypeSource::Id(x.base));
         }
         SymbolKind::GenericParameter(x) => {
-            let proto = x.bound.resolve_proto_bound(&symbol.namespace)?;
+            let proto = x.bound.resolve_proto_bound(&symbol.namespace).ok()?;
             if let Some(symbol) = proto.get_symbol() {
                 return resolve_inst_type(&InstTypeSource::Id(symbol.id));
             }
@@ -64,7 +64,7 @@ fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
                 return Some(base.kind);
             }
             SymbolKind::GenericParameter(x) => {
-                if let Some(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace).clone() {
+                if let Ok(proto) = x.bound.resolve_proto_bound(&inst_symbol.namespace) {
                     return proto.get_symbol().map(|x| x.kind);
                 }
             }

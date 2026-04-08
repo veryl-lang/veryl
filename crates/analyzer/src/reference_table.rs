@@ -187,7 +187,7 @@ impl ReferenceTable {
             let name = format!("{not_found}");
             if let Some(generics_token) = generics_token {
                 self.errors
-                    .push(AnalyzerError::unresolvable_generic_argument(
+                    .push(AnalyzerError::unresolvable_generic_expression(
                         &name,
                         token,
                         &generics_token.into(),

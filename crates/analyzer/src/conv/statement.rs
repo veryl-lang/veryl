@@ -50,6 +50,10 @@ impl Conv<&StatementBlockItem> for ir::StatementBlock {
                 let _: ir::Declaration = Conv::conv(context, x.const_declaration.as_ref())?;
                 Ok(ir::StatementBlock::default())
             }
+            StatementBlockItem::GenDeclaration(x) => {
+                let _: ir::Declaration = Conv::conv(context, x.gen_declaration.as_ref())?;
+                Ok(ir::StatementBlock::default())
+            }
             StatementBlockItem::Statement(x) => Conv::conv(context, x.statement.as_ref()),
             StatementBlockItem::ConcatenationAssignment(x) => {
                 Conv::conv(context, x.concatenation_assignment.as_ref())

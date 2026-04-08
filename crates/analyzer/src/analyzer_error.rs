@@ -1419,30 +1419,12 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(unresolvable_generic_argument),
+        code(unresolvable_generic_expression),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{identifier}\" can't be resolved from the definition of generics")]
-    UnresolvableGenericArgument {
-        identifier: String,
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        #[label("Definition")]
-        definition_location: SourceSpan,
-        token_source: TokenSource,
-    },
-
-    #[diagnostic(
-        severity(Error),
-        code(unresolvable_generic_reference),
-        help(""),
-        url("")
-    )]
-    #[error("\"{identifier}\" can't be resolved from the definition of generics")]
-    UnresolvableGenericReference {
+    UnresolvableGenericExpression {
         identifier: String,
         #[source_code]
         input: MultiSources,
@@ -1664,8 +1646,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownParam { token_source, .. } => *token_source,
             AnalyzerError::UnknownPort { token_source, .. } => *token_source,
             AnalyzerError::UnknownUnsafe { token_source, .. } => *token_source,
-            AnalyzerError::UnresolvableGenericArgument { token_source, .. } => *token_source,
-            AnalyzerError::UnresolvableGenericReference { token_source, .. } => *token_source,
+            AnalyzerError::UnresolvableGenericExpression { token_source, .. } => *token_source,
             AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
                 token_source, ..
             } => *token_source,
@@ -2454,25 +2435,12 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn unresolvable_generic_argument(
+    pub fn unresolvable_generic_expression(
         identifier: &str,
         token: &TokenRange,
         definition_token: &TokenRange,
     ) -> Self {
-        AnalyzerError::UnresolvableGenericArgument {
-            identifier: identifier.to_string(),
-            input: source(token),
-            error_location: token.into(),
-            definition_location: definition_token.into(),
-            token_source: token.source(),
-        }
-    }
-    pub fn unresolvable_generic_reference(
-        identifier: &str,
-        token: &TokenRange,
-        definition_token: &TokenRange,
-    ) -> Self {
-        AnalyzerError::UnresolvableGenericReference {
+        AnalyzerError::UnresolvableGenericExpression {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
