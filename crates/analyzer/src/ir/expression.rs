@@ -611,13 +611,15 @@ impl Factor {
                 // Array dimensions are already drained at Factor construction time
                 // (in VarPathSelect::to_expression and eval_factor).
 
-                // Struct/Union/Enum should be treated as flatten bit/logic when it is bit-selected
-                if !select.is_empty() {
-                    comptime.r#type.flatten_struct_union_enum()
-                }
+                if !comptime.evaluated {
+                    // Struct/Union/Enum should be treated as flatten bit/logic when it is bit-selected
+                    if !select.is_empty() {
+                        comptime.r#type.flatten_struct_union_enum();
+                    }
 
-                if let Some(width) = select.eval_comptime(context, &comptime.r#type, false) {
-                    comptime.r#type.width = width;
+                    if let Some(width) = select.eval_comptime(context, &comptime.r#type, false) {
+                        comptime.r#type.width = width;
+                    }
                 }
 
                 ExpressionContext {
