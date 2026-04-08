@@ -883,7 +883,19 @@ impl Symbol {
         };
         matches!(
             type_kind,
-            TypeKind::Type | TypeKind::U8 | TypeKind::U16 | TypeKind::U32 | TypeKind::U64
+            TypeKind::Type
+                | TypeKind::U8
+                | TypeKind::U16
+                | TypeKind::U32
+                | TypeKind::U64
+                | TypeKind::I8
+                | TypeKind::I16
+                | TypeKind::I32
+                | TypeKind::I64
+                | TypeKind::P8
+                | TypeKind::P16
+                | TypeKind::P32
+                | TypeKind::P64
         )
     }
 
