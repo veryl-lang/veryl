@@ -21,8 +21,11 @@ If you have any idea, please open [Issue](https://github.com/veryl-lang/veryl/is
 
 * [Web Site](https://veryl-lang.org)
 * [Language Reference](https://doc.veryl-lang.org/book/)
-    * [日本語](https://doc.veryl-lang.org/book/ja/)
+    * [Nightly](https://doc.veryl-lang.org/nightly/book/)
+* [言語リファレンス（日本語）](https://doc.veryl-lang.org/book/ja/)
+    * [Nightly](https://doc.veryl-lang.org/nightly/book/ja/)
 * [PlayGround](https://doc.veryl-lang.org/playground/)
+    * [Nightly](https://doc.veryl-lang.org/nightly/playground/)
 * [Discord](https://discord.gg/MJZr9NufTT)
 
 ## Documentation quick links
