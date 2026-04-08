@@ -3964,6 +3964,34 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA #(
+        param VALUE: u32 = 1,
+        param WIDTH: p32 = 1,
+    ) (
+        o: output logic<WIDTH>,
+    ) {
+        assign o = VALUE as WIDTH;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        param VALUE: u32 = 1,
+        param WIDTH: i32 = 1,
+    ) (
+        o: output logic<WIDTH>,
+    ) {
+        assign o = VALUE as WIDTH;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
