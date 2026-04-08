@@ -2844,7 +2844,7 @@ endmodule
 }
 
 #[test]
-fn emit_unbound_function() {
+fn emit_global_function() {
     let code = r#"
 function func::<A: u32>() -> u32 {
     return A;

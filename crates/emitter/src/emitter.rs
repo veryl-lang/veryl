@@ -573,9 +573,9 @@ impl Emitter {
         }
 
         let text = if let Some(symbol) = symbol
-            && symbol.is_unbound_function()
+            && symbol.is_global_function()
         {
-            self.unbound_function_identifier_token(&arg.identifier_token, symbol)
+            self.global_function_identifier_token(&arg.identifier_token, symbol)
         } else {
             emitting_identifier_token(&arg.identifier_token, symbol)
         };
@@ -587,7 +587,7 @@ impl Emitter {
         }
     }
 
-    fn unbound_function_identifier_token(&self, token: &VerylToken, symbol: &Symbol) -> VerylToken {
+    fn global_function_identifier_token(&self, token: &VerylToken, symbol: &Symbol) -> VerylToken {
         let prefix = if let Some(bound_namespace) = self.bound_namespace.as_ref()
             && !bound_namespace.included(&symbol.namespace)
         {
@@ -1856,7 +1856,7 @@ impl Emitter {
         true
     }
 
-    fn emit_unbound_functions(&mut self, component_symbol: &Symbol) {
+    fn emit_global_functions(&mut self, component_symbol: &Symbol) {
         let Some(func_paths) = symbol_table::get_reference_functions(component_symbol.id) else {
             unreachable!()
         };
@@ -1869,14 +1869,14 @@ impl Emitter {
 
         let mut emitted_functions = Vec::new();
         for path in &func_paths {
-            self.emit_unbound_function(path, &mut emitted_functions);
+            self.emit_global_function(path, &mut emitted_functions);
         }
 
         self.bound_namespace = None;
         self.src_line = src_line;
     }
 
-    fn emit_unbound_function(
+    fn emit_global_function(
         &mut self,
         path: &GenericSymbolPath,
         emitted_functions: &mut Vec<SymbolId>,
@@ -1885,7 +1885,7 @@ impl Emitter {
             return;
         };
 
-        if !func_symbol.found.is_unbound_function() {
+        if !func_symbol.found.is_global_function() {
             return;
         }
 
@@ -1921,7 +1921,7 @@ impl Emitter {
         if let Some(func_paths) = &symbol_table::get_reference_functions(func_id) {
             self.generic_map.push(generic_map);
             for func_path in func_paths {
-                self.emit_unbound_function(func_path, emitted_functions);
+                self.emit_global_function(func_path, emitted_functions);
             }
             self.generic_map.pop();
         }
@@ -5263,7 +5263,7 @@ impl VerylWalker for Emitter {
                 }
                 self.module_group(&x.module_group);
             }
-            self.emit_unbound_functions(&symbol.found);
+            self.emit_global_functions(&symbol.found);
             self.newline_list_post(arg.module_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
 
@@ -5353,7 +5353,7 @@ impl VerylWalker for Emitter {
                 }
                 self.interface_group(&x.interface_group);
             }
-            self.emit_unbound_functions(&symbol.found);
+            self.emit_global_functions(&symbol.found);
             self.newline_list_post(arg.interface_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
 
@@ -5569,7 +5569,7 @@ impl VerylWalker for Emitter {
                 }
                 self.package_group(&x.package_group);
             }
-            self.emit_unbound_functions(&symbol.found);
+            self.emit_global_functions(&symbol.found);
             self.newline_list_post(arg.package_declaration_list.is_empty());
             self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
 

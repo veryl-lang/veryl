@@ -188,7 +188,7 @@ impl GenericMap {
             SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
                 include_namspace_prefix
             }
-            SymbolKind::Function(x) => include_namspace_prefix && x.is_unbound(),
+            SymbolKind::Function(x) => include_namspace_prefix && x.is_global(),
             _ => false,
         };
         if emit_namespace_preffix {
@@ -917,12 +917,12 @@ impl Symbol {
         }
     }
 
-    pub fn is_unbound_function(&self) -> bool {
+    pub fn is_global_function(&self) -> bool {
         match &self.kind {
-            SymbolKind::Function(x) => x.is_unbound(),
+            SymbolKind::Function(x) => x.is_global(),
             SymbolKind::GenericInstance(x) => {
                 let symbol = symbol_table::get(x.base).unwrap();
-                symbol.is_unbound_function()
+                symbol.is_global_function()
             }
             _ => false,
         }
@@ -2345,7 +2345,7 @@ pub struct FunctionProperty {
 }
 
 impl FunctionProperty {
-    pub fn is_unbound(&self) -> bool {
+    pub fn is_global(&self) -> bool {
         self.affiliation == Affiliation::ProjectNamespace
     }
 }
