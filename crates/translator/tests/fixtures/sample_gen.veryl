@@ -1,0 +1,18 @@
+module gen_test #(
+    param N: i32 = 4,
+) (
+    in: input logic<N>,
+    out: output logic<N>,
+) {
+    for gi in 0..N {
+        assign out[gi] = in[gi];
+    }
+
+    if N > 2 {
+        assign out = in;
+    } else {
+        assign out = '0;
+    }
+
+}
+

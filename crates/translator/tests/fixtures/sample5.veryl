@@ -1,0 +1,36 @@
+interface bus_if {
+    var valid: logic;
+    var data: logic<8>;
+    var ready: logic;
+    modport master {
+        valid: output,
+        data: output,
+        ready: input,
+    }
+
+    modport slave {
+        valid: input,
+        data: input,
+        ready: output,
+    }
+
+}
+
+module producer (
+    clk: input logic,
+    bus: modport bus_if::master,
+) {
+    assign bus.valid = 1;
+    assign bus.data  = 8'hAB;
+}
+
+module wrap (
+    clk: input logic,
+    generic_bus: interface bus_if,
+) {
+    var a: logic;
+    var b: logic;
+    assign a = 1;
+    assign b = 2;
+}
+

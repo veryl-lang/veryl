@@ -15,6 +15,7 @@ members = [
     "crates/sourcemap",
     "crates/std",
     "crates/tests",
+    "crates/translator",
     "crates/veryl",
     "support/highlightgen",
 ]

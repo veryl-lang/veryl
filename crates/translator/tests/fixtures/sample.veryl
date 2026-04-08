@@ -1,0 +1,24 @@
+module foo #(
+    param WIDTH: u32 = 8,
+) (
+    a: input logic<WIDTH>,
+    clk: input logic,
+    rst: input logic,
+    q: output logic<WIDTH>,
+) {
+    var r: logic<WIDTH>;
+    assign q = r;
+    always_ff (clk, rst) {
+        if_reset {
+            r = '0;
+        } else {
+            r = a;
+        }
+    }
+
+    inst u_bar: bar (
+        x: a,
+        y: q,
+    );
+}
+
