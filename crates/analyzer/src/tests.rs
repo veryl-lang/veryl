@@ -9204,6 +9204,33 @@ fn invalid_select() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        enum a_enum: logic {
+            FOO,
+            BAR,
+        }
+        struct b_struct {
+            e: a_enum,
+            d: a_enum,
+            c: logic<32>,
+            b: logic<32>,
+            a: logic<32>,
+        }
+        let _a: b_struct = b_struct'{
+            a: '0,
+            b: '0,
+            c: '0,
+            d: a_enum::FOO,
+            e: a_enum::BAR,
+        };
+        let _b: logic = inside _a.e { a_enum::BAR };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
