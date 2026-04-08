@@ -2480,8 +2480,8 @@ pub fn var_path_to_assign_destination(
 fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> IrResult<FuncProto> {
     if !context.func_paths.contains_key(path) {
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
-        let (definition, is_unbound) = match &symbol.kind {
-            SymbolKind::Function(x) => (x.definition.unwrap(), x.is_unbound()),
+        let (definition, is_global) = match &symbol.kind {
+            SymbolKind::Function(x) => (x.definition.unwrap(), x.is_global()),
             SymbolKind::ModportFunctionMember(x) => {
                 let symbol = symbol_table::get(x.function).unwrap();
                 let SymbolKind::Function(x) = symbol.kind else {
@@ -2511,7 +2511,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let ret: IrResult<()> = Conv::conv(context, (&definition, Some(path)));
             ret?;
         } else {
-            let generic_arg_paths = if is_unbound {
+            let generic_arg_paths = if is_global {
                 path.sig
                     .generic_parameters
                     .iter()

@@ -347,7 +347,7 @@ impl ReferenceTable {
         affiliation_symbol: Option<&Symbol>,
     ) {
         let instance_path = &path.paths[ith];
-        let instance = if affiliation_symbol.is_some() || !target.is_unbound_function() {
+        let instance = if affiliation_symbol.is_some() || !target.is_global_function() {
             instance_path.get_generic_instance(target, affiliation_symbol)
         } else {
             instance_path.get_generic_instance(target, namespace.get_symbol().as_ref())

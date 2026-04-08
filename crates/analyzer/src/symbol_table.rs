@@ -558,7 +558,7 @@ impl SymbolTable {
                     || via_interface_instance
                     || via_pacakge
                     || via_tb_component
-                    || via_namespace && x.is_unbound()
+                    || via_namespace && x.is_global()
             }
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => via_enum,
             SymbolKind::Modport(_) => via_interface || via_interface_instance,

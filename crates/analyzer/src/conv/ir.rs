@@ -77,7 +77,7 @@ impl Conv<&Veryl> for ir::Ir {
                                     Conv::conv(context, x.alias_declaration.as_ref());
                             }
                             PublicDescriptionItem::FunctionDeclaration(x) => {
-                                conv_unbound_function(context, x.function_declaration.as_ref());
+                                conv_global_function(context, x.function_declaration.as_ref());
                             }
                         }
                     }
@@ -104,14 +104,14 @@ impl Conv<&Veryl> for ir::Ir {
     }
 }
 
-fn conv_unbound_function(context: &mut Context, value: &FunctionDeclaration) {
+fn conv_global_function(context: &mut Context, value: &FunctionDeclaration) {
     let upper_context = context;
     let mut context = Context::default();
     context.inherit(upper_context);
 
-    context.in_unbound_func = Some(value.identifier.identifier_token.token);
+    context.in_global_func = Some(value.identifier.identifier_token.token);
     let _: IrResult<()> = Conv::conv(&mut context, value);
-    context.in_unbound_func = None;
+    context.in_global_func = None;
 
     upper_context.inherit(&mut context);
 }

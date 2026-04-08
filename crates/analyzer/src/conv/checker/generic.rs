@@ -95,7 +95,7 @@ fn check_referable_path(
     base: Option<&Symbol>,
     token: TokenRange,
 ) -> Option<AnalyzerError> {
-    if !path.is_resolvable() || base.map(|x| x.is_unbound_function()).unwrap_or(false) {
+    if !path.is_resolvable() || base.map(|x| x.is_global_function()).unwrap_or(false) {
         return None;
     }
 
@@ -310,11 +310,11 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
             let params = symbol.found.generic_parameters();
             let args = &path.paths[i].arguments;
 
-            if context.in_unbound_func.is_some()
+            if context.in_global_func.is_some()
                 && !params.is_empty()
-                && !symbol.found.is_unbound_function()
+                && !symbol.found.is_global_function()
             {
-                let definition_token = context.in_unbound_func.unwrap();
+                let definition_token = context.in_global_func.unwrap();
                 context.insert_error(AnalyzerError::unresolvable_generic_expression(
                     &path.to_string(),
                     &path.range,
