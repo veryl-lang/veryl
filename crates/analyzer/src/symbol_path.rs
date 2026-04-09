@@ -18,11 +18,15 @@ pub struct SymbolPath(pub SVec<StrId>);
 
 impl SymbolPath {
     pub fn new(x: &[StrId]) -> Self {
-        Self(x.into())
+        Self(
+            x.iter()
+                .map(|id| resource_table::canonical_str_id(*id))
+                .collect(),
+        )
     }
 
     pub fn push(&mut self, x: StrId) {
-        self.0.push(x)
+        self.0.push(resource_table::canonical_str_id(x))
     }
 
     pub fn pop(&mut self) -> Option<StrId> {
@@ -62,46 +66,48 @@ impl fmt::Display for SymbolPath {
 
 impl From<&[Token]> for SymbolPath {
     fn from(value: &[Token]) -> Self {
-        let mut path = SVec::new();
+        let mut ret = SymbolPath::default();
         for x in value {
-            path.push(x.text);
+            ret.push(x.text);
         }
-        SymbolPath(path)
+        ret
     }
 }
 
 impl From<&Token> for SymbolPath {
     fn from(value: &Token) -> Self {
-        let path = svec![value.text];
+        let path = svec![resource_table::canonical_str_id(value.text)];
         SymbolPath(path)
     }
 }
 
 impl From<&syntax_tree::Identifier> for SymbolPath {
     fn from(value: &syntax_tree::Identifier) -> Self {
-        let path = svec![value.identifier_token.token.text];
+        let path = svec![resource_table::canonical_str_id(
+            value.identifier_token.token.text
+        )];
         SymbolPath(path)
     }
 }
 
 impl From<&[syntax_tree::Identifier]> for SymbolPath {
     fn from(value: &[syntax_tree::Identifier]) -> Self {
-        let mut path = SVec::new();
+        let mut ret = SymbolPath::default();
         for x in value {
-            path.push(x.identifier_token.token.text);
+            ret.push(x.identifier_token.token.text);
         }
-        SymbolPath(path)
+        ret
     }
 }
 
 impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let mut path = SVec::new();
-        path.push(value.identifier.identifier_token.token.text);
+        let mut ret = SymbolPath::default();
+        ret.push(value.identifier.identifier_token.token.text);
         for x in &value.hierarchical_identifier_list0 {
-            path.push(x.identifier.identifier_token.token.text);
+            ret.push(x.identifier.identifier_token.token.text);
         }
-        SymbolPath(path)
+        ret
     }
 }
 
@@ -124,11 +130,11 @@ impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
 
 impl From<&str> for SymbolPath {
     fn from(value: &str) -> Self {
-        let mut path = SVec::new();
+        let mut ret = SymbolPath::default();
         for x in value.split("::") {
-            path.push(x.into());
+            ret.push(x.into());
         }
-        SymbolPath(path)
+        ret
     }
 }
 

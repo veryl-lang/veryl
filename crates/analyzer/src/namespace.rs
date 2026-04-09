@@ -7,7 +7,7 @@ use crate::symbol_table;
 use crate::{HashMap, SVec, svec};
 use std::collections::BTreeSet;
 use std::fmt;
-use veryl_parser::resource_table::StrId;
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_token::{Token, VerylToken};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
@@ -103,7 +103,7 @@ impl Namespace {
     }
 
     pub fn push(&mut self, path: StrId) {
-        self.paths.push(path);
+        self.paths.push(resource_table::canonical_str_id(path));
     }
 
     pub fn pop(&mut self) -> Option<StrId> {

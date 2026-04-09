@@ -1,6 +1,7 @@
 use bimap::BiMap;
 use std::borrow::Borrow;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
@@ -105,6 +106,7 @@ impl From<&str> for StrId {
 thread_local!(static STRING_TABLE: RefCell<GlobalTable<String, StrId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static PATHBUF_TABLE: RefCell<GlobalTable<PathBuf, PathId>> = RefCell::new(GlobalTable::default()));
 thread_local!(static TOKEN_ID: RefCell<usize> = const { RefCell::new(0) });
+thread_local!(static CANONICAL_CACHE: RefCell<HashMap<StrId, StrId>> = RefCell::new(HashMap::new()));
 
 pub fn insert_str(value: &str) -> StrId {
     STRING_TABLE.with(|f| f.borrow_mut().insert(value.to_owned()))
@@ -120,6 +122,25 @@ pub fn get_str_value(id: StrId) -> Option<String> {
 
 pub fn get_path_value(id: PathId) -> Option<PathBuf> {
     PATHBUF_TABLE.with(|f| f.borrow().get_value(id).map(|x| x.to_owned()))
+}
+
+pub fn canonical_str_id(id: StrId) -> StrId {
+    CANONICAL_CACHE.with(|cache| {
+        if let Some(&cached) = cache.borrow().get(&id) {
+            return cached;
+        }
+        let canonical = if let Some(text) = get_str_value(id) {
+            if let Some(stripped) = text.strip_prefix("r#") {
+                insert_str(stripped)
+            } else {
+                id
+            }
+        } else {
+            id
+        };
+        cache.borrow_mut().insert(id, canonical);
+        canonical
+    })
 }
 
 pub fn get_str_id<T: Borrow<String>>(value: T) -> Option<StrId> {
@@ -145,6 +166,7 @@ pub fn export_tables() -> ResourceTableSnapshot {
 pub fn import_tables(snapshot: &ResourceTableSnapshot) {
     STRING_TABLE.with(|f| *f.borrow_mut() = snapshot.string_table.clone());
     PATHBUF_TABLE.with(|f| *f.borrow_mut() = snapshot.pathbuf_table.clone());
+    CANONICAL_CACHE.with(|f| f.borrow_mut().clear());
 }
 
 pub fn new_token_id() -> TokenId {

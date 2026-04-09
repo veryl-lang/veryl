@@ -3,6 +3,7 @@ mod r#enum;
 mod function;
 mod msb;
 
+use crate::analyzer_error::DuplicatedIdentifierKind;
 use crate::namespace::Namespace;
 use crate::sv_system_function;
 use crate::symbol::{
@@ -20,7 +21,7 @@ use log::trace;
 use msb::check_msb;
 use std::cell::RefCell;
 use std::fmt;
-use veryl_parser::resource_table::{PathId, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -124,7 +125,10 @@ impl SymbolTable {
     }
 
     pub fn insert(&mut self, token: &Token, symbol: Symbol) -> Option<SymbolId> {
-        let entry = self.name_table.entry(token.text).or_default();
+        let entry = self
+            .name_table
+            .entry(resource_table::canonical_str_id(token.text))
+            .or_default();
         for id in entry.iter() {
             let item = self.symbol_table.get(id).unwrap();
             let symbol = &symbol.namespace;
@@ -633,7 +637,10 @@ impl SymbolTable {
                 });
             }
 
-            if let Some(ids) = self.name_table.get(name) {
+            if let Some(ids) = self
+                .name_table
+                .get(&resource_table::canonical_str_id(*name))
+            {
                 for id in ids {
                     let symbol = self.symbol_table.get(id).unwrap();
                     let (included, imported) = if context.inner {
@@ -1151,6 +1158,7 @@ impl SymbolTable {
             } else {
                 errors.push(AnalyzerError::duplicated_identifier(
                     &bind.token.to_string(),
+                    DuplicatedIdentifierKind::Normal,
                     &bind.token.into(),
                 ));
             }
