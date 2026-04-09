@@ -305,6 +305,14 @@ pub fn create_variable_meta(
     let mut variables = HashMap::default();
 
     for (k, v) in src_sorted {
+        // `string`-typed params/consts have no well-defined native byte
+        // width; they are always comptime-inlined so no runtime storage
+        // is needed.
+        if matches!(v.kind, air::VarKind::Param | air::VarKind::Const)
+            && v.r#type.kind == air::TypeKind::String
+        {
+            continue;
+        }
         let width = v.r#type.total_width()?;
         let nb = native_bytes(width);
         let vs = value_size(nb, use_4state);

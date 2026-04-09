@@ -22,10 +22,15 @@ pub struct CmdTest {
 }
 
 struct NativeTestJob {
-    test_name: String,
     module_name: String,
     sim_ir: Ir,
     dump: Option<WaveDumper>,
+}
+
+struct PendingNativeTest {
+    test_name: String,
+    top: Option<resource_table::StrId>,
+    test_path: PathId,
 }
 
 fn wave_output_path(name: &str, test_path: PathId, metadata: &Metadata) -> PathBuf {
@@ -148,31 +153,17 @@ impl CmdTest {
         let mut success = 0;
         let mut failure = 0;
 
-        let mut native_jobs: Vec<NativeTestJob> = Vec::new();
+        let mut pending_native: Vec<PendingNativeTest> = Vec::new();
         let mut non_native_tests = Vec::new();
 
         for (test, property) in &tests {
             match property.r#type {
                 TestType::Native => {
-                    let test_name = test.to_string();
-                    info!("Building IR for test ({test_name})");
-
-                    match prepare_native_test(
-                        &ir,
-                        &test_name,
-                        &property.top,
-                        &self.opt,
-                        property.path,
-                        metadata,
-                        &config,
-                        &mut proto_cache,
-                    ) {
-                        Ok(job) => native_jobs.push(job),
-                        Err(e) => {
-                            error!("Failed to build IR for test ({test_name}): {e}");
-                            failure += 1;
-                        }
-                    }
+                    pending_native.push(PendingNativeTest {
+                        test_name: test.to_string(),
+                        top: property.top,
+                        test_path: property.path,
+                    });
                 }
                 _ => {
                     non_native_tests.push((test, property));
@@ -180,12 +171,12 @@ impl CmdTest {
             }
         }
 
-        if !native_jobs.is_empty() {
+        if !pending_native.is_empty() {
             let num_threads = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1)
-                .min(native_jobs.len());
-            let job_queue = std::sync::Mutex::new(native_jobs.into_iter());
+                .min(pending_native.len());
+            let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let table_snapshot = resource_table::export_tables();
 
             type JobResult = (
@@ -193,24 +184,46 @@ impl CmdTest {
                 std::result::Result<(TestResult, Option<PathBuf>), SimulatorError>,
                 String,
             );
+            let ir_ref = &ir;
+            let config_ref = &config;
+            let opt_ref = &self.opt;
+            let metadata_ref: &Metadata = metadata;
             let results: Vec<Vec<JobResult>> = std::thread::scope(|s| {
-                let queue = &job_queue;
+                let queue = &pending_queue;
                 let snapshot = &table_snapshot;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         s.spawn(move || {
                             resource_table::import_tables(snapshot);
+                            // Per-thread cache avoids locking; cross-test
+                            // reuse is rare since each top name is unique.
+                            let mut thread_cache = ProtoModuleCache::default();
                             let mut thread_results = Vec::new();
                             loop {
-                                let job = queue.lock().unwrap().next();
-                                let Some(job) = job else { break };
+                                let pending = queue.lock().unwrap().next();
+                                let Some(pending) = pending else { break };
                                 output_buffer::enable();
-                                let wave_path = job.dump.as_ref().and_then(|d| d.path().cloned());
-                                let result =
-                                    run_native_testbench(job.sim_ir, job.dump, job.module_name);
-                                let result = result.map(|r| (r, wave_path));
+                                let build_result = prepare_native_test(
+                                    ir_ref,
+                                    &pending.test_name,
+                                    &pending.top,
+                                    opt_ref,
+                                    pending.test_path,
+                                    metadata_ref,
+                                    config_ref,
+                                    &mut thread_cache,
+                                );
+                                let run_result = match build_result {
+                                    Ok(job) => {
+                                        let wave_path =
+                                            job.dump.as_ref().and_then(|d| d.path().cloned());
+                                        run_native_testbench(job.sim_ir, job.dump, job.module_name)
+                                            .map(|r| (r, wave_path))
+                                    }
+                                    Err(e) => Err(e),
+                                };
                                 let output = output_buffer::take();
-                                thread_results.push((job.test_name, result, output));
+                                thread_results.push((pending.test_name, run_result, output));
                             }
                             thread_results
                         })
@@ -356,7 +369,6 @@ fn prepare_native_test(
     };
 
     Ok(NativeTestJob {
-        test_name: test_name.to_string(),
         module_name,
         sim_ir,
         dump,
