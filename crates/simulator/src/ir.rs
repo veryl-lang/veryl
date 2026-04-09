@@ -293,12 +293,10 @@ struct CacheEntry {
 }
 
 /// Cache for `ProtoModule` and JIT binaries keyed by top module name.
-/// `shared_jit_cache` persists sub-module JIT results across different top modules.
 #[derive(Default)]
 pub struct ProtoModuleCache {
     entries: HashMap<StrId, CacheEntry>,
-    shared_jit_cache: HashMap<StrId, context::JitCacheEntry>,
-    /// Keeps JIT binary pages alive so function pointers in shared_jit_cache remain valid.
+    /// Keeps JIT binary pages alive for the cached ProtoModules.
     shared_binaries: Vec<Arc<Vec<BinaryStorage>>>,
 }
 
@@ -327,7 +325,6 @@ pub fn build_ir_cached(
             let token = x.token;
             let mut context = context::Context {
                 config: config.clone(),
-                jit_cache: std::mem::take(&mut cache.shared_jit_cache),
                 ..Default::default()
             };
 
@@ -337,7 +334,6 @@ pub fn build_ir_cached(
 
             let result = Ir::from_module_arc(module, Arc::clone(&binary), config, token);
 
-            cache.shared_jit_cache = context.jit_cache;
             cache.shared_binaries.push(Arc::clone(&binary));
 
             cache.entries.insert(

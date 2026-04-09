@@ -3,8 +3,8 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::utils::convert_cast;
 use crate::ir::{
-    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall, Type,
-    TypeKind, ValueVariant, VarId, VarIndex, VarSelect,
+    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall,
+    SystemFunctionKind, Type, TypeKind, ValueVariant, VarId, VarIndex, VarSelect,
 };
 use crate::symbol::{ClockDomain, Symbol, SymbolKind};
 use crate::value::{Value, ValueBigUint};
@@ -290,6 +290,15 @@ impl Expression {
                     let val = x.eval_value(context)?;
                     return Some(convert_cast(val, src_kind, dst_kind, context_width));
                 }
+
+                // Re-derive signed from the operands for Div/Rem: the
+                // outer-propagated expr_context may have dropped signed
+                // via merge() when a sibling branch is unsigned.
+                let signed = if matches!(op, Op::Div | Op::Rem) {
+                    x.comptime().expr_context.signed & y.comptime().expr_context.signed
+                } else {
+                    signed
+                };
 
                 let x_kind = x.comptime().r#type.kind.clone();
                 let y_kind = y.comptime().r#type.kind.clone();
@@ -665,7 +674,18 @@ impl Factor {
                 x.evaluated = true;
             }
             Factor::SystemFunctionCall(x) => {
+                // Preserve the signed flag set by $signed / $unsigned:
+                // the outer-propagated expr_context must not clobber the
+                // explicit cast intent.
+                let preserve_signed = matches!(
+                    x.kind,
+                    SystemFunctionKind::Signed(_) | SystemFunctionKind::Unsigned(_)
+                );
+                let kept = x.comptime.expr_context.signed;
                 x.comptime.expr_context = expr_context;
+                if preserve_signed {
+                    x.comptime.expr_context.signed = kept;
+                }
                 x.comptime.evaluated = true;
             }
             Factor::FunctionCall(x) => {

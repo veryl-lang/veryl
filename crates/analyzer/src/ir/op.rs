@@ -839,13 +839,18 @@ impl Op {
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        if x.is_xz() || y.is_xz() || y.payload == 0 {
+                        let y_masked = y.payload & ValueU64::gen_mask(width);
+                        if x.is_xz() || y.is_xz() || y_masked == 0 {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
                             let mut payload = if signed {
-                                let x = x.to_i64().unwrap();
-                                let y = y.to_i64().unwrap();
-                                (x / y) as u64
+                                // Sign-extend operands from the
+                                // expression width; on i64::MIN / -1
+                                // overflow fall back to the dividend.
+                                let sh = 64 - width;
+                                let xs = ((x.payload << sh) as i64) >> sh;
+                                let ys = ((y.payload << sh) as i64) >> sh;
+                                xs.checked_div(ys).unwrap_or(xs) as u64
                             } else {
                                 x.payload / y.payload
                             };
@@ -877,13 +882,15 @@ impl Op {
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
-                        if x.is_xz() || y.is_xz() || y.payload == 0 {
+                        let y_masked = y.payload & ValueU64::gen_mask(width);
+                        if x.is_xz() || y.is_xz() || y_masked == 0 {
                             Value::U64(ValueU64::new_x(width, signed))
                         } else {
                             let mut payload = if signed {
-                                let x = x.to_i64().unwrap();
-                                let y = y.to_i64().unwrap();
-                                (x % y) as u64
+                                let sh = 64 - width;
+                                let xs = ((x.payload << sh) as i64) >> sh;
+                                let ys = ((y.payload << sh) as i64) >> sh;
+                                xs.checked_rem(ys).unwrap_or(0) as u64
                             } else {
                                 x.payload % y.payload
                             };
@@ -1138,7 +1145,8 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            x.to_i64() > y.to_i64()
+                            let sh = 64 - xy_width;
+                            ((x.payload << sh) as i64) >> sh > ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload > y.payload
                         };
@@ -1171,7 +1179,8 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            x.to_i64() >= y.to_i64()
+                            let sh = 64 - xy_width;
+                            ((x.payload << sh) as i64) >> sh >= ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload >= y.payload
                         };
@@ -1204,7 +1213,8 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            x.to_i64() < y.to_i64()
+                            let sh = 64 - xy_width;
+                            ((x.payload << sh) as i64) >> sh < ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload < y.payload
                         };
@@ -1237,7 +1247,8 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            x.to_i64() <= y.to_i64()
+                            let sh = 64 - xy_width;
+                            ((x.payload << sh) as i64) >> sh <= ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload <= y.payload
                         };
@@ -1395,7 +1406,7 @@ impl Op {
                         if let Some(y) = y {
                             let mut ret = x.clone();
 
-                            let (ext_payload, ext_mask_xz) = if x.signed {
+                            let (ext_payload, ext_mask_xz) = if signed {
                                 let mut ext_mask = ValueU64::gen_mask(width - y);
                                 ext_mask ^= ValueU64::gen_mask(width);
 
@@ -1422,7 +1433,7 @@ impl Op {
                         if let Some(y) = y {
                             let mut ret = x.clone();
 
-                            let (ext_payload, ext_mask_xz) = if x.signed {
+                            let (ext_payload, ext_mask_xz) = if signed {
                                 let mut ext_mask = mask_cache.get(width - y).clone();
                                 ext_mask ^= mask_cache.get(width);
 

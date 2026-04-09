@@ -1576,6 +1576,152 @@ fn binary_corner_case() {
     binary_test("8'shz4", "** ", "3'd2  ", 16, "16'bxxxxxxxxxxxxxxxx", true);
 }
 
+// Regression: `$signed(x) >>> y` and signed comparisons on a same-width
+// unsigned variable must use the expression-context `signed` flag, not
+// the stored variable flag, otherwise the interpreter falls back to a
+// logical shift / unsigned compare.
+#[test]
+fn signed_cast_same_width() {
+    let code = r#"
+    module Top (
+        a  : input  logic<64>,
+        sh : input  logic<6> ,
+        b  : input  logic<64>,
+        sra: output logic<64>,
+        lt : output logic    ,
+        ge : output logic    ,
+    ) {
+        assign sra = $signed(a) >>> sh;
+        assign lt  = $signed(a) <: $signed(b);
+        assign ge  = $signed(a) >= $signed(b);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // 0xFFFFFFFF_80000000 >>> 1 = 0xFFFFFFFF_C0000000 (arithmetic)
+        sim.set("a", Value::from_str("64'hFFFFFFFF_80000000").unwrap());
+        sim.set("sh", Value::from_str("6'd1").unwrap());
+        sim.set("b", Value::from_str("64'd1").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("sra").unwrap()),
+            "64'hffffffffc0000000"
+        );
+        // -0x80000000 < 1 → taken
+        assert_eq!(format!("{:b}", sim.get("lt").unwrap()), "1'b1");
+        // -0x80000000 >= 1 → false
+        assert_eq!(format!("{:b}", sim.get("ge").unwrap()), "1'b0");
+
+        // -1 vs -2: -1 > -2
+        sim.set("a", Value::from_str("64'hFFFFFFFF_FFFFFFFF").unwrap());
+        sim.set("b", Value::from_str("64'hFFFFFFFF_FFFFFFFE").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(format!("{:b}", sim.get("lt").unwrap()), "1'b0");
+        assert_eq!(format!("{:b}", sim.get("ge").unwrap()), "1'b1");
+    }
+}
+
+// Regression: `$signed(a) / $signed(b)` and `%` must (a) produce a
+// signed result and (b) survive the cranelift SIGFPE cases (y == 0 and
+// signed i64::MIN / -1) consistently between interpreter and JIT.
+#[test]
+fn signed_div_rem_cast_and_overflow() {
+    let code = r#"
+    module Top (
+        a : input  logic<64>,
+        b : input  logic<64>,
+        q : output logic<64>,
+        r : output logic<64>,
+    ) {
+        assign q = $signed(a) / $signed(b);
+        assign r = $signed(a) % $signed(b);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // -10 / 3 = -3, -10 % 3 = -1 (signed division)
+        sim.set("a", Value::from_str("64'hFFFFFFFF_FFFFFFF6").unwrap());
+        sim.set("b", Value::from_str("64'd3").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("q").unwrap()),
+            "64'hfffffffffffffffd"
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("r").unwrap()),
+            "64'hffffffffffffffff"
+        );
+
+        // i64::MIN / -1 would SIGFPE on cranelift sdiv; the JIT must
+        // guard it and fall back to the dividend.
+        sim.set("a", Value::from_str("64'h80000000_00000000").unwrap());
+        sim.set("b", Value::from_str("64'hFFFFFFFF_FFFFFFFF").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("q").unwrap()),
+            "64'h8000000000000000"
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("r").unwrap()),
+            "64'h0000000000000000"
+        );
+    }
+}
+
+// Regression: a narrow-width destination (here `logic<2>`) must mask
+// the stored payload to dst_width; `effective_bits()` reports the
+// declared width and misses the carry-out from Add, which would
+// otherwise leak into the high bits of the stored value.
+#[test]
+fn narrow_width_add_carry_out_masked() {
+    let code = r#"
+    module Top (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        i_inc: input  logic   ,
+        o_idx: output logic<2>,
+    ) {
+        var idx: logic<2>;
+        always_ff {
+            if_reset {
+                idx = 2'd0;
+            } else if i_inc {
+                idx = idx + 2'd1;
+            }
+        }
+        assign o_idx = idx;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("i_inc", Value::new(1, 1, false));
+        sim.step(&rst);
+
+        // Drive 8 cycles; idx must wrap cleanly 0,1,2,3,0,1,2,3.
+        let expected = [1u64, 2, 3, 0, 1, 2, 3, 0];
+        for (i, want) in expected.iter().enumerate() {
+            sim.step(&clk);
+            let got = sim.get("o_idx").unwrap().payload_u64() & 0x3;
+            assert_eq!(
+                got, *want,
+                "cycle {}: JIT={} 4st={} ff_opt={}: got {} expected {}",
+                i, config.use_jit, config.use_4state, !config.disable_ff_opt, got, *want
+            );
+        }
+    }
+}
+
 #[test]
 fn partial_jit() {
     // Mix of JIT-compilable (a + b, a ** d) and non-JIT-compilable ($display) statements.
@@ -9616,6 +9762,107 @@ fn dual_jit_load_cache_read_after_write() {
     });
 }
 
+/// Merged comb+event JIT: a child module with comb assigns reading an
+/// FF plus multiple always_ff blocks reading the same FF and a port
+/// exercises the load_cache / event-dependency interaction in the
+/// merged JIT path.
+#[test]
+fn dual_jit_merged_comb_event_flush_pattern() {
+    let code = r#"
+    module Top (
+        clk   : input  clock,
+        rst   : input  reset,
+        result: output logic<8>,
+        valid : output logic,
+    ) {
+        var counter: logic<8>;
+        always_ff {
+            if_reset {
+                counter = 0;
+            } else {
+                counter += 1;
+            }
+        }
+
+        let trap_taken: logic = counter == 8'd3 || counter == 8'd7;
+
+        inst u_pipe: Pipeline (
+            clk,
+            rst,
+            i_flush  : trap_taken,
+            i_valid  : 1'b1,
+            i_data   : counter,
+            i_mode   : counter[1:0],
+            o_valid  : valid,
+            o_data   : result,
+        );
+    }
+
+    module Pipeline (
+        clk    : input  clock,
+        rst    : input  reset,
+        i_flush: input  logic,
+        i_valid: input  logic,
+        i_data : input  logic<8>,
+        i_mode : input  logic<2>,
+        o_valid: output logic,
+        o_data : output logic<8>,
+    ) {
+        var flush_q: logic;
+        always_ff {
+            if_reset {
+                flush_q = 1'b0;
+            } else {
+                flush_q = i_flush;
+            }
+        }
+
+        // Several comb chains give the merged optimiser internal
+        // variables to work on.
+        let wen     : logic    = i_valid && !flush_q;
+        let ren     : logic    = i_valid && !flush_q;
+        let gated   : logic<8> = if wen ? i_data : 8'd0;
+        let shifted : logic<8> = gated << i_mode;
+        let masked  : logic<8> = shifted & 8'hFF;
+        let combined: logic<8> = masked + gated;
+
+        let is_special: logic    = i_mode == 2'd3;
+        let sc_success: logic    = is_special && wen;
+        let sc_result : logic<8> = if sc_success ? 8'd0 : 8'd1;
+        let final_data: logic<8> = if is_special ? sc_result : combined;
+
+        var saved_data: logic<8>;
+        always_ff {
+            if_reset {
+                saved_data = 8'd0;
+            } else if ren {
+                saved_data = i_data;
+            }
+        }
+
+        always_ff {
+            if_reset {
+                o_valid = 1'b0;
+                o_data  = 8'd0;
+            } else if i_flush || flush_q {
+                o_valid = 1'b0;
+            } else {
+                o_valid = i_valid;
+                o_data  = final_data + saved_data;
+            }
+        }
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        dual.step_reset("rst");
+
+        for _ in 0u64..20 {
+            dual.step_clock("clk");
+        }
+    });
+}
+
 /// Store elimination: internal comb variable in child module has its store
 /// eliminated in JIT (forwarded via load_cache only).
 #[test]
@@ -10353,6 +10600,126 @@ fn issue_2454_mixed_int_float_binary() {
             result, expected,
             "step32_from_hz(440Hz): JIT={} 4st={}: expected {} got {}",
             config.use_jit, config.use_4state, expected, result
+        );
+    }
+}
+
+/// Regression: the "find max" pattern in always_comb — initialise a
+/// state variable, then conditionally update it inside a loop that
+/// reads itself — must not be store-eliminated when load_cache is
+/// disabled, otherwise the elided value is not recoverable and the
+/// loop reads stale memory.
+///
+/// Only triggers via the merged comb+event JIT path, so the module
+/// under test must be instantiated as a child.
+#[test]
+fn find_max_with_self_reference_in_comb() {
+    let code = r#"
+    module Inner (
+        clk    : input  clock    ,
+        rst    : input  reset    ,
+        i_set  : input  logic<8> ,
+        i_clear: input  logic    ,
+        o_vec  : output logic<8> ,
+    ) {
+        var vec : logic<8>;
+        var prio: logic<3> [8];
+
+        var best_id : logic<3>;
+        var best_pri: logic<3>;
+
+        always_comb {
+            best_id  = 3'd0;
+            best_pri = 3'd0;
+            for i: i32 in 1..8 {
+                if vec[i] && prio[i] >: best_pri {
+                    best_id  = i[2:0];
+                    best_pri = prio[i];
+                }
+            }
+        }
+
+        always_ff (clk, rst) {
+            if_reset {
+                vec = 8'd0;
+                for i: i32 in 0..8 {
+                    prio[i] = 3'd0;
+                }
+                prio[3] = 3'd5;
+            } else {
+                for i: i32 in 1..8 {
+                    if i_set[i] && !vec[i] {
+                        vec[i] = 1'b1;
+                    }
+                }
+                if i_clear && best_id != 3'd0 {
+                    vec[best_id] = 1'b0;
+                }
+            }
+        }
+
+        assign o_vec = vec;
+    }
+
+    module Top (
+        clk    : input  clock    ,
+        rst    : input  reset    ,
+        i_set  : input  logic<8> ,
+        i_clear: input  logic    ,
+        o_vec  : output logic<8> ,
+    ) {
+        inst u_inner: Inner (
+            clk            ,
+            rst            ,
+            i_set  : i_set ,
+            i_clear: i_clear,
+            o_vec  : o_vec ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("i_set", Value::new(0, 8, false));
+        sim.set("i_clear", Value::new(0, 1, false));
+        sim.step(&rst);
+        sim.step(&clk);
+
+        // Latch vec[3] = 1 (prio[3] is the only nonzero priority).
+        sim.set("i_set", Value::new(0b0000_1000, 8, false));
+        sim.step(&clk);
+        sim.set("i_set", Value::new(0, 8, false));
+
+        let v = sim.get("o_vec").unwrap().payload_u64();
+        assert_eq!(
+            v & 0xff,
+            0x08,
+            "after set: JIT={} 4st={} ff_opt={}: vec=0x{:02x} expected 0x08",
+            config.use_jit,
+            config.use_4state,
+            !config.disable_ff_opt,
+            v & 0xff
+        );
+
+        // Clear via dynamic best_id; vec should be empty afterwards.
+        sim.set("i_clear", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("i_clear", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        let v = sim.get("o_vec").unwrap().payload_u64();
+        assert_eq!(
+            v & 0xff,
+            0x00,
+            "after claim: JIT={} 4st={} ff_opt={}: vec=0x{:02x} expected 0x00",
+            config.use_jit,
+            config.use_4state,
+            !config.disable_ff_opt,
+            v & 0xff
         );
     }
 }
