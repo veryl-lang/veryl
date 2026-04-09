@@ -2141,9 +2141,19 @@ fn extract_display_args(
     Some((format_str, exprs))
 }
 
+fn factor_comptime(factor: &air::Factor) -> Option<&veryl_analyzer::ir::Comptime> {
+    match factor {
+        air::Factor::Value(x) => Some(x),
+        // A const parameter reference whose comptime value has already
+        // been folded in by the analyzer.
+        air::Factor::Variable(_, _, _, x) if x.is_const && x.evaluated => Some(x),
+        _ => None,
+    }
+}
+
 fn is_string_literal(expr: &air::Expression) -> bool {
     if let air::Expression::Term(factor) = expr
-        && let air::Factor::Value(comptime) = factor.as_ref()
+        && let Some(comptime) = factor_comptime(factor.as_ref())
     {
         return comptime.r#type.kind == TypeKind::String;
     }
@@ -2152,7 +2162,7 @@ fn is_string_literal(expr: &air::Expression) -> bool {
 
 fn extract_string_value(expr: &air::Expression) -> Option<String> {
     if let air::Expression::Term(factor) = expr
-        && let air::Factor::Value(comptime) = factor.as_ref()
+        && let Some(comptime) = factor_comptime(factor.as_ref())
         && let ValueVariant::Numeric(value) = &comptime.value
     {
         return veryl_analyzer::value::byte_value_to_string(value);
