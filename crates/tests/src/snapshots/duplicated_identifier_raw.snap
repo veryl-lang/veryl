@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+duplicated_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#duplicated_identifier)
+
+  × "_a" is duplicated
+   ╭─[../../testcases/error/duplicated_identifier_raw.veryl:3:9]
+ 2 │     var _a: logic;
+ 3 │     var r#_a: logic;
+   ·         ──┬─
+   ·           ╰── Error location
+ 4 │ }
+   ╰────
+  help: r#-prefixed identifier "r#_a" is treated as the same identifier without the prefix

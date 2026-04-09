@@ -1,5 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, InvalidModifierKind, InvalidTestKind, MultipleDefaultKind,
+    AnalyzerError, DuplicatedIdentifierKind, InvalidModifierKind, InvalidTestKind,
+    MultipleDefaultKind,
 };
 use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
@@ -161,6 +162,7 @@ impl CreateSymbolTable {
         if identifier_token.text == type_base.text {
             self.errors.push(AnalyzerError::duplicated_identifier(
                 &identifier_token.to_string(),
+                DuplicatedIdentifierKind::Normal,
                 &identifier_token.into(),
             ));
             false
@@ -200,8 +202,17 @@ impl CreateSymbolTable {
             // Need to insert the namespace again to resolve this namespace mismatch.
             self.insert_namespace(token);
         } else {
+            let canonical = resource_table::canonical_str_id(token.text);
+            let kind = if canonical != token.text {
+                DuplicatedIdentifierKind::RawIdentifier {
+                    raw: token.text.to_string(),
+                }
+            } else {
+                DuplicatedIdentifierKind::Normal
+            };
             self.errors.push(AnalyzerError::duplicated_identifier(
-                &token.to_string(),
+                &canonical.to_string(),
+                kind,
                 &token.into(),
             ));
         }

@@ -1,0 +1,4 @@
+module duplicated_identifier_raw {
+    var _a: logic;
+    var r#_a: logic;
+}

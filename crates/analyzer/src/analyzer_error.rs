@@ -78,12 +78,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(duplicated_identifier),
-        help(""),
+        help("{kind}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{identifier}\" is duplicated")]
     DuplicatedIdentifier {
         identifier: String,
+        kind: DuplicatedIdentifierKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1691,9 +1692,14 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn duplicated_identifier(identifier: &str, token: &TokenRange) -> Self {
+    pub fn duplicated_identifier(
+        identifier: &str,
+        kind: DuplicatedIdentifierKind,
+        token: &TokenRange,
+    ) -> Self {
         AnalyzerError::DuplicatedIdentifier {
             identifier: identifier.to_string(),
+            kind,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -2768,6 +2774,26 @@ impl fmt::Display for MultipleDefaultKind {
         match self {
             MultipleDefaultKind::Clock => "clock".fmt(f),
             MultipleDefaultKind::Reset => "reset".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DuplicatedIdentifierKind {
+    Normal,
+    RawIdentifier { raw: String },
+}
+
+impl fmt::Display for DuplicatedIdentifierKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DuplicatedIdentifierKind::Normal => "".fmt(f),
+            DuplicatedIdentifierKind::RawIdentifier { raw } => {
+                write!(
+                    f,
+                    "r#-prefixed identifier \"{raw}\" is treated as the same identifier without the prefix"
+                )
+            }
         }
     }
 }
