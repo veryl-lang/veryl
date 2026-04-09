@@ -1087,6 +1087,10 @@ impl ProtoExpression {
 
     /// # Safety
     /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
+    // `ff_len` / `comb_len` are used by the debug_assert! bounds checks
+    // below; release builds compile those out, which tricks clippy into
+    // thinking the parameters are only passed through to recursive calls.
+    #[allow(clippy::only_used_in_recursion)]
     pub unsafe fn apply_values_ptr(
         &self,
         ff_values_ptr: *mut u8,
@@ -1764,7 +1768,14 @@ impl ProtoExpression {
                 let (mut x_payload, mut x_mask_xz) = x.build_binary(context, builder)?;
                 let (mut y_payload, mut y_mask_xz) = y.build_binary(context, builder)?;
 
-                let signed = expr_context.signed;
+                // Re-derive signed from the operand contexts for
+                // Div/Rem: the outer expr_context may have dropped
+                // signed via merge() when a sibling branch is unsigned.
+                let signed = if matches!(op, Op::Div | Op::Rem) {
+                    x.expr_context().signed & y.expr_context().signed
+                } else {
+                    expr_context.signed
+                };
                 let wide = expr_context.width > 64;
                 let x_wide = x.width() > 64;
                 let y_wide = y.width() > 64;
@@ -1805,52 +1816,87 @@ impl ProtoExpression {
                     Op::Sub => builder.ins().isub(x_payload, y_payload),
                     Op::Mul => builder.ins().imul(x_payload, y_payload),
                     Op::Div => {
-                        // I128 div/rem rejected in can_build_binary
-                        let block0 = builder.create_block();
-                        let block1 = builder.create_block();
-                        let block2 = builder.create_block();
-                        builder.append_block_param(block2, I64);
+                        // I128 div/rem rejected in can_build_binary.
+                        // cranelift sdiv traps SIGFPE on both y==0 and
+                        // signed i64::MIN / -1. y==0 keeps the existing
+                        // "return 0" behaviour; the overflow case is
+                        // routed to the dividend to match the analyzer
+                        // interpreter's checked_div fallback.
+                        let block_zero = builder.create_block();
+                        let block_ovf = builder.create_block();
+                        let block_ok = builder.create_block();
+                        let block_end = builder.create_block();
+                        builder.append_block_param(block_end, I64);
 
                         let zero_div = builder.ins().icmp_imm(IntCC::Equal, y_payload, 0);
-                        builder.ins().brif(zero_div, block0, &[], block1, &[]);
+                        if signed {
+                            let block_check = builder.create_block();
+                            builder
+                                .ins()
+                                .brif(zero_div, block_zero, &[], block_check, &[]);
 
-                        builder.switch_to_block(block0);
-                        let ret = builder.ins().iconst(I64, 0);
-                        builder.ins().jump(block2, &[BlockArg::Value(ret)]);
+                            builder.switch_to_block(block_check);
+                            let neg_one = builder.ins().icmp_imm(IntCC::Equal, y_payload, -1);
+                            let int_min = builder.ins().icmp_imm(IntCC::Equal, x_payload, i64::MIN);
+                            let ovf = builder.ins().band(neg_one, int_min);
+                            builder.ins().brif(ovf, block_ovf, &[], block_ok, &[]);
+                        } else {
+                            builder.ins().brif(zero_div, block_zero, &[], block_ok, &[]);
+                        }
 
-                        builder.switch_to_block(block1);
+                        builder.switch_to_block(block_zero);
+                        let zero = builder.ins().iconst(I64, 0);
+                        builder.ins().jump(block_end, &[BlockArg::Value(zero)]);
+
+                        builder.switch_to_block(block_ovf);
+                        builder.ins().jump(block_end, &[BlockArg::Value(x_payload)]);
+
+                        builder.switch_to_block(block_ok);
                         let ret = if signed {
                             builder.ins().sdiv(x_payload, y_payload)
                         } else {
                             builder.ins().udiv(x_payload, y_payload)
                         };
-                        builder.ins().jump(block2, &[BlockArg::Value(ret)]);
-                        builder.switch_to_block(block2);
-                        builder.block_params(block2)[0]
+                        builder.ins().jump(block_end, &[BlockArg::Value(ret)]);
+                        builder.switch_to_block(block_end);
+                        builder.block_params(block_end)[0]
                     }
                     Op::Rem => {
-                        // I128 div/rem rejected in can_build_binary
-                        let block0 = builder.create_block();
-                        let block1 = builder.create_block();
-                        let block2 = builder.create_block();
-                        builder.append_block_param(block2, I64);
+                        // I128 div/rem rejected in can_build_binary.
+                        // Both y==0 and signed i64::MIN % -1 trap
+                        // cranelift srem; both are routed to 0 to
+                        // preserve the original y==0 behaviour and
+                        // match the analyzer interpreter's checked_rem
+                        // fallback for the overflow case.
+                        let block_zero = builder.create_block();
+                        let block_ok = builder.create_block();
+                        let block_end = builder.create_block();
+                        builder.append_block_param(block_end, I64);
 
-                        let zero_div = builder.ins().icmp_imm(IntCC::Equal, y_payload, 0);
-                        builder.ins().brif(zero_div, block0, &[], block1, &[]);
+                        let bad = if signed {
+                            let zero_div = builder.ins().icmp_imm(IntCC::Equal, y_payload, 0);
+                            let neg_one = builder.ins().icmp_imm(IntCC::Equal, y_payload, -1);
+                            let int_min = builder.ins().icmp_imm(IntCC::Equal, x_payload, i64::MIN);
+                            let ovf = builder.ins().band(neg_one, int_min);
+                            builder.ins().bor(zero_div, ovf)
+                        } else {
+                            builder.ins().icmp_imm(IntCC::Equal, y_payload, 0)
+                        };
+                        builder.ins().brif(bad, block_zero, &[], block_ok, &[]);
 
-                        builder.switch_to_block(block0);
-                        let ret = builder.ins().iconst(I64, 0);
-                        builder.ins().jump(block2, &[BlockArg::Value(ret)]);
+                        builder.switch_to_block(block_zero);
+                        let zero = builder.ins().iconst(I64, 0);
+                        builder.ins().jump(block_end, &[BlockArg::Value(zero)]);
 
-                        builder.switch_to_block(block1);
+                        builder.switch_to_block(block_ok);
                         let ret = if signed {
                             builder.ins().srem(x_payload, y_payload)
                         } else {
                             builder.ins().urem(x_payload, y_payload)
                         };
-                        builder.ins().jump(block2, &[BlockArg::Value(ret)]);
-                        builder.switch_to_block(block2);
-                        builder.block_params(block2)[0]
+                        builder.ins().jump(block_end, &[BlockArg::Value(ret)]);
+                        builder.switch_to_block(block_end);
+                        builder.block_params(block_end)[0]
                     }
                     Op::BitAnd => builder.ins().band(x_payload, y_payload),
                     Op::BitOr => builder.ins().bor(x_payload, y_payload),
@@ -3889,7 +3935,24 @@ impl Conv<&air::Expression> for ProtoExpression {
                 }
                 air::Factor::SystemFunctionCall(call) => match &call.kind {
                     air::SystemFunctionKind::Signed(input)
-                    | air::SystemFunctionKind::Unsigned(input) => Conv::conv(context, &input.0),
+                    | air::SystemFunctionKind::Unsigned(input) => {
+                        let mut inner: ProtoExpression = Conv::conv(context, &input.0)?;
+                        // Stamp the cast's signedness onto the inner
+                        // expression's expr_context so downstream
+                        // consumers see the post-cast flag.
+                        let signed = matches!(call.kind, air::SystemFunctionKind::Signed(_));
+                        let ctx = match &mut inner {
+                            ProtoExpression::Variable { expr_context, .. }
+                            | ProtoExpression::Value { expr_context, .. }
+                            | ProtoExpression::Unary { expr_context, .. }
+                            | ProtoExpression::Binary { expr_context, .. }
+                            | ProtoExpression::Concatenation { expr_context, .. }
+                            | ProtoExpression::Ternary { expr_context, .. }
+                            | ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
+                        };
+                        ctx.signed = signed;
+                        Ok(inner)
+                    }
                     _ => {
                         unreachable!("system function calls are resolved by the analyzer")
                     }
@@ -3972,7 +4035,11 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
-                let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
+                if matches!(op, Op::Div | Op::Rem) {
+                    // See build_binary for the merge() rationale.
+                    expr_context.signed = x.expr_context().signed & y.expr_context().signed;
+                }
 
                 // Float constant folding
                 if (x_kind.is_float() || y_kind.is_float())

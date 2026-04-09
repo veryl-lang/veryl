@@ -489,7 +489,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         && !stmts.is_empty()
                         && let Some(func) = cranelift::build_binary(context, stmts.clone())
                     {
-                        let (input_offsets, output_offsets) = gather_external_offsets(stmts);
+                        // Event blocks use NBA semantics, so a variable
+                        // that is both read and written is not purely
+                        // internal; keep all inputs so sort_ff_event sees
+                        // the dependency.
+                        let mut all_inputs = vec![];
+                        let mut all_outputs = vec![];
+                        for s in stmts.iter() {
+                            s.gather_variable_offsets(&mut all_inputs, &mut all_outputs);
+                        }
+                        all_inputs.dedup();
+                        all_outputs.dedup();
+                        let (input_offsets, output_offsets) = (all_inputs, all_outputs);
                         let ff_canonical = gather_ff_canonical(stmts);
 
                         let event_original = stmts.clone();
@@ -652,7 +663,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         let mut merged = opt_comb;
                         merged.extend(opt_events);
 
-                        if let Some(func) = cranelift::build_binary_with_store_elim(
+                        if let Some(func) = cranelift::build_binary_with_store_elim_and_no_cache(
                             context,
                             merged.clone(),
                             store_elim,

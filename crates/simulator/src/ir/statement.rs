@@ -1750,10 +1750,11 @@ impl ProtoAssignStatement {
                 .load_cache
                 .insert(cache_key, (result, result_mask_xz));
         } else {
-            // Store elimination: skip memory store for internal comb variables,
-            // keeping only load_cache forwarding.
-            let skip_store =
-                context.store_elim_enabled && context.store_elim_offsets.contains(&cache_key);
+            // Store elimination relies on load_cache forwarding to
+            // serve subsequent reads; skip only when the cache is live.
+            let skip_store = context.store_elim_enabled
+                && !context.disable_load_cache
+                && context.store_elim_offsets.contains(&cache_key);
 
             if !skip_store {
                 let needs_trunc = known_bits > self.dst_width;
@@ -1828,12 +1829,11 @@ impl ProtoAssignStatement {
                         if self.dst_width > 128 {
                             return None;
                         }
-                        let payload = if needs_trunc {
-                            let mask = gen_mask_for_width(self.dst_width);
-                            band_const(builder, payload, mask, wide)
-                        } else {
-                            payload
-                        };
+                        // Always mask: effective_bits() reports declared
+                        // width and misses carry-out from Add and friends.
+                        let _ = needs_trunc;
+                        let mask = gen_mask_for_width(self.dst_width);
+                        let payload = band_const(builder, payload, mask, wide);
                         // Store using the appropriate native width
                         if nb == 4 {
                             builder
@@ -1845,12 +1845,8 @@ impl ProtoAssignStatement {
                                 .store(store_mem_flag, payload, base_addr, dst_offset);
                         }
                         if let Some(mask_xz) = mask_xz {
-                            let mask_xz = if needs_trunc {
-                                let mask = gen_mask_for_width(self.dst_width);
-                                band_const(builder, mask_xz, mask, wide)
-                            } else {
-                                mask_xz
-                            };
+                            let mask = gen_mask_for_width(self.dst_width);
+                            let mask_xz = band_const(builder, mask_xz, mask, wide);
                             if nb == 4 {
                                 builder.ins().istore32(
                                     store_mem_flag,
@@ -2098,7 +2094,7 @@ impl ProtoIfStatement {
         context.load_cache.clear();
 
         builder.switch_to_block(false_block);
-        let len = self.true_side.len();
+        let len = self.false_side.len();
         for (i, x) in self.false_side.iter().enumerate() {
             let is_last = is_last && (i + 1 == len);
             x.build_binary(context, builder, is_last)?;
