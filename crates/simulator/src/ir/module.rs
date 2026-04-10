@@ -13,8 +13,10 @@ use crate::ir::{
 };
 use crate::simulator_error::SimulatorError;
 use daggy::Dag;
+use daggy::petgraph::Direction::Outgoing;
 use daggy::petgraph::algo;
 use daggy::petgraph::visit::{Bfs, Walker};
+use std::collections::VecDeque;
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -537,8 +539,10 @@ pub(crate) fn analyze_dependency(
         tokens
     };
 
-    // Helper: build DAG and attempt topological sort.
+    // Helper: build DAG and attempt stable topological sort (Kahn's algorithm).
     // Returns Ok(sorted) on success, Err(failed_id) on cycle.
+    // Uses FIFO queue initialized in source order to preserve source ordering
+    // for statements that have no explicit dependency between them.
     let try_topo_sort =
         |table: &HashMap<usize, ProtoStatement>| -> Result<Vec<ProtoStatement>, usize> {
             let mut dag = Dag::<Node, ()>::new();
@@ -546,6 +550,8 @@ pub(crate) fn analyze_dependency(
 
             let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
             sorted_keys.sort();
+
+            let mut node_to_stmt: HashMap<daggy::NodeIndex, usize> = HashMap::default();
 
             for id in &sorted_keys {
                 let x = &table[id];
@@ -555,6 +561,7 @@ pub(crate) fn analyze_dependency(
                 let stmt_node = Node::Statement(*id);
                 let stmt = dag.add_node(stmt_node);
                 dag_nodes.insert(stmt_node, stmt);
+                node_to_stmt.insert(stmt, *id);
 
                 let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
                 let mut ok = true;
@@ -589,16 +596,55 @@ pub(crate) fn analyze_dependency(
                 }
             }
 
-            let nodes = algo::toposort(dag.graph(), None).unwrap();
+            let graph = dag.graph();
+            let node_count = graph.node_count();
+            let mut in_degree: HashMap<daggy::NodeIndex, usize> = HashMap::default();
+            for idx in graph.node_indices() {
+                in_degree.insert(idx, 0);
+            }
+            for edge in graph.edge_indices() {
+                if let Some((_src, tgt)) = graph.edge_endpoints(edge) {
+                    *in_degree.entry(tgt).or_insert(0) += 1;
+                }
+            }
+
+            let mut queue: VecDeque<daggy::NodeIndex> = VecDeque::new();
+            let mut zero_nodes: Vec<daggy::NodeIndex> = in_degree
+                .iter()
+                .filter(|&(_, &deg)| deg == 0)
+                .map(|(&idx, _)| idx)
+                .collect();
+            zero_nodes.sort_by_key(|&idx| node_to_stmt.get(&idx).copied().unwrap_or(usize::MAX));
+            for idx in zero_nodes {
+                queue.push_back(idx);
+            }
+
             let mut ret = vec![];
             let mut t = table.clone();
-            for i in nodes {
-                if let Node::Statement(x) = dag[i]
+            let mut visited = 0;
+            while let Some(idx) = queue.pop_front() {
+                visited += 1;
+                if let Node::Statement(x) = graph[idx]
                     && let Some(s) = t.remove(&x)
                 {
                     ret.push(s);
                 }
+                let mut successors: Vec<daggy::NodeIndex> =
+                    graph.neighbors_directed(idx, Outgoing).collect();
+                successors.sort_by_key(|&s| node_to_stmt.get(&s).copied().unwrap_or(usize::MAX));
+                for succ in successors {
+                    let deg = in_degree.get_mut(&succ).unwrap();
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(succ);
+                    }
+                }
             }
+
+            if visited != node_count {
+                return Err(sorted_keys[0]);
+            }
+
             Ok(ret)
         };
 
