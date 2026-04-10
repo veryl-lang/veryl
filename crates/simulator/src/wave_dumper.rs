@@ -228,10 +228,10 @@ impl WaveDumper {
     }
 
     pub fn setup_module(&mut self, module_vars: &ModuleVariables, dump_vars: &mut Vec<DumpVar>) {
-        self.add_module(&module_vars.name.to_string());
+        self.add_module(&sanitize_wave_name(&module_vars.name.to_string()));
 
         for x in module_vars.variables.values() {
-            let name = x.path.to_string();
+            let name = sanitize_wave_name(&x.path.to_string());
             let width = x.width as u32;
             let handle = self.add_wire(width, &name);
             dump_vars.push(DumpVar {
@@ -273,6 +273,10 @@ impl Drop for FstDumper {
             let _ = body.finish();
         }
     }
+}
+
+fn sanitize_wave_name(name: &str) -> String {
+    name.replace("::<", "_").replace(">", "").replace("::", "_")
 }
 
 pub struct DumpVar {
