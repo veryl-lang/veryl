@@ -10774,3 +10774,62 @@ fn find_max_with_self_reference_in_comb() {
         );
     }
 }
+
+/// Regression: https://github.com/veryl-lang/veryl/issues/2490
+#[test]
+fn dispatch_binary_pattern_via_function() {
+    let code = r#"
+    module Top #(
+        param WIDTH  : u32  = 4 ,
+        param ENTRIES: u32  = 16,
+        param DATA_TYPE: type = logic<WIDTH>,
+    ) (
+        sel : input  logic<4>,
+        data: input  DATA_TYPE,
+        o0  : output DATA_TYPE,
+        o1  : output DATA_TYPE,
+        o2  : output DATA_TYPE,
+        o3  : output DATA_TYPE,
+    ) {
+        var tmp: DATA_TYPE<ENTRIES>;
+        always_comb {
+            for i: u32 in 0..ENTRIES {
+                tmp[i] = 0 as DATA_TYPE;
+            }
+            tmp[sel] = data;
+            o0 = tmp[0];
+            o1 = tmp[1];
+            o2 = tmp[2];
+            o3 = tmp[3];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for sel_val in 0..4u64 {
+            sim.set("sel", Value::new(sel_val, 4, false));
+            sim.set("data", Value::new(sel_val + 1, 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+            for j in 0..4u64 {
+                let port = format!("o{}", j);
+                let expected = if j == sel_val { sel_val + 1 } else { 0 };
+                assert_eq!(
+                    sim.get(&port).unwrap(),
+                    Value::new(expected, 4, false),
+                    "sel={} j={} expected={} JIT={} 4st={}",
+                    sel_val,
+                    j,
+                    expected,
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
