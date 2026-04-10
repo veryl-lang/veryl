@@ -1165,6 +1165,57 @@ b00000000000000000000000001000110 #
     }
 }
 
+#[test]
+fn dump_vcd_generic_function() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        c: output logic<32>,
+    ) {
+        function Add1::<W: u32> (
+            x: input logic<W>,
+        ) -> logic<W> {
+            return x + 1;
+        }
+
+        assign c = Add1::<32>(a);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let a = Value::new(10, 32, false);
+        sim.set("a", a);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert!(!dump.contains("::<"), "VCD should not contain '::<'");
+        assert!(!dump.contains('>'), "VCD should not contain '>'");
+        assert!(
+            dump.contains("Add1_32"),
+            "VCD should contain sanitized generic function name 'Add1_32'"
+        );
+    }
+}
+
 #[track_caller]
 fn unary_test(op: &str, x: &str, dst_width: usize, dst: &str, only_4state: bool) {
     let x_signed = if x.contains('s') { "signed" } else { "" };
