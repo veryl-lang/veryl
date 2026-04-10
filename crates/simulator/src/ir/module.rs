@@ -3,6 +3,7 @@ use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
+use crate::ir::declaration::stable_topo_sort;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
     write_native_value,
@@ -15,11 +16,9 @@ use crate::simulator_error::SimulatorError;
 use daggy::Dag;
 use daggy::petgraph::Direction::Outgoing;
 use daggy::petgraph::algo;
-use daggy::petgraph::visit::{Bfs, Walker};
 use std::collections::VecDeque;
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
-use veryl_parser::token_range::TokenRange;
 
 pub struct Module {
     pub name: StrId,
@@ -520,25 +519,6 @@ pub(crate) fn analyze_dependency(
         table.insert(i, x);
     }
 
-    let collect_cycle_tokens = |dag: &Dag<Node, ()>,
-                                table: &HashMap<usize, ProtoStatement>,
-                                from: daggy::NodeIndex,
-                                trigger_id: usize| {
-        let mut tokens = vec![];
-        let bfs = Bfs::new(dag.graph(), from);
-        for node_idx in bfs.iter(dag.graph()) {
-            if let Node::Statement(id) = dag.graph()[node_idx]
-                && id != trigger_id
-                && let Some(stmt) = table.get(&id)
-                && let Some(token) = stmt.token()
-                && token != TokenRange::default()
-            {
-                tokens.push(token);
-            }
-        }
-        tokens
-    };
-
     // Helper: build DAG and attempt stable topological sort (Kahn's algorithm).
     // Returns Ok(sorted) on success, Err(failed_id) on cycle.
     // Uses FIFO queue initialized in source order to preserve source ordering
@@ -694,65 +674,72 @@ pub(crate) fn analyze_dependency(
         .values()
         .any(|x| matches!(x, ProtoStatement::CompiledBlock(_)));
 
-    if !has_any_cb {
-        // Genuine loop, no CBs involved — re-do analysis for error message.
-        let mut dag2 = Dag::<Node, ()>::new();
-        let mut dag_nodes2: HashMap<Node, _> = HashMap::default();
+    if !has_any_cb || !has_non_expandable_cb {
+        // DAG-based sort failed (false cycle from inlined function bodies).
+        // Fall back to direct statement-level sort.
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
-        for id in &sorted_keys {
-            let x = &table[id];
-            let mut inputs = vec![];
-            let mut outputs = vec![];
-            x.gather_variable_offsets(&mut inputs, &mut outputs);
-            let stmt_node = Node::Statement(*id);
-            let stmt = dag2.add_node(stmt_node);
-            dag_nodes2.insert(stmt_node, stmt);
-            let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
-            for var_key in inputs {
-                if output_set.contains(&var_key) {
-                    continue;
-                }
-                let var_node = Node::Var(var_key);
-                let var = *dag_nodes2
-                    .entry(var_node)
-                    .or_insert_with(|| dag2.add_node(var_node));
-                if dag2.add_edge(var, stmt, ()).is_err() {
-                    let participant_tokens = collect_cycle_tokens(&dag2, &table, stmt, *id);
-                    let trigger_token = table[id].token().unwrap_or_default();
-                    return Err(SimulatorError::combinational_loop(
-                        &trigger_token,
-                        &participant_tokens,
-                    ));
-                }
+        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+        let sorted = stable_topo_sort(stmts);
+        // Verify no genuine combinational loop remains.
+        let n = sorted.len();
+        let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+        let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+        for s in &sorted {
+            let mut ins = vec![];
+            let mut outs = vec![];
+            s.gather_variable_offsets(&mut ins, &mut outs);
+            s_inputs.push(ins);
+            s_outputs.push(outs);
+        }
+        let mut w: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+        for (i, outs) in s_outputs.iter().enumerate() {
+            for &key in outs {
+                w.entry(key).or_default().push(i);
             }
-            for var_key in outputs {
-                let var_node = Node::Var(var_key);
-                let var = *dag_nodes2
-                    .entry(var_node)
-                    .or_insert_with(|| dag2.add_node(var_node));
-                if dag2.add_edge(stmt, var, ()).is_err() {
-                    let participant_tokens = collect_cycle_tokens(&dag2, &table, var, *id);
-                    let trigger_token = table[id].token().unwrap_or_default();
-                    return Err(SimulatorError::combinational_loop(
-                        &trigger_token,
-                        &participant_tokens,
-                    ));
+        }
+        let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+        let mut deg: Vec<usize> = vec![0; n];
+        for (ri, ins) in s_inputs.iter().enumerate() {
+            for key in ins {
+                if let Some(wis) = w.get(key) {
+                    for &wi in wis {
+                        if wi != ri && a[wi].insert(ri) {
+                            deg[ri] += 1;
+                        }
+                    }
                 }
             }
         }
-        return Err(SimulatorError::combinational_loop(
-            &TokenRange::default(),
-            &[],
-        ));
-    }
-
-    if !has_non_expandable_cb {
-        // All CBs were expandable but cycle persists — genuine loop.
-        return Err(SimulatorError::combinational_loop(
-            &TokenRange::default(),
-            &[],
-        ));
+        let mut q: VecDeque<usize> = VecDeque::new();
+        for (i, &d) in deg.iter().enumerate() {
+            if d == 0 {
+                q.push_back(i);
+            }
+        }
+        let mut cnt = 0;
+        while let Some(idx) = q.pop_front() {
+            cnt += 1;
+            for &succ in &a[idx] {
+                deg[succ] -= 1;
+                if deg[succ] == 0 {
+                    q.push_back(succ);
+                }
+            }
+        }
+        if cnt == n {
+            return Ok(sorted);
+        }
+        // Collect tokens from statements involved in the cycle (deg > 0).
+        let mut tokens: Vec<_> = deg
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| **d > 0)
+            .filter_map(|(i, _)| sorted[i].token())
+            .filter(|t| *t != Default::default())
+            .collect();
+        let trigger = tokens.pop().unwrap_or_default();
+        return Err(SimulatorError::combinational_loop(&trigger, &tokens));
     }
 
     // Relaxed ordering: skip edges that would create cycles when at least

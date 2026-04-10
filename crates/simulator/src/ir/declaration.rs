@@ -109,6 +109,32 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
         }
     }
 
+    // WAW ordering: chain consecutive writers of the same variable so that
+    // bit-select assigns to a packed variable keep source order.
+    // Skip when next already reaches prev (would create a cycle).
+    for writer_indices in writers.values() {
+        for pair in writer_indices.windows(2) {
+            let (prev, next) = (pair[0], pair[1]);
+            let mut reachable = false;
+            let mut stack = vec![next];
+            let mut visited = HashSet::default();
+            while let Some(node) = stack.pop() {
+                if node == prev {
+                    reachable = true;
+                    break;
+                }
+                if visited.insert(node) {
+                    for &succ in &adj[node] {
+                        stack.push(succ);
+                    }
+                }
+            }
+            if !reachable && adj[prev].insert(next) {
+                in_degree[next] += 1;
+            }
+        }
+    }
+
     // Kahn's algorithm with FIFO queue (VecDeque) for stable ordering.
     // Initialize queue with zero-in-degree nodes in source order.
     let mut queue: VecDeque<usize> = VecDeque::new();
