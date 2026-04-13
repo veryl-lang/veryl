@@ -1,0 +1,18 @@
+[package]
+name                  = "veryl-translator"
+version               = "0.19.1"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description           = "SystemVerilog to Veryl translator"
+edition.workspace     = true
+
+[dependencies]
+sv-parser       = "0.13"
+thiserror       = {workspace = true}
+veryl-formatter = {version = "0.19.1", path = "../formatter"}
+veryl-metadata  = {version = "0.19.1", path = "../metadata"}
+veryl-parser    = {version = "0.19.1", path = "../parser"}

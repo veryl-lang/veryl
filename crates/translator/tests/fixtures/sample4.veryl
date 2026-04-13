@@ -1,0 +1,45 @@
+type byte_t = logic<8>;
+package my_pkg {
+    enum state_e: logic<2> {
+        S_IDLE,
+        S_RUN,
+        S_DONE,
+    }
+
+    const WIDTH: i32 = 16;
+}
+
+interface bus_if {
+    var valid: logic;
+    var data: logic<8>;
+    var ready: logic;
+    modport master {
+        valid: output,
+        data: output,
+        ready: input,
+    }
+
+    modport slave {
+        valid: input,
+        data: input,
+        ready: output,
+    }
+
+}
+
+module dut #(
+    param N: i32 = 4,
+) (
+    clk: input logic,
+    mem: input logic<N, 8>,
+    flags: output logic<N>,
+) {
+    var regfile: logic<4, 8>;
+    always_comb {
+        for i in 0..N {
+            flags[i] = (mem[i] > 0);
+        }
+    }
+
+}
+

@@ -1,0 +1,16 @@
+module casts (
+    a: input logic<8>,
+    clk: input logic,
+    q: output logic<8>,
+) {
+    var tmp: logic<16>;
+    var cast_out: logic<8>;
+    always_ff (clk) {
+        tmp = (a) as logic<16>;
+        $display("a=%h", a);
+    }
+
+    assign cast_out = (tmp + 1) as logic<8>;
+    assign q = cast_out;
+}
+

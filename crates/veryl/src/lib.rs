@@ -13,6 +13,7 @@ pub mod cmd_migrate;
 pub mod cmd_new;
 pub mod cmd_publish;
 pub mod cmd_test;
+pub mod cmd_translate;
 pub mod cmd_update;
 pub mod context;
 pub mod diff;
@@ -77,6 +78,27 @@ pub enum Commands {
     Metadata(OptMetadata),
     Dump(OptDump),
     Test(OptTest),
+    Translate(OptTranslate),
+}
+
+/// Translate SystemVerilog files into Veryl source
+#[derive(Args)]
+pub struct OptTranslate {
+    /// Input SystemVerilog files. Each `foo.sv` produces a sibling `foo.veryl`.
+    pub files: Vec<PathBuf>,
+
+    /// Write the result to stdout instead of writing files. Useful for piping
+    /// or redirecting to a non-default path.
+    #[arg(long)]
+    pub stdout: bool,
+
+    /// Fail if any unsupported constructs are encountered
+    #[arg(long)]
+    pub strict: bool,
+
+    /// Skip the Veryl formatter pass and emit the raw translator output
+    #[arg(long = "no-format")]
+    pub no_format: bool,
 }
 
 /// Create a new project

@@ -1,0 +1,36 @@
+enum state_e: logic<2> {
+    ST_IDLE,
+    ST_RUN,
+    ST_DONE,
+}
+
+module foo #(
+    param WIDTH: i32 = 8,
+    param INIT: logic<4> = 4'h0,
+) (
+    clk: input logic,
+    rst: input logic,
+    a: input signed logic<8>,
+    q: output logic<WIDTH>,
+) {
+    var r: logic<WIDTH>;
+    function add (
+        x: input logic<WIDTH>,
+        y: input logic<WIDTH>,
+    ) -> logic<WIDTH> {
+        return x + y;
+    }
+
+    always_ff (clk, rst) {
+        if_reset {
+            r = '0;
+        } else {
+            for i in 0..WIDTH {
+                r[i] = a[i];
+            }
+        }
+    }
+
+    assign q = add(r, INIT);
+}
+
