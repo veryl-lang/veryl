@@ -126,6 +126,20 @@ jobs:
           pip install "cocotb==2.0.0"
           target/release-verylup/veryl test --sim verilator testcases/veryl/67_cocotb.veryl
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "${{ runner.os }}-wasm"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Build for wasm
+        run: cargo check --target wasm32-unknown-unknown -p veryl-emitter -p veryl-formatter -p veryl-simulator
+
   highlightgen:
     runs-on: ubuntu-latest
     steps:
