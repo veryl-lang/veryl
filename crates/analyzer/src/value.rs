@@ -1356,11 +1356,11 @@ impl Value {
         } else {
             TypeKind::Bit
         };
-        Type {
-            kind,
-            signed: self.signed(),
-            width: Shape::new(vec![Some(self.width())]),
-            ..Default::default()
+        {
+            let mut t = Type::new(kind);
+            t.signed = self.signed();
+            t.set_concrete_width(Shape::new(vec![Some(self.width())]));
+            t
         }
     }
 

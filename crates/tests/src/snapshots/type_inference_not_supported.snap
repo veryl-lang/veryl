@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 366
+expression: out
+---
+type_inference_not_supported (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#type_inference_not_supported)
+
+  × type inference is not supported for this expression
+   ╭─[../../testcases/error/type_inference_not_supported.veryl:3:20]
+ 2 │     let _a: logic<8> = 0;
+ 3 │     let _b       = _a + 1;
+   ·                    ───┬──
+   ·                       ╰── Error location
+ 4 │ }
+   ╰────
+  help: use a simple variable reference, sized literal, or function call; otherwise provide an explicit type annotation

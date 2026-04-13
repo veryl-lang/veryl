@@ -2822,7 +2822,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             let array_exprs = eval_array_literal(
                 &mut scope.analyzer_context,
                 Some(&dst_type.array),
-                Some(&dst_type.width),
+                Some(dst_type.width()),
                 &mut expr_clone,
             )
             .unwrap()
@@ -3015,7 +3015,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             };
             let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
             let select = if need_dynamic { None } else { select };
-            let width_shape = meta.r#type.width.clone();
+            let width_shape = meta.r#type.width().clone();
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
             (
                 select,
@@ -3145,7 +3145,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             let dst_width = meta.width;
             let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
             let select = if need_dynamic { None } else { select };
-            let width_shape = meta.r#type.width.clone();
+            let width_shape = meta.r#type.width().clone();
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
             (
                 index,

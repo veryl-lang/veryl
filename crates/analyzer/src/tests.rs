@@ -10766,6 +10766,140 @@ fn mixed_struct_union_member() {
 }
 
 #[test]
+fn generic_inference_failed() {
+    // Argument width cannot be determined → inference fails. Should
+    // surface a dedicated error rather than `mismatch_generics_arity`.
+    let code = r#"
+    module ModuleA {
+        function FuncId::<T: u32> (
+            x: input logic<T>,
+        ) -> logic<T> {
+            return x;
+        }
+
+        let _r: logic<8> = FuncId(8'd0);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::GenericInferenceFailed { .. }))
+    );
+}
+
+#[test]
+fn type_inference_var_conflict() {
+    // Two assigns to the same untyped `var` with mismatched widths
+    // should be rejected as not inferable.
+    let code = r#"
+    module ModuleA {
+        let _a: logic<8>  = 0;
+        let _b: logic<16> = 0;
+        var _v;
+        assign _v = _a;
+        always_comb {
+            _v = _b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TypeInferenceConflict { .. }))
+    );
+}
+
+#[test]
+fn type_inference_not_supported() {
+    // Binary arithmetic is not an inferable expression shape.
+    let code = r#"
+    module ModuleA {
+        let _a: logic<8> = 0;
+        let _b           = _a + 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::TypeInferenceNotSupported { .. }
+    ));
+
+    // Unsized literal is not inferable.
+    let code = r#"
+    module ModuleA {
+        let _a = 42;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::TypeInferenceNotSupported { .. }
+    ));
+}
+
+#[test]
+fn type_inference_always_comb_var() {
+    let code = r#"
+    module ModuleA {
+        let _a: logic<8> = 0;
+        var _v;
+        always_comb {
+            _v = _a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn type_inference_multiple_generic_params() {
+    let code = r#"
+    module ModuleA {
+        function FuncAB::<A: u32, B: u32> (
+            x: input logic<A>,
+            y: input logic<B>,
+        ) -> logic<A> {
+            return x;
+        }
+
+        let _a: logic<8>  = 0;
+        let _b: logic<16> = 0;
+        let _r: logic<8>  = FuncAB(_a, _b);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn type_inference_generic_default() {
+    let code = r#"
+    module ModuleA {
+        function FuncDef::<A: u32, B: u32 = 2> (
+            x: input logic<A>,
+        ) -> logic<A> {
+            return x;
+        }
+
+        let _a: logic<8> = 0;
+        let _r: logic<8> = FuncDef(_a);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn ambiguous_elsif() {
     let code = r#"
     module ModuleA {

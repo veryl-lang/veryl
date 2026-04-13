@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 362
+expression: out
+---
+generic_inference_failed (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#generic_inference_failed)
+
+  × failed to infer generic arguments for `FuncId`
+   ╭─[../../testcases/error/generic_inference_failed.veryl:8:24]
+ 7 │ 
+ 8 │     let _r: logic<8> = FuncId(8'd0);
+   ·                        ───┬──
+   ·                           ╰── Error location
+ 9 │ }
+   ╰────
+  help: provide explicit generic arguments like `FuncId::<…>(…)`, or pass an argument whose width can be determined from a variable declaration

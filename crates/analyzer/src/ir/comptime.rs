@@ -94,7 +94,7 @@ impl PartSelectPath {
 
             let width = if is_select {
                 let mut r#type = x.r#type.clone();
-                r#type.width = remaining_width.to_owned();
+                r#type.set_concrete_width(remaining_width.to_owned());
                 r#type.total_width()?
             } else {
                 x.r#type.total_width()?
@@ -324,15 +324,83 @@ pub struct Type {
     pub signed: bool,
     pub is_positive: bool,
     pub array: Shape,
-    pub width: Shape,
+    width: Shape,
+    width_expr: Vec<crate::ir::WidthExpr>,
 }
 
 impl Type {
+    pub fn width(&self) -> &Shape {
+        &self.width
+    }
+
+    pub fn width_mut(&mut self) -> &mut Shape {
+        &mut self.width
+    }
+
+    pub fn width_expr(&self) -> &[crate::ir::WidthExpr] {
+        &self.width_expr
+    }
+
+    pub fn new(kind: TypeKind) -> Type {
+        Type {
+            kind,
+            ..Default::default()
+        }
+    }
+
     pub fn create_unknown() -> Type {
         Type {
             kind: TypeKind::Unknown,
             ..Default::default()
         }
+    }
+
+    pub fn set_concrete_width(&mut self, shape: Shape) {
+        self.width_expr = crate::ir::WidthExpr::from_shape(&shape);
+        self.width = shape;
+    }
+
+    pub fn set_parametric_width(&mut self, shape: Shape, width_expr: Vec<crate::ir::WidthExpr>) {
+        debug_assert_eq!(
+            shape.as_slice().len(),
+            width_expr.len(),
+            "shape and width_expr length mismatch"
+        );
+        self.width = shape;
+        self.width_expr = width_expr;
+    }
+
+    pub fn clear_width(&mut self) {
+        self.width = Shape::default();
+        self.width_expr.clear();
+    }
+
+    pub fn to_sv_type_name(&self) -> Option<&'static str> {
+        match &self.kind {
+            TypeKind::Bit => Some("bit"),
+            TypeKind::Logic => Some("logic"),
+            TypeKind::F32 => Some("shortreal"),
+            TypeKind::F64 => Some("real"),
+            TypeKind::String => Some("string"),
+            TypeKind::Clock | TypeKind::ClockPosedge | TypeKind::ClockNegedge => Some("logic"),
+            TypeKind::Reset
+            | TypeKind::ResetAsyncHigh
+            | TypeKind::ResetAsyncLow
+            | TypeKind::ResetSyncHigh
+            | TypeKind::ResetSyncLow => Some("logic"),
+            _ => None,
+        }
+    }
+
+    pub fn to_sv_width(&self) -> String {
+        if self.width_expr.is_empty() {
+            return String::new();
+        }
+        let mut s = String::new();
+        for dim in &self.width_expr {
+            s.push_str(&dim.to_sv_width_string());
+        }
+        s
     }
 
     pub fn is_4state(&self) -> bool {
@@ -588,7 +656,7 @@ impl Type {
                     TypeKind::Logic
                 };
                 self.signed = false;
-                self.width = Shape::new(vec![width]);
+                self.set_concrete_width(Shape::new(vec![width]));
             }
             TypeKind::Union(_) => {
                 let width = self.total_width();
@@ -598,7 +666,7 @@ impl Type {
                     TypeKind::Logic
                 };
                 self.signed = false;
-                self.width = Shape::new(vec![width]);
+                self.set_concrete_width(Shape::new(vec![width]));
             }
             TypeKind::Enum(x) => {
                 self.kind = x.r#type.kind;
@@ -608,7 +676,7 @@ impl Type {
                 array.append(&mut self.array);
                 width.append(&mut self.width);
                 self.array = array;
-                self.width = width;
+                self.set_concrete_width(width);
             }
             _ => (),
         }
@@ -1053,23 +1121,27 @@ mod tests {
     use veryl_parser::resource_table;
 
     fn create_logic(width: usize) -> Type {
-        Type {
+        let mut t = Type {
             kind: TypeKind::Logic,
             array: Shape::default(),
-            width: Shape::new(vec![Some(width)]),
             signed: false,
             is_positive: false,
-        }
+            ..Default::default()
+        };
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
+        t
     }
 
     fn create_logic_multi_dim(width: &[Option<usize>]) -> Type {
-        Type {
+        let mut t = Type {
             kind: TypeKind::Logic,
             array: Shape::default(),
-            width: Shape::new(width.to_vec()),
             signed: false,
             is_positive: false,
-        }
+            ..Default::default()
+        };
+        t.set_concrete_width(Shape::new(width.to_vec()));
+        t
     }
 
     fn create_struct(members: &[(&'static str, Type)], width: usize) -> Type {
@@ -1080,16 +1152,18 @@ mod tests {
                 r#type: t.clone(),
             })
             .collect();
-        Type {
+        let mut t = Type {
             kind: TypeKind::Struct(TypeKindStruct {
                 id: SymbolId::default(),
                 members,
             }),
             array: Shape::default(),
-            width: Shape::new(vec![Some(width)]),
             signed: false,
             is_positive: false,
-        }
+            ..Default::default()
+        };
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
+        t
     }
 
     fn create_union(members: &[(&'static str, Type)], width: usize) -> Type {
@@ -1100,16 +1174,18 @@ mod tests {
                 r#type: t.clone(),
             })
             .collect();
-        Type {
+        let mut t = Type {
             kind: TypeKind::Union(TypeKindUnion {
                 id: SymbolId::default(),
                 members,
             }),
             array: Shape::default(),
-            width: Shape::new(vec![Some(width)]),
             signed: false,
             is_positive: false,
-        }
+            ..Default::default()
+        };
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
+        t
     }
 
     #[track_caller]

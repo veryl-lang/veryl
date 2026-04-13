@@ -164,10 +164,10 @@ impl SystemFunctionCall {
                     ));
                     return Err(ir_error!(token));
                 }
-                let arg0_type = Type {
-                    kind: TypeKind::Logic,
-                    width: Shape::new(vec![Some(32)]),
-                    ..Default::default()
+                let arg0_type = {
+                    let mut t = Type::new(TypeKind::Logic);
+                    t.set_concrete_width(Shape::new(vec![Some(32)]));
+                    t
                 };
                 let arg0 = create_input(context, name, Some(arg0_type), args.remove(0));
                 Ok(SystemFunctionCall {
@@ -185,10 +185,10 @@ impl SystemFunctionCall {
                     ));
                     return Err(ir_error!(token));
                 }
-                let arg0_type = Type {
-                    kind: TypeKind::Logic,
-                    width: Shape::new(vec![Some(32)]),
-                    ..Default::default()
+                let arg0_type = {
+                    let mut t = Type::new(TypeKind::Logic);
+                    t.set_concrete_width(Shape::new(vec![Some(32)]));
+                    t
                 };
                 let arg0 = create_input(context, name, Some(arg0_type), args.remove(0));
                 Ok(SystemFunctionCall {

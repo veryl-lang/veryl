@@ -1,0 +1,9 @@
+module type_inference_conflict {
+    let _a: logic<8>  = 0;
+    let _b: logic<16> = 0;
+    var _v;
+    assign _v = _a;
+    always_comb {
+        _v = _b;
+    }
+}

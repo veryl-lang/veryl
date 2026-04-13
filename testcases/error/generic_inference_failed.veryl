@@ -1,0 +1,9 @@
+module generic_inference_failed {
+    function FuncId::<T: u32> (
+        x: input logic<T>,
+    ) -> logic<T> {
+        return x;
+    }
+
+    let _r: logic<8> = FuncId(8'd0);
+}

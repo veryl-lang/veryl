@@ -6,6 +6,7 @@ use crate::attribute::Attribute as Attr;
 use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
 use crate::definition_table::{self, Definition};
+use crate::generic_inference_table::{self, PendingEntry};
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::reference_table::{self, ReferenceCandidate};
@@ -818,13 +819,43 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.identifier_factor_names
                     .push(*arg.expression_identifier.clone());
                 if let Some(x) = arg.identifier_factor_opt.as_ref()
-                    && matches!(
-                        x.identifier_factor_opt_group.as_ref(),
-                        IdentifierFactorOptGroup::FunctionCall(_)
-                    )
+                    && let IdentifierFactorOptGroup::FunctionCall(fc) =
+                        x.identifier_factor_opt_group.as_ref()
                 {
                     let path: GenericSymbolPath = arg.expression_identifier.as_ref().into();
-                    self.reference_functions.push(path);
+                    self.reference_functions.push(path.clone());
+
+                    let has_generic_args = path
+                        .paths
+                        .last()
+                        .map(|p| !p.arguments.is_empty())
+                        .unwrap_or(false);
+                    if !has_generic_args {
+                        let arg_exprs: Vec<_> =
+                            if let Some(list) = &fc.function_call.function_call_opt {
+                                let items: Vec<&ArgumentItem> = list.argument_list.as_ref().into();
+                                items
+                                    .iter()
+                                    .filter(|item| item.argument_item_opt.is_none())
+                                    .map(|item| (*item.argument_expression.expression).clone())
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                        let call_token = arg
+                            .expression_identifier
+                            .scoped_identifier
+                            .identifier()
+                            .token;
+                        let namespace = self.namespace.clone();
+                        generic_inference_table::push_pending(PendingEntry {
+                            call_token_id: call_token.id,
+                            call_token,
+                            path,
+                            arg_exprs,
+                            namespace,
+                        });
+                    }
                 }
             }
             HandlerPoint::After => {
@@ -894,7 +925,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let mut r#type: SymType = arg.array_type.as_ref().into();
+            let mut r#type: SymType = if let Some(ref x) = arg.let_statement_opt {
+                x.array_type.as_ref().into()
+            } else {
+                SymType::create_inferred((&arg.identifier.identifier_token).into())
+            };
             if !self.check_identifer_with_type(&arg.identifier, &r#type) {
                 return Ok(());
             }
@@ -902,8 +937,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
             r#type.is_const = true;
             let affiliation = self.affiliation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
-            let clock_domain = if let Some(ref x) = arg.let_statement_opt {
-                self.insert_clock_domain(&x.clock_domain)
+            let clock_domain = if let Some(ref x) = arg.let_statement_opt
+                && let Some(ref y) = x.let_statement_opt0
+            {
+                self.insert_clock_domain(&y.clock_domain)
             } else if affiliation == Affiliation::Module {
                 self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
@@ -993,7 +1030,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let mut r#type: SymType = arg.array_type.as_ref().into();
+            let mut r#type: SymType = if let Some(ref x) = arg.let_declaration_opt {
+                x.array_type.as_ref().into()
+            } else {
+                SymType::create_inferred((&arg.identifier.identifier_token).into())
+            };
             if !self.check_identifer_with_type(&arg.identifier, &r#type) {
                 return Ok(());
             }
@@ -1001,8 +1042,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
             r#type.is_const = true;
             let affiliation = self.affiliation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
-            let clock_domain = if let Some(ref x) = arg.let_declaration_opt {
-                self.insert_clock_domain(&x.clock_domain)
+            let clock_domain = if let Some(ref x) = arg.let_declaration_opt
+                && let Some(ref y) = x.let_declaration_opt0
+            {
+                self.insert_clock_domain(&y.clock_domain)
             } else if affiliation == Affiliation::Module {
                 self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
@@ -1031,15 +1074,21 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let r#type: SymType = arg.array_type.as_ref().into();
+            let r#type: SymType = if let Some(ref x) = arg.var_declaration_opt {
+                x.array_type.as_ref().into()
+            } else {
+                SymType::create_inferred((&arg.identifier.identifier_token).into())
+            };
             if !self.check_identifer_with_type(&arg.identifier, &r#type) {
                 return Ok(());
             }
 
             let affiliation = self.affiliation.last().cloned().unwrap();
             let (prefix, suffix) = self.get_signal_prefix_suffix(r#type.kind.clone());
-            let clock_domain = if let Some(ref x) = arg.var_declaration_opt {
-                self.insert_clock_domain(&x.clock_domain)
+            let clock_domain = if let Some(ref x) = arg.var_declaration_opt
+                && let Some(ref y) = x.var_declaration_opt0
+            {
+                self.insert_clock_domain(&y.clock_domain)
             } else if affiliation == Affiliation::Module {
                 self.check_missing_clock_domain(&arg.identifier.identifier_token.token, &r#type);
                 SymClockDomain::Implicit
@@ -1075,38 +1124,34 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::After => {
                 let token = arg.identifier.identifier_token.token;
                 let value = Some(*arg.expression.clone());
-                let property = match &*arg.const_declaration_group {
-                    ConstDeclarationGroup::ArrayType(x) => {
-                        let r#type: SymType = x.array_type.as_ref().into();
-                        if !self.check_identifer_with_type(&arg.identifier, &r#type) {
-                            self.pop_type_dag_cand(None);
-                            return Ok(());
+                let r#type = if let Some(ref opt) = arg.const_declaration_opt {
+                    match &*opt.const_declaration_opt_group {
+                        ConstDeclarationOptGroup::ArrayType(x) => {
+                            let r#type: SymType = x.array_type.as_ref().into();
+                            if !self.check_identifer_with_type(&arg.identifier, &r#type) {
+                                self.pop_type_dag_cand(None);
+                                return Ok(());
+                            }
+                            r#type
                         }
-
-                        ParameterProperty {
-                            token,
-                            r#type,
-                            kind: ParameterKind::Const,
-                            value,
-                        }
-                    }
-                    ConstDeclarationGroup::Type(_) => {
-                        let r#type: SymType = SymType {
+                        ConstDeclarationOptGroup::Type(_) => SymType {
                             modifier: vec![],
                             kind: TypeKind::Type,
                             width: vec![],
                             array: vec![],
                             array_type: None,
                             is_const: false,
-                            token: arg.const_declaration_group.as_ref().into(),
-                        };
-                        ParameterProperty {
-                            token,
-                            r#type,
-                            kind: ParameterKind::Const,
-                            value,
-                        }
+                            token: opt.const_declaration_opt_group.as_ref().into(),
+                        },
                     }
+                } else {
+                    SymType::create_inferred((&arg.identifier.identifier_token).into())
+                };
+                let property = ParameterProperty {
+                    token,
+                    r#type,
+                    kind: ParameterKind::Const,
+                    value,
                 };
                 let kind = SymbolKind::Parameter(property);
                 if let Some(id) = self.insert_symbol(&token, kind, false) {

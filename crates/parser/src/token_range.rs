@@ -1028,15 +1028,15 @@ impl_token_range!(LetDeclaration, r#let, semicolon);
 impl_token_range!(VarDeclaration, var, semicolon);
 impl_token_range!(ConstDeclaration, r#const, semicolon);
 
-impl From<&ConstDeclarationGroup> for TokenRange {
-    fn from(value: &ConstDeclarationGroup) -> Self {
+impl From<&ConstDeclarationOptGroup> for TokenRange {
+    fn from(value: &ConstDeclarationOptGroup) -> Self {
         match value {
-            ConstDeclarationGroup::Type(x) => x.r#type.as_ref().into(),
-            ConstDeclarationGroup::ArrayType(x) => x.array_type.as_ref().into(),
+            ConstDeclarationOptGroup::Type(x) => x.r#type.as_ref().into(),
+            ConstDeclarationOptGroup::ArrayType(x) => x.array_type.as_ref().into(),
         }
     }
 }
-impl_token_ext!(ConstDeclarationGroup);
+impl_token_ext!(ConstDeclarationOptGroup);
 
 impl_token_range!(GenDeclaration, r#gen, semicolon);
 impl_token_range_enum!(GenDeclarationGroup, generic_proto_bound, r#type);

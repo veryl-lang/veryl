@@ -1391,6 +1391,18 @@ pub struct Type {
 }
 
 impl Type {
+    pub fn create_inferred(token: TokenRange) -> Self {
+        Self {
+            modifier: vec![],
+            kind: TypeKind::Inferred,
+            width: vec![],
+            array: vec![],
+            array_type: None,
+            is_const: false,
+            token,
+        }
+    }
+
     pub fn is_compatible(&self, other: &Type) -> bool {
         self.to_string() == other.to_string()
     }
@@ -1409,6 +1421,10 @@ impl Type {
         } else {
             self.has_modifier(&TypeModifierKind::Signed)
         }
+    }
+
+    pub fn is_inferred(&self) -> bool {
+        matches!(self.kind, TypeKind::Inferred)
     }
 
     pub fn can_be_default_clock(&self) -> bool {
@@ -1528,6 +1544,7 @@ impl Type {
                 Shape::default()
             }
             TypeKind::Any => Shape::default(),
+            TypeKind::Inferred => Shape::default(),
         };
 
         let mut array = Shape::default();
@@ -1586,7 +1603,7 @@ impl Type {
             TypeKind::UserDefined(x) => {
                 let mut r#type = eval_type(context, &x.path, pos)?;
 
-                width.append(&mut r#type.width);
+                width.append(r#type.width_mut());
                 array.append(&mut r#type.array);
                 signed = r#type.signed;
 
@@ -1594,15 +1611,79 @@ impl Type {
             }
             TypeKind::AbstractInterface(x) => ir::TypeKind::AbstractInterface(*x),
             TypeKind::Any => ir::TypeKind::Unknown,
+            TypeKind::Inferred => ir::TypeKind::Unknown,
         };
 
-        Ok(ir::Type {
-            kind,
-            signed,
-            is_positive,
-            width,
-            array,
-        })
+        let width_expr = build_width_expr(&self.width, &width);
+        let mut r#type = ir::Type::new(kind);
+        r#type.signed = signed;
+        r#type.is_positive = is_positive;
+        r#type.array = array;
+        if width_expr.len() == width.as_slice().len() {
+            r#type.set_parametric_width(width, width_expr);
+        } else {
+            r#type.set_concrete_width(width);
+        }
+        Ok(r#type)
+    }
+}
+
+fn build_width_expr(sources: &[syntax_tree::Expression], width: &Shape) -> Vec<ir::WidthExpr> {
+    let shape_slice = width.as_slice();
+    if sources.len() != shape_slice.len() {
+        return ir::WidthExpr::from_shape(width);
+    }
+    let mut result = Vec::with_capacity(shape_slice.len());
+    for (src, slot) in sources.iter().zip(shape_slice.iter()) {
+        if let Some(expr) = try_syntax_expr_to_param_width(src) {
+            result.push(expr);
+        } else if let Some(n) = slot {
+            result.push(ir::WidthExpr::Concrete(*n));
+        } else {
+            return ir::WidthExpr::from_shape(width);
+        }
+    }
+    result
+}
+
+fn try_syntax_expr_to_param_width(expr: &syntax_tree::Expression) -> Option<ir::WidthExpr> {
+    let if_expr = &*expr.if_expression;
+    if !if_expr.if_expression_list.is_empty() {
+        return None;
+    }
+    let e01 = &*if_expr.expression01;
+    if !e01.expression01_list.is_empty() {
+        return None;
+    }
+    let e02 = &*e01.expression02;
+    if !e02.expression02_list.is_empty() || e02.expression02_opt.is_some() {
+        return None;
+    }
+    let factor = &*e02.factor;
+    let id_factor = match factor {
+        syntax_tree::Factor::IdentifierFactor(x) => &x.identifier_factor,
+        _ => return None,
+    };
+    if id_factor.identifier_factor_opt.is_some() {
+        return None;
+    }
+    let scoped = &*id_factor.expression_identifier;
+    if scoped.expression_identifier_opt.is_some()
+        || !scoped.expression_identifier_list.is_empty()
+        || !scoped.expression_identifier_list0.is_empty()
+    {
+        return None;
+    }
+    let symbol = symbol_table::resolve(scoped.scoped_identifier.as_ref()).ok()?;
+    if !matches!(symbol.found.kind, SymbolKind::Parameter(_)) {
+        return None;
+    }
+    let parent = symbol.found.get_parent()?;
+    match parent.kind {
+        SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
+            Some(ir::WidthExpr::Param(symbol.found.token.text))
+        }
+        _ => None,
     }
 }
 
@@ -1639,6 +1720,7 @@ pub enum TypeKind {
     P32,
     P64,
     Any,
+    Inferred,
 }
 
 impl TypeKind {
@@ -1820,6 +1902,7 @@ impl fmt::Display for Type {
                 }
             }
             TypeKind::Any => text.push_str("any"),
+            TypeKind::Inferred => text.push('_'),
         }
         if !self.width.is_empty() {
             text.push('<');

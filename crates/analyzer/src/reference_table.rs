@@ -1,4 +1,5 @@
 use crate::AnalyzerError;
+use crate::generic_inference_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
@@ -263,6 +264,22 @@ impl ReferenceTable {
 
                     // Check number of arguments
                     let params = symbol.found.generic_parameters();
+
+                    let mut inference_attempted_failed = false;
+                    if i + 1 == path.paths.len()
+                        && path.paths[i].arguments.is_empty()
+                        && !params.is_empty()
+                        && matches!(symbol.found.kind, SymbolKind::Function(_))
+                    {
+                        let call_token_id = path.paths[i].base.id;
+                        if let Some(inferred) = generic_inference_table::get_inferred(call_token_id)
+                        {
+                            path.paths[i].arguments = inferred;
+                        } else {
+                            inference_attempted_failed = true;
+                        }
+                    }
+
                     let n_args = path.paths[i].arguments.len();
 
                     if in_import_declaration
@@ -287,12 +304,19 @@ impl ReferenceTable {
                         params.len() == n_args
                     };
                     if !match_artiy {
-                        self.errors.push(AnalyzerError::mismatch_generics_arity(
-                            &path.paths[i].base.to_string(),
-                            params.len(),
-                            n_args,
-                            &path.range,
-                        ));
+                        if inference_attempted_failed {
+                            self.errors.push(AnalyzerError::generic_inference_failed(
+                                &path.paths[i].base.to_string(),
+                                &path.range,
+                            ));
+                        } else {
+                            self.errors.push(AnalyzerError::mismatch_generics_arity(
+                                &path.paths[i].base.to_string(),
+                                params.len(),
+                                n_args,
+                                &path.range,
+                            ));
+                        }
                         continue;
                     }
 

@@ -2,7 +2,8 @@ use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::utils::{
     TypePosition, argument_list, build_for_range, build_for_statement, case_condition,
     eval_assign_statement, eval_expr, eval_variable, expand_connect, expand_connect_const,
-    function_call, get_return_str, switch_condition, tb_method_call,
+    function_call, get_return_str, switch_condition, tb_method_call, try_infer_decl_type,
+    try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -76,7 +77,18 @@ impl Conv<&LetStatement> for ir::StatementBlock {
             let kind = VarKind::Let;
             let variable_token: TokenRange = (&value.identifier.identifier_token).into();
 
-            let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
+            let inferred = try_infer_decl_type(
+                context,
+                &x.r#type,
+                &value.expression,
+                value.identifier.identifier_token.token.id,
+                token,
+            )?;
+            let r#type = if let Some((ref comptime, _)) = inferred {
+                comptime.r#type.clone()
+            } else {
+                x.r#type.to_ir_type(context, TypePosition::Variable)?
+            };
             let clock_domain = x.clock_domain;
 
             eval_variable(context, &path, kind, &r#type, clock_domain, variable_token);
@@ -92,7 +104,11 @@ impl Conv<&LetStatement> for ir::StatementBlock {
                 token: variable_token,
             };
 
-            let mut expr = eval_expr(context, Some(r#type.clone()), &value.expression, false)?;
+            let mut expr = if let Some(inferred) = inferred {
+                inferred
+            } else {
+                eval_expr(context, Some(r#type.clone()), &value.expression, false)?
+            };
 
             let statements = eval_assign_statement(context, &mut dst, &mut expr, token)?;
             Ok(ir::StatementBlock(statements))
@@ -143,10 +159,10 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
             width = context.check_size(x, token);
         }
 
-        let r#type = ir::Type {
-            kind: TypeKind::Logic,
-            width: Shape::new(vec![width]),
-            ..Default::default()
+        let r#type = {
+            let mut t = ir::Type::new(TypeKind::Logic);
+            t.set_concrete_width(Shape::new(vec![width]));
+            t
         };
 
         let (_, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
@@ -195,15 +211,30 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
             IdentifierStatementGroup::Assignment(x) => {
                 match x.assignment.assignment_group.as_ref() {
                     AssignmentGroup::Equ(_) => {
+                        let inferred = if let Ok(symbol) = symbol_table::resolve(expr) {
+                            try_infer_var_assign(
+                                context,
+                                &symbol.found,
+                                &x.assignment.expression,
+                                token,
+                            )?
+                        } else {
+                            None
+                        };
+
                         let dst: VarPathSelect = Conv::conv(context, expr)?;
 
                         if let Some(mut dst) = dst.to_assign_destination(context, false) {
-                            let mut expr = eval_expr(
-                                context,
-                                Some(dst.comptime.r#type.clone()),
-                                &x.assignment.expression,
-                                false,
-                            )?;
+                            let mut expr = if let Some(inferred) = inferred {
+                                inferred
+                            } else {
+                                eval_expr(
+                                    context,
+                                    Some(dst.comptime.r#type.clone()),
+                                    &x.assignment.expression,
+                                    false,
+                                )?
+                            };
 
                             let statements =
                                 eval_assign_statement(context, &mut dst, &mut expr, token)?;

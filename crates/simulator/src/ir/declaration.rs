@@ -979,7 +979,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         !parent_dst.select.is_empty() && !parent_dst.select.is_const();
                     let select = if need_dynamic { None } else { select };
                     let width = parent_meta.width;
-                    let width_shape = parent_meta.r#type.width.clone();
+                    let width_shape = parent_meta.r#type.width().clone();
                     let kind_width = parent_meta.r#type.kind.width().unwrap_or(1);
                     (
                         parent_index,

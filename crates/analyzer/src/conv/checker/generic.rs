@@ -167,10 +167,7 @@ fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
 }
 
 fn check_generic_type_arg(arg: &Comptime) -> Option<AnalyzerError> {
-    let dst = Type {
-        kind: crate::ir::TypeKind::Type,
-        ..Default::default()
-    };
+    let dst = Type::new(crate::ir::TypeKind::Type);
 
     if dst.compatible(arg) {
         None

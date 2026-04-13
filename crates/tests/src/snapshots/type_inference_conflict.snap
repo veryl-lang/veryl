@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 366
+expression: out
+---
+type_inference_conflict (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#type_inference_conflict)
+
+  × conflicting types in inference for `_v`
+   ╭─[../../testcases/error/type_inference_conflict.veryl:7:14]
+ 6 │     always_comb {
+ 7 │         _v = _b;
+   ·              ─┬
+   ·               ╰── Error location
+ 8 │     }
+   ╰────
+  help: all assignments to an untyped variable must agree on the same type

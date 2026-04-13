@@ -15,6 +15,7 @@ mod statement;
 mod system_function;
 mod utils;
 mod variable;
+mod width_expr;
 pub use comptime::{
     Comptime, ExpressionContext, InstanceKind, PartSelectPath, Type, TypeKind, TypeKindEnum,
     TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
@@ -42,6 +43,7 @@ pub use variable::{
     VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, VarSelectOp, Variable,
     VariableInfo,
 };
+pub use width_expr::{WidthExpr, WidthOp};
 
 #[cfg(test)]
 mod tests;
