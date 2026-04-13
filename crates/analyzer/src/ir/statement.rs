@@ -39,28 +39,70 @@ pub struct ForStatement {
     pub token: TokenRange,
 }
 
+#[derive(Clone, Debug)]
+pub enum ForBound {
+    Const(usize),
+    Expression(Box<Expression>),
+}
+
+impl ForBound {
+    pub fn eval_value(&self, context: &mut Context) -> Option<usize> {
+        match self {
+            Self::Const(x) => Some(*x),
+            Self::Expression(exp) => {
+                let mut exp = exp.as_ref().clone();
+                let comptime = exp.eval_comptime(context, None);
+                comptime.get_value().ok()?.to_usize()
+            }
+        }
+    }
+}
+
+impl fmt::Display for ForBound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ForBound::Const(x) => x.fmt(f),
+            ForBound::Expression(x) => format!("{}", x.as_ref()).fmt(f),
+        }
+    }
+}
+
 /// Loop iteration range representation.
 #[derive(Clone, Debug)]
 pub enum ForRange {
     /// start..end with additive step (default step=1)
     Forward {
-        start: usize,
-        end: usize,
+        start: ForBound,
+        end: ForBound,
+        inclusive: bool,
         step: usize,
     },
     /// (start..end).rev() with additive step (default step=1)
     Reverse {
-        start: usize,
-        end: usize,
+        start: ForBound,
+        end: ForBound,
+        inclusive: bool,
         step: usize,
     },
     /// start..end with arbitrary step operator (e.g., step *= 2)
     Stepped {
-        start: usize,
-        end: usize,
+        start: ForBound,
+        end: ForBound,
+        inclusive: bool,
         step: usize,
         op: Op,
     },
+}
+
+impl ForRange {
+    pub fn is_dynamic(&self) -> bool {
+        let (start, end) = match self {
+            Self::Forward { start, end, .. } => (start, end),
+            Self::Reverse { start, end, .. } => (start, end),
+            Self::Stepped { start, end, .. } => (start, end),
+        };
+        matches!(start, ForBound::Expression(_)) || matches!(end, ForBound::Expression(_))
+    }
 }
 
 #[derive(Clone)]
@@ -208,30 +250,70 @@ impl fmt::Display for Statement {
             },
             Statement::For(x) => {
                 match &x.range {
-                    ForRange::Forward { start, end, step } if *step == 1 => {
-                        writeln!(f, "for {} in {}..{} {{", x.var_name, start, end)?;
+                    ForRange::Forward {
+                        start,
+                        end,
+                        inclusive,
+                        step,
+                    } if *step == 1 => {
+                        if *inclusive {
+                            writeln!(f, "for {} in {}..={} {{", x.var_name, start, end)?;
+                        } else {
+                            writeln!(f, "for {} in {}..{} {{", x.var_name, start, end)?;
+                        }
                     }
-                    ForRange::Forward { start, end, step } => {
-                        writeln!(
-                            f,
-                            "for {} in {}..{} step += {} {{",
-                            x.var_name, start, end, step
-                        )?;
+                    ForRange::Forward {
+                        start,
+                        end,
+                        inclusive,
+                        step,
+                    } => {
+                        if *inclusive {
+                            writeln!(
+                                f,
+                                "for {} in {}..={} step += {} {{",
+                                x.var_name, start, end, step
+                            )?;
+                        } else {
+                            writeln!(
+                                f,
+                                "for {} in {}..{} step += {} {{",
+                                x.var_name, start, end, step
+                            )?;
+                        }
                     }
-                    ForRange::Reverse { start, end, .. } => {
-                        writeln!(f, "for {} in rev {}..{} {{", x.var_name, start, end)?;
+                    ForRange::Reverse {
+                        start,
+                        end,
+                        inclusive,
+                        ..
+                    } => {
+                        if *inclusive {
+                            writeln!(f, "for {} in rev {}..={} {{", x.var_name, start, end)?;
+                        } else {
+                            writeln!(f, "for {} in rev {}..{} {{", x.var_name, start, end)?;
+                        }
                     }
                     ForRange::Stepped {
                         start,
                         end,
+                        inclusive,
                         step,
                         op,
                     } => {
-                        writeln!(
-                            f,
-                            "for {} in {}..{} step {op}= {} {{",
-                            x.var_name, start, end, step
-                        )?;
+                        if *inclusive {
+                            writeln!(
+                                f,
+                                "for {} in {}..={} step {op}= {} {{",
+                                x.var_name, start, end, step
+                            )?;
+                        } else {
+                            writeln!(
+                                f,
+                                "for {} in {}..{} step {op}= {} {{",
+                                x.var_name, start, end, step
+                            )?;
+                        }
                     }
                 }
                 for s in &x.body {

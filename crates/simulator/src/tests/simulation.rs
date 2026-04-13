@@ -10927,3 +10927,299 @@ fn function_var_reassign_not_comb_loop() {
         );
     }
 }
+
+#[test]
+fn for_loop_range_determied_by_variable() {
+    let code = r#"
+    module Top #(
+        param T: type = logic<4>,
+    )(
+        o0: output T,
+        o1: output T,
+        o2: output T,
+        o3: output T,
+        o4: output T,
+        o5: output T,
+        o6: output T,
+        o7: output T,
+    ) {
+        function func(
+            out: output T<8>,
+        ) {
+            var m: u32;
+            var n: u32;
+
+            for i: u32 in 0..8 {
+                out[i] = 0 as T;
+            }
+
+            m = 8;
+            for i: u32 in 0..2 {
+                n = m;
+                m = n / 2;
+                $display("i %d m %d n %d", i, m, n);
+                for j: u32 in 0..m {
+                    out[4 * i + j] = (4 * i + j) as T;
+                }
+            }
+        }
+
+        var out: T<8>;
+
+        always_comb {
+            func(out);
+            o0  = out[0];
+            o1  = out[1];
+            o2  = out[2];
+            o3  = out[3];
+            o4  = out[4];
+            o5  = out[5];
+            o6  = out[6];
+            o7  = out[7];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let exp_list: [u64; 8] = [0, 1, 2, 3, 4, 5, 0, 0];
+        for (i, exp) in exp_list.iter().enumerate() {
+            let port = format!("o{}", i);
+            assert_eq!(
+                sim.get(&port).unwrap(),
+                Value::new(*exp, 4, false),
+                "i={} expected={} JIT={} 4st={}",
+                i,
+                exp,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+
+    let code = r#"
+    module Top #(
+        param T: type = logic<4>,
+    )(
+        o0: output T,
+        o1: output T,
+        o2: output T,
+        o3: output T,
+        o4: output T,
+        o5: output T,
+        o6: output T,
+        o7: output T,
+    ) {
+        function func(
+            beg_outer: input  u32 ,
+            end_outer: input  u32 ,
+            out      : output T<8>,
+        ) {
+            var m: u32;
+            var n: u32;
+
+            for i: u32 in 0..8 {
+                out[i] = 0 as T;
+            }
+
+            m = 8;
+            for i: u32 in beg_outer..end_outer {
+                n = m;
+                m = n / 2;
+                for j: u32 in 0..m {
+                    out[4 * i + j] = (4 * i + j) as T;
+                }
+            }
+        }
+
+        var out: T<8>;
+
+        always_comb {
+            func(0, 2, out);
+            o0  = out[0];
+            o1  = out[1];
+            o2  = out[2];
+            o3  = out[3];
+            o4  = out[4];
+            o5  = out[5];
+            o6  = out[6];
+            o7  = out[7];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let exp_list: [u64; 8] = [0, 1, 2, 3, 4, 5, 0, 0];
+        for (i, exp) in exp_list.iter().enumerate() {
+            let port = format!("o{}", i);
+            assert_eq!(
+                sim.get(&port).unwrap(),
+                Value::new(*exp, 4, false),
+                "i={} expected={} JIT={} 4st={}",
+                i,
+                exp,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+
+    let code = r#"
+    module Top #(
+        param T: type = logic<4>,
+    )(
+        o0: output T,
+        o1: output T,
+        o2: output T,
+        o3: output T,
+        o4: output T,
+        o5: output T,
+        o6: output T,
+        o7: output T,
+    ) {
+        function func(
+            out: output T<8>,
+        ) {
+            var m: i32;
+            var n: i32;
+
+            for i: u32 in 0..8 {
+                out[i] = 0 as T;
+            }
+
+            m = -2;
+            for i: u32 in 0..2 {
+                n = m;
+                m = n + 2;
+                for j: u32 in m..4 {
+                    out[4 * i + j] = (4 * i + j) as T;
+                }
+            }
+        }
+
+        var out: T<8>;
+
+        always_comb {
+            func(out);
+            o0  = out[0];
+            o1  = out[1];
+            o2  = out[2];
+            o3  = out[3];
+            o4  = out[4];
+            o5  = out[5];
+            o6  = out[6];
+            o7  = out[7];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let exp_list: [u64; 8] = [0, 1, 2, 3, 0, 0, 6, 7];
+        for (i, exp) in exp_list.iter().enumerate() {
+            let port = format!("o{}", i);
+            assert_eq!(
+                sim.get(&port).unwrap(),
+                Value::new(*exp, 4, false),
+                "i={} expected={} JIT={} 4st={}",
+                i,
+                exp,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+
+    let code = r#"
+    module Top #(
+        param T: type = logic<4>,
+    )(
+        o0: output T,
+        o1: output T,
+        o2: output T,
+        o3: output T,
+        o4: output T,
+        o5: output T,
+        o6: output T,
+        o7: output T,
+    ) {
+        function func(
+            beg_outer: input  u32 ,
+            end_outer: input  u32 ,
+            out      : output T<8>,
+        ) {
+            var m: i32;
+            var n: i32;
+
+            for i: u32 in 0..8 {
+                out[i] = 0 as T;
+            }
+
+            m = -2;
+            for i: u32 in beg_outer..end_outer {
+                n = m;
+                m = n + 2;
+                for j: u32 in m..4 {
+                    out[4 * i + j] = (4 * i + j) as T;
+                }
+            }
+        }
+
+        var out: T<8>;
+
+        always_comb {
+            func(0, 2, out);
+            o0  = out[0];
+            o1  = out[1];
+            o2  = out[2];
+            o3  = out[3];
+            o4  = out[4];
+            o5  = out[5];
+            o6  = out[6];
+            o7  = out[7];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let exp_list: [u64; 8] = [0, 1, 2, 3, 0, 0, 6, 7];
+        for (i, exp) in exp_list.iter().enumerate() {
+            let port = format!("o{}", i);
+            assert_eq!(
+                sim.get(&port).unwrap(),
+                Value::new(*exp, 4, false),
+                "i={} expected={} JIT={} 4st={}",
+                i,
+                exp,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}

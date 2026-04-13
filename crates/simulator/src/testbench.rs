@@ -522,6 +522,7 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             loop_var,
         } => {
             if let Some(lv) = loop_var {
+                let (start, end) = lv.range.eval(&mut sim.mask_cache);
                 let mut step_body = |i: u64| -> ExecResult {
                     let val = Value::new(i, lv.width, lv.signed);
                     unsafe {
@@ -530,9 +531,9 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                     exec(sim, body)
                 };
                 match &lv.range {
-                    SimForRange::Forward { start, end, step } => {
-                        let mut i = *start;
-                        while i < *end {
+                    SimForRange::Forward { step, .. } => {
+                        let mut i = start;
+                        while i < end {
                             let result = step_body(i);
                             if result.should_stop() {
                                 return result;
@@ -540,9 +541,9 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                             i += step;
                         }
                     }
-                    SimForRange::Reverse { start, end, step } => {
-                        let mut i = *end;
-                        while i > *start {
+                    SimForRange::Reverse { step, .. } => {
+                        let mut i = end;
+                        while i > start {
                             i -= step;
                             let result = step_body(i);
                             if result.should_stop() {
@@ -550,14 +551,9 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                             }
                         }
                     }
-                    SimForRange::Stepped {
-                        start,
-                        end,
-                        step,
-                        op,
-                    } => {
-                        let mut i = *start;
-                        while i < *end {
+                    SimForRange::Stepped { step, op, .. } => {
+                        let mut i = start;
+                        while i < end {
                             let result = step_body(i);
                             if result.should_stop() {
                                 return result;

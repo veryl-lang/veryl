@@ -204,6 +204,7 @@ impl Statement {
             Statement::AssignDynamic(x) => x.eval_step(mask_cache),
             Statement::If(x) => x.eval_step(mask_cache),
             Statement::For(x) => {
+                let (start, end) = x.range.eval(mask_cache);
                 let mut step_body = |i: u64| {
                     let val = Value::new(i, x.var_width, x.var_signed);
                     unsafe {
@@ -213,29 +214,25 @@ impl Statement {
                         s.eval_step(mask_cache);
                     }
                 };
+
                 match &x.range {
-                    SimForRange::Forward { start, end, step } => {
-                        let mut i = *start;
-                        while i < *end {
+                    SimForRange::Forward { step, .. } => {
+                        let mut i = start;
+                        while i < end {
                             step_body(i);
                             i += step;
                         }
                     }
-                    SimForRange::Reverse { start, end, step } => {
-                        let mut i = *end;
-                        while i > *start {
+                    SimForRange::Reverse { step, .. } => {
+                        let mut i = end;
+                        while i > start {
                             i -= step;
                             step_body(i);
                         }
                     }
-                    SimForRange::Stepped {
-                        start,
-                        end,
-                        step,
-                        op,
-                    } => {
-                        let mut i = *start;
-                        while i < *end {
+                    SimForRange::Stepped { step, op, .. } => {
+                        let mut i = start;
+                        while i < end {
                             step_body(i);
                             i = op.eval(i as usize, *step as usize) as u64;
                         }
@@ -686,24 +683,316 @@ pub struct CompiledBlockStatement {
 }
 
 #[derive(Clone, Debug)]
+pub enum ProtoForBound {
+    Const(usize),
+    Expression(Box<ProtoExpression>),
+}
+
+impl ProtoForBound {
+    pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
+        if let Self::Expression(exp) = self {
+            exp.adjust_offsets(ff_delta, comb_delta);
+        }
+    }
+
+    pub fn gather_variable_offsets(&self, inputs: &mut Vec<VarOffset>) {
+        if let Self::Expression(exp) = self {
+            exp.gather_variable_offsets(inputs);
+        }
+    }
+}
+
+impl Conv<&air::ForBound> for ProtoForBound {
+    fn conv(context: &mut ConvContext, src: &air::ForBound) -> Result<Self, SimulatorError> {
+        match src {
+            air::ForBound::Const(x) => Ok(Self::Const(*x)),
+            air::ForBound::Expression(exp) => {
+                let exp = Conv::conv(context, exp.as_ref())?;
+                Ok(Self::Expression(Box::new(exp)))
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum SimForBound {
+    Const(u64),
+    Expression(Box<Expression>),
+}
+
+impl SimForBound {
+    pub fn from_proto(
+        proto: &ProtoForBound,
+        ff_values_ptr: *mut u8,
+        ff_len: usize,
+        comb_values_ptr: *mut u8,
+        comb_len: usize,
+        use_4state: bool,
+    ) -> Self {
+        match proto {
+            ProtoForBound::Const(x) => Self::Const(*x as u64),
+            ProtoForBound::Expression(exp) => {
+                let exp = unsafe {
+                    exp.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    )
+                };
+                Self::Expression(Box::new(exp))
+            }
+        }
+    }
+
+    pub fn eval(&self, mask_cache: &mut MaskCache) -> u64 {
+        match self {
+            Self::Const(x) => *x,
+            Self::Expression(exp) => {
+                let val = exp.eval(mask_cache);
+                val.to_u64().unwrap_or_default()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ProtoForRange {
+    Forward {
+        start: ProtoForBound,
+        end: ProtoForBound,
+        inclusive: bool,
+        step: usize,
+    },
+    Reverse {
+        start: ProtoForBound,
+        end: ProtoForBound,
+        inclusive: bool,
+        step: usize,
+    },
+    Stepped {
+        start: ProtoForBound,
+        end: ProtoForBound,
+        inclusive: bool,
+        step: usize,
+        op: air::Op,
+    },
+}
+
+impl ProtoForRange {
+    pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
+        match self {
+            Self::Forward { start, end, .. }
+            | Self::Reverse { start, end, .. }
+            | Self::Stepped { start, end, .. } => {
+                start.adjust_offsets(ff_delta, comb_delta);
+                end.adjust_offsets(ff_delta, comb_delta);
+            }
+        }
+    }
+
+    pub fn gather_variable_offsets(&self, inputs: &mut Vec<VarOffset>) {
+        match self {
+            Self::Forward { start, end, .. }
+            | Self::Reverse { start, end, .. }
+            | Self::Stepped { start, end, .. } => {
+                start.gather_variable_offsets(inputs);
+                end.gather_variable_offsets(inputs);
+            }
+        }
+    }
+}
+
+impl Conv<&air::ForRange> for ProtoForRange {
+    fn conv(context: &mut ConvContext, src: &air::ForRange) -> Result<Self, SimulatorError> {
+        match src {
+            air::ForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            } => Ok(Self::Forward {
+                start: Conv::conv(context, start)?,
+                end: Conv::conv(context, end)?,
+                inclusive: *inclusive,
+                step: *step,
+            }),
+            air::ForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                step,
+            } => Ok(Self::Reverse {
+                start: Conv::conv(context, start)?,
+                end: Conv::conv(context, end)?,
+                inclusive: *inclusive,
+                step: *step,
+            }),
+            air::ForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                step,
+                op,
+            } => Ok(Self::Stepped {
+                start: Conv::conv(context, start)?,
+                end: Conv::conv(context, end)?,
+                inclusive: *inclusive,
+                step: *step,
+                op: *op,
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum SimForRange {
     Forward {
-        start: u64,
-        end: u64,
+        start: SimForBound,
+        end: SimForBound,
+        inclusive: bool,
         step: u64,
     },
     Reverse {
-        start: u64,
-        end: u64,
+        start: SimForBound,
+        end: SimForBound,
+        inclusive: bool,
         step: u64,
     },
     Stepped {
-        start: u64,
-        end: u64,
+        start: SimForBound,
+        end: SimForBound,
+        inclusive: bool,
         step: u64,
         op: air::Op,
     },
 }
+
+impl SimForRange {
+    pub fn from_proto(
+        proto: &ProtoForRange,
+        ff_values_ptr: *mut u8,
+        ff_len: usize,
+        comb_values_ptr: *mut u8,
+        comb_len: usize,
+        use_4state: bool,
+    ) -> Self {
+        match proto {
+            ProtoForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            } => Self::Forward {
+                start: SimForBound::from_proto(
+                    start,
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                ),
+                end: SimForBound::from_proto(
+                    end,
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                ),
+                inclusive: *inclusive,
+                step: *step as u64,
+            },
+            ProtoForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                step,
+            } => Self::Reverse {
+                start: SimForBound::from_proto(
+                    start,
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                ),
+                end: SimForBound::from_proto(
+                    end,
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                ),
+                inclusive: *inclusive,
+                step: *step as u64,
+            },
+            ProtoForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                step,
+                op,
+            } => Self::Stepped {
+                start: SimForBound::from_proto(
+                    start,
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                ),
+                end: SimForBound::from_proto(
+                    end,
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                ),
+                inclusive: *inclusive,
+                step: *step as u64,
+                op: *op,
+            },
+        }
+    }
+
+    pub fn eval(&self, mask_cache: &mut MaskCache) -> (u64, u64) {
+        match self {
+            SimForRange::Forward {
+                start,
+                end,
+                inclusive,
+                ..
+            }
+            | SimForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                ..
+            }
+            | SimForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                ..
+            } => {
+                let start = start.eval(mask_cache);
+                let end = end.eval(mask_cache);
+                if *inclusive {
+                    (start, end + 1)
+                } else {
+                    (start, end)
+                }
+            }
+        }
+    }
+}
+
+// SAFETY: ForwardDynamic::end_ptr points into an exclusively-owned simulation buffer.
+unsafe impl Send for SimForRange {}
 
 #[derive(Clone, Debug)]
 pub struct ProtoForStatement {
@@ -711,7 +1000,7 @@ pub struct ProtoForStatement {
     pub var_width: usize,
     pub var_native_bytes: usize,
     pub var_signed: bool,
-    pub range: SimForRange,
+    pub range: ProtoForRange,
     pub body: Vec<ProtoStatement>,
 }
 
@@ -799,6 +1088,7 @@ impl ProtoStatement {
             }
             ProtoStatement::For(x) => {
                 x.var_offset = x.var_offset.adjust(ff_delta, comb_delta);
+                x.range.adjust_offsets(ff_delta, comb_delta);
                 for s in &mut x.body {
                     s.adjust_offsets(ff_delta, comb_delta);
                 }
@@ -949,6 +1239,7 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::For(x) => {
+                x.range.gather_variable_offsets(inputs);
                 for s in &x.body {
                     s.gather_variable_offsets(inputs, outputs);
                 }
@@ -1193,6 +1484,16 @@ impl ProtoStatement {
                     } else {
                         comb_values_ptr.offset(x.var_offset.raw())
                     };
+
+                    let range = SimForRange::from_proto(
+                        &x.range,
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
+
                     let body = x
                         .body
                         .iter()
@@ -1212,7 +1513,7 @@ impl ProtoStatement {
                         var_use_4state: use_4state,
                         var_width: x.var_width,
                         var_signed: x.var_signed,
-                        range: x.range.clone(),
+                        range,
                         body,
                     })
                 }
@@ -2353,35 +2654,13 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 let var_native_bytes = meta.native_bytes;
                 let var_signed = x.var_type.signed;
 
+                let range: ProtoForRange = Conv::conv(context, &x.range)?;
+
                 let mut body = vec![];
                 for stmt in &x.body {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
                     body.extend(stmts);
                 }
-
-                let range = match &x.range {
-                    air::ForRange::Forward { start, end, step } => SimForRange::Forward {
-                        start: *start as u64,
-                        end: *end as u64,
-                        step: *step as u64,
-                    },
-                    air::ForRange::Reverse { start, end, step } => SimForRange::Reverse {
-                        start: *start as u64,
-                        end: *end as u64,
-                        step: *step as u64,
-                    },
-                    air::ForRange::Stepped {
-                        start,
-                        end,
-                        step,
-                        op,
-                    } => SimForRange::Stepped {
-                        start: *start as u64,
-                        end: *end as u64,
-                        step: *step as u64,
-                        op: *op,
-                    },
-                };
 
                 vec![ProtoStatement::For(ProtoForStatement {
                     var_offset,

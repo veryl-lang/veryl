@@ -631,16 +631,15 @@ impl Conv<&ForStatement> for ir::StatementBlock {
             .for_statement_opt0
             .as_ref()
             .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
+        let for_range = build_for_range(context, &value.range, rev, step)?;
 
-        if context.in_sequential_block {
-            let for_range = build_for_range(context, &value.range, rev, step)?;
+        if context.in_sequential_block || for_range.is_dynamic() {
             return build_for_statement(context, value, &r#type, clock_domain, for_range, token);
         }
 
-        let range = eval_for_range(context, &value.range, rev, step, token)?;
+        let range = eval_for_range(context, &for_range, token)?;
 
         let mut ret = ir::StatementBlock::default();
-
         for i in range {
             let label = format!("[{}]", i);
             let label = resource_table::insert_str(&label);
