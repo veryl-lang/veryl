@@ -1,4 +1,6 @@
-use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, UnevaluableValueKind};
+use crate::analyzer_error::{
+    AnalyzerError, ExceedLimitKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+};
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
@@ -255,7 +257,11 @@ pub fn eval_array_literal(
                     if default.is_none() {
                         default = Some(exprs);
                     } else {
-                        // TODO multiple default error
+                        context.insert_error(AnalyzerError::multiple_default(
+                            MultipleDefaultKind::ArrayLiteral,
+                            "default",
+                            &token,
+                        ));
                         return Err(ir_error!(token));
                     }
                 }
@@ -279,11 +285,23 @@ pub fn eval_array_literal(
                         index += 1;
                     }
                 } else {
-                    // TODO mismatch dimension error
+                    context.insert_error(AnalyzerError::mismatch_type(
+                        MismatchTypeKind::ArrayDimension {
+                            expected: *target_len,
+                            actual: len,
+                        },
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
             } else if *target_len != len {
-                // TODO mismatch dimension error
+                context.insert_error(AnalyzerError::mismatch_type(
+                    MismatchTypeKind::ArrayDimension {
+                        expected: *target_len,
+                        actual: len,
+                    },
+                    &token,
+                ));
                 return Err(ir_error!(token));
             }
         } else {
@@ -765,9 +783,11 @@ pub fn eval_type(
             if type_error {
                 let token: TokenRange = symbol.found.token.into();
                 context.insert_error(AnalyzerError::mismatch_type(
-                    &symbol.found.token.to_string(),
-                    "enum or union or struct",
-                    &symbol.found.kind.to_kind_name(),
+                    MismatchTypeKind::SymbolKind {
+                        name: symbol.found.token.to_string(),
+                        expected: "enum or union or struct".to_string(),
+                        actual: symbol.found.kind.to_kind_name(),
+                    },
                     &token,
                 ));
             }
@@ -1414,7 +1434,12 @@ pub fn eval_struct_constructor(
             ir::TypeKind::Union(x) => &x.members,
             ir::TypeKind::SystemVerilog => &vec![],
             _ => {
-                // TODO error: non-struct/union type
+                context.insert_error(AnalyzerError::mismatch_type(
+                    MismatchTypeKind::NonStructUnionType {
+                        actual: r#type.kind.to_string(),
+                    },
+                    &token,
+                ));
                 return Err(ir_error!(token));
             }
         };
@@ -1432,7 +1457,11 @@ pub fn eval_struct_constructor(
             } else if let Some(expr) = default {
                 eval_expr(context, Some(x.r#type.clone()), &expr.expression, false)?
             } else {
-                // TODO error: unknown member
+                context.insert_error(AnalyzerError::unknown_member(
+                    "struct constructor",
+                    &x.name.to_string(),
+                    &token,
+                ));
                 return Err(ir_error!(token));
             };
 

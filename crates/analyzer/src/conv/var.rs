@@ -1,3 +1,4 @@
+use crate::analyzer_error::InvalidSelectKind;
 use crate::conv::checker::separator::check_separator;
 use crate::conv::{Context, Conv};
 use crate::ir::{self, IrResult, VarPath, VarPathSelect, VarSelect, VarSelectOp};
@@ -79,7 +80,11 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
 
         for x in &value.expression_identifier_list {
             if end.is_some() {
-                // TODO invalid_select error like "[1:0][0]"
+                context.insert_error(AnalyzerError::invalid_select(
+                    &InvalidSelectKind::SelectAfterRange,
+                    &token,
+                    &[],
+                ));
                 return Err(ir_error!(token));
             }
             context
@@ -109,7 +114,11 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 .push((path.clone(), generic_path.clone()));
             for x in &x.expression_identifier_list0_list {
                 if end.is_some() {
-                    // TODO invalid_select error like "[1:0][0]"
+                    context.insert_error(AnalyzerError::invalid_select(
+                        &InvalidSelectKind::SelectAfterRange,
+                        &token,
+                        &[],
+                    ));
                     return Err(ir_error!(token));
                 }
                 let mut expr = Conv::conv(context, x.select.expression.as_ref())?;
@@ -144,7 +153,11 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
 
         for x in &value.hierarchical_identifier_list {
             if end.is_some() {
-                // TODO invalid_select error like "[1:0][0]"
+                context.insert_error(AnalyzerError::invalid_select(
+                    &InvalidSelectKind::SelectAfterRange,
+                    &token,
+                    &[],
+                ));
                 return Err(ir_error!(token));
             }
             context
@@ -173,7 +186,11 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                 .push((path.clone(), generic_path.clone()));
             for x in &x.hierarchical_identifier_list0_list {
                 if end.is_some() {
-                    // TODO invalid_select error like "[1:0][0]"
+                    context.insert_error(AnalyzerError::invalid_select(
+                        &InvalidSelectKind::SelectAfterRange,
+                        &token,
+                        &[],
+                    ));
                     return Err(ir_error!(token));
                 }
                 let mut expr = Conv::conv(context, x.select.expression.as_ref())?;

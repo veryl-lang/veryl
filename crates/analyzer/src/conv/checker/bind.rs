@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, MismatchTypeKind};
 use crate::conv::Context;
 use crate::symbol::Symbol;
 use veryl_parser::Stringifier;
@@ -16,9 +16,11 @@ pub fn check_bind_target(
         let name = stringifier.as_str();
 
         context.insert_error(AnalyzerError::mismatch_type(
-            name,
-            "module or interface",
-            &target.kind.to_kind_name(),
+            MismatchTypeKind::SymbolKind {
+                name: name.to_string(),
+                expected: "module or interface".to_string(),
+                actual: target.kind.to_kind_name(),
+            },
             &identifier.into(),
         ));
         return false;

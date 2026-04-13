@@ -1,4 +1,4 @@
-use crate::analyzer_error::{AnalyzerError, InvalidModportItemKind};
+use crate::analyzer_error::{AnalyzerError, InvalidModportItemKind, MismatchTypeKind};
 use crate::attribute::ExpandItem;
 use crate::attribute_table;
 use crate::conv::{Affiliation, Context};
@@ -119,17 +119,21 @@ pub fn check_modport_default(context: &mut Context, arg: &ModportDefault, name: 
         if !matches!(symbol.found.kind, SymbolKind::Modport(_)) {
             // Check modport default member type
             context.insert_error(AnalyzerError::mismatch_type(
-                &symbol.found.token.to_string(),
-                "modport",
-                &symbol.found.kind.to_kind_name(),
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "modport".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
                 &identifier.identifier_token.token.into(),
             ));
         } else if symbol.found.token.text == name {
             // Check self reference
             context.insert_error(AnalyzerError::mismatch_type(
-                &symbol.found.token.to_string(),
-                "other modport",
-                "ownself",
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "other modport".to_string(),
+                    actual: "ownself".to_string(),
+                },
                 &identifier.identifier_token.token.into(),
             ));
         }

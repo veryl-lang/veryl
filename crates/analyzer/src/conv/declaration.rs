@@ -1,4 +1,4 @@
-use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
+use crate::analyzer_error::{AnalyzerError, MismatchTypeKind, UnevaluableValueKind};
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::checker::alias::{AliasType, check_alias_target};
@@ -510,9 +510,11 @@ impl Conv<&PortDeclarationItem> for () {
                         ir::TypeKind::SystemVerilog => (),
                         _ => {
                             context.insert_error(AnalyzerError::mismatch_type(
-                                &symbol.found.token.to_string(),
-                                "modport",
-                                &symbol.found.kind.to_kind_name(),
+                                MismatchTypeKind::SymbolKind {
+                                    name: symbol.found.token.to_string(),
+                                    expected: "modport".to_string(),
+                                    actual: symbol.found.kind.to_kind_name(),
+                                },
                                 &variable_token,
                             ));
                         }
@@ -1451,7 +1453,10 @@ impl Conv<&ConnectDeclaration> for ir::DeclarationBlock {
             expand_connect_const(context, lhs, comptime, token)?
         } else {
             if rhs.len() != 1 {
-                // TODO error
+                context.insert_error(AnalyzerError::mismatch_type(
+                    MismatchTypeKind::ConnectMultipleExpression,
+                    &token,
+                ));
                 return Err(ir_error!(token));
             }
 

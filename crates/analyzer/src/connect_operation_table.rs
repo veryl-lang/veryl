@@ -1,5 +1,5 @@
 use crate::HashMap;
-use crate::analyzer_error::{AnalyzerError, InvalidConnectOperandKind};
+use crate::analyzer_error::{AnalyzerError, InvalidConnectOperandKind, MismatchTypeKind};
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_table;
 use std::cell::RefCell;
@@ -155,9 +155,11 @@ pub fn clear() {
 
 fn mismatch_type(symbol: &Symbol, expected: &str) -> Option<AnalyzerError> {
     let error = AnalyzerError::mismatch_type(
-        &symbol.token.to_string(),
-        expected,
-        &symbol.kind.to_kind_name(),
+        MismatchTypeKind::SymbolKind {
+            name: symbol.token.to_string(),
+            expected: expected.to_string(),
+            actual: symbol.kind.to_kind_name(),
+        },
         &symbol.token.into(),
     );
     Some(error)

@@ -1,3 +1,4 @@
+use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::utils::{TypePosition, eval_factor_path, eval_generic_expr};
 use crate::conv::{Context, Conv};
 use crate::ir::{self, Comptime, IrResult, Type, VarPathSelect};
@@ -18,9 +19,12 @@ pub fn check_generic_bound_item(
             if let Err(Some(id)) = bound.resolve_inst_bound(namespace) {
                 let symbol = symbol_table::get(id).unwrap();
                 context.insert_error(AnalyzerError::mismatch_type(
-                    &symbol.token.to_string(),
-                    "proto module, proto interface or non generic interface",
-                    &symbol.kind.to_kind_name(),
+                    MismatchTypeKind::SymbolKind {
+                        name: symbol.token.to_string(),
+                        expected: "proto module, proto interface or non generic interface"
+                            .to_string(),
+                        actual: symbol.kind.to_kind_name(),
+                    },
                     &path.range,
                 ));
             }
@@ -29,9 +33,12 @@ pub fn check_generic_bound_item(
             if let Err(Some(id)) = bound.resolve_proto_bound(namespace) {
                 let symbol = symbol_table::get(id).unwrap();
                 context.insert_error(AnalyzerError::mismatch_type(
-                    &symbol.token.to_string(),
-                    "proto module, proto interface, proto package or variable type",
-                    &symbol.kind.to_kind_name(),
+                    MismatchTypeKind::SymbolKind {
+                        name: symbol.token.to_string(),
+                        expected: "proto module, proto interface, proto package or variable type"
+                            .to_string(),
+                        actual: symbol.kind.to_kind_name(),
+                    },
                     &r#type.token,
                 ));
             }
@@ -169,9 +176,11 @@ fn check_generic_type_arg(arg: &Comptime) -> Option<AnalyzerError> {
     } else {
         let src_type = arg.r#type.to_string();
         Some(AnalyzerError::mismatch_type(
-            &arg.token.end.to_string(),
-            "variable type",
-            &src_type,
+            MismatchTypeKind::GenericArgument {
+                name: arg.token.end.to_string(),
+                expected: "variable type".to_string(),
+                actual: src_type,
+            },
             &arg.token,
         ))
     }
@@ -186,9 +195,11 @@ fn check_generic_inst_arg(
 
     if !arg.r#type.is_interface_instance() {
         return Some(AnalyzerError::mismatch_type(
-            &arg.token.end.to_string(),
-            &format!("inst {}", bound_symbol.token),
-            &arg.r#type.to_string(),
+            MismatchTypeKind::GenericArgument {
+                name: arg.token.end.to_string(),
+                expected: format!("inst {}", bound_symbol.token),
+                actual: arg.r#type.to_string(),
+            },
             &arg.token,
         ));
     }
@@ -197,9 +208,11 @@ fn check_generic_inst_arg(
         let component = symbol_table::get(sig.symbol).unwrap();
         let Some(proto) = component.proto() else {
             return Some(AnalyzerError::mismatch_type(
-                &arg.token.end.to_string(),
-                &format!("inst {}", bound_symbol.token),
-                &component.kind.to_kind_name(),
+                MismatchTypeKind::GenericArgument {
+                    name: arg.token.end.to_string(),
+                    expected: format!("inst {}", bound_symbol.token),
+                    actual: component.kind.to_kind_name(),
+                },
                 &arg.token,
             ));
         };
@@ -210,9 +223,11 @@ fn check_generic_inst_arg(
 
     if proto_symbol.id != bound_symbol.id {
         return Some(AnalyzerError::mismatch_type(
-            &arg.token.end.to_string(),
-            &format!("inst {}", bound_symbol.token),
-            &proto_symbol.kind.to_kind_name(),
+            MismatchTypeKind::GenericArgument {
+                name: arg.token.end.to_string(),
+                expected: format!("inst {}", bound_symbol.token),
+                actual: proto_symbol.kind.to_kind_name(),
+            },
             &arg.token,
         ));
     }
@@ -275,9 +290,11 @@ fn check_generic_proto_arg(
     if let Some((expected, actual)) = result {
         let actual = actual.unwrap_or(arg.r#type.to_string());
         Some(AnalyzerError::mismatch_type(
-            &arg.token.end.to_string(),
-            &expected,
-            &actual,
+            MismatchTypeKind::GenericArgument {
+                name: arg.token.end.to_string(),
+                expected,
+                actual,
+            },
             &arg.token,
         ))
     } else {
