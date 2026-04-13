@@ -12,7 +12,6 @@ use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use crate::simulator_error::SimulatorError;
-#[cfg(not(target_family = "wasm"))]
 use std::collections::VecDeque;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
