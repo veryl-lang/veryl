@@ -11631,3 +11631,120 @@ fn unevaluable_value_parameter_value() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 }
+
+#[test]
+fn mismatch_function_arity_system_function() {
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $bits(1, 2);
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $size(1, 2);
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $clog2(1, 2);
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $onehot(1, 2);
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        let _a: u32 = $readmemh("file.hex");
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchFunctionArity { .. }
+    ));
+}
+
+#[test]
+fn invalid_select_after_range() {
+    let code = r#"
+    module ModuleA {
+        var a: logic<8>;
+        let _b: logic = a[3:0][0];
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSelect { .. }));
+}
+
+#[test]
+fn multiple_default_array_literal() {
+    let code = r#"
+    module ModuleA {
+        let _a: u32[4] = '{default: 0, default: 1};
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::MultipleDefault { .. }));
+}
+
+#[test]
+fn mismatch_dimension_array() {
+    let code = r#"
+    module ModuleA {
+        let _a: u32[2] = '{1, 2, 3};
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+}
+
+#[test]
+fn missing_member_struct_constructor() {
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic,
+            y: logic,
+        }
+
+        let _a: StructA = StructA'{x: 1};
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+}

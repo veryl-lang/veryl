@@ -806,11 +806,9 @@ pub enum AnalyzerError {
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("\"{name}\" is expected to \"{expected}\", but it is \"{actual}\"")]
+    #[error("{kind}")]
     MismatchType {
-        name: String,
-        expected: String,
-        actual: String,
+        kind: MismatchTypeKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2119,11 +2117,9 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn mismatch_type(name: &str, expected: &str, actual: &str, token: &TokenRange) -> Self {
+    pub fn mismatch_type(kind: MismatchTypeKind, token: &TokenRange) -> Self {
         AnalyzerError::MismatchType {
-            name: name.to_string(),
-            expected: expected.to_string(),
-            actual: actual.to_string(),
+            kind,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -2726,10 +2722,75 @@ impl fmt::Display for InvalidPortDefaultValueKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MismatchTypeKind {
+    SymbolKind {
+        name: String,
+        expected: String,
+        actual: String,
+    },
+    GenericArgument {
+        name: String,
+        expected: String,
+        actual: String,
+    },
+    ArrayDimension {
+        expected: usize,
+        actual: usize,
+    },
+    ConnectMultipleExpression,
+    NonStructUnionType {
+        actual: String,
+    },
+}
+
+impl fmt::Display for MismatchTypeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MismatchTypeKind::SymbolKind {
+                name,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "\"{name}\" is expected to \"{expected}\", but it is \"{actual}\""
+                )
+            }
+            MismatchTypeKind::GenericArgument {
+                name,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "\"{name}\" is expected to \"{expected}\", but it is \"{actual}\""
+                )
+            }
+            MismatchTypeKind::ArrayDimension { expected, actual } => {
+                write!(
+                    f,
+                    "array literal is expected to {expected} elements, but it has {actual} elements"
+                )
+            }
+            MismatchTypeKind::ConnectMultipleExpression => {
+                "connect requires a single expression, but multiple expressions are provided".fmt(f)
+            }
+            MismatchTypeKind::NonStructUnionType { actual } => {
+                write!(
+                    f,
+                    "struct constructor is expected to \"struct or union\", but it is \"{actual}\""
+                )
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InvalidSelectKind {
     WrongOrder { beg: usize, end: usize },
     OutOfRange { beg: usize, end: usize, size: usize },
     OutOfDimension { dim: usize, size: usize },
+    SelectAfterRange,
 }
 
 impl fmt::Display for InvalidSelectKind {
@@ -2746,6 +2807,7 @@ impl fmt::Display for InvalidSelectKind {
                 }
             }
             InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
+            InvalidSelectKind::SelectAfterRange => "select after range is not allowed".fmt(f),
         }
     }
 }
@@ -2767,6 +2829,7 @@ impl fmt::Display for InvalidTestKind {
 pub enum MultipleDefaultKind {
     Clock,
     Reset,
+    ArrayLiteral,
 }
 
 impl fmt::Display for MultipleDefaultKind {
@@ -2774,6 +2837,7 @@ impl fmt::Display for MultipleDefaultKind {
         match self {
             MultipleDefaultKind::Clock => "clock".fmt(f),
             MultipleDefaultKind::Reset => "reset".fmt(f),
+            MultipleDefaultKind::ArrayLiteral => "value in array literal".fmt(f),
         }
     }
 }

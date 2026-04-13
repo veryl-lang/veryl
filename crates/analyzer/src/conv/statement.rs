@@ -1,3 +1,4 @@
+use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::utils::{
     TypePosition, argument_list, build_for_range, build_for_statement, case_condition,
     eval_assign_statement, eval_expr, eval_for_range, eval_variable, expand_connect,
@@ -267,7 +268,10 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             expand_connect_const(context, lhs, comptime, token)?
                         } else {
                             if rhs.len() != 1 {
-                                // TODO error
+                                context.insert_error(AnalyzerError::mismatch_type(
+                                    MismatchTypeKind::ConnectMultipleExpression,
+                                    &token,
+                                ));
                                 return Err(ir_error!(token));
                             }
 

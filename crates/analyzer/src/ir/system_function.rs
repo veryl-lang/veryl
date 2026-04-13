@@ -123,7 +123,12 @@ impl SystemFunctionCall {
         match name.to_string().as_str() {
             "$bits" => {
                 if args.len() != 1 {
-                    // TODO mismatch arity
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$bits",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));
@@ -134,7 +139,12 @@ impl SystemFunctionCall {
             }
             "$size" => {
                 if args.len() != 1 {
-                    // TODO mismatch arity
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$size",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));
@@ -145,7 +155,12 @@ impl SystemFunctionCall {
             }
             "$clog2" => {
                 if args.len() != 1 {
-                    // TODO mismatch arity
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$clog2",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
                 let arg0_type = Type {
@@ -161,7 +176,12 @@ impl SystemFunctionCall {
             }
             "$onehot" => {
                 if args.len() != 1 {
-                    // TODO mismatch arity
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$onehot",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
                 let arg0_type = Type {
@@ -177,7 +197,12 @@ impl SystemFunctionCall {
             }
             "$readmemh" => {
                 if args.len() != 2 {
-                    // TODO mismatch arity
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$readmemh",
+                        2,
+                        args.len(),
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));

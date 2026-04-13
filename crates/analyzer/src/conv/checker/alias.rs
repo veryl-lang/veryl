@@ -1,3 +1,4 @@
+use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::Context;
 use crate::conv::checker::generic::check_generic_refereence;
 use crate::{AnalyzerError, symbol_table};
@@ -31,9 +32,11 @@ pub fn check_alias_target(context: &mut Context, value: &ScopedIdentifier, r#typ
 
         if let Some(expected) = expected {
             context.insert_error(AnalyzerError::mismatch_type(
-                &symbol.token.to_string(),
-                expected,
-                &symbol.kind.to_kind_name(),
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.token.to_string(),
+                    expected: expected.to_string(),
+                    actual: symbol.kind.to_kind_name(),
+                },
                 &value.identifier().token.into(),
             ));
         }

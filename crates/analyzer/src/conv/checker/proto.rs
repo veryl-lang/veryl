@@ -1,5 +1,5 @@
 use crate::HashMap;
-use crate::analyzer_error::{AnalyzerError, IncompatProtoKind};
+use crate::analyzer_error::{AnalyzerError, IncompatProtoKind, MismatchTypeKind};
 use crate::conv::Context;
 use crate::namespace::Namespace;
 use crate::symbol::{
@@ -649,9 +649,11 @@ pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIde
         }
         (SymbolKind::Module(_), _) => {
             context.insert_error(AnalyzerError::mismatch_type(
-                &proto_symbol.token.to_string(),
-                "proto module",
-                &proto_symbol.kind.to_kind_name(),
+                MismatchTypeKind::SymbolKind {
+                    name: proto_symbol.token.to_string(),
+                    expected: "proto module".to_string(),
+                    actual: proto_symbol.kind.to_kind_name(),
+                },
                 &proto.identifier().token.into(),
             ));
         }
@@ -660,9 +662,11 @@ pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIde
         }
         (SymbolKind::Interface(_), _) => {
             context.insert_error(AnalyzerError::mismatch_type(
-                &proto_symbol.token.to_string(),
-                "proto interface",
-                &proto_symbol.kind.to_kind_name(),
+                MismatchTypeKind::SymbolKind {
+                    name: proto_symbol.token.to_string(),
+                    expected: "proto interface".to_string(),
+                    actual: proto_symbol.kind.to_kind_name(),
+                },
                 &proto.identifier().token.into(),
             ));
         }
@@ -671,9 +675,11 @@ pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIde
         }
         (SymbolKind::Package(_), _) => {
             context.insert_error(AnalyzerError::mismatch_type(
-                &proto_symbol.token.to_string(),
-                "proto package",
-                &proto_symbol.kind.to_kind_name(),
+                MismatchTypeKind::SymbolKind {
+                    name: proto_symbol.token.to_string(),
+                    expected: "proto package".to_string(),
+                    actual: proto_symbol.kind.to_kind_name(),
+                },
                 &proto.identifier().token.into(),
             ));
         }

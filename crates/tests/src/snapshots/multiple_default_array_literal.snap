@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 366
+expression: out
+---
+multiple_default (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#multiple_default)
+
+  × "default" can't be used as the default value in array literal because the default value in array literal has already been specified.
+   ╭─[../../testcases/error/multiple_default_array_literal.veryl:2:22]
+ 1 │ module multiple_default_array_literal {
+ 2 │     let _a: u32[4] = '{default: 0, default: 1};
+   ·                      ────────────┬────────────
+   ·                                  ╰── Error location
+ 3 │ }
+   ╰────
+  help:

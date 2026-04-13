@@ -1,0 +1,4 @@
+module invalid_select_after_range {
+    var a: logic<8>;
+    let _b: logic = a[3:0][0];
+}

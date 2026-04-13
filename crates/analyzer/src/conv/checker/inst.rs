@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, MismatchTypeKind};
 use crate::attribute::AllowItem;
 use crate::attribute::Attribute as Attr;
 use crate::attribute_table;
@@ -157,9 +157,11 @@ pub fn check_inst(
 
         if let Some(expected) = type_expected {
             context.insert_error(AnalyzerError::mismatch_type(
-                name,
-                expected,
-                &symbol.kind.to_kind_name(),
+                MismatchTypeKind::SymbolKind {
+                    name: name.to_string(),
+                    expected: expected.to_string(),
+                    actual: symbol.kind.to_kind_name(),
+                },
                 &arg.identifier.as_ref().into(),
             ));
         }
