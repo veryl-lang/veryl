@@ -61,7 +61,6 @@ fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets)
 /// are skipped to avoid false cycles.
 ///
 /// Falls back to source order if a cycle is detected.
-#[cfg(not(target_family = "wasm"))]
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let n = statements.len();
     if n <= 1 {
