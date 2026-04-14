@@ -633,17 +633,20 @@ pub(crate) fn analyze_dependency(
         return Ok(sorted);
     }
 
-    // Phase 2: Expand all CompiledBlocks with original_stmts and retry.
-    let has_expandable = table
-        .values()
-        .any(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()));
+    // Phase 2: Expand all CompiledBlocks and SequentialBlocks and retry.
+    let has_expandable = table.values().any(|x| {
+        matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
+            || matches!(x, ProtoStatement::SequentialBlock(_))
+    });
 
     if has_expandable {
         let mut next_id = table.keys().max().copied().unwrap_or(0) + 1;
         let expandable_ids: Vec<usize> = table
             .iter()
             .filter_map(|(id, x)| {
-                if matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()) {
+                if matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
+                    || matches!(x, ProtoStatement::SequentialBlock(_))
+                {
                     Some(*id)
                 } else {
                     None
@@ -652,10 +655,23 @@ pub(crate) fn analyze_dependency(
             .collect();
 
         for eid in expandable_ids {
-            if let Some(ProtoStatement::CompiledBlock(cb)) = table.remove(&eid) {
-                for stmt in cb.original_stmts {
-                    table.insert(next_id, stmt);
-                    next_id += 1;
+            match table.remove(&eid) {
+                Some(ProtoStatement::CompiledBlock(cb)) => {
+                    for stmt in cb.original_stmts {
+                        table.insert(next_id, stmt);
+                        next_id += 1;
+                    }
+                }
+                Some(ProtoStatement::SequentialBlock(body)) => {
+                    for stmt in body {
+                        table.insert(next_id, stmt);
+                        next_id += 1;
+                    }
+                }
+                other => {
+                    if let Some(s) = other {
+                        table.insert(eid, s);
+                    }
                 }
             }
         }
@@ -986,6 +1002,7 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             ProtoStatement::Assign(_) => 1,
             ProtoStatement::AssignDynamic(_) => 2,
             ProtoStatement::If(_) => 3,
+            ProtoStatement::SequentialBlock(_) => 1,
             _ => 4,
         })
         .collect();
@@ -1053,6 +1070,7 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             ProtoStatement::Assign(_) => 1,
             ProtoStatement::AssignDynamic(_) => 2,
             ProtoStatement::If(_) => 3,
+            ProtoStatement::SequentialBlock(_) => 1,
             _ => 4,
         });
         return result;

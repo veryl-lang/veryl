@@ -10834,6 +10834,46 @@ fn dispatch_binary_pattern_via_function() {
     }
 }
 
+// Regression (#2506): always_comb body statements must preserve source
+// order (SequentialBlock grouping prevents reordering by topo sort).
+#[test]
+fn always_comb_preserves_statement_order() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a:   input  logic<32>,
+        b:   output logic<32>,
+    ) {
+        always_comb {
+            var c: logic<32>;
+            var d: logic<32>;
+            c = a;
+            d = 2 * c;
+            c = d;
+            b = c;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(5, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(10, 32, false),
+            "a=5 → b should be 10, JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
 // Regression (#2506): variable reassignment in an inlined function
 // must not be flagged as a combinational loop.
 #[test]

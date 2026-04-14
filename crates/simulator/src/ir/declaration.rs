@@ -192,6 +192,11 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
                     comb_statements.extend(stmts);
                 }
+                let comb_statements = if comb_statements.len() > 1 {
+                    vec![ProtoStatement::SequentialBlock(comb_statements)]
+                } else {
+                    comb_statements
+                };
                 Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
                     comb_statements,
@@ -359,13 +364,27 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // Save own Comb assign statements that write to offsets NOT
             // already written by any child Inst (port connection).
             if matches!(decl, air::Declaration::Comb(_)) {
-                for s in &proto_decl.comb_statements {
-                    if let ProtoStatement::Assign(a) = s
-                        && !a.dst.is_ff()
-                        && !inst_written_offsets.contains(&a.dst.raw())
-                    {
-                        own_new_assigns.push(s.clone());
+                fn collect_assigns(
+                    s: &ProtoStatement,
+                    inst_written_offsets: &HashSet<isize>,
+                    out: &mut Vec<ProtoStatement>,
+                ) {
+                    match s {
+                        ProtoStatement::Assign(a)
+                            if !a.dst.is_ff() && !inst_written_offsets.contains(&a.dst.raw()) =>
+                        {
+                            out.push(s.clone());
+                        }
+                        ProtoStatement::SequentialBlock(body) => {
+                            for s in body {
+                                collect_assigns(s, inst_written_offsets, out);
+                            }
+                        }
+                        _ => {}
                     }
+                }
+                for s in &proto_decl.comb_statements {
+                    collect_assigns(s, &inst_written_offsets, &mut own_new_assigns);
                 }
             }
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
