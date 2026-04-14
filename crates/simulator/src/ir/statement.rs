@@ -162,6 +162,7 @@ pub enum Statement {
     For(ForStatement),
     Binary(FuncPtr, *const u8, *const u8),
     BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
+    SequentialBlock(Vec<Statement>),
     SystemFunctionCall(SystemFunctionCall),
     TbMethodCall { inst: StrId, method: TbMethodKind },
 }
@@ -191,6 +192,7 @@ impl Statement {
             Statement::For(_) => "For",
             Statement::Binary(_, _, _) => "Binary",
             Statement::BinaryBatch(_, _) => "BinaryBatch",
+            Statement::SequentialBlock(_) => "SequentialBlock",
             Statement::SystemFunctionCall(_) => "SystemFunctionCall",
             Statement::TbMethodCall { .. } => "TbMethodCall",
         }
@@ -248,6 +250,11 @@ impl Statement {
                     func(ff_values, comb_values);
                 }
             },
+            Statement::SequentialBlock(body) => {
+                for s in body {
+                    s.eval_step(mask_cache);
+                }
+            }
             Statement::SystemFunctionCall(x) => x.eval_step(mask_cache),
             Statement::TbMethodCall { .. } => (),
         }
@@ -264,6 +271,11 @@ impl Statement {
                 }
             }
             Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) => (),
+            Statement::SequentialBlock(body) => {
+                for s in body {
+                    s.gather_variable(inputs, outputs);
+                }
+            }
             Statement::SystemFunctionCall(x) => x.gather_variable(inputs),
             Statement::TbMethodCall { .. } => (),
         }
@@ -711,6 +723,9 @@ pub enum ProtoStatement {
     For(ProtoForStatement),
     SystemFunctionCall(ProtoSystemFunctionCall),
     CompiledBlock(CompiledBlockStatement),
+    /// Sequential statement group (always_comb / inlined function body).
+    /// Dependency analysis sees only external I/O; internal variables are hidden.
+    SequentialBlock(Vec<ProtoStatement>),
     TbMethodCall {
         inst: StrId,
         method: ProtoTbMethodKind,
@@ -788,6 +803,11 @@ impl ProtoStatement {
                     s.adjust_offsets(ff_delta, comb_delta);
                 }
             }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
             ProtoStatement::TbMethodCall { method, .. } => match method {
                 ProtoTbMethodKind::ClockNext { count, period } => {
                     if let Some(c) = count {
@@ -815,6 +835,7 @@ impl ProtoStatement {
             ProtoStatement::For(_) => false,
             ProtoStatement::SystemFunctionCall(_) => false,
             ProtoStatement::CompiledBlock(_) => false,
+            ProtoStatement::SequentialBlock(body) => body.iter().all(|s| s.can_build_binary()),
             ProtoStatement::TbMethodCall { .. } => false,
         }
     }
@@ -932,6 +953,23 @@ impl ProtoStatement {
                     s.gather_variable_offsets(inputs, outputs);
                 }
             }
+            ProtoStatement::SequentialBlock(body) => {
+                let mut all_ins = vec![];
+                let mut all_outs = vec![];
+                for s in body {
+                    s.gather_variable_offsets(&mut all_ins, &mut all_outs);
+                }
+                let input_set: HashSet<VarOffset> = all_ins.iter().cloned().collect();
+                let output_set: HashSet<VarOffset> = all_outs.iter().cloned().collect();
+                let internal: HashSet<VarOffset> =
+                    input_set.intersection(&output_set).cloned().collect();
+                for off in all_ins {
+                    if !internal.contains(&off) {
+                        inputs.push(off);
+                    }
+                }
+                outputs.extend(all_outs);
+            }
             ProtoStatement::TbMethodCall { .. } => {}
         }
     }
@@ -975,6 +1013,11 @@ impl ProtoStatement {
             ProtoStatement::CompiledBlock(x) => {
                 for off in &x.ff_canonical_offsets {
                     result.insert(*off);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    result.extend(s.gather_ff_canonical_offsets());
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
@@ -1173,6 +1216,21 @@ impl ProtoStatement {
                         body,
                     })
                 }
+                ProtoStatement::SequentialBlock(body) => {
+                    let stmts = body
+                        .iter()
+                        .map(|s| {
+                            s.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )
+                        })
+                        .collect();
+                    Statement::SequentialBlock(stmts)
+                }
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
                         ProtoTbMethodKind::ClockNext { count, period } => {
@@ -1240,6 +1298,12 @@ impl ProtoStatement {
             ProtoStatement::For(_) => None,
             ProtoStatement::SystemFunctionCall(_) => None,
             ProtoStatement::CompiledBlock(_) => None,
+            ProtoStatement::SequentialBlock(body) => {
+                for (i, s) in body.iter().enumerate() {
+                    s.build_binary(context, builder, is_last && i == body.len() - 1)?;
+                }
+                Some(())
+            }
             ProtoStatement::TbMethodCall { .. } => None,
         }
     }

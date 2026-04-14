@@ -90,6 +90,11 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
                 count_stmt_reads(s, counts);
             }
         }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                count_stmt_reads(s, counts);
+            }
+        }
         ProtoStatement::TbMethodCall { .. } => {}
     }
 }
@@ -233,6 +238,11 @@ fn substitute_stmt(
             x.expr = substitute_expr(x.expr, inline_map);
             ProtoStatement::AssignDynamic(x)
         }
+        ProtoStatement::SequentialBlock(body) => ProtoStatement::SequentialBlock(
+            body.into_iter()
+                .map(|s| substitute_stmt(s, inline_map))
+                .collect(),
+        ),
         _ => stmt,
     }
 }
