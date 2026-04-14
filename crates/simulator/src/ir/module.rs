@@ -703,10 +703,15 @@ pub(crate) fn analyze_dependency(
         for (ri, ins) in s_inputs.iter().enumerate() {
             for key in ins {
                 if let Some(wis) = w.get(key) {
-                    for &wi in wis {
+                    if wis.len() == 1 {
+                        let wi = wis[0];
                         if wi != ri && a[wi].insert(ri) {
                             deg[ri] += 1;
                         }
+                    } else if let Some(&wi) = wis.iter().rev().find(|&&w| w < ri)
+                        && a[wi].insert(ri)
+                    {
+                        deg[ri] += 1;
                     }
                 }
             }
