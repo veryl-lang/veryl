@@ -10833,3 +10833,57 @@ fn dispatch_binary_pattern_via_function() {
         }
     }
 }
+
+// Regression (#2506): variable reassignment in an inlined function
+// must not be flagged as a combinational loop.
+#[test]
+fn function_var_reassign_not_comb_loop() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a:   input  logic<32>,
+        b:   output logic<32>,
+    ) {
+        function f(a: input logic<32>) -> logic<32> {
+            var b: logic<32>;
+            var c: logic<32>;
+
+            c = a;
+            b = 2 * c;
+            c = b;
+
+            return c;
+        }
+
+        assign b = f(a);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(5, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(10, 32, false),
+            "f(5) should be 10, JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("a", Value::new(0, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(0, 32, false),
+            "f(0) should be 0, JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

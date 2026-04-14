@@ -87,21 +87,24 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
 
     // Build adjacency list and in-degree count for Kahn's algorithm.
     // Edge: writer_stmt → reader_stmt (RAW dependency).
-    // Skip self-referencing edges (same statement index).
+    // For variables with multiple writers (sequential reassignment from inlined
+    // functions), only the most recent writer before the reader is relevant.
     let mut adj: Vec<HashSet<usize>> = vec![HashSet::default(); n];
     let mut in_degree: Vec<usize> = vec![0; n];
 
     for (reader_idx, ins) in stmt_inputs.iter().enumerate() {
         for key in ins {
             if let Some(writer_indices) = writers.get(key) {
-                for &writer_idx in writer_indices {
-                    if writer_idx == reader_idx {
-                        // Skip self-reference to avoid false cycle
-                        continue;
-                    }
-                    if adj[writer_idx].insert(reader_idx) {
+                if writer_indices.len() == 1 {
+                    let writer_idx = writer_indices[0];
+                    if writer_idx != reader_idx && adj[writer_idx].insert(reader_idx) {
                         in_degree[reader_idx] += 1;
                     }
+                } else if let Some(&writer_idx) =
+                    writer_indices.iter().rev().find(|&&w| w < reader_idx)
+                    && adj[writer_idx].insert(reader_idx)
+                {
+                    in_degree[reader_idx] += 1;
                 }
             }
         }
