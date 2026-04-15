@@ -10927,3 +10927,379 @@ fn function_var_reassign_not_comb_loop() {
         );
     }
 }
+
+#[test]
+fn for_break_in_comb() {
+    let code_basic = r#"
+    module Top (
+        a0: input  logic<8>,
+        a1: input  logic<8>,
+        a2: input  logic<8>,
+        a3: input  logic<8>,
+        sum: output logic<8>,
+    ) {
+        var a: logic<8> [4];
+        always_comb {
+            a[0] = a0;
+            a[1] = a1;
+            a[2] = a2;
+            a[3] = a3;
+            sum = 0;
+            for i: u32 in 0..4 {
+                sum += a[i];
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code_basic, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a0", Value::new(1, 8, false));
+        sim.set("a1", Value::new(2, 8, false));
+        sim.set("a2", Value::new(3, 8, false));
+        sim.set("a3", Value::new(4, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(10, 8, false),
+            "basic for sum: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+
+    let code = r#"
+    module Top (
+        a0: input  logic<8>,
+        a1: input  logic<8>,
+        a2: input  logic<8>,
+        a3: input  logic<8>,
+        idx: output logic<8>,
+    ) {
+        var a: logic<8> [4];
+        always_comb {
+            a[0] = a0;
+            a[1] = a1;
+            a[2] = a2;
+            a[3] = a3;
+            idx = 0;
+            for i: u32 in 0..4 {
+                if a[i] != 0 {
+                    idx = i as 8;
+                    break;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a0", Value::new(0, 8, false));
+        sim.set("a1", Value::new(0, 8, false));
+        sim.set("a2", Value::new(0, 8, false));
+        sim.set("a3", Value::new(0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("idx").unwrap(),
+            Value::new(0, 8, false),
+            "all-zero: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("a2", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("idx").unwrap(),
+            Value::new(2, 8, false),
+            "a[2]=1: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("a1", Value::new(5, 8, false));
+        sim.set("a3", Value::new(9, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("idx").unwrap(),
+            Value::new(1, 8, false),
+            "a[1]=5,a[3]=9: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// Static for-loop with `break` following an assignment in the body:
+/// statements before break must execute each iteration until break fires.
+#[test]
+fn for_break_after_assign_in_comb() {
+    let code = r#"
+    module Top (
+        limit: input  logic<8>,
+        sum  : output logic<8>,
+    ) {
+        always_comb {
+            sum = 0;
+            for i: u32 in 0..4 {
+                sum += i as 8;
+                if (i as 8) == limit {
+                    break;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("limit", Value::new(4, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(6, 8, false),
+            "limit=4 (no break, sum=0+1+2+3): JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("limit", Value::new(2, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(3, 8, false),
+            "limit=2 (break at i=2, sum=0+1+2): JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// Dynamic-range for-loop with `break`: `Statement::For::eval_step` path.
+#[test]
+fn for_break_in_dynamic_range_function() {
+    let code = r#"
+    module Top (
+        n    : input  logic<8>,
+        limit: input  logic<8>,
+        sum  : output logic<8>,
+    ) {
+        function count_until(
+            n    : input u32,
+            limit: input u32,
+        ) -> u32 {
+            var s: u32;
+            s = 0;
+            for i: u32 in 0..n {
+                if i == limit {
+                    break;
+                }
+                s += 1;
+            }
+            return s;
+        }
+
+        always_comb {
+            sum = count_until(n as 32, limit as 32) as 8;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("n", Value::new(5, 8, false));
+        sim.set("limit", Value::new(10, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(5, 8, false),
+            "n=5,limit=10 (no break): JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("limit", Value::new(3, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(3, 8, false),
+            "n=5,limit=3 (break at i=3): JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn dynamic_for_range_in_function() {
+    let code = r#"
+    module Top #(
+        param T: type = logic<4>,
+    )(
+        o0: output T,
+        o1: output T,
+        o2: output T,
+        o3: output T,
+        o4: output T,
+        o5: output T,
+        o6: output T,
+        o7: output T,
+    ) {
+        function func(
+            beg_outer: input  u32 ,
+            end_outer: input  u32 ,
+            out      : output T<8>,
+        ) {
+            var m: i32;
+            var n: i32;
+
+            for i: u32 in 0..8 {
+                out[i] = 0 as T;
+            }
+
+            m = 8;
+            for i: u32 in beg_outer..end_outer {
+                n = m;
+                m = n / 2;
+                for j: u32 in 0..m {
+                    out[4 * i + j] = (4 * i + j) as T;
+                }
+            }
+        }
+
+        var out: T<8>;
+
+        always_comb {
+            func(0, 2, out);
+            o0  = out[0];
+            o1  = out[1];
+            o2  = out[2];
+            o3  = out[3];
+            o4  = out[4];
+            o5  = out[5];
+            o6  = out[6];
+            o7  = out[7];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let exp_list: [u64; 8] = [0, 1, 2, 3, 4, 5, 0, 0];
+        for (i, exp) in exp_list.iter().enumerate() {
+            let port = format!("o{}", i);
+            assert_eq!(
+                sim.get(&port).unwrap(),
+                Value::new(*exp, 4, false),
+                "i={} expected={} JIT={} 4st={}",
+                i,
+                exp,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn for_static_in_always_ff_reset() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+        o3: output logic<8>,
+    ) {
+        var data: logic<8> [4];
+
+        always_ff (clk, rst) {
+            if_reset {
+                for i: i32 in 0..4 {
+                    data[i] = (i + 10) as 8;
+                }
+            }
+        }
+
+        assign o0 = data[0];
+        assign o1 = data[1];
+        assign o2 = data[2];
+        assign o3 = data[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&sim.get_reset("rst").unwrap());
+        assert_eq!(sim.get("o0").unwrap(), Value::new(10, 8, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(11, 8, false));
+        assert_eq!(sim.get("o2").unwrap(), Value::new(12, 8, false));
+        assert_eq!(sim.get("o3").unwrap(), Value::new(13, 8, false));
+    }
+}
+
+#[test]
+fn for_static_step_and_rev() {
+    let code = r#"
+    module Top (
+        sum_step: output logic<32>,
+        sum_rev: output logic<32>,
+    ) {
+        always_comb {
+            sum_step = 0;
+            for i: u32 in 0..10 step += 3 {
+                sum_step += i;
+            }
+            sum_rev = 0;
+            for i: i32 in rev 0..4 {
+                sum_rev = sum_rev * 10 + i as 32;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // 0 + 3 + 6 + 9 = 18
+        assert_eq!(
+            sim.get("sum_step").unwrap(),
+            Value::new(18, 32, false),
+            "step: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        // 3*1000 + 2*100 + 1*10 + 0 = 3210
+        assert_eq!(
+            sim.get("sum_rev").unwrap(),
+            Value::new(3210, 32, false),
+            "rev: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

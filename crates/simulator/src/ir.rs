@@ -14,8 +14,8 @@ pub use event::Event;
 pub use expression::{Expression, ProtoExpression};
 pub use module::{Module, ProtoModule};
 pub use statement::{
-    CompiledBlockStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, SimForRange,
-    Statement, SystemFunctionCall, TbMethodKind, parse_hex_content,
+    CompiledBlockStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, RuntimeForBound,
+    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, parse_hex_content,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,

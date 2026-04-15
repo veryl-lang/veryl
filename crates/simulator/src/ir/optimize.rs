@@ -96,6 +96,7 @@ fn count_stmt_reads(stmt: &ProtoStatement, counts: &mut HashMap<CombKey, usize>)
             }
         }
         ProtoStatement::TbMethodCall { .. } => {}
+        ProtoStatement::Break => {}
     }
 }
 

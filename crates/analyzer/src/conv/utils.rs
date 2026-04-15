@@ -86,11 +86,17 @@ pub fn eval_generic_expr(
     ret
 }
 
-pub fn eval_range(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
+pub fn eval_range(
+    context: &mut Context,
+    range: &Range,
+) -> IrResult<(ir::ForBound, ir::ForBound, bool)> {
     eval_range_inner(context, range, false)
 }
 
-pub fn eval_range_const(context: &mut Context, range: &Range) -> IrResult<(usize, usize)> {
+pub fn eval_range_const(
+    context: &mut Context,
+    range: &Range,
+) -> IrResult<(ir::ForBound, ir::ForBound, bool)> {
     eval_range_inner(context, range, true)
 }
 
@@ -98,7 +104,7 @@ fn eval_range_inner(
     context: &mut Context,
     range: &Range,
     require_const: bool,
-) -> IrResult<(usize, usize)> {
+) -> IrResult<(ir::ForBound, ir::ForBound, bool)> {
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
     let beg_comptime = beg.eval_comptime(context, None);
     if require_const && !beg_comptime.is_const {
@@ -107,9 +113,14 @@ fn eval_range_inner(
             &range.into(),
         ));
     }
-    let beg = beg_comptime.get_value()?.to_usize().unwrap_or(0);
+    let beg = if beg_comptime.is_const {
+        let val = beg_comptime.get_value()?.to_usize().unwrap_or(0);
+        ir::ForBound::Const(val)
+    } else {
+        ir::ForBound::Expression(Box::new(beg))
+    };
 
-    let end = if let Some(x) = &range.range_opt {
+    let (end, inclusive) = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
         let end_comptime = end.eval_comptime(context, None);
         if require_const && !end_comptime.is_const {
@@ -118,18 +129,23 @@ fn eval_range_inner(
                 &range.into(),
             ));
         }
-        let end = end_comptime.get_value()?.to_usize().unwrap_or(0);
+        let end = if end_comptime.is_const {
+            let val = end_comptime.get_value()?.to_usize().unwrap_or(0);
+            ir::ForBound::Const(val)
+        } else {
+            ir::ForBound::Expression(Box::new(end))
+        };
 
         if matches!(x.range_operator.as_ref(), RangeOperator::DotDotEqu(_)) {
-            end + 1
+            (end, true)
         } else {
-            end
+            (end, false)
         }
     } else {
-        beg
+        (beg.clone(), false)
     };
 
-    Ok((beg, end))
+    Ok((beg, end, inclusive))
 }
 
 #[derive(Clone)]
@@ -1221,16 +1237,6 @@ pub fn eval_width_select(
     }
 }
 
-pub fn eval_for_range(
-    context: &mut Context,
-    range: &Range,
-    rev: bool,
-    step: Option<(&AssignmentOperator, &Expression)>,
-    token: TokenRange,
-) -> IrResult<Vec<usize>> {
-    eval_for_range_inner(context, range, rev, step, token, false)
-}
-
 pub fn eval_generate_for_range(
     context: &mut Context,
     range: &Range,
@@ -1238,50 +1244,8 @@ pub fn eval_generate_for_range(
     step: Option<(&AssignmentOperator, &Expression)>,
     token: TokenRange,
 ) -> IrResult<Vec<usize>> {
-    eval_for_range_inner(context, range, rev, step, token, true)
-}
-
-fn eval_for_range_inner(
-    context: &mut Context,
-    range: &Range,
-    rev: bool,
-    step: Option<(&AssignmentOperator, &Expression)>,
-    token: TokenRange,
-    require_const: bool,
-) -> IrResult<Vec<usize>> {
-    let (beg, end) = if require_const {
-        eval_range_const(context, range)?
-    } else {
-        eval_range(context, range)?
-    };
-
-    if let Some((op, expr)) = step {
-        let mut step: ir::Expression = Conv::conv(context, expr)?;
-        let step = step.eval_comptime(context, None);
-        let step = step.get_value()?.to_usize().unwrap_or(0);
-        let op: ir::Op = Conv::conv(context, op)?;
-
-        let mut ret = vec![];
-        let mut tmp = beg;
-        let mut count = 0;
-        while tmp < end {
-            ret.push(tmp);
-            tmp = op.eval(tmp, step);
-            count += 1;
-
-            if tmp == op.eval(tmp, step) {
-                break;
-            }
-            if context.check_size(count, token).is_none() {
-                break;
-            }
-        }
-        Ok(ret)
-    } else if rev {
-        Ok((beg..end).rev().collect())
-    } else {
-        Ok((beg..end).collect())
-    }
+    let for_range = build_for_range_inner(context, range, rev, step, true)?;
+    for_range.eval_iter(context).ok_or_else(|| ir_error!(token))
 }
 
 /// Build a `ForRange` from syntactic elements of a for-loop.
@@ -1291,7 +1255,21 @@ pub fn build_for_range(
     rev: bool,
     step: Option<(&AssignmentOperator, &Expression)>,
 ) -> IrResult<ir::ForRange> {
-    let (beg, end) = eval_range(context, range)?;
+    build_for_range_inner(context, range, rev, step, false)
+}
+
+fn build_for_range_inner(
+    context: &mut Context,
+    range: &Range,
+    rev: bool,
+    step: Option<(&AssignmentOperator, &Expression)>,
+    require_const: bool,
+) -> IrResult<ir::ForRange> {
+    let (beg, end, inclusive) = if require_const {
+        eval_range_const(context, range)?
+    } else {
+        eval_range(context, range)?
+    };
 
     if let Some((op, expr)) = step {
         let mut step_expr: ir::Expression = Conv::conv(context, expr)?;
@@ -1303,12 +1281,14 @@ pub fn build_for_range(
             Ok(ir::ForRange::Forward {
                 start: beg,
                 end,
+                inclusive,
                 step: step_val,
             })
         } else {
             Ok(ir::ForRange::Stepped {
                 start: beg,
                 end,
+                inclusive,
                 step: step_val,
                 op,
             })
@@ -1317,19 +1297,21 @@ pub fn build_for_range(
         Ok(ir::ForRange::Reverse {
             start: beg,
             end,
+            inclusive,
             step: 1,
         })
     } else {
         Ok(ir::ForRange::Forward {
             start: beg,
             end,
+            inclusive,
             step: 1,
         })
     }
 }
 
-/// Convert a `ForStatement` AST node into a runtime `ir::Statement::For`
-/// (used in initial blocks to avoid loop unrolling).
+/// Convert a `ForStatement` AST node into a runtime `ir::Statement::For`.
+/// Used for dynamic-range for-loops that cannot be unrolled at compile time.
 pub fn build_for_statement(
     context: &mut Context,
     value: &ForStatement,
@@ -1343,18 +1325,20 @@ pub fn build_for_statement(
     let index = value.identifier.text();
     let path = VarPath::new(index);
     let kind = VarKind::Const;
-    let mut comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
-    if let Some(total_width) = r#type.total_width() {
-        comptime.value = ir::ValueVariant::Numeric(Value::new(0, total_width, r#type.signed));
-    }
+    let comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
 
     let loop_var_id = context.insert_var_path(path.clone(), comptime.clone());
+    let values = if let Some(total_width) = r#type.total_width() {
+        vec![Value::new_x(total_width, r#type.signed)]
+    } else {
+        vec![]
+    };
     let variable = Variable::new(
         loop_var_id,
         path,
         kind,
         comptime.r#type.clone(),
-        vec![comptime.get_value().unwrap().clone()],
+        values,
         context.get_affiliation(),
         &token,
     );

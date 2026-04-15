@@ -1,11 +1,12 @@
 use crate::HashMap;
 use crate::ir::{
-    Event, Expression, Ir, ModuleVariables, SimForRange, Statement, SystemFunctionCall,
+    Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement, SystemFunctionCall,
     TbMethodKind, Value, VarId, VarPath, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::wave_dumper::WaveDumper;
+use veryl_analyzer::ir::ControlFlow;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
@@ -54,7 +55,7 @@ pub struct LoopVariable {
     pub use_4state: bool,
     pub width: usize,
     pub signed: bool,
-    pub range: SimForRange,
+    pub range: RuntimeForRange,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -67,6 +68,7 @@ pub enum TestResult {
 #[derive(Debug, PartialEq, Eq)]
 enum ExecResult {
     Continue,
+    Break,
     Finished,
     Fail(String),
 }
@@ -80,7 +82,7 @@ impl ExecResult {
 impl From<ExecResult> for TestResult {
     fn from(result: ExecResult) -> Self {
         match result {
-            ExecResult::Continue | ExecResult::Finished => TestResult::Pass,
+            ExecResult::Continue | ExecResult::Break | ExecResult::Finished => TestResult::Pass,
             ExecResult::Fail(msg) => TestResult::Fail(msg),
         }
     }
@@ -426,9 +428,13 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
     match stmt {
         TestbenchStatement::Stmt(s) => {
             sim.ensure_comb_updated();
-            s.eval_step(&mut sim.mask_cache);
+            let flow = s.eval_step(&mut sim.mask_cache);
             sim.mark_comb_dirty();
-            ExecResult::Continue
+            if flow == ControlFlow::Break {
+                ExecResult::Break
+            } else {
+                ExecResult::Continue
+            }
         }
         TestbenchStatement::ClockNext {
             clock,
@@ -522,6 +528,15 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             loop_var,
         } => {
             if let Some(lv) = loop_var {
+                let r = &lv.range;
+                let start = r.start.eval(&mut sim.mask_cache);
+                let mut end = r.end.eval(&mut sim.mask_cache);
+                if r.inclusive {
+                    end += 1;
+                }
+                let step = r.step;
+                let op = r.op;
+                let reverse = r.reverse;
                 let mut step_body = |i: u64| -> ExecResult {
                     let val = Value::new(i, lv.width, lv.signed);
                     unsafe {
@@ -529,46 +544,50 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                     }
                     exec(sim, body)
                 };
-                match &lv.range {
-                    SimForRange::Forward { start, end, step } => {
-                        let mut i = *start;
-                        while i < *end {
-                            let result = step_body(i);
-                            if result.should_stop() {
-                                return result;
-                            }
-                            i += step;
+                let mut loop_result = ExecResult::Continue;
+                if reverse {
+                    let mut i = end;
+                    while i > start {
+                        i -= step;
+                        let result = step_body(i);
+                        if result.should_stop() {
+                            loop_result = result;
+                            break;
                         }
                     }
-                    SimForRange::Reverse { start, end, step } => {
-                        let mut i = *end;
-                        while i > *start {
-                            i -= step;
-                            let result = step_body(i);
-                            if result.should_stop() {
-                                return result;
-                            }
+                } else if let Some(op) = op {
+                    let mut i = start;
+                    while i < end {
+                        let result = step_body(i);
+                        if result.should_stop() {
+                            loop_result = result;
+                            break;
                         }
+                        i = op.eval(i as usize, step as usize) as u64;
                     }
-                    SimForRange::Stepped {
-                        start,
-                        end,
-                        step,
-                        op,
-                    } => {
-                        let mut i = *start;
-                        while i < *end {
-                            let result = step_body(i);
-                            if result.should_stop() {
-                                return result;
-                            }
-                            i = op.eval(i as usize, *step as usize) as u64;
+                } else {
+                    let mut i = start;
+                    while i < end {
+                        let result = step_body(i);
+                        if result.should_stop() {
+                            loop_result = result;
+                            break;
                         }
+                        i += step;
                     }
+                }
+                if matches!(loop_result, ExecResult::Break) {
+                    return ExecResult::Continue;
+                }
+                if loop_result.should_stop() {
+                    return loop_result;
                 }
             } else {
                 for _ in 0..*count {
                     let result = exec(sim, body);
+                    if matches!(result, ExecResult::Break) {
+                        break;
+                    }
                     if result.should_stop() {
                         return result;
                     }

@@ -6,7 +6,7 @@ use crate::ir::{
     Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, Type, VarId, VarIndex,
     VarPath, VarSelect,
 };
-use crate::value::ValueBigUint;
+use crate::value::{Value, ValueBigUint};
 use indent::indent_all_by;
 use std::borrow::Cow;
 use std::fmt;
@@ -15,6 +15,12 @@ use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Default)]
 pub struct StatementBlock(pub Vec<Statement>);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ControlFlow {
+    Continue,
+    Break,
+}
 
 #[derive(Clone)]
 pub enum Statement {
@@ -25,6 +31,7 @@ pub enum Statement {
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     TbMethodCall(TbMethodCall),
+    Break,
     Unsupported(TokenRange),
     Null,
 }
@@ -39,28 +46,132 @@ pub struct ForStatement {
     pub token: TokenRange,
 }
 
+#[derive(Clone, Debug)]
+pub enum ForBound {
+    Const(usize),
+    Expression(Box<Expression>),
+}
+
+impl ForBound {
+    pub fn eval_value(&self, context: &mut Context) -> Option<usize> {
+        match self {
+            Self::Const(x) => Some(*x),
+            Self::Expression(exp) => {
+                let exp = exp.as_ref().clone();
+                exp.eval_value(context)?.to_usize()
+            }
+        }
+    }
+}
+
+impl fmt::Display for ForBound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ForBound::Const(x) => x.fmt(f),
+            ForBound::Expression(x) => write!(f, "{}", x.as_ref()),
+        }
+    }
+}
+
 /// Loop iteration range representation.
 #[derive(Clone, Debug)]
 pub enum ForRange {
     /// start..end with additive step (default step=1)
     Forward {
-        start: usize,
-        end: usize,
+        start: ForBound,
+        end: ForBound,
+        inclusive: bool,
         step: usize,
     },
     /// (start..end).rev() with additive step (default step=1)
     Reverse {
-        start: usize,
-        end: usize,
+        start: ForBound,
+        end: ForBound,
+        inclusive: bool,
         step: usize,
     },
     /// start..end with arbitrary step operator (e.g., step *= 2)
     Stepped {
-        start: usize,
-        end: usize,
+        start: ForBound,
+        end: ForBound,
+        inclusive: bool,
         step: usize,
         op: Op,
     },
+}
+
+impl ForRange {
+    pub fn eval_iter(&self, context: &mut Context) -> Option<Vec<usize>> {
+        let limit = context.config.evaluate_size_limit;
+        match self {
+            ForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            } => {
+                let start = start.eval_value(context)?;
+                let end = end.eval_value(context)?;
+                let end = if *inclusive { end + 1 } else { end };
+                if end.saturating_sub(start) > limit {
+                    return None;
+                }
+                if *step == 1 {
+                    Some((start..end).collect())
+                } else {
+                    let mut ret = vec![];
+                    let mut i = start;
+                    while i < end {
+                        ret.push(i);
+                        i += step;
+                    }
+                    Some(ret)
+                }
+            }
+            ForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                ..
+            } => {
+                let start = start.eval_value(context)?;
+                let end = end.eval_value(context)?;
+                if end.saturating_sub(start) > limit {
+                    return None;
+                }
+                if *inclusive {
+                    Some((start..=end).rev().collect())
+                } else {
+                    Some((start..end).rev().collect())
+                }
+            }
+            ForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                step,
+                op,
+            } => {
+                let start = start.eval_value(context)?;
+                let end = end.eval_value(context)?;
+                let end = if *inclusive { end + 1 } else { end };
+                let mut ret = vec![];
+                let mut i = start;
+                while i < end {
+                    if ret.len() > limit {
+                        return None;
+                    }
+                    ret.push(i);
+                    let new_i = op.eval(i, *step);
+                    if new_i == i {
+                        break;
+                    }
+                    i = new_i;
+                }
+                Some(ret)
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -86,20 +197,41 @@ impl Statement {
         matches!(self, Statement::Null)
     }
 
-    pub fn eval_value(&self, context: &mut Context) {
-        // TODO
+    pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
         match self {
-            Statement::Assign(x) => x.eval_value(context),
+            Statement::Assign(x) => {
+                x.eval_value(context);
+                ControlFlow::Continue
+            }
             Statement::If(x) => x.eval_value(context),
-            Statement::IfReset(_) => (),
-            Statement::For(_) => (),
-            Statement::SystemFunctionCall(_) => (),
+            Statement::IfReset(_) => ControlFlow::Continue,
+            Statement::For(x) => {
+                if let Some(iter) = x.range.eval_iter(context) {
+                    'outer: for i in iter {
+                        if let Some(var) = context.variables.get_mut(&x.var_id)
+                            && let Some(total_width) = x.var_type.total_width()
+                        {
+                            let val = Value::new(i as u64, total_width, x.var_type.signed);
+                            var.set_value(&[], val, None);
+                        }
+                        for s in &x.body {
+                            if s.eval_value(context) == ControlFlow::Break {
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+                ControlFlow::Continue
+            }
+            Statement::SystemFunctionCall(_) => ControlFlow::Continue,
             Statement::FunctionCall(x) => {
                 x.eval_value(context);
+                ControlFlow::Continue
             }
-            Statement::TbMethodCall(_) => (),
-            Statement::Unsupported(_) => (),
-            Statement::Null => (),
+            Statement::TbMethodCall(_) => ControlFlow::Continue,
+            Statement::Break => ControlFlow::Break,
+            Statement::Unsupported(_) => ControlFlow::Continue,
+            Statement::Null => ControlFlow::Continue,
         }
     }
 
@@ -123,7 +255,7 @@ impl Statement {
                     s.eval_assign(context, assign_table, assign_context, base_tables);
                 }
             }
-            Statement::TbMethodCall(_) => (),
+            Statement::TbMethodCall(_) | Statement::Break => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
@@ -135,8 +267,13 @@ impl Statement {
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None),
-            Statement::For(_)
-            | Statement::TbMethodCall(_)
+            Statement::For(x) => {
+                for s in &x.body {
+                    s.gather_ff(context, table, decl);
+                }
+            }
+            Statement::TbMethodCall(_)
+            | Statement::Break
             | Statement::SystemFunctionCall(_)
             | Statement::Unsupported(_)
             | Statement::Null => (),
@@ -163,6 +300,11 @@ impl Statement {
                 }
             }
             Statement::FunctionCall(x) => x.gather_ff_comb_assign(context, table, decl),
+            Statement::For(x) => {
+                for s in &x.body {
+                    s.gather_ff_comb_assign(context, table, decl);
+                }
+            }
             _ => (),
         }
     }
@@ -174,8 +316,12 @@ impl Statement {
             Statement::IfReset(x) => x.set_index(index),
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
-            Statement::For(_) => (),
-            Statement::TbMethodCall(_) => (),
+            Statement::For(x) => {
+                for s in &mut x.body {
+                    s.set_index(index);
+                }
+            }
+            Statement::TbMethodCall(_) | Statement::Break => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
@@ -207,38 +353,57 @@ impl fmt::Display for Statement {
                 }
             },
             Statement::For(x) => {
-                match &x.range {
-                    ForRange::Forward { start, end, step } if *step == 1 => {
-                        writeln!(f, "for {} in {}..{} {{", x.var_name, start, end)?;
-                    }
-                    ForRange::Forward { start, end, step } => {
-                        writeln!(
-                            f,
-                            "for {} in {}..{} step += {} {{",
-                            x.var_name, start, end, step
-                        )?;
-                    }
-                    ForRange::Reverse { start, end, .. } => {
-                        writeln!(f, "for {} in rev {}..{} {{", x.var_name, start, end)?;
-                    }
+                let range_op = if let ForRange::Reverse { .. } = &x.range {
+                    "rev "
+                } else {
+                    ""
+                };
+                let (start, end, inclusive, step_info) = match &x.range {
+                    ForRange::Forward {
+                        start,
+                        end,
+                        inclusive,
+                        step,
+                    } => (
+                        start,
+                        end,
+                        *inclusive,
+                        if *step == 1 {
+                            None
+                        } else {
+                            Some(format!("+= {step}"))
+                        },
+                    ),
+                    ForRange::Reverse {
+                        start,
+                        end,
+                        inclusive,
+                        ..
+                    } => (start, end, *inclusive, None),
                     ForRange::Stepped {
                         start,
                         end,
+                        inclusive,
                         step,
                         op,
-                    } => {
-                        writeln!(
-                            f,
-                            "for {} in {}..{} step {op}= {} {{",
-                            x.var_name, start, end, step
-                        )?;
-                    }
+                    } => (start, end, *inclusive, Some(format!("{op}= {step}"))),
+                };
+                let dots = if inclusive { "..=" } else { ".." };
+                if let Some(step_str) = step_info {
+                    writeln!(
+                        f,
+                        "for {} in {range_op}{start}{dots}{end} step {step_str} {{",
+                        x.var_name
+                    )?;
+                } else {
+                    writeln!(f, "for {} in {range_op}{start}{dots}{end} {{", x.var_name)?;
                 }
                 for s in &x.body {
                     writeln!(f, "  {s}")?;
                 }
                 write!(f, "}}")
             }
+            Statement::Break => "break;".fmt(f),
             Statement::Unsupported(_) => "/* unsupported */".fmt(f),
             Statement::Null => "".fmt(f),
         }
@@ -274,7 +439,6 @@ impl AssignDestination {
             let is_select_const = self.select.is_const();
             let is_const = is_index_const & is_select_const;
 
-            // If index is not const, assign to the whole array
             let range = if !is_index_const {
                 variable.r#type.array.calc_range(&[])
             } else {
@@ -467,18 +631,23 @@ pub struct IfStatement {
 }
 
 impl IfStatement {
-    pub fn eval_value(&self, context: &mut Context) {
+    pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
         if let Some(cond) = self.cond.eval_value(context) {
             if cond.to_usize().unwrap_or(0) != 0 {
                 for stmt in &self.true_side {
-                    stmt.eval_value(context);
+                    if stmt.eval_value(context) == ControlFlow::Break {
+                        return ControlFlow::Break;
+                    }
                 }
             } else {
                 for stmt in &self.false_side {
-                    stmt.eval_value(context);
+                    if stmt.eval_value(context) == ControlFlow::Break {
+                        return ControlFlow::Break;
+                    }
                 }
             }
         }
+        ControlFlow::Continue
     }
 
     pub fn insert_leaf_false(&mut self, false_side: Vec<Statement>) {
