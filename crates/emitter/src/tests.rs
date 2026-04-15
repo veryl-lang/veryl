@@ -2947,7 +2947,7 @@ fn gen_declaration() {
         b: input T       ,
     ) {}
     module ModuleB::<A: u32, B: u32, C: u32, D: u32> {
-        gen WIDTH_A: u32  = A + B;
+        gen WIDTH_A: u32  = $clog2(A + B);
         gen TYPE_A : u32  = logic<WIDTH_A>;
         gen TYPE_B : type = logic<C, D>;
 
@@ -2964,8 +2964,8 @@ fn gen_declaration() {
     }
     "#;
 
-    let expect = r#"module prj___ModuleA__3__logic_3_4 (
-    input var logic [3-1:0]        a,
+    let expect = r#"module prj___ModuleA__2__logic_3_4 (
+    input var logic [2-1:0]        a,
     input var logic [3-1:0][4-1:0] b
 );
 endmodule
@@ -2974,10 +2974,10 @@ module prj___ModuleB__1__2__3__4;
 
 
 
-    logic        [3-1:0] a; always_comb a = '0;
+    logic        [2-1:0] a; always_comb a = '0;
     logic [3-1:0][4-1:0] b; always_comb b = '0;
 
-    prj___ModuleA__3__logic_3_4 u (
+    prj___ModuleA__2__logic_3_4 u (
         .a (a),
         .b (a)
     );
