@@ -10098,6 +10098,16 @@ fn unresolvable_generic_expression() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        gen A: u32 = 8;
+        gen B: u32 = $clog2(A);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

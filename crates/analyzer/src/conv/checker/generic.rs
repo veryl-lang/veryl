@@ -136,6 +136,7 @@ fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
         | SymbolKind::ProtoPackage(_)
         | SymbolKind::GenericParameter(_)
         | SymbolKind::GenericConst(_)
+        | SymbolKind::SystemFunction(_)
         | SymbolKind::SystemVerilog => {
             return true;
         }
