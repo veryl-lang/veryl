@@ -3,7 +3,7 @@ pub function bit_reverse::<N: p32> (
 ) -> logic<N> {
     var ret: logic<N>;
 
-    for i: u32 in 0..N {
+    for i in 0..N {
         ret[i] = bits[N - i - 1];
     }
 

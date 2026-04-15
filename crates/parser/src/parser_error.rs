@@ -83,7 +83,8 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
             } else if r_angle(token, &expected_tokens) {
                 help = "If you mean \"greater than operator\", please use '>:'".to_string();
             } else if colon_instead_of_in(token, &expected_tokens) {
-                help = "generate-for declaration doesn't need type specifier (e.g. 'for i in 0..10 {')".to_string();
+                help = "for declaration doesn't need type specifier (e.g. 'for i in 0..10 {')"
+                    .to_string();
             } else if comma_instead_of_assignment_operator(token, &expected_tokens) {
                 help = "single case statement with bit concatenation at the left-hand side is not allowed,\nplease surround it by '{}' (e.g. 'x: { {a, b} = 1; }')".to_string();
             } else if l_brace_instead_of_colon(token, &expected_tokens) {

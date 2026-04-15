@@ -721,7 +721,7 @@ ReturnStatement: Return Expression Semicolon;
 
 BreakStatement: Break Semicolon;
 
-ForStatement: For Identifier Colon ScalarType In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
+ForStatement: For Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 

@@ -48,7 +48,7 @@ pub package lzc_pkg::<N: p32> {
             var count   : lzc_count<N_SPLITS>;
             var all_zero: logic    <N_SPLITS>;
 
-            for i: u32                              in 0..N_SPLITS {
+            for i in 0..N_SPLITS {
                 var bits64: logic                       <64>;
                 var ret64 : lzc_common_pkg::result::<64>    ;
 

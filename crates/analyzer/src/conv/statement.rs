@@ -648,12 +648,6 @@ impl Conv<&ForStatement> for ir::StatementBlock {
 
         let rev = value.for_statement_opt.is_some();
 
-        if rev && !r#type.signed {
-            context.insert_error(
-                AnalyzerError::unsigned_loop_variable_in_descending_order_for_loop(&token),
-            );
-        }
-
         let step = value
             .for_statement_opt0
             .as_ref()

@@ -1004,10 +1004,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (_, name) = self.get_anonymous_block_name(None);
                 self.namespace.push(name);
 
-                let r#type: SymType = arg.scalar_type.as_ref().into();
-                if !self.check_identifer_with_type(&arg.identifier, &r#type) {
-                    return Ok(());
-                }
+                let r#type = SymType {
+                    modifier: Vec::new(),
+                    kind: TypeKind::I32,
+                    width: Vec::new(),
+                    array: Vec::new(),
+                    array_type: None,
+                    is_const: false,
+                    token: TokenRange::default(),
+                };
 
                 let affiliation = self.affiliation.last().cloned().unwrap();
                 let property = VariableProperty {

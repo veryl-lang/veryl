@@ -1141,7 +1141,7 @@ fn multiple_assignment() {
     module ModuleA {
         var a: logic<4*2>[2];
         always_comb {
-            for i: u32 in 0..8 {
+            for i in 0..8 {
                 a[i[2]][2*i[1:0]+:2] = '0;
             }
         }
@@ -1343,7 +1343,7 @@ fn invalid_msb() {
             }
         }
         always_comb {
-            for i: u32 in 0..2 {
+            for i in 0..2 {
             _bar[i][msb:0] = 0;
             }
         }
@@ -5758,7 +5758,7 @@ fn referring_before_definition() {
         let _a: u32 = func();
         function func() -> u32 {
             var a: u32;
-            for _i: u32 in 0..N {
+            for _i in 0..N {
                 a = 0;
             }
             return a;
@@ -7091,7 +7091,7 @@ fn unassign_variable() {
     module ModuleA {
         var a: logic;
         always_comb {
-            for i: u32 in 0..1 {
+            for i in 0..1 {
                 a = i;
             }
         }
@@ -7627,7 +7627,7 @@ fn unassign_variable() {
         function func() {
             const D: u32 = $clog2(N);
             var a: u32;
-            for i: u32 in 0..D {
+            for i in 0..D {
                 a = i;
             }
         }
@@ -7641,7 +7641,7 @@ fn unassign_variable() {
     function func::<N: p32> {
         const DEPTH: u32 = $clog2(N);
         var n: u32;
-        for i: u32 in 0..DEPTH {
+        for i in 0..DEPTH {
             n = i;
         }
     }
@@ -7660,7 +7660,7 @@ fn unassign_variable() {
     module ModuleA {
         var a: logic<8> [4];
         always_comb {
-            for i: u32 in 0..4 {
+            for i in 0..4 {
                 a[i] = 0;
             }
         }
@@ -7674,7 +7674,7 @@ fn unassign_variable() {
     module ModuleA {
         var a: logic<8> [4];
         always_comb {
-            for i: u32 in 0..3 {
+            for i in 0..3 {
                 a[i] = 0;
             }
         }
@@ -10673,7 +10673,7 @@ fn exceed_limit() {
         var a: logic<10>;
 
         always_comb {
-            for i: u32 in 0..10 {
+            for i in 0..10 {
                 if i == 0 {
                     a[i] = 0;
                 } else {
@@ -11594,77 +11594,6 @@ fn recursive_module_instance() {
             i_a,
             o_b,
         );
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-}
-
-#[test]
-fn unsigned_loop_variable_in_descending_order_for_loop() {
-    let code = r#"
-    module ModuleA {
-        var _a: logic<10>;
-        always_comb {
-            for i: u32 in rev 0..10 {
-                _a += i;
-            }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop { .. }
-    ));
-
-    let code = r#"
-    module ModuleA {
-        type my_type = logic<4>;
-
-        var _a: logic<10>;
-        always_comb {
-            for i: my_type in rev 0..10 {
-                _a += i;
-            }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop { .. }
-    ));
-
-    let code = r#"
-    module ModuleA {
-        var _a: logic<10>;
-        always_comb {
-            _a = 0;
-            for i: i32 in rev 0..10 {
-                _a += i;
-            }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(errors.is_empty());
-
-    let code = r#"
-    module ModuleA {
-        type my_type = signed logic<4>;
-
-        var _a: logic<10>;
-        always_comb {
-            _a = 0;
-            for i: my_type in rev 0..10 {
-                _a += i;
-            }
-        }
     }
     "#;
 

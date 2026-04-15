@@ -1517,21 +1517,6 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Warning),
-        code(unsigned_loop_variable_in_descending_order_for_loop),
-        help("use singed type as loop variable"),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
-    )]
-    #[error("use of unsigned loop variable in descending order for loop may cause infinite loop")]
-    UnsignedLoopVariableInDescendingOrderForLoop {
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        token_source: TokenSource,
-    },
-
-    #[diagnostic(
-        severity(Warning),
         code(unused_return),
         help("add variable assignment for function return"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1732,9 +1717,6 @@ impl AnalyzerError {
             AnalyzerError::UnknownPort { token_source, .. } => *token_source,
             AnalyzerError::UnknownUnsafe { token_source, .. } => *token_source,
             AnalyzerError::UnresolvableGenericExpression { token_source, .. } => *token_source,
-            AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
-                token_source, ..
-            } => *token_source,
             AnalyzerError::UnusedReturn { token_source, .. } => *token_source,
             AnalyzerError::UnusedVariable { token_source, .. } => *token_source,
             AnalyzerError::WrongSeparator { token_source, .. } => *token_source,
@@ -2574,13 +2556,6 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             definition_location: definition_token.into(),
-            token_source: token.source(),
-        }
-    }
-    pub fn unsigned_loop_variable_in_descending_order_for_loop(token: &TokenRange) -> Self {
-        AnalyzerError::UnsignedLoopVariableInDescendingOrderForLoop {
-            input: source(token),
-            error_location: token.into(),
             token_source: token.source(),
         }
     }

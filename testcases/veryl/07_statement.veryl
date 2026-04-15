@@ -32,29 +32,29 @@ module Module07 {
         }
 
         // for statement
-        for i: u32 in 0..10 {
+        for i in 0..10 {
             a  = i;
             aa = i + 1;
         }
 
         // for statement with closed range
-        for i: u32 in 0..=10 {
+        for i in 0..=10 {
             a  = i;
             aa = i + 1;
         }
 
         // for statement with custom step
-        for i: u32 in 0..10 step += 2 {
+        for i in 0..10 step += 2 {
             a  = i;
             aa = i + 1;
         }
-        for i: u32 in 0..10 step *= 2 {
+        for i in 0..10 step *= 2 {
             a  = i;
             aa = i + 1;
         }
 
         // for statement with break statement
-        for i: u32 in 0..10 {
+        for i in 0..10 {
             a  = i;
             aa = i + 1;
             if i == 0 {
@@ -62,8 +62,8 @@ module Module07 {
             }
         }
 
-        for i: u32 in 0..10 {
-            for j: u32 in 0..10 {
+        for i in 0..10 {
+            for j in 0..10 {
                 a  = i;
                 aa = i + j;
                 if i == 0 && j == 0 {
@@ -72,7 +72,7 @@ module Module07 {
             }
         }
 
-        for i: i32 in rev 0..10 {
+        for i in rev 0..10 {
             a  = i;
             aa = i + 1;
             if i == 9 {

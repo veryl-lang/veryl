@@ -736,7 +736,7 @@
 /*  698 */ IfResetStatementOpt /* Option<T>::None */: ;
 /*  699 */ ReturnStatement: Return Expression Semicolon;
 /*  700 */ BreakStatement: Break Semicolon;
-/*  701 */ ForStatement: For Identifier Colon ScalarType In ForStatementOpt /* Option */ Range ForStatementOpt0 /* Option */ StatementBlock;
+/*  701 */ ForStatement: For Identifier In ForStatementOpt /* Option */ Range ForStatementOpt0 /* Option */ StatementBlock;
 /*  702 */ ForStatementOpt0 /* Option<T>::Some */: Step AssignmentOperator Expression;
 /*  703 */ ForStatementOpt0 /* Option<T>::None */: ;
 /*  704 */ ForStatementOpt /* Option<T>::Some */: Rev;

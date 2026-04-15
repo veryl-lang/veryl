@@ -492,7 +492,7 @@ fn testbench_initial_for_not_unrolled() {
     module tb_sample {
         var a: logic<32> [4];
         initial {
-            for i: u32 in 0..4 {
+            for i in 0..4 {
                 a[i] = i;
             }
         }
@@ -504,7 +504,7 @@ fn testbench_initial_for_not_unrolled() {
   var var0[1](a): logic<32> = 32'hxxxxxxxx;
   var var0[2](a): logic<32> = 32'hxxxxxxxx;
   var var0[3](a): logic<32> = 32'hxxxxxxxx;
-  const var1(i): bit<32> = 32'hxxxxxxxx;
+  const var1(i): signed bit<32> = 32'shxxxxxxxx;
 
   initial {
     for i in 0..4 {
@@ -524,7 +524,7 @@ fn comb_for() {
         var a: logic<4>;
 
         always_comb {
-            for i: u32 in 0..4 {
+            for i in 0..4 {
                 a[i] = i + 1;
             }
         }
@@ -533,16 +533,16 @@ fn comb_for() {
 
     let exp = r#"module ModuleA {
   var var0(a): logic<4> = 4'hx;
-  const var1([0].i): bit<32> = 32'h00000000;
-  const var2([1].i): bit<32> = 32'h00000001;
-  const var3([2].i): bit<32> = 32'h00000002;
-  const var4([3].i): bit<32> = 32'h00000003;
+  const var1([0].i): signed bit<32> = 32'sh00000000;
+  const var2([1].i): signed bit<32> = 32'sh00000001;
+  const var3([2].i): signed bit<32> = 32'sh00000002;
+  const var4([3].i): signed bit<32> = 32'sh00000003;
 
   comb {
-    var0[32'h00000000] = 32'h00000001;
-    var0[32'h00000001] = 32'h00000002;
-    var0[32'h00000002] = 32'h00000003;
-    var0[32'h00000003] = 32'h00000004;
+    var0[32'sh00000000] = 32'sh00000001;
+    var0[32'sh00000001] = 32'sh00000002;
+    var0[32'sh00000002] = 32'sh00000003;
+    var0[32'sh00000003] = 32'sh00000004;
   }
 }
 "#;
@@ -557,7 +557,7 @@ fn const_function_with_static_for() {
         function sum() -> u32 {
             var acc: u32;
             acc = 0;
-            for i: u32 in 0..5 {
+            for i in 0..5 {
                 acc += i;
             }
             return acc;
@@ -590,7 +590,7 @@ fn const_function_with_static_for() {
         function sum(n: input u32) -> u32 {
             var acc: u32;
             acc = 0;
-            for i: u32 in 0..n {
+            for i in 0..n {
                 acc += i;
             }
             return acc;
@@ -2352,13 +2352,13 @@ fn assignment_operator_with_array_index() {
     ) {
         var score: logic<32> [N];
         always_comb {
-            for i: u32 in 0..N {
+            for i in 0..N {
                 score[i] = 0;
-                for j: u32 in 0..N {
+                for j in 0..N {
                     score[i] += a[j];
                 }
             }
-            for i: u32 in 0..N {
+            for i in 0..N {
                 b[i] = score[i];
             }
         }
@@ -2379,56 +2379,56 @@ fn assignment_operator_with_array_index() {
   var var3[1](score): logic<32> = 32'hxxxxxxxx;
   var var3[2](score): logic<32> = 32'hxxxxxxxx;
   var var3[3](score): logic<32> = 32'hxxxxxxxx;
-  const var4([0].i): bit<32> = 32'h00000000;
-  const var5([0].[0].j): bit<32> = 32'h00000000;
-  const var6([0].[1].j): bit<32> = 32'h00000001;
-  const var7([0].[2].j): bit<32> = 32'h00000002;
-  const var8([0].[3].j): bit<32> = 32'h00000003;
-  const var9([1].i): bit<32> = 32'h00000001;
-  const var10([1].[0].j): bit<32> = 32'h00000000;
-  const var11([1].[1].j): bit<32> = 32'h00000001;
-  const var12([1].[2].j): bit<32> = 32'h00000002;
-  const var13([1].[3].j): bit<32> = 32'h00000003;
-  const var14([2].i): bit<32> = 32'h00000002;
-  const var15([2].[0].j): bit<32> = 32'h00000000;
-  const var16([2].[1].j): bit<32> = 32'h00000001;
-  const var17([2].[2].j): bit<32> = 32'h00000002;
-  const var18([2].[3].j): bit<32> = 32'h00000003;
-  const var19([3].i): bit<32> = 32'h00000003;
-  const var20([3].[0].j): bit<32> = 32'h00000000;
-  const var21([3].[1].j): bit<32> = 32'h00000001;
-  const var22([3].[2].j): bit<32> = 32'h00000002;
-  const var23([3].[3].j): bit<32> = 32'h00000003;
-  const var24([0].i): bit<32> = 32'h00000000;
-  const var25([1].i): bit<32> = 32'h00000001;
-  const var26([2].i): bit<32> = 32'h00000002;
-  const var27([3].i): bit<32> = 32'h00000003;
+  const var4([0].i): signed bit<32> = 32'sh00000000;
+  const var5([0].[0].j): signed bit<32> = 32'sh00000000;
+  const var6([0].[1].j): signed bit<32> = 32'sh00000001;
+  const var7([0].[2].j): signed bit<32> = 32'sh00000002;
+  const var8([0].[3].j): signed bit<32> = 32'sh00000003;
+  const var9([1].i): signed bit<32> = 32'sh00000001;
+  const var10([1].[0].j): signed bit<32> = 32'sh00000000;
+  const var11([1].[1].j): signed bit<32> = 32'sh00000001;
+  const var12([1].[2].j): signed bit<32> = 32'sh00000002;
+  const var13([1].[3].j): signed bit<32> = 32'sh00000003;
+  const var14([2].i): signed bit<32> = 32'sh00000002;
+  const var15([2].[0].j): signed bit<32> = 32'sh00000000;
+  const var16([2].[1].j): signed bit<32> = 32'sh00000001;
+  const var17([2].[2].j): signed bit<32> = 32'sh00000002;
+  const var18([2].[3].j): signed bit<32> = 32'sh00000003;
+  const var19([3].i): signed bit<32> = 32'sh00000003;
+  const var20([3].[0].j): signed bit<32> = 32'sh00000000;
+  const var21([3].[1].j): signed bit<32> = 32'sh00000001;
+  const var22([3].[2].j): signed bit<32> = 32'sh00000002;
+  const var23([3].[3].j): signed bit<32> = 32'sh00000003;
+  const var24([0].i): signed bit<32> = 32'sh00000000;
+  const var25([1].i): signed bit<32> = 32'sh00000001;
+  const var26([2].i): signed bit<32> = 32'sh00000002;
+  const var27([3].i): signed bit<32> = 32'sh00000003;
 
   comb {
-    var3[32'h00000000] = 32'sh00000000;
-    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000000]);
-    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000001]);
-    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000002]);
-    var3[32'h00000000] = (var3[32'h00000000] + var1[32'h00000003]);
-    var3[32'h00000001] = 32'sh00000000;
-    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000000]);
-    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000001]);
-    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000002]);
-    var3[32'h00000001] = (var3[32'h00000001] + var1[32'h00000003]);
-    var3[32'h00000002] = 32'sh00000000;
-    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000000]);
-    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000001]);
-    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000002]);
-    var3[32'h00000002] = (var3[32'h00000002] + var1[32'h00000003]);
-    var3[32'h00000003] = 32'sh00000000;
-    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000000]);
-    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000001]);
-    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000002]);
-    var3[32'h00000003] = (var3[32'h00000003] + var1[32'h00000003]);
-    var2[32'h00000000] = var3[32'h00000000];
-    var2[32'h00000001] = var3[32'h00000001];
-    var2[32'h00000002] = var3[32'h00000002];
-    var2[32'h00000003] = var3[32'h00000003];
+    var3[32'sh00000000] = 32'sh00000000;
+    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000000]);
+    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000001]);
+    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000002]);
+    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000003]);
+    var3[32'sh00000001] = 32'sh00000000;
+    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000000]);
+    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000001]);
+    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000002]);
+    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000003]);
+    var3[32'sh00000002] = 32'sh00000000;
+    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000000]);
+    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000001]);
+    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000002]);
+    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000003]);
+    var3[32'sh00000003] = 32'sh00000000;
+    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000000]);
+    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000001]);
+    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000002]);
+    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000003]);
+    var2[32'sh00000000] = var3[32'sh00000000];
+    var2[32'sh00000001] = var3[32'sh00000001];
+    var2[32'sh00000002] = var3[32'sh00000002];
+    var2[32'sh00000003] = var3[32'sh00000003];
   }
 }
 "#;
@@ -2492,7 +2492,7 @@ fn assignment_operator_with_array_index() {
     module ModuleA {
         var a: logic<2*4>[2];
         always_comb {
-            for i: u32 in 0..8 {
+            for i in 0..8 {
                 a[i[2]][2*i[1:0]+:2] = '0;
             }
         }
@@ -2502,24 +2502,24 @@ fn assignment_operator_with_array_index() {
     let exp = r#"module ModuleA {
   var var0[0](a): logic<8> = 8'hxx;
   var var0[1](a): logic<8> = 8'hxx;
-  const var1([0].i): bit<32> = 32'h00000000;
-  const var2([1].i): bit<32> = 32'h00000001;
-  const var3([2].i): bit<32> = 32'h00000002;
-  const var4([3].i): bit<32> = 32'h00000003;
-  const var5([4].i): bit<32> = 32'h00000004;
-  const var6([5].i): bit<32> = 32'h00000005;
-  const var7([6].i): bit<32> = 32'h00000006;
-  const var8([7].i): bit<32> = 32'h00000007;
+  const var1([0].i): signed bit<32> = 32'sh00000000;
+  const var2([1].i): signed bit<32> = 32'sh00000001;
+  const var3([2].i): signed bit<32> = 32'sh00000002;
+  const var4([3].i): signed bit<32> = 32'sh00000003;
+  const var5([4].i): signed bit<32> = 32'sh00000004;
+  const var6([5].i): signed bit<32> = 32'sh00000005;
+  const var7([6].i): signed bit<32> = 32'sh00000006;
+  const var8([7].i): signed bit<32> = 32'sh00000007;
 
   comb {
-    var0[1'h0][32'h00000000+:32'sh00000002] = '0;
-    var0[1'h0][32'h00000002+:32'sh00000002] = '0;
-    var0[1'h0][32'h00000004+:32'sh00000002] = '0;
-    var0[1'h0][32'h00000006+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000000+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000002+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000004+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000006+:32'sh00000002] = '0;
+    var0[1'h0][32'sh00000000+:32'sh00000002] = '0;
+    var0[1'h0][32'sh00000002+:32'sh00000002] = '0;
+    var0[1'h0][32'sh00000004+:32'sh00000002] = '0;
+    var0[1'h0][32'sh00000006+:32'sh00000002] = '0;
+    var0[1'h1][32'sh00000000+:32'sh00000002] = '0;
+    var0[1'h1][32'sh00000002+:32'sh00000002] = '0;
+    var0[1'h1][32'sh00000004+:32'sh00000002] = '0;
+    var0[1'h1][32'sh00000006+:32'sh00000002] = '0;
   }
 }
 "#;

@@ -3,9 +3,7 @@ use crate::veryl_token::{Token, VerylToken};
 use crate::veryl_walker::VerylWalker;
 use veryl_metadata::{Format, Metadata};
 use veryl_parser::resource_table;
-use veryl_parser::veryl_grammar_trait::Identifier as NewIdentifier;
 use veryl_parser::veryl_grammar_trait::Veryl as NewVeryl;
-use veryl_parser::veryl_walker::VerylWalker as NewVerylWalker;
 
 pub struct Migrator {
     format_opt: Format,
@@ -85,53 +83,29 @@ impl Migrator {
     }
 
     /// Check whether the valid syntax tree should be migrated
-    pub fn migratable(veryl: &NewVeryl) -> bool {
-        struct BoolChecker {
-            bool_exist: bool,
-        }
-
-        impl NewVerylWalker for BoolChecker {
-            fn identifier(&mut self, arg: &NewIdentifier) {
-                if arg.text().to_string() == "bool" {
-                    self.bool_exist = true;
-                }
-            }
-        }
-
-        let mut checker = BoolChecker { bool_exist: false };
-        checker.veryl(veryl);
-
-        checker.bool_exist
+    pub fn migratable(_veryl: &NewVeryl) -> bool {
+        false
     }
 }
 
 impl VerylWalker for Migrator {
-    /// Semantic action for non-terminal 'VerylToken'
     fn veryl_token(&mut self, arg: &VerylToken) {
         self.token(arg);
     }
 
-    /// Semantic action for non-terminal 'Bool'
-    fn bool(&mut self, arg: &Bool) {
-        self.veryl_token(&arg.bool_token.replace("lbool"));
-    }
-
-    /// Semantic action for non-terminal 'StatementBlockGroup'
-    fn statement_block_group(&mut self, arg: &StatementBlockGroup) {
-        for x in &arg.statement_block_group_list {
-            self.attribute(&x.attribute);
+    fn for_statement(&mut self, arg: &ForStatement) {
+        self.r#for(&arg.r#for);
+        self.identifier(&arg.identifier);
+        self.r#in(&arg.r#in);
+        if let Some(ref x) = arg.for_statement_opt {
+            self.rev(&x.rev);
         }
-        match arg.statement_block_group_group.as_ref() {
-            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
-                self.token(&x.l_brace.l_brace_token.replace("block {"));
-                for x in &x.statement_block_group_group_list {
-                    self.statement_block_group(&x.statement_block_group);
-                }
-                self.r_brace(&x.r_brace);
-            }
-            StatementBlockGroupGroup::StatementBlockItem(x) => {
-                self.statement_block_item(&x.statement_block_item);
-            }
+        self.range(&arg.range);
+        if let Some(ref x) = arg.for_statement_opt0 {
+            self.step(&x.step);
+            self.assignment_operator(&x.assignment_operator);
+            self.expression(&x.expression);
         }
+        self.statement_block(&arg.statement_block);
     }
 }

@@ -433,11 +433,25 @@ pub trait VerylWalker {
         after!(self, bit, arg);
     }
 
-    /// Semantic action for non-terminal 'Bool'
-    fn bool(&mut self, arg: &Bool) {
-        before!(self, bool, arg);
-        self.veryl_token(&arg.bool_token);
-        after!(self, bool, arg);
+    /// Semantic action for non-terminal 'Block'
+    fn block(&mut self, arg: &Block) {
+        before!(self, block, arg);
+        self.veryl_token(&arg.block_token);
+        after!(self, block, arg);
+    }
+
+    /// Semantic action for non-terminal 'BBool'
+    fn b_bool(&mut self, arg: &BBool) {
+        before!(self, b_bool, arg);
+        self.veryl_token(&arg.b_bool_token);
+        after!(self, b_bool, arg);
+    }
+
+    /// Semantic action for non-terminal 'LBool'
+    fn l_bool(&mut self, arg: &LBool) {
+        before!(self, l_bool, arg);
+        self.veryl_token(&arg.l_bool_token);
+        after!(self, l_bool, arg);
     }
 
     /// Semantic action for non-terminal 'Case'
@@ -557,6 +571,13 @@ pub trait VerylWalker {
         before!(self, function, arg);
         self.veryl_token(&arg.function_token);
         after!(self, function, arg);
+    }
+
+    /// Semantic action for non-terminal 'Gen'
+    fn r#gen(&mut self, arg: &Gen) {
+        before!(self, r#gen, arg);
+        self.veryl_token(&arg.gen_token);
+        after!(self, r#gen, arg);
     }
 
     /// Semantic action for non-terminal 'I8'
@@ -886,6 +907,34 @@ pub trait VerylWalker {
         before!(self, r#type, arg);
         self.veryl_token(&arg.type_token);
         after!(self, r#type, arg);
+    }
+
+    /// Semantic action for non-terminal 'P8'
+    fn p8(&mut self, arg: &P8) {
+        before!(self, p8, arg);
+        self.veryl_token(&arg.p8_token);
+        after!(self, p8, arg);
+    }
+
+    /// Semantic action for non-terminal 'P16'
+    fn p16(&mut self, arg: &P16) {
+        before!(self, p16, arg);
+        self.veryl_token(&arg.p16_token);
+        after!(self, p16, arg);
+    }
+
+    /// Semantic action for non-terminal 'P32'
+    fn p32(&mut self, arg: &P32) {
+        before!(self, p32, arg);
+        self.veryl_token(&arg.p32_token);
+        after!(self, p32, arg);
+    }
+
+    /// Semantic action for non-terminal 'P64'
+    fn p64(&mut self, arg: &P64) {
+        before!(self, p64, arg);
+        self.veryl_token(&arg.p64_token);
+        after!(self, p64, arg);
     }
 
     /// Semantic action for non-terminal 'U8'
@@ -1532,6 +1581,10 @@ pub trait VerylWalker {
     fn fixed_type(&mut self, arg: &FixedType) {
         before!(self, fixed_type, arg);
         match arg {
+            FixedType::P8(x) => self.p8(&x.p8),
+            FixedType::P16(x) => self.p16(&x.p16),
+            FixedType::P32(x) => self.p32(&x.p32),
+            FixedType::P64(x) => self.p64(&x.p64),
             FixedType::U8(x) => self.u8(&x.u8),
             FixedType::U16(x) => self.u16(&x.u16),
             FixedType::U32(x) => self.u32(&x.u32),
@@ -1542,7 +1595,8 @@ pub trait VerylWalker {
             FixedType::I64(x) => self.i64(&x.i64),
             FixedType::F32(x) => self.f32(&x.f32),
             FixedType::F64(x) => self.f64(&x.f64),
-            FixedType::Bool(x) => self.bool(&x.bool),
+            FixedType::BBool(x) => self.b_bool(&x.b_bool),
+            FixedType::LBool(x) => self.l_bool(&x.l_bool),
             FixedType::Strin(x) => self.strin(&x.strin),
         };
         after!(self, fixed_type, arg);
@@ -1633,6 +1687,10 @@ pub trait VerylWalker {
     fn casting_type(&mut self, arg: &CastingType) {
         before!(self, casting_type, arg);
         match arg {
+            CastingType::P8(x) => self.p8(&x.p8),
+            CastingType::P16(x) => self.p16(&x.p16),
+            CastingType::P32(x) => self.p32(&x.p32),
+            CastingType::P64(x) => self.p64(&x.p64),
             CastingType::U8(x) => self.u8(&x.u8),
             CastingType::U16(x) => self.u16(&x.u16),
             CastingType::U32(x) => self.u32(&x.u32),
@@ -1643,7 +1701,8 @@ pub trait VerylWalker {
             CastingType::I64(x) => self.i64(&x.i64),
             CastingType::F32(x) => self.f32(&x.f32),
             CastingType::F64(x) => self.f64(&x.f64),
-            CastingType::Bool(x) => self.bool(&x.bool),
+            CastingType::BBool(x) => self.b_bool(&x.b_bool),
+            CastingType::LBool(x) => self.l_bool(&x.l_bool),
             CastingType::Clock(x) => self.clock(&x.clock),
             CastingType::ClockPosedge(x) => self.clock_posedge(&x.clock_posedge),
             CastingType::ClockNegedge(x) => self.clock_negedge(&x.clock_negedge),
@@ -1685,7 +1744,8 @@ pub trait VerylWalker {
             self.attribute(&x.attribute);
         }
         match arg.statement_block_group_group.as_ref() {
-            StatementBlockGroupGroup::LBraceStatementBlockGroupGroupListRBrace(x) => {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                self.block(&x.block);
                 self.l_brace(&x.l_brace);
                 for x in &x.statement_block_group_group_list {
                     self.statement_block_group(&x.statement_block_group);
@@ -1707,6 +1767,10 @@ pub trait VerylWalker {
             StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
             StatementBlockItem::Statement(x) => self.statement(&x.statement),
             StatementBlockItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            StatementBlockItem::GenDeclaration(x) => self.gen_declaration(&x.gen_declaration),
+            StatementBlockItem::ConcatenationAssignment(x) => {
+                self.concatenation_assignment(&x.concatenation_assignment)
+            }
         }
         after!(self, statement_block_item, arg);
     }
@@ -1757,6 +1821,18 @@ pub trait VerylWalker {
         }
         self.semicolon(&arg.semicolon);
         after!(self, identifier_statement, arg);
+    }
+
+    /// Semantic action for non-terminal 'ConcatenationAssignment'
+    fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        before!(self, concatenation_assignment, arg);
+        self.l_brace(&arg.l_brace);
+        self.assign_concatenation_list(&arg.assign_concatenation_list);
+        self.r_brace(&arg.r_brace);
+        self.equ(&arg.equ);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+        after!(self, concatenation_assignment, arg);
     }
 
     /// Semantic action for non-terminal 'Assignment'
@@ -1834,8 +1910,6 @@ pub trait VerylWalker {
         before!(self, for_statement, arg);
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.scalar_type(&arg.scalar_type);
         self.r#in(&arg.r#in);
         if let Some(ref x) = arg.for_statement_opt {
             self.rev(&x.rev);
@@ -2013,6 +2087,26 @@ pub trait VerylWalker {
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
         after!(self, const_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'GenDeclaration'
+    fn gen_declaration(&mut self, arg: &GenDeclaration) {
+        before!(self, gen_declaration, arg);
+        self.r#gen(&arg.r#gen);
+        self.identifier(&arg.identifier);
+        self.colon(&arg.colon);
+        match &*arg.gen_declaration_group {
+            GenDeclarationGroup::GenericProtoBound(x) => {
+                self.generic_proto_bound(&x.generic_proto_bound);
+            }
+            GenDeclarationGroup::Type(x) => {
+                self.r#type(&x.r#type);
+            }
+        }
+        self.equ(&arg.equ);
+        self.expression(&arg.expression);
+        self.semicolon(&arg.semicolon);
+        after!(self, gen_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'TypeDefDeclaration'
@@ -2194,20 +2288,34 @@ pub trait VerylWalker {
         match arg {
             ModportDefault::Input(x) => self.input(&x.input),
             ModportDefault::Output(x) => self.output(&x.output),
-            ModportDefault::SameLParenIdentifierRParen(x) => {
+            ModportDefault::SameLParenModportDefaultListRParen(x) => {
                 self.same(&x.same);
                 self.l_paren(&x.l_paren);
-                self.identifier(&x.identifier);
+                self.modport_default_list(&x.modport_default_list);
                 self.r_paren(&x.r_paren);
             }
-            ModportDefault::ConverseLParenIdentifierRParen(x) => {
+            ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
                 self.converse(&x.converse);
                 self.l_paren(&x.l_paren);
-                self.identifier(&x.identifier);
+                self.modport_default_list(&x.modport_default_list);
                 self.r_paren(&x.r_paren);
             }
         }
         after!(self, modport_default, arg);
+    }
+
+    /// Semantic action for non-terminal 'ModportDefaultList'
+    fn modport_default_list(&mut self, arg: &ModportDefaultList) {
+        before!(self, modport_default_list, arg);
+        self.identifier(&arg.identifier);
+        for x in &arg.modport_default_list_list {
+            self.comma(&x.comma);
+            self.identifier(&x.identifier);
+        }
+        if let Some(ref x) = arg.modport_default_list_opt {
+            self.comma(&x.comma);
+        }
+        after!(self, modport_default_list, arg);
     }
 
     /// Semantic action for non-terminal 'EnumDeclaration'
@@ -3044,6 +3152,7 @@ pub trait VerylWalker {
             GenerateItem::InstDeclaration(x) => self.inst_declaration(&x.inst_declaration),
             GenerateItem::BindDeclaration(x) => self.bind_declaration(&x.bind_declaration),
             GenerateItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            GenerateItem::GenDeclaration(x) => self.gen_declaration(&x.gen_declaration),
             GenerateItem::AlwaysFfDeclaration(x) => {
                 self.always_ff_declaration(&x.always_ff_declaration)
             }
@@ -3125,6 +3234,7 @@ pub trait VerylWalker {
         before!(self, package_item, arg);
         match arg {
             PackageItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+            PackageItem::GenDeclaration(x) => self.gen_declaration(&x.gen_declaration),
             PackageItem::TypeDefDeclaration(x) => {
                 self.type_def_declaration(&x.type_def_declaration)
             }
@@ -3461,10 +3571,13 @@ pub trait VerylWalker {
                 self.package_declaration(&x.package_declaration)
             }
             PublicDescriptionItem::AliasDeclaration(x) => {
-                self.alias_declaration(&x.alias_declaration);
+                self.alias_declaration(&x.alias_declaration)
             }
             PublicDescriptionItem::ProtoDeclaration(x) => {
                 self.proto_declaration(&x.proto_declaration)
+            }
+            PublicDescriptionItem::FunctionDeclaration(x) => {
+                self.function_declaration(&x.function_declaration)
             }
         };
         after!(self, public_description_item, arg);
