@@ -11221,6 +11221,93 @@ fn dynamic_for_range_in_function() {
 }
 
 #[test]
+fn dynamic_for_range_in_unrolled_static_for() {
+    let code = r#"
+    module Top (
+        o0: output logic<4>,
+        o1: output logic<4>,
+        o2: output logic<4>,
+        o3: output logic<4>,
+        o4: output logic<4>,
+        o5: output logic<4>,
+        o6: output logic<4>,
+        o7: output logic<4>,
+    ) {
+        function func(
+            i_data: input  logic<8, 4>,
+            o_data: output logic<8, 4>,
+        ) {
+            const DEPTH: u32 = 2;
+            var current_n: u32;
+            var current_d: logic<8, 4>;
+            var next_n   : u32;
+            var next_d   : logic<8, 4>;
+
+            next_n = 8;
+            next_d = i_data;
+            for _i: u32 in 0..DEPTH {
+                current_n = next_n;
+                current_d = next_d;
+                next_n = current_n / 2;
+                for j: u32 in 0..next_n {
+                    next_d[j] = (current_d[2 * j + 0] + current_d[2 * j + 1]) as 4;
+                }
+            }
+            o_data = next_d;
+        }
+
+        var data: logic<8, 4>;
+        var out : logic<8, 4>;
+
+        always_comb {
+            data[0] = 1;
+            data[1] = 2;
+            data[2] = 3;
+            data[3] = 4;
+            data[4] = 5;
+            data[5] = 6;
+            data[6] = 7;
+            data[7] = 8;
+            func(data, out);
+            o0 = out[0];
+            o1 = out[1];
+            o2 = out[2];
+            o3 = out[3];
+            o4 = out[4];
+            o5 = out[5];
+            o6 = out[6];
+            o7 = out[7];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // iter 0 (next_n=4): next_d[0..3] = [3, 7, 11, 15]
+        // iter 1 (next_n=2): next_d[0..1] = [3+7, (11+15)%16] = [10, 10]
+        let exp_list: [u64; 8] = [10, 10, 11, 15, 5, 6, 7, 8];
+        for (i, exp) in exp_list.iter().enumerate() {
+            let port = format!("o{}", i);
+            assert_eq!(
+                sim.get(&port).unwrap(),
+                Value::new(*exp, 4, false),
+                "i={} expected={} JIT={} 4st={}",
+                i,
+                exp,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
 fn for_static_in_always_ff_reset() {
     let code = r#"
     module Top (
