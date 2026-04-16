@@ -9662,6 +9662,40 @@ fn nba_conditional_write() {
     });
 }
 
+/// $assert in always_ff must read the pre-NBA value of a variable it shares
+/// the block with. If system function argument reads are not tracked in
+/// FfTable, the variable gets misclassified as comb (single-buffered) and
+/// the write becomes immediate, so $assert sees the post-write value.
+#[test]
+fn nba_system_call_read_in_always_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        out: output logic<32>,
+    ) {
+        var x: logic<32>;
+        always_ff {
+            if_reset {
+                x = 99;
+            } else {
+                x = x + 1;
+                $assert(x == 99, "x in $assert must be pre-NBA (99), not post-write (100)");
+            }
+        }
+        assign out = x;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        let (jclk, iclk) = dual.get_clock("clk");
+        let (jrst, irst) = dual.get_reset("rst");
+        dual.step(&jrst, &irst);
+        dual.step(&jclk, &iclk);
+        assert_eq!(dual.get("out").unwrap(), Value::new(100, 32, false));
+    });
+}
+
 // ============================================================
 // 4-state X/Z propagation tests
 // ============================================================

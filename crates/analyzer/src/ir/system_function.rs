@@ -1,5 +1,6 @@
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
+use crate::ir::ff_table::FfTable;
 use crate::ir::{
     AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
     VarPathSelect,
@@ -408,6 +409,46 @@ impl fmt::Display for SystemFunctionCall {
             SystemFunctionKind::Finish => "$finish()".fmt(f),
             SystemFunctionKind::Signed(x) => format!("$signed({x})").fmt(f),
             SystemFunctionKind::Unsigned(x) => format!("$unsigned({x})").fmt(f),
+        }
+    }
+}
+
+impl SystemFunctionCall {
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        from_ff: bool,
+    ) {
+        let process_input = |input: &Input, context: &mut Context, table: &mut FfTable| {
+            input.0.gather_ff(context, table, decl, None, from_ff);
+        };
+        match &self.kind {
+            SystemFunctionKind::Bits(x)
+            | SystemFunctionKind::Size(x)
+            | SystemFunctionKind::Clog2(x)
+            | SystemFunctionKind::Onehot(x)
+            | SystemFunctionKind::Signed(x)
+            | SystemFunctionKind::Unsigned(x) => {
+                process_input(x, context, table);
+            }
+            SystemFunctionKind::Readmemh(_, _) => {
+                // First arg is filename literal, second is output array
+                // (written to, so handled via assignment, not reference).
+            }
+            SystemFunctionKind::Display(args) | SystemFunctionKind::Write(args) => {
+                for arg in args {
+                    process_input(arg, context, table);
+                }
+            }
+            SystemFunctionKind::Assert(cond, msg) => {
+                process_input(cond, context, table);
+                if let Some(m) = msg {
+                    process_input(m, context, table);
+                }
+            }
+            SystemFunctionKind::Finish => {}
         }
     }
 }

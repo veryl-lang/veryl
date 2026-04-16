@@ -8,9 +8,11 @@ type AssignTarget = (VarId, Option<usize>);
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
     pub assigned: Option<usize>,
-    /// (decl_index, assign_target) pairs where this variable is referenced.
+    /// (decl_index, assign_target, from_ff) pairs where this variable is referenced.
     /// None assign_target for condition expressions (if/case).
-    pub refered: Vec<(usize, Option<AssignTarget>)>,
+    /// from_ff: true if the reference is in an always_ff block (NBA-sensitive),
+    /// false if in always_comb / continuous assign (re-evaluated after NBA).
+    pub refered: Vec<(usize, Option<AssignTarget>, bool)>,
     pub is_ff: bool,
     pub assigned_comb: Option<usize>,
 }
@@ -18,16 +20,17 @@ pub struct FfTableEntry {
 impl FfTableEntry {
     fn update_is_ff(&mut self, self_key: (VarId, usize)) {
         if let Some(assigned_decl) = self.assigned {
-            // FF if referenced in a different decl (traditional check) OR
-            // referenced by a different variable's assignment within the same
-            // decl (NBA: cross-variable reads must see old values).
-            // Self-referencing within the same decl (e.g. `a = a + 1` alone)
-            // can remain comb because no other variable observes the old value.
-            //
-            // assign_target=None means the reference is in a condition expression
-            // (if/case) which indirectly affects all assignments in the block,
-            // so it must be treated as a cross-reference.
-            self.is_ff = self.refered.iter().any(|(decl, assign_target)| {
+            // FF classification rules (strict NBA semantics):
+            // - A variable may be treated as comb (ff_opt) only if no always_ff
+            //   block reads it (cross-block NBA races would be violated).
+            // - always_comb / continuous assigns re-evaluate after NBA in SV,
+            //   so they correctly see new FF values; ff_opt is safe for them.
+            // - Within the same always_ff (assigned_decl), self-reference is
+            //   safe; but cross-variable assignments must see old values.
+            self.is_ff = self.refered.iter().any(|(decl, assign_target, from_ff)| {
+                if !from_ff {
+                    return false;
+                }
                 if *decl != assigned_decl {
                     return true;
                 }
@@ -87,13 +90,14 @@ impl FfTable {
         index: usize,
         decl: usize,
         assign_target: Option<AssignTarget>,
+        from_ff: bool,
     ) {
         self.table
             .entry((id, index))
-            .and_modify(|x| x.refered.push((decl, assign_target)))
+            .and_modify(|x| x.refered.push((decl, assign_target, from_ff)))
             .or_insert(FfTableEntry {
                 assigned: None,
-                refered: vec![(decl, assign_target)],
+                refered: vec![(decl, assign_target, from_ff)],
                 is_ff: false,
                 assigned_comb: None,
             });
