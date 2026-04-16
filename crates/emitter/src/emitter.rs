@@ -4196,15 +4196,11 @@ impl VerylWalker for Emitter {
         for ident in idents {
             if let Ok(symbol) = symbol_table::resolve(ident) {
                 match &symbol.found.kind {
-                    SymbolKind::Variable(x) => {
-                        if x.r#type.has_modifier(&SymTypeModifierKind::Tri) {
-                            emit_assign = true;
-                        }
+                    SymbolKind::Variable(x) if x.r#type.has_modifier(&SymTypeModifierKind::Tri) => {
+                        emit_assign = true;
                     }
-                    SymbolKind::Port(x) => {
-                        if x.r#type.has_modifier(&SymTypeModifierKind::Tri) {
-                            emit_assign = true;
-                        }
+                    SymbolKind::Port(x) if x.r#type.has_modifier(&SymTypeModifierKind::Tri) => {
+                        emit_assign = true;
                     }
                     _ => (),
                 }

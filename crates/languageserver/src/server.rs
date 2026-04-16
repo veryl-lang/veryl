@@ -1159,33 +1159,25 @@ fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace>
     let mut ret_func = None;
     for symbol in symbol_table::get_all() {
         match symbol.kind {
-            VerylSymbolKind::Module(x) => {
-                if x.range.include(url, line as u32, column as u32) {
-                    let mut namespace = symbol.namespace;
-                    namespace.push(symbol.token.text);
-                    ret = Some(namespace);
-                }
+            VerylSymbolKind::Module(x) if x.range.include(url, line as u32, column as u32) => {
+                let mut namespace = symbol.namespace;
+                namespace.push(symbol.token.text);
+                ret = Some(namespace);
             }
-            VerylSymbolKind::Function(x) => {
-                if x.range.include(url, line as u32, column as u32) {
-                    let mut namespace = symbol.namespace;
-                    namespace.push(symbol.token.text);
-                    ret_func = Some(namespace);
-                }
+            VerylSymbolKind::Function(x) if x.range.include(url, line as u32, column as u32) => {
+                let mut namespace = symbol.namespace;
+                namespace.push(symbol.token.text);
+                ret_func = Some(namespace);
             }
-            VerylSymbolKind::Interface(x) => {
-                if x.range.include(url, line as u32, column as u32) {
-                    let mut namespace = symbol.namespace;
-                    namespace.push(symbol.token.text);
-                    ret = Some(namespace);
-                }
+            VerylSymbolKind::Interface(x) if x.range.include(url, line as u32, column as u32) => {
+                let mut namespace = symbol.namespace;
+                namespace.push(symbol.token.text);
+                ret = Some(namespace);
             }
-            VerylSymbolKind::Package(x) => {
-                if x.range.include(url, line as u32, column as u32) {
-                    let mut namespace = symbol.namespace;
-                    namespace.push(symbol.token.text);
-                    ret = Some(namespace);
-                }
+            VerylSymbolKind::Package(x) if x.range.include(url, line as u32, column as u32) => {
+                let mut namespace = symbol.namespace;
+                namespace.push(symbol.token.text);
+                ret = Some(namespace);
             }
             _ => (),
         }

@@ -113,81 +113,76 @@ impl Preprocessor for Veryl {
                             in_code = false;
                             in_playground = false;
                         }
-                        Event::Text(x) => {
-                            if in_code {
-                                let replaced_code = re_hiding_code_line.replace_all(x.as_ref(), "");
-                                code_blocks.push((x.to_string(), replaced_code.to_string()));
+                        Event::Text(x) if in_code => {
+                            let replaced_code = re_hiding_code_line.replace_all(x.as_ref(), "");
+                            code_blocks.push((x.to_string(), replaced_code.to_string()));
 
-                                chapter_skip = false;
-                                let x = re_hiding_code_indicator.replace_all(x.as_ref(), "");
+                            chapter_skip = false;
+                            let x = re_hiding_code_indicator.replace_all(x.as_ref(), "");
 
-                                let ret = veryl_parser::Parser::parse(&x, &"");
+                            let ret = veryl_parser::Parser::parse(&x, &"");
 
-                                let (line, col) = lookup.get(range.start);
-                                match ret {
-                                    Err(err) => {
-                                        eprintln!("veryl parse failed : {path}:{line}:{col}");
-                                        eprintln!("{err}");
+                            let (line, col) = lookup.get(range.start);
+                            match ret {
+                                Err(err) => {
+                                    eprintln!("veryl parse failed : {path}:{line}:{col}");
+                                    eprintln!("{err}");
+                                    total_success = false;
+                                    chapter_success = false;
+                                }
+                                Ok(ret) if in_playground => {
+                                    let metadata = Metadata::create_default("codeblock").unwrap();
+                                    let prj = &metadata.project.name;
+
+                                    let analyzer = Analyzer::new(&metadata);
+                                    analyzer.clear();
+
+                                    let mut errors = vec![];
+                                    errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
+                                    errors.append(&mut Analyzer::analyze_post_pass1());
+                                    errors.append(&mut analyzer.analyze_pass2(
+                                        prj,
+                                        &ret.veryl,
+                                        &mut context,
+                                        None,
+                                    ));
+                                    errors.append(&mut Analyzer::analyze_post_pass2());
+
+                                    let errors: Vec<_> = errors
+                                        .into_iter()
+                                        .filter(|x| {
+                                            !matches!(x, AnalyzerError::UnassignVariable { .. })
+                                        })
+                                        .collect();
+
+                                    if !errors.is_empty() {
+                                        eprintln!("veryl analyze failed : {path}:{line}:{col}");
+                                        for err in errors {
+                                            eprintln!("{err}");
+                                        }
                                         total_success = false;
                                         chapter_success = false;
                                     }
-                                    Ok(ret) if in_playground => {
-                                        let metadata =
-                                            Metadata::create_default("codeblock").unwrap();
-                                        let prj = &metadata.project.name;
 
-                                        let analyzer = Analyzer::new(&metadata);
-                                        analyzer.clear();
+                                    let mut formatter = Formatter::new(&metadata);
+                                    formatter.format(&ret.veryl, x.as_ref());
 
-                                        let mut errors = vec![];
-                                        errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
-                                        errors.append(&mut Analyzer::analyze_post_pass1());
-                                        errors.append(&mut analyzer.analyze_pass2(
-                                            prj,
-                                            &ret.veryl,
-                                            &mut context,
-                                            None,
-                                        ));
-                                        errors.append(&mut Analyzer::analyze_post_pass2());
-
-                                        let errors: Vec<_> = errors
-                                            .into_iter()
-                                            .filter(|x| {
-                                                !matches!(x, AnalyzerError::UnassignVariable { .. })
-                                            })
-                                            .collect();
-
-                                        if !errors.is_empty() {
-                                            eprintln!("veryl analyze failed : {path}:{line}:{col}");
-                                            for err in errors {
-                                                eprintln!("{err}");
+                                    if x != formatter.as_str() {
+                                        eprintln!("veryl format failed : {path}:{line}:{col}");
+                                        let diff =
+                                            TextDiff::from_lines(x.as_ref(), formatter.as_str());
+                                        for change in diff.iter_all_changes() {
+                                            match change.tag() {
+                                                ChangeTag::Delete => eprint!("-{change}"),
+                                                ChangeTag::Insert => eprint!("+{change}"),
+                                                ChangeTag::Equal => (),
                                             }
-                                            total_success = false;
-                                            chapter_success = false;
                                         }
-
-                                        let mut formatter = Formatter::new(&metadata);
-                                        formatter.format(&ret.veryl, x.as_ref());
-
-                                        if x != formatter.as_str() {
-                                            eprintln!("veryl format failed : {path}:{line}:{col}");
-                                            let diff = TextDiff::from_lines(
-                                                x.as_ref(),
-                                                formatter.as_str(),
-                                            );
-                                            for change in diff.iter_all_changes() {
-                                                match change.tag() {
-                                                    ChangeTag::Delete => eprint!("-{change}"),
-                                                    ChangeTag::Insert => eprint!("+{change}"),
-                                                    ChangeTag::Equal => (),
-                                                }
-                                            }
-                                            total_success = false;
-                                            chapter_success = false;
-                                        }
+                                        total_success = false;
+                                        chapter_success = false;
                                     }
-                                    _ => (),
                                 }
+                                _ => (),
                             }
                         }
                         _ => (),
