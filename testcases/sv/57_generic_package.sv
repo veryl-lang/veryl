@@ -50,7 +50,7 @@ package veryl_testcase___Package57F__Module57F;
 endpackage
 
 package veryl_testcase___Package57G__i32;
-    typedef int signed TYPE;
+    typedef int TYPE;
 endpackage
 package veryl_testcase___Package57G__u32;
     typedef int unsigned TYPE;

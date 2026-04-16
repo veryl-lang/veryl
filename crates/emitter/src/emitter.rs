@@ -2878,10 +2878,10 @@ impl VerylWalker for Emitter {
                 CastingType::U16(_) | CastingType::P16(_) => self.str("unsigned'(shortint'("),
                 CastingType::U32(_) | CastingType::P32(_) => self.str("unsigned'(int'("),
                 CastingType::U64(_) | CastingType::P64(_) => self.str("unsigned'(longint'("),
-                CastingType::I8(_) => self.str("signed'(byte'("),
-                CastingType::I16(_) => self.str("signed'(shortint'("),
-                CastingType::I32(_) => self.str("signed'(int'("),
-                CastingType::I64(_) => self.str("signed'(longint'("),
+                CastingType::I8(_) => self.str("byte'("),
+                CastingType::I16(_) => self.str("shortint'("),
+                CastingType::I32(_) => self.str("int'("),
+                CastingType::I64(_) => self.str("longint'("),
                 CastingType::F32(x) => {
                     self.f32(&x.f32);
                     self.str("'(");
@@ -2976,12 +2976,12 @@ impl VerylWalker for Emitter {
                 CastingType::U8(_)
                 | CastingType::U16(_)
                 | CastingType::U32(_)
-                | CastingType::U64(_)
-                | CastingType::I8(_)
+                | CastingType::U64(_) => self.str("))"),
+                CastingType::I8(_)
                 | CastingType::I16(_)
                 | CastingType::I32(_)
-                | CastingType::I64(_) => self.str("))"),
-                CastingType::F32(_)
+                | CastingType::I64(_)
+                | CastingType::F32(_)
                 | CastingType::F64(_)
                 | CastingType::UserDefinedType(_)
                 | CastingType::Based(_)

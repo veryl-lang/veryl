@@ -14,7 +14,7 @@ module veryl_testcase_Module58;
         C                           A;
     } __StructA__C;
 
-    typedef int signed C;
+    typedef int C;
 
     typedef struct packed {
         veryl_testcase_Package58::C B;
