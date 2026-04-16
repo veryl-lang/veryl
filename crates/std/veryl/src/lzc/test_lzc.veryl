@@ -1,0 +1,167 @@
+#[test(test_lzc_4)]
+module test_lzc_4 {
+    import lzc_pkg::<4>::*;
+
+    var bits  : logic     <4>;
+    var result: lzc_result   ;
+
+    initial {
+        bits    = '0;
+        result  = lzc(bits, true);
+        $assert(result.all_zero);
+
+        for i: i32      in 0..4 {
+            var exp: logic<2>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc(bits, true);
+
+            exp     = 3 - i;
+            $assert(!result.all_zero);
+            $assert(result.count == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_8)]
+module test_lzc_8 {
+    import lzc_pkg::<8>::*;
+
+    var bits  : logic     <8>;
+    var result: lzc_result   ;
+
+    initial {
+        bits    = '0;
+        result  = lzc(bits, true);
+        $assert(result.all_zero);
+
+        for i: i32      in 0..8 {
+            var exp: logic<3>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc(bits, true);
+
+            exp     = 7 - i;
+            $assert(!result.all_zero);
+            $assert(result.count == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_16)]
+module test_lzc_16 {
+    import lzc_pkg::<16>::*;
+
+    var bits  : logic     <16>;
+    var result: lzc_result    ;
+
+    initial {
+        bits    = '0;
+        result  = lzc(bits, true);
+        $assert(result.all_zero);
+
+        for i: i32      in 0..16 {
+            var exp: logic<4>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc(bits, true);
+
+            exp     = 15 - i;
+            $assert(!result.all_zero);
+            $assert(result.count == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_32)]
+module test_lzc_32 {
+    import lzc_pkg::<32>::*;
+
+    var bits  : logic     <32>;
+    var result: lzc_result    ;
+
+    initial {
+        bits    = '0;
+        result  = lzc(bits, true);
+        $assert(result.all_zero);
+
+        for i: i32      in 0..32 {
+            var exp: logic<5>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc(bits, true);
+
+            exp     = 31 - i;
+            $assert(!result.all_zero);
+            $assert(result.count == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_64)]
+module test_lzc_64 {
+    import lzc_pkg::<64>::*;
+
+    var bits  : logic     <64>;
+    var result: lzc_result    ;
+
+    initial {
+        bits    = '0;
+        result  = lzc(bits, true);
+        $assert(result.all_zero);
+
+        for i: i32      in 0..64 {
+            var exp: logic<6>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc(bits, true);
+
+            exp     = 63 - i;
+            $assert(!result.all_zero);
+            $assert(result.count == exp);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_lzc_128)]
+module test_lzc_128 {
+    import lzc_pkg::<128>::*;
+
+    var bits  : logic     <128>;
+    var result: lzc_result     ;
+
+    initial {
+        bits    = '0;
+        result  = lzc(bits, true);
+        $assert(result.all_zero);
+
+        for i: i32      in 0..128 {
+            var exp: logic<7>;
+
+            bits    = '0;
+            bits[i] = '1;
+            result  = lzc(bits, true);
+
+            exp     = 127 - i;
+            $assert(!result.all_zero);
+            $assert(result.count == exp);
+        }
+
+        $finish();
+    }
+}

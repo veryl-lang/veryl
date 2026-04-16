@@ -1,0 +1,95 @@
+pub package lzc_common_pkg {
+    struct result::<N: p32> {
+        all_zero: logic           ,
+        count   : logic<$clog2(N)>,
+    }
+
+    function lzc4 (
+        bits: input logic<4>,
+    ) -> result::<4> {
+        var ret         : result::<4>;
+        ret.all_zero = bits == '0;
+        ret.count[1] = bits[1:0] == '0;
+        ret.count[0] = !(bits[0] || ((!bits[1]) && bits[2]));
+        return ret;
+    }
+
+    function lzc8 (
+        bits: input logic<8>,
+    ) -> result::<8> {
+        var ret4: result::<4> [2];
+        var ret : result::<8>    ;
+
+        ret4[0] = lzc4(bits[0 step 4]);
+        ret4[1] = lzc4(bits[1 step 4]);
+
+        ret.all_zero = ret4[0].all_zero && ret4[1].all_zero;
+        if !ret4[0].all_zero {
+            ret.count = {1'b0, ret4[0].count};
+        } else {
+            ret.count = {1'b1, ret4[1].count};
+        }
+
+        return ret;
+    }
+
+    function lzc16 (
+        bits: input logic<16>,
+    ) -> result::<16> {
+        var ret4       : result::<4>     [4];
+        var any_one    : logic       <4>    ;
+        var ret_any_one: result::<4>        ;
+        var ret        : result::<16>       ;
+
+        for i: u32 in 0..4 {
+            ret4[i]    = lzc4(bits[i step 4]);
+            any_one[i] = !ret4[i].all_zero;
+        }
+        ret_any_one = lzc4(any_one);
+
+        ret.all_zero = ret_any_one.all_zero;
+        ret.count    = {ret_any_one.count, ret4[ret_any_one.count].count};
+
+        return ret;
+    }
+
+    function lzc32 (
+        bits: input logic<32>,
+    ) -> result::<32> {
+        var ret8       : result::<8>     [4];
+        var any_one    : logic       <4>    ;
+        var ret_any_one: result::<4>        ;
+        var ret        : result::<32>       ;
+
+        for i: u32 in 0..4 {
+            ret8[i]    = lzc8(bits[i step 8]);
+            any_one[i] = !ret8[i].all_zero;
+        }
+        ret_any_one = lzc4(any_one);
+
+        ret.all_zero = ret_any_one.all_zero;
+        ret.count    = {ret_any_one.count, ret8[ret_any_one.count].count};
+
+        return ret;
+    }
+
+    function lzc64 (
+        bits: input logic<64>,
+    ) -> result::<64> {
+        var ret8       : result::<8>     [8];
+        var any_one    : logic       <8>    ;
+        var ret_any_one: result::<8>        ;
+        var ret        : result::<64>       ;
+
+        for i: u32 in 0..8 {
+            ret8[i]    = lzc8(bits[i step 8]);
+            any_one[i] = !ret8[i].all_zero;
+        }
+        ret_any_one = lzc8(any_one);
+
+        ret.all_zero = ret_any_one.all_zero;
+        ret.count    = {ret_any_one.count, ret8[ret_any_one.count].count};
+
+        return ret;
+    }
+}

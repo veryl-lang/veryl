@@ -1,0 +1,68 @@
+pub package lzc_pkg::<N: p32> {
+    const COUNT_WIDTH      : p32 = if N >= 2 ? $clog2(N) : 1;
+    const COUNT_UPPER_WIDTH: p32 = if N >: 64 ? COUNT_WIDTH - 6 : 1;
+    const N_SPLITS         : p32 = if N >: 64 ? (N + 63) / 64 : 2; // 2 is to prevent verilator warning
+
+    type lzc_result = lzc_common_pkg::result::<N>             ;
+    type lzc_count  = logic                      <COUNT_WIDTH>;
+
+    function lzc (
+        bits    : input logic<N>,
+        from_msb: input logic   ,
+    ) -> lzc_result {
+        var input_bits: logic     <N>;
+        var ret       : lzc_result   ;
+
+        if from_msb {
+            input_bits = bit_reverse::<N>(bits);
+        } else {
+            input_bits = bits;
+        }
+
+        if N <= 4 {
+            var ret4        : lzc_common_pkg::result::<4>;
+            ret4         = lzc_common_pkg::lzc4(input_bits as 4);
+            ret.all_zero = ret4.all_zero;
+            ret.count    = ret4.count as COUNT_WIDTH;
+        } else if N <= 8 {
+            var ret8        : lzc_common_pkg::result::<8>;
+            ret8         = lzc_common_pkg::lzc8(input_bits as 8);
+            ret.all_zero = ret8.all_zero;
+            ret.count    = ret8.count;
+        } else if N <= 16 {
+            var ret16       : lzc_common_pkg::result::<16>;
+            ret16        = lzc_common_pkg::lzc16(input_bits as 16);
+            ret.all_zero = ret16.all_zero;
+            ret.count    = ret16.count;
+        } else if N <= 32 {
+            var ret32       : lzc_common_pkg::result::<32>;
+            ret32        = lzc_common_pkg::lzc32(input_bits as 32);
+            ret.all_zero = ret32.all_zero;
+            ret.count    = ret32.count;
+        } else if N <= 64 {
+            var ret64       : lzc_common_pkg::result::<64>;
+            ret64        = lzc_common_pkg::lzc64(input_bits as 64);
+            ret.all_zero = ret64.all_zero;
+            ret.count    = ret64.count;
+        } else {
+            var count   : lzc_count<N_SPLITS>;
+            var all_zero: logic    <N_SPLITS>;
+
+            for i: u32                              in 0..N_SPLITS {
+                var bits64: logic                       <64>;
+                var ret64 : lzc_common_pkg::result::<64>    ;
+
+                bits64 = (input_bits >> (64 * i)) as 64;
+                ret64  = lzc_common_pkg::lzc64(bits64);
+
+                count[i]    = {i as COUNT_UPPER_WIDTH, ret64.count};
+                all_zero[i] = ret64.all_zero;
+            }
+
+            ret.all_zero = all_zero == '1;
+            ret.count    = select_vector::<N_SPLITS, lzc_count>(~all_zero, count);
+        }
+
+        return ret;
+    }
+}
