@@ -27,6 +27,9 @@ fn check_module_compat(
     ret
 }
 
+// Collapsing the inner `if`s would let the trailing `(_, SymbolKind::Proto*)`
+// fallback arms match and push an error, changing behavior.
+#[allow(clippy::collapsible_match)]
 fn check_interface_compat(
     actual: &InterfaceProperty,
     proto: &ProtoInterfaceProperty,
@@ -163,6 +166,7 @@ fn check_interface_compat(
     ret
 }
 
+#[allow(clippy::collapsible_match)] // see check_interface_compat
 fn check_package_compat(
     actual: &PackageProperty,
     proto: &ProtoPackageProperty,

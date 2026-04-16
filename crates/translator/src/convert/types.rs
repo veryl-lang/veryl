@@ -19,10 +19,8 @@ pub(crate) fn sv_type_to_veryl(node: &RefNode, src: &str) -> String {
 
     for n in node.clone().into_iter() {
         match n {
-            RefNode::Signing(_) => {
-                if node_text(&n, src).trim() == "signed" {
-                    signed = true;
-                }
+            RefNode::Signing(_) if node_text(&n, src).trim() == "signed" => {
+                signed = true;
             }
             RefNode::IntegerAtomType(_) => {
                 let txt = node_text(&n, src).trim();
@@ -46,10 +44,8 @@ pub(crate) fn sv_type_to_veryl(node: &RefNode, src: &str) -> String {
             RefNode::PackedDimension(_) => {
                 packed.push(node_text(&n, src).trim().to_string());
             }
-            RefNode::TypeIdentifier(_) => {
-                if type_ident.is_none() {
-                    type_ident = Some(node_text(&n, src).trim().to_string());
-                }
+            RefNode::TypeIdentifier(_) if type_ident.is_none() => {
+                type_ident = Some(node_text(&n, src).trim().to_string());
             }
             _ => {}
         }

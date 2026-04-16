@@ -415,16 +415,15 @@ impl Symbol {
                 syntax_tree::Factor::BooleanLiteral(x) => {
                     return Some(x.boolean_literal.as_ref().into());
                 }
-                syntax_tree::Factor::IdentifierFactor(x) => {
-                    if x.identifier_factor.identifier_factor_opt.is_none() {
-                        let mut context = Context::default();
-                        context.push_generic_map(maps.to_vec());
+                syntax_tree::Factor::IdentifierFactor(x)
+                    if x.identifier_factor.identifier_factor_opt.is_none() =>
+                {
+                    let mut context = Context::default();
+                    context.push_generic_map(maps.to_vec());
 
-                        let path = context.resolve_path(
-                            x.identifier_factor.expression_identifier.as_ref().into(),
-                        );
-                        return Some(path);
-                    }
+                    let path = context
+                        .resolve_path(x.identifier_factor.expression_identifier.as_ref().into());
+                    return Some(path);
                 }
                 syntax_tree::Factor::LParenExpressionRParen(x) => {
                     return Self::expr_to_generic_symbol_path(&x.expression, maps);

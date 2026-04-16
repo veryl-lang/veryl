@@ -57,16 +57,14 @@ fn is_constantable_function(func: &FunctionProperty, id: SymbolId, namespace: &N
         }
 
         match &symbol.found.kind {
-            SymbolKind::Port(_) | SymbolKind::Variable(_) => {
-                // port and variable should be defined in the given function
-                if !symbol.found.namespace.included(namespace) {
-                    return false;
-                }
+            // port and variable should be defined in the given function
+            SymbolKind::Port(_) | SymbolKind::Variable(_)
+                if !symbol.found.namespace.included(namespace) =>
+            {
+                return false;
             }
-            SymbolKind::Function(_) => {
-                if !resolve_constantable(&symbol.found) {
-                    return false;
-                }
+            SymbolKind::Function(_) if !resolve_constantable(&symbol.found) => {
+                return false;
             }
             SymbolKind::Instance(_) => return false,
             _ => {}
