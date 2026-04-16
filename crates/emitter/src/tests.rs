@@ -2998,4 +2998,41 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+module ModuleA {
+    function func::<N: u32> {
+        gen W: u32 = N;
+        var a: u32;
+        a = 0 as W;
+    }
+    always_comb {
+        func::<8>();
+    }
+}
+    "#;
+
+    let expect = r#"module prj_ModuleA;
+    function automatic void __func__8;
+
+        int unsigned a;
+        a = 8'(0);
+    endfunction
+    always_comb begin
+        __func__8();
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }

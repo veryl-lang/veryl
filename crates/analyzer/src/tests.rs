@@ -8494,6 +8494,22 @@ fn invalid_operand() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA {
+        function func::<N: u32> {
+            gen W: u32 = N;
+            var a: u32;
+            a = 0 as W;
+        }
+        always_comb {
+            func::<8>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

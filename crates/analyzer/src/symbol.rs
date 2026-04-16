@@ -382,11 +382,9 @@ impl Symbol {
 
         let consts = self.generic_consts();
         if !consts.is_empty() {
-            let namespace = self.inner_namespace();
             for (name, r#const) in &consts {
                 let maps = vec![map.clone()];
-                if let Some(mut path) = Self::expr_to_generic_symbol_path(&r#const.value, &maps) {
-                    path.resolve_imported(&namespace, Some(&maps));
+                if let Some(path) = Self::expr_to_generic_symbol_path(&r#const.value, &maps) {
                     map.map.insert(*name, path);
                 }
             }
@@ -419,7 +417,13 @@ impl Symbol {
                 }
                 syntax_tree::Factor::IdentifierFactor(x) => {
                     if x.identifier_factor.identifier_factor_opt.is_none() {
-                        return Some(x.identifier_factor.expression_identifier.as_ref().into());
+                        let mut context = Context::default();
+                        context.push_generic_map(maps.to_vec());
+
+                        let path = context.resolve_path(
+                            x.identifier_factor.expression_identifier.as_ref().into(),
+                        );
+                        return Some(path);
                     }
                 }
                 syntax_tree::Factor::LParenExpressionRParen(x) => {

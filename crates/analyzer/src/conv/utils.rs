@@ -950,6 +950,27 @@ pub fn eval_type(
                     }
                     _ => ir::TypeKind::Unknown,
                 },
+                SymbolKind::GenericConst(x) => match &x.bound {
+                    GenericBoundKind::Proto(x) => {
+                        let mut r#type = x.to_ir_type(context, pos)?;
+                        width.append(&mut r#type.width);
+                        array.append(&mut r#type.array);
+                        signed = r#type.signed;
+
+                        r#type.kind
+                    }
+                    GenericBoundKind::Type => {
+                        let (comptime, _) = eval_generic_expr(context, &x.value)?;
+                        if let ValueVariant::Type(mut x) = comptime.value {
+                            width.append(&mut x.width);
+                            array.append(&mut x.array);
+                            x.kind
+                        } else {
+                            ir::TypeKind::Unknown
+                        }
+                    }
+                    _ => ir::TypeKind::Unknown,
+                },
                 SymbolKind::Parameter(x) => {
                     if x.r#type.kind.is_type() {
                         if let Some(expr) = &x.value {
