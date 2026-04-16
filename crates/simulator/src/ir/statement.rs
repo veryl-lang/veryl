@@ -2734,14 +2734,13 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     match b {
                         air::ForBound::Const(v) => Ok(ProtoForBound::Const(*v as u64)),
                         air::ForBound::Expression(expr) => {
-                            let scope = ctx.scope();
-                            if let Some(v) = b.eval_value(&mut scope.analyzer_context) {
-                                Ok(ProtoForBound::Const(v as u64))
-                            } else {
-                                let proto_expr: ProtoExpression = Conv::conv(ctx, expr.as_ref())
-                                    .map_err(|_| SimulatorError::unsupported_description(&token))?;
-                                Ok(ProtoForBound::Dynamic(proto_expr))
-                            }
+                            // Must not fold via eval_value: the analyzer's
+                            // Context holds the last-tracked value of any
+                            // mutable variable in `expr`, not its value at
+                            // each runtime iteration of an enclosing loop.
+                            let proto_expr: ProtoExpression = Conv::conv(ctx, expr.as_ref())
+                                .map_err(|_| SimulatorError::unsupported_description(&token))?;
+                            Ok(ProtoForBound::Dynamic(proto_expr))
                         }
                     }
                 };
