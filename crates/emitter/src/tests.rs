@@ -767,9 +767,9 @@ package prj___PkgB____PkgA__2;
     } __Struct__2;
 endpackage
 module prj_Module;
-    int signed                         _a; always_comb _a = prj___PkgB____PkgA__1::__Func__1();
-    int signed                         _b; always_comb _b = prj___PkgB____PkgA__1::__Func__2();
-    int signed                         _c; always_comb _c = prj___PkgB____PkgA__2::__Func__1();
+    int                                _a; always_comb _a = prj___PkgB____PkgA__1::__Func__1();
+    int                                _b; always_comb _b = prj___PkgB____PkgA__1::__Func__2();
+    int                                _c; always_comb _c = prj___PkgB____PkgA__2::__Func__1();
     prj___PkgB____PkgA__1::__Struct__2 _d;
     prj___PkgB____PkgA__2::__Struct__1 _e;
     prj___PkgB____PkgA__2::__Struct__2 _f;
