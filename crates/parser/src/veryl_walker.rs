@@ -1796,11 +1796,13 @@ pub trait VerylWalker {
         before!(self, let_statement, arg);
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
         if let Some(ref x) = arg.let_statement_opt {
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
+            if let Some(ref y) = x.let_statement_opt0 {
+                self.clock_domain(&y.clock_domain);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
@@ -2046,11 +2048,13 @@ pub trait VerylWalker {
         before!(self, let_declaration, arg);
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
         if let Some(ref x) = arg.let_declaration_opt {
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
+            if let Some(ref y) = x.let_declaration_opt0 {
+                self.clock_domain(&y.clock_domain);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
@@ -2062,11 +2066,13 @@ pub trait VerylWalker {
         before!(self, var_declaration, arg);
         self.var(&arg.var);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
         if let Some(ref x) = arg.var_declaration_opt {
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
+            if let Some(ref y) = x.var_declaration_opt0 {
+                self.clock_domain(&y.clock_domain);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
         after!(self, var_declaration, arg);
     }
@@ -2076,13 +2082,15 @@ pub trait VerylWalker {
         before!(self, const_declaration, arg);
         self.r#const(&arg.r#const);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        match &*arg.const_declaration_group {
-            ConstDeclarationGroup::ArrayType(x) => {
-                self.array_type(&x.array_type);
-            }
-            ConstDeclarationGroup::Type(x) => {
-                self.r#type(&x.r#type);
+        if let Some(ref x) = arg.const_declaration_opt {
+            self.colon(&x.colon);
+            match &*x.const_declaration_opt_group {
+                ConstDeclarationOptGroup::ArrayType(x) => {
+                    self.array_type(&x.array_type);
+                }
+                ConstDeclarationOptGroup::Type(x) => {
+                    self.r#type(&x.r#type);
+                }
             }
         }
         self.equ(&arg.equ);

@@ -1,0 +1,49 @@
+// Parametric width inference: module parameter references must be preserved
+// as `W` rather than being evaluated to a concrete number.
+module Module88b #(
+    param W: u32 = 8,
+) {
+    var _pa: logic<W>;
+    assign _pa = 0;
+
+    // Variable reference: width expression `W` is kept intact.
+    let _pb = _pa;
+
+    // `var` without type annotation: type is inferred from the first
+    // subsequent `assign` statement.
+    var _pc;
+    assign _pc = _pa;
+
+    // Type of `_pd` is inferred from its first assignment inside
+    // always_comb.
+    var _pd;
+    always_comb {
+        _pd = _pa;
+    }
+
+    // Multi-stage inference: _pe is inferred from _pc which itself
+    // was inferred earlier in this module.
+    var _pe;
+    assign _pe = _pc;
+}
+
+module Module88 {
+    let _a: logic<8> = 0;
+
+    // Variable reference: type copied from the referenced variable.
+    let _b = _a;
+
+    // Sized literal: type implied by the literal itself.
+    let _c = 8'd255;
+
+    // Parenthesized expression recurses.
+    let _d = (_a);
+
+    // Const declarations also support inference.
+    const _E = 16'd100;
+
+    always_comb {
+        // Let statement inside a block.
+        let _e = _a;
+    }
+}

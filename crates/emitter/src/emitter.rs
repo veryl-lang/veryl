@@ -8,9 +8,11 @@ use veryl_analyzer::attribute_table;
 use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::conv::{Context, Conv};
 use veryl_analyzer::definition_table::{self, Definition};
+use veryl_analyzer::generic_inference_table;
 use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::namespace::Namespace;
+use veryl_analyzer::resolved_type_table;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
@@ -975,6 +977,21 @@ impl Emitter {
         }
     }
 
+    fn emit_inferred_type(&mut self, token_id: veryl_parser::resource_table::TokenId) {
+        if let Some(ir_type) = resolved_type_table::get(&token_id)
+            && let Some(name) = ir_type.to_sv_type_name()
+        {
+            self.str(name);
+            let width_str = ir_type.to_sv_width();
+            if !width_str.is_empty() {
+                self.space(1);
+                self.str(&width_str);
+            }
+        } else {
+            self.str("logic");
+        }
+    }
+
     fn is_implicit_scalar_type(&mut self, x: &ScalarType) -> bool {
         let mut stringifier = Stringifier::new();
         stringifier.scalar_type(x);
@@ -1136,12 +1153,18 @@ impl Emitter {
             }
             StatementBlockItem::LetStatement(x) => {
                 let x = &x.let_statement;
-                self.scalar_type(&x.array_type.scalar_type);
-                self.space(1);
-                self.identifier(&x.identifier);
-                if let Some(ref x) = x.array_type.array_type_opt {
+                if let Some(ref opt) = x.let_statement_opt {
+                    self.scalar_type(&opt.array_type.scalar_type);
                     self.space(1);
-                    self.array(&x.array);
+                    self.identifier(&x.identifier);
+                    if let Some(ref arr) = opt.array_type.array_type_opt {
+                        self.space(1);
+                        self.array(&arr.array);
+                    }
+                } else {
+                    self.emit_inferred_type(x.identifier.identifier_token.token.id);
+                    self.space(1);
+                    self.identifier(&x.identifier);
                 }
                 self.str(";");
             }
@@ -3907,26 +3930,43 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'LetDeclaration'
     fn let_declaration(&mut self, arg: &LetDeclaration) {
         let is_tri = arg
-            .array_type
-            .scalar_type
-            .scalar_type_list
-            .iter()
-            .any(|x| matches!(x.type_modifier.as_ref(), TypeModifier::Tri(_)));
+            .let_declaration_opt
+            .as_ref()
+            .map(|opt| {
+                opt.array_type
+                    .scalar_type
+                    .scalar_type_list
+                    .iter()
+                    .any(|x| matches!(x.type_modifier.as_ref(), TypeModifier::Tri(_)))
+            })
+            .unwrap_or(false);
 
-        self.scalar_type(&arg.array_type.scalar_type);
-        self.space(1);
-        self.align_start(align_kind::IDENTIFIER);
-        self.identifier(&arg.identifier);
-        self.align_finish(align_kind::IDENTIFIER);
-        self.align_start(align_kind::ARRAY);
-        if let Some(ref x) = arg.array_type.array_type_opt {
+        if let Some(ref opt) = arg.let_declaration_opt {
+            self.scalar_type(&opt.array_type.scalar_type);
             self.space(1);
-            self.array(&x.array);
+            self.align_start(align_kind::IDENTIFIER);
+            self.identifier(&arg.identifier);
+            self.align_finish(align_kind::IDENTIFIER);
+            self.align_start(align_kind::ARRAY);
+            if let Some(ref x) = opt.array_type.array_type_opt {
+                self.space(1);
+                self.array(&x.array);
+            } else {
+                let loc = self.align_last_location(align_kind::IDENTIFIER);
+                self.align_dummy_location(align_kind::ARRAY, loc);
+            }
+            self.align_finish(align_kind::ARRAY);
         } else {
+            self.emit_inferred_type(arg.identifier.identifier_token.token.id);
+            self.space(1);
+            self.align_start(align_kind::IDENTIFIER);
+            self.identifier(&arg.identifier);
+            self.align_finish(align_kind::IDENTIFIER);
+            self.align_start(align_kind::ARRAY);
             let loc = self.align_last_location(align_kind::IDENTIFIER);
             self.align_dummy_location(align_kind::ARRAY, loc);
+            self.align_finish(align_kind::ARRAY);
         }
-        self.align_finish(align_kind::ARRAY);
         self.str(";");
         self.space(1);
         if is_tri {
@@ -3945,20 +3985,28 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'VarDeclaration'
     fn var_declaration(&mut self, arg: &VarDeclaration) {
-        self.scalar_type(&arg.array_type.scalar_type);
-        self.space(1);
-        self.align_start(align_kind::IDENTIFIER);
-        self.identifier(&arg.identifier);
-        self.align_finish(align_kind::IDENTIFIER);
-        self.align_start(align_kind::ARRAY);
-        if let Some(ref x) = arg.array_type.array_type_opt {
+        if let Some(ref opt) = arg.var_declaration_opt {
+            self.scalar_type(&opt.array_type.scalar_type);
             self.space(1);
-            self.array(&x.array);
+            self.align_start(align_kind::IDENTIFIER);
+            self.identifier(&arg.identifier);
+            self.align_finish(align_kind::IDENTIFIER);
+            self.align_start(align_kind::ARRAY);
+            if let Some(ref x) = opt.array_type.array_type_opt {
+                self.space(1);
+                self.array(&x.array);
+            } else {
+                let loc = self.align_last_location(align_kind::IDENTIFIER);
+                self.align_dummy_location(align_kind::ARRAY, loc);
+            }
+            self.align_finish(align_kind::ARRAY);
         } else {
-            let loc = self.align_last_location(align_kind::IDENTIFIER);
-            self.align_dummy_location(align_kind::ARRAY, loc);
+            self.emit_inferred_type(arg.identifier.identifier_token.token.id);
+            self.space(1);
+            self.align_start(align_kind::IDENTIFIER);
+            self.identifier(&arg.identifier);
+            self.align_finish(align_kind::IDENTIFIER);
         }
-        self.align_finish(align_kind::ARRAY);
         self.semicolon(&arg.semicolon);
     }
 
@@ -3966,8 +4014,21 @@ impl VerylWalker for Emitter {
     fn const_declaration(&mut self, arg: &ConstDeclaration) {
         self.r#const(&arg.r#const);
         self.space(1);
-        match &*arg.const_declaration_group {
-            ConstDeclarationGroup::ArrayType(x) => {
+        let Some(ref opt) = arg.const_declaration_opt else {
+            self.emit_inferred_type(arg.identifier.identifier_token.token.id);
+            self.space(1);
+            self.align_start(align_kind::IDENTIFIER);
+            self.identifier(&arg.identifier);
+            self.align_finish(align_kind::IDENTIFIER);
+            self.space(1);
+            self.equ(&arg.equ);
+            self.space(1);
+            self.expression(&arg.expression);
+            self.semicolon(&arg.semicolon);
+            return;
+        };
+        match &*opt.const_declaration_opt_group {
+            ConstDeclarationOptGroup::ArrayType(x) => {
                 if !self.is_implicit_scalar_type(&x.array_type.scalar_type) {
                     self.scalar_type(&x.array_type.scalar_type);
                     self.space(1);
@@ -3992,7 +4053,7 @@ impl VerylWalker for Emitter {
                 }
                 self.align_finish(align_kind::ARRAY);
             }
-            ConstDeclarationGroup::Type(x) => {
+            ConstDeclarationOptGroup::Type(x) => {
                 self.align_start(align_kind::TYPE);
                 if !self.is_implicit_type() {
                     self.r#type(&x.r#type);
@@ -6152,11 +6213,26 @@ pub fn resolve_generic_path(
     for (i, symbol) in &path_symbols {
         if symbol.kind.is_generic() {
             let params = symbol.generic_parameters();
+
+            // Inferred generic arguments (call site omitted `::<…>`).
+            if path.paths[*i].arguments.is_empty()
+                && !params.is_empty()
+                && i + 1 == path.paths.len()
+            {
+                let call_token_id = path.paths[*i].base.id;
+                if let Some(inferred) = generic_inference_table::get_inferred(call_token_id) {
+                    path.paths[*i].arguments = inferred;
+                }
+            }
+
             let n_args = path.paths[*i].arguments.len();
 
             // Apply default value
             for param in params.iter().skip(n_args) {
-                let mut arg = param.1.default_value.as_ref().unwrap().clone();
+                let Some(default) = param.1.default_value.as_ref() else {
+                    break;
+                };
+                let mut arg = default.clone();
                 arg.unalias();
                 path.paths[*i].arguments.push(arg);
             }

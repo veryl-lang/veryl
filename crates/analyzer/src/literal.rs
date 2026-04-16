@@ -21,10 +21,10 @@ impl Literal {
                 (ValueVariant::Numeric(x.clone()), r#type)
             }
             Literal::Type(x) => {
-                let r#type = Type {
-                    kind: TypeKind::Type,
-                    width: Shape::new(vec![Some(1)]),
-                    ..Default::default()
+                let r#type = {
+                    let mut t = Type::new(TypeKind::Type);
+                    t.set_concrete_width(Shape::new(vec![Some(1)]));
+                    t
                 };
                 (ValueVariant::Type(x.into()), r#type)
             }
@@ -37,10 +37,10 @@ impl Literal {
                 let text = resource_table::get_str_value(*x).unwrap_or_default();
                 let value = string_to_byte_value(&text);
                 let width = value.width() as usize;
-                let r#type = Type {
-                    kind: TypeKind::String,
-                    width: Shape::new(vec![Some(width)]),
-                    ..Default::default()
+                let r#type = {
+                    let mut t = Type::new(TypeKind::String);
+                    t.set_concrete_width(Shape::new(vec![Some(width)]));
+                    t
                 };
                 (ValueVariant::Numeric(value), r#type)
             }

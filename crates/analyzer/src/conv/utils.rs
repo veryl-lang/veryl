@@ -16,7 +16,7 @@ use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, Symbol,
     SymbolKind, TbComponentKind, TypeKind,
 };
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind};
+use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
 use crate::{HashMap, ir_error};
@@ -24,12 +24,113 @@ use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
+/// True for "atomic" expressions whose result type is unambiguous:
+/// variable references, sized / real / boolean literals, function
+/// calls, and parenthesized recursions. Operators, casts, concatenation
+/// and unsized literals are rejected.
+pub fn is_inferable_expression(expr: &Expression) -> bool {
+    let if_expr = &*expr.if_expression;
+    if !if_expr.if_expression_list.is_empty() {
+        return false;
+    }
+    let e01 = &*if_expr.expression01;
+    if !e01.expression01_list.is_empty() {
+        return false;
+    }
+    let e02 = &*e01.expression02;
+    if !e02.expression02_list.is_empty() || e02.expression02_opt.is_some() {
+        return false;
+    }
+    is_inferable_factor(&e02.factor)
+}
+
+fn is_inferable_factor(factor: &Factor) -> bool {
+    match factor {
+        Factor::IdentifierFactor(_) => true,
+        Factor::BooleanLiteral(_) => true,
+        Factor::LParenExpressionRParen(x) => is_inferable_expression(&x.expression),
+        Factor::Number(x) => match x.number.as_ref() {
+            Number::IntegralNumber(x) => match x.integral_number.as_ref() {
+                IntegralNumber::Based(_) => true,
+                IntegralNumber::BaseLess(_) | IntegralNumber::AllBit(_) => false,
+            },
+            Number::RealNumber(_) => true,
+        },
+        _ => false,
+    }
+}
+
+/// Inference for `var X;` (no type) from a single assignment.
+/// Returns the evaluation pair so the caller avoids re-walking the
+/// expression. Subsequent conflicting assigns are rejected.
+pub fn try_infer_var_assign(
+    context: &mut Context,
+    dst_symbol: &Symbol,
+    expr: &Expression,
+    token: TokenRange,
+) -> IrResult<Option<(Comptime, ir::Expression)>> {
+    let SymbolKind::Variable(var_prop) = &dst_symbol.kind else {
+        return Ok(None);
+    };
+    if !var_prop.r#type.is_inferred() {
+        return Ok(None);
+    }
+
+    if !is_inferable_expression(expr) {
+        context.insert_error(AnalyzerError::type_inference_not_supported(&expr.into()));
+        return Err(ir_error!(token));
+    }
+    let (comptime, ir_expr) = eval_expr(context, None, expr, false)?;
+    let inferred = comptime.r#type.clone();
+
+    if let Some(existing) = crate::resolved_type_table::get(&dst_symbol.token.id) {
+        if existing != inferred {
+            context.insert_error(AnalyzerError::type_inference_conflict(
+                &dst_symbol.token.text.to_string(),
+                &expr.into(),
+            ));
+            return Err(ir_error!(token));
+        }
+    } else {
+        crate::resolved_type_table::insert(dst_symbol.token.id, inferred.clone());
+        // Replace the placeholder Comptime so subsequent lookups see
+        // the inferred type, not `Unknown`.
+        let path = VarPath::new(dst_symbol.token.text);
+        if let Some((id, mut ct)) = context.find_path(&path) {
+            ct.r#type = inferred.clone();
+            context.insert_var_path_with_id(path, id, ct);
+        }
+    }
+    Ok(Some((comptime, ir_expr)))
+}
+
+/// Inference for `let`/`const` declarations. Returns `None` when the
+/// type is not `Inferred`.
+pub fn try_infer_decl_type(
+    context: &mut Context,
+    sym_type: &symbol::Type,
+    expr: &Expression,
+    decl_token_id: veryl_parser::resource_table::TokenId,
+    token: TokenRange,
+) -> IrResult<Option<(Comptime, ir::Expression)>> {
+    if !sym_type.is_inferred() {
+        return Ok(None);
+    }
+    if !is_inferable_expression(expr) {
+        context.insert_error(AnalyzerError::type_inference_not_supported(&expr.into()));
+        return Err(ir_error!(token));
+    }
+    let (comptime, ir_expr) = eval_expr(context, None, expr, false)?;
+    crate::resolved_type_table::insert(decl_token_id, comptime.r#type.clone());
+    Ok(Some((comptime, ir_expr)))
+}
+
 fn format_positive_type_name(r#type: &ir::Type) -> Option<String> {
     if !r#type.is_positive {
         return None;
     }
 
-    if let Some(width) = r#type.width.first()
+    if let Some(width) = r#type.width().first()
         && let Some(w) = width
     {
         return Some(match *w {
@@ -429,7 +530,7 @@ pub fn eval_assign_statement(
     let array_exprs = eval_array_literal(
         context,
         Some(&dst.comptime.r#type.array),
-        Some(&dst.comptime.r#type.width),
+        Some(dst.comptime.r#type.width()),
         expr,
     )?;
     if let Some(exprs) = array_exprs {
@@ -485,7 +586,7 @@ fn eval_array_literal_expressions(
         }
 
         let mut part_type = r#type.clone();
-        part_type.width.drain(0..expr.select.len());
+        part_type.width_mut().drain(0..expr.select.len());
 
         if let Some(mut part_value) = expr.expr.eval_value(context) {
             let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
@@ -525,7 +626,7 @@ pub fn eval_const_assign(
     match expr {
         ir::Expression::ArrayLiteral(_, _) => {
             let exprs =
-                eval_array_literal(context, Some(&r#type.array), Some(&r#type.width), expr)?;
+                eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?;
             if let Some(exprs) = exprs {
                 let values = eval_array_literal_expressions(context, r#type, exprs, token)?;
                 let id = context.insert_var_path(path.clone(), comptime);
@@ -771,7 +872,7 @@ pub fn eval_type(
                 let mut x = x.clone();
 
                 // append internal width/array
-                width.append(&mut x.width);
+                width.append(x.width_mut());
                 array.append(&mut x.array);
 
                 x.kind
@@ -879,7 +980,7 @@ pub fn eval_type(
                         if let Ok(r#type) = ret.as_mut() {
                             // Infer width from member variants
                             if r#type.is_inferable_width() {
-                                r#type.width.replace(0, Some(x.width));
+                                r#type.width_mut().replace(0, Some(x.width));
                             }
                         }
 
@@ -887,10 +988,10 @@ pub fn eval_type(
 
                         ret?
                     } else {
-                        ir::Type {
-                            kind: ir::TypeKind::Logic,
-                            width: Shape::new(vec![Some(x.width)]),
-                            ..Default::default()
+                        {
+                            let mut t = ir::Type::new(ir::TypeKind::Logic);
+                            t.set_concrete_width(Shape::new(vec![Some(x.width)]));
+                            t
                         }
                     };
                     ir::TypeKind::Enum(ir::TypeKindEnum {
@@ -915,7 +1016,7 @@ pub fn eval_type(
 
                     let mut r#type = r#type?;
 
-                    width.append(&mut r#type.width);
+                    width.append(r#type.width_mut());
                     array.append(&mut r#type.array);
                     signed = r#type.signed;
 
@@ -932,7 +1033,7 @@ pub fn eval_type(
                 SymbolKind::ProtoTypeDef(x) => {
                     if let Some(x) = &x.r#type {
                         let mut r#type = x.to_ir_type(context, TypePosition::TypeDef)?;
-                        width.append(&mut r#type.width);
+                        width.append(r#type.width_mut());
                         array.append(&mut r#type.array);
                         signed = r#type.signed;
 
@@ -951,7 +1052,7 @@ pub fn eval_type(
                 SymbolKind::GenericParameter(x) => match &x.bound {
                     GenericBoundKind::Proto(x) => {
                         let mut r#type = x.to_ir_type(context, pos)?;
-                        width.append(&mut r#type.width);
+                        width.append(r#type.width_mut());
                         array.append(&mut r#type.array);
                         signed = r#type.signed;
 
@@ -969,7 +1070,7 @@ pub fn eval_type(
                 SymbolKind::GenericConst(x) => match &x.bound {
                     GenericBoundKind::Proto(x) => {
                         let mut r#type = x.to_ir_type(context, pos)?;
-                        width.append(&mut r#type.width);
+                        width.append(r#type.width_mut());
                         array.append(&mut r#type.array);
                         signed = r#type.signed;
 
@@ -978,7 +1079,7 @@ pub fn eval_type(
                     GenericBoundKind::Type => {
                         let (comptime, _) = eval_generic_expr(context, &x.value)?;
                         if let ValueVariant::Type(mut x) = comptime.value {
-                            width.append(&mut x.width);
+                            width.append(x.width_mut());
                             array.append(&mut x.array);
                             x.kind
                         } else {
@@ -998,7 +1099,7 @@ pub fn eval_type(
 
                             let (comptime, _) = expr?;
                             if let ValueVariant::Type(mut r#type) = comptime.value {
-                                width.append(&mut r#type.width);
+                                width.append(r#type.width_mut());
                                 array.append(&mut r#type.array);
                                 signed = r#type.signed;
                                 r#type.kind
@@ -1090,13 +1191,17 @@ pub fn eval_type(
         }
     };
 
-    Ok(ir::Type {
-        kind,
-        signed,
-        is_positive,
-        width,
-        array,
-    })
+    let width_expr = ir::WidthExpr::from_shape(&width);
+    let mut r#type = ir::Type::new(kind);
+    r#type.signed = signed;
+    r#type.is_positive = is_positive;
+    r#type.array = array;
+    if width_expr.len() == width.as_slice().len() {
+        r#type.set_parametric_width(width, width_expr);
+    } else {
+        r#type.set_concrete_width(width);
+    }
+    Ok(r#type)
 }
 
 fn check_struct_union_members(
@@ -1225,7 +1330,7 @@ pub fn eval_width_select(
     r#type: &ir::Type,
     width_select: VarSelect,
 ) -> Option<VarSelect> {
-    if r#type.is_struct_union() && !r#type.width.is_empty() && !width_select.is_empty() {
+    if r#type.is_struct_union() && !r#type.width().is_empty() && !width_select.is_empty() {
         let part_select = PartSelectPath {
             base: r#type.clone(),
             path: path.clone(),
@@ -1764,10 +1869,7 @@ pub fn eval_factor_symbol(
             return eval_struct_member(context, &symbol.found, &path, VarPath::default(), token);
         }
         SymbolKind::SystemVerilog => {
-            let r#type = ir::Type {
-                kind: ir::TypeKind::SystemVerilog,
-                ..Default::default()
-            };
+            let r#type = ir::Type::new(ir::TypeKind::SystemVerilog);
             let mut x = Comptime::from_type(r#type, ClockDomain::None, token);
 
             // $sv member is const / global
@@ -1813,10 +1915,7 @@ pub fn eval_factor_symbol(
                 } else {
                     ir::TypeKind::Instance(sig, ir::InstanceKind::SystemVerilog)
                 };
-                let r#type = ir::Type {
-                    kind,
-                    ..Default::default()
-                };
+                let r#type = ir::Type::new(kind);
 
                 let comptime = Comptime::from_type(r#type, ClockDomain::None, token);
                 return Ok(ir::Factor::Value(comptime));
@@ -1867,10 +1966,7 @@ pub fn eval_factor_symbol(
             let r#type = r#type.to_ir_type(context, TypePosition::Variable)?;
             let x = Comptime {
                 value: ValueVariant::Type(r#type),
-                r#type: ir::Type {
-                    kind: ir::TypeKind::Type,
-                    ..Default::default()
-                },
+                r#type: ir::Type::new(ir::TypeKind::Type),
                 is_const: true,
                 is_global: true,
                 token,
@@ -2780,7 +2876,7 @@ pub fn tb_method_call(
 
     // Resolve just the first element (the instance name)
     let inst_name = path.paths[0].base.text;
-    let inst_path = crate::symbol_path::SymbolPath::new(&[inst_name]);
+    let inst_path = SymbolPath::new(&[inst_name]);
     let inst_namespace = match crate::namespace_table::get(path.paths[0].base.id) {
         Some(ns) => ns,
         None => return Ok(None),

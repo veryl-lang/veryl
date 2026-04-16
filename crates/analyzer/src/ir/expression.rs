@@ -594,10 +594,7 @@ impl Factor {
             | SymbolKind::ProtoAliasPackage(_) => TypeKind::Package(sig),
             _ => unreachable!(),
         };
-        let r#type = Type {
-            kind,
-            ..Default::default()
-        };
+        let r#type = Type::new(kind);
 
         let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
         comptime.is_const = true;
@@ -627,8 +624,11 @@ impl Factor {
                         comptime.r#type.flatten_struct_union_enum();
                     }
 
-                    if let Some(width) = select.eval_comptime(context, &comptime.r#type, false) {
-                        comptime.r#type.width = width;
+                    // Skip on empty select to preserve parametric `width_expr`.
+                    if !select.is_empty()
+                        && let Some(width) = select.eval_comptime(context, &comptime.r#type, false)
+                    {
+                        comptime.r#type.set_concrete_width(width);
                     }
                 }
 
@@ -1163,67 +1163,57 @@ mod tests {
     }
 
     fn bit(width: usize) -> Box<Expression> {
+        let mut t = Type::new(TypeKind::Bit);
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
         let ret = Comptime {
             value: ValueVariant::Unknown,
-            r#type: Type {
-                kind: TypeKind::Bit,
-                width: Shape::new(vec![Some(width)]),
-                ..Default::default()
-            },
+            r#type: t,
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn logic(width: usize) -> Box<Expression> {
+        let mut t = Type::new(TypeKind::Logic);
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
         let ret = Comptime {
             value: ValueVariant::Unknown,
-            r#type: Type {
-                kind: TypeKind::Logic,
-                width: Shape::new(vec![Some(width)]),
-                ..Default::default()
-            },
+            r#type: t,
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn signed_bit(width: usize) -> Box<Expression> {
+        let mut t = Type::new(TypeKind::Bit);
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
+        t.signed = true;
         let ret = Comptime {
             value: ValueVariant::Unknown,
-            r#type: Type {
-                kind: TypeKind::Bit,
-                width: Shape::new(vec![Some(width)]),
-                signed: true,
-                ..Default::default()
-            },
+            r#type: t,
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn signed_logic(width: usize) -> Box<Expression> {
+        let mut t = Type::new(TypeKind::Logic);
+        t.set_concrete_width(Shape::new(vec![Some(width)]));
+        t.signed = true;
         let ret = Comptime {
             value: ValueVariant::Unknown,
-            r#type: Type {
-                kind: TypeKind::Logic,
-                width: Shape::new(vec![Some(width)]),
-                signed: true,
-                ..Default::default()
-            },
+            r#type: t,
             ..Default::default()
         };
         Box::new(Expression::Term(Box::new(Factor::Value(ret))))
     }
 
     fn value(value: usize) -> Box<Expression> {
+        let mut t = Type::new(TypeKind::Logic);
+        t.set_concrete_width(Shape::new(vec![Some(32)]));
         let ret = Comptime {
             value: ValueVariant::Numeric(Value::new(value as u64, 32, false)),
-            r#type: Type {
-                kind: TypeKind::Logic,
-                width: Shape::new(vec![Some(32)]),
-                ..Default::default()
-            },
+            r#type: t,
             is_const: true,
             is_global: true,
             ..Default::default()

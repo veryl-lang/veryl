@@ -1,0 +1,23 @@
+module Module89 {
+    function FuncId::<T: u32> (
+        x: input logic<T>,
+    ) -> logic<T> {
+        return x;
+    }
+
+    function FuncWide::<T: u32> (
+        x: input logic<T>,
+    ) -> logic<T + 1> {
+        return {1'b0, x};
+    }
+
+    let _a: logic<8>  = 0;
+    let _b: logic<16> = 0;
+
+    // Generic argument inferred from the argument's declared width.
+    let _r1: logic<8>  = FuncId(_a);
+    let _r2: logic<16> = FuncId(_b);
+
+    // `T + 1` pattern inference: argument width 8 resolves T = 8.
+    let _rw: logic<9> = FuncWide(_a);
+}

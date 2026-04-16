@@ -3826,7 +3826,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                         };
                         let need_dynamic = !select.is_empty() && !select.is_const();
                         let select_val = if need_dynamic { None } else { select_val };
-                        let width_shape = meta.r#type.width.clone();
+                        let width_shape = meta.r#type.width().clone();
                         let kind_width = meta.r#type.kind.width().unwrap_or(1);
                         (
                             select_val,

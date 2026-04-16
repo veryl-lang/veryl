@@ -1124,19 +1124,21 @@ impl VerylWalker for Formatter {
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
-        self.colon(&arg.colon);
-        self.space(1);
         if let Some(ref x) = arg.let_statement_opt {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
             self.space(1);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
-        } else {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
+            if let Some(ref y) = x.let_statement_opt0 {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+                self.clock_domain(&y.clock_domain);
+                self.space(1);
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            } else {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+                self.align_dummy_token(align_kind::CLOCK_DOMAIN, &x.colon.colon_token);
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -1458,19 +1460,21 @@ impl VerylWalker for Formatter {
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
-        self.colon(&arg.colon);
-        self.space(1);
         if let Some(ref x) = arg.let_declaration_opt {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
             self.space(1);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
-        } else {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
+            if let Some(ref y) = x.let_declaration_opt0 {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+                self.clock_domain(&y.clock_domain);
+                self.space(1);
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            } else {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+                self.align_dummy_token(align_kind::CLOCK_DOMAIN, &x.colon.colon_token);
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.space(1);
         self.equ(&arg.equ);
         self.space(1);
@@ -1487,19 +1491,21 @@ impl VerylWalker for Formatter {
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
-        self.colon(&arg.colon);
-        self.space(1);
         if let Some(ref x) = arg.var_declaration_opt {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
             self.space(1);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
-        } else {
-            self.align_start(align_kind::CLOCK_DOMAIN);
-            self.align_dummy_token(align_kind::CLOCK_DOMAIN, &arg.colon.colon_token);
-            self.align_finish(align_kind::CLOCK_DOMAIN);
+            if let Some(ref y) = x.var_declaration_opt0 {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+                self.clock_domain(&y.clock_domain);
+                self.space(1);
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            } else {
+                self.align_start(align_kind::CLOCK_DOMAIN);
+                self.align_dummy_token(align_kind::CLOCK_DOMAIN, &x.colon.colon_token);
+                self.align_finish(align_kind::CLOCK_DOMAIN);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
     }
 
@@ -1512,16 +1518,18 @@ impl VerylWalker for Formatter {
         self.align_start(align_kind::IDENTIFIER);
         self.identifier(&arg.identifier);
         self.align_finish(align_kind::IDENTIFIER);
-        self.colon(&arg.colon);
-        self.space(1);
-        match &*arg.const_declaration_group {
-            ConstDeclarationGroup::ArrayType(x) => {
-                self.array_type(&x.array_type);
-            }
-            ConstDeclarationGroup::Type(x) => {
-                self.align_start(align_kind::TYPE);
-                self.r#type(&x.r#type);
-                self.align_finish(align_kind::TYPE);
+        if let Some(ref opt) = arg.const_declaration_opt {
+            self.colon(&opt.colon);
+            self.space(1);
+            match &*opt.const_declaration_opt_group {
+                ConstDeclarationOptGroup::ArrayType(x) => {
+                    self.array_type(&x.array_type);
+                }
+                ConstDeclarationOptGroup::Type(x) => {
+                    self.align_start(align_kind::TYPE);
+                    self.r#type(&x.r#type);
+                    self.align_finish(align_kind::TYPE);
+                }
             }
         }
         self.space(1);

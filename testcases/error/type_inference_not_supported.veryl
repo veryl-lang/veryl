@@ -1,0 +1,4 @@
+module type_inference_not_supported {
+    let _a: logic<8> = 0;
+    let _b       = _a + 1;
+}

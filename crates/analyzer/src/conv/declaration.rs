@@ -16,7 +16,7 @@ use crate::conv::utils::{
     TypePosition, eval_assign_statement, eval_clock, eval_const_assign, eval_expr,
     eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
     expand_connect_const, get_component, get_overridden_params, get_port_connects, get_return_str,
-    insert_port_connect, var_path_to_assign_destination,
+    insert_port_connect, try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
@@ -497,10 +497,10 @@ impl Conv<&PortDeclarationItem> for () {
 
                             // insert path of modport instance
                             let path = VarPath::new(value.identifier.text());
-                            let r#type = ir::Type {
-                                kind: TypeKind::Modport(sig.clone(), *name),
-                                array: r#type.array,
-                                ..Default::default()
+                            let r#type = {
+                                let mut t = ir::Type::new(TypeKind::Modport(sig.clone(), *name));
+                                t.array = r#type.array;
+                                t
                             };
 
                             let comptime =
@@ -664,7 +664,18 @@ impl Conv<&LetDeclaration> for ir::Declaration {
             let kind = VarKind::Let;
             let variable_token: TokenRange = (&value.identifier.identifier_token).into();
 
-            let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
+            let inferred = try_infer_decl_type(
+                context,
+                &x.r#type,
+                &value.expression,
+                value.identifier.identifier_token.token.id,
+                token,
+            )?;
+            let r#type = if let Some((ref comptime, _)) = inferred {
+                comptime.r#type.clone()
+            } else {
+                x.r#type.to_ir_type(context, TypePosition::Variable)?
+            };
             let clock_domain = x.clock_domain;
 
             eval_variable(context, &path, kind, &r#type, clock_domain, variable_token);
@@ -680,7 +691,11 @@ impl Conv<&LetDeclaration> for ir::Declaration {
                 token: variable_token,
             };
 
-            let mut expr = eval_expr(context, Some(r#type.clone()), &value.expression, false)?;
+            let mut expr = if let Some(inferred) = inferred {
+                inferred
+            } else {
+                eval_expr(context, Some(r#type.clone()), &value.expression, false)?
+            };
 
             let statements = eval_assign_statement(context, &mut dst, &mut expr, token)?;
             Ok(ir::Declaration::new_comb(statements))
@@ -706,7 +721,18 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
             let kind: VarKind = (&x.kind).into();
             let variable_token: TokenRange = (&value.identifier.identifier_token).into();
 
-            let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
+            let inferred = try_infer_decl_type(
+                context,
+                &x.r#type,
+                &value.expression,
+                value.identifier.identifier_token.token.id,
+                token,
+            )?;
+            let r#type = if let Some((ref comptime, _)) = inferred {
+                comptime.r#type.clone()
+            } else {
+                x.r#type.to_ir_type(context, TypePosition::Variable)?
+            };
 
             let Some(expr) = &x.value else {
                 context.insert_error(AnalyzerError::missing_default_argument(
@@ -716,7 +742,11 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
                 return Err(ir_error!(token));
             };
 
-            let (comptime, expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
+            let (comptime, expr) = if let Some(inferred) = inferred {
+                inferred
+            } else {
+                eval_expr(context, Some(r#type.clone()), expr, false)?
+            };
             if !comptime.is_const {
                 context.insert_error(AnalyzerError::unevaluable_value(
                     UnevaluableValueKind::ConstValue,
@@ -779,15 +809,27 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
         match value.assign_destination.as_ref() {
             AssignDestination::HierarchicalIdentifier(x) => {
                 let ident = x.hierarchical_identifier.as_ref();
+
+                let inferred =
+                    if let Ok(symbol) = symbol_table::resolve(x.hierarchical_identifier.as_ref()) {
+                        try_infer_var_assign(context, &symbol.found, &value.expression, token)?
+                    } else {
+                        None
+                    };
+
                 let dst: VarPathSelect = Conv::conv(context, ident)?;
 
                 if let Some(mut dst) = dst.to_assign_destination(context, false) {
-                    let mut expr = eval_expr(
-                        context,
-                        Some(dst.comptime.r#type.clone()),
-                        &value.expression,
-                        false,
-                    )?;
+                    let mut expr = if let Some(inferred) = inferred {
+                        inferred
+                    } else {
+                        eval_expr(
+                            context,
+                            Some(dst.comptime.r#type.clone()),
+                            &value.expression,
+                            false,
+                        )?
+                    };
 
                     let statements = eval_assign_statement(context, &mut dst, &mut expr, token)?;
 
@@ -845,10 +887,10 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     width = context.check_size(x, token);
                 }
 
-                let r#type = ir::Type {
-                    kind: TypeKind::Logic,
-                    width: Shape::new(vec![width]),
-                    ..Default::default()
+                let r#type = {
+                    let mut t = ir::Type::new(TypeKind::Logic);
+                    t.set_concrete_width(Shape::new(vec![width]));
+                    t
                 };
 
                 let (_, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
@@ -885,7 +927,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
             let ret_type = if let Some(x) = &x.ret {
                 let mut r#type = x.to_ir_type(context, TypePosition::Variable)?;
                 if r#type.is_struct() {
-                    r#type.width = Shape::new(vec![r#type.total_width()]);
+                    r#type.set_concrete_width(Shape::new(vec![r#type.total_width()]));
                     r#type.kind = if r#type.is_2state() {
                         TypeKind::Bit
                     } else {
@@ -894,10 +936,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                 }
                 Comptime::from_type(r#type, ClockDomain::None, token)
             } else {
-                let r#type = ir::Type {
-                    kind: TypeKind::Void,
-                    ..Default::default()
-                };
+                let r#type = ir::Type::new(TypeKind::Void);
                 Comptime::from_type(r#type, ClockDomain::None, token)
             };
 
@@ -1172,10 +1211,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 TbComponentKind::ClockGen => ir::TypeKind::Clock,
                 TbComponentKind::ResetGen => ir::TypeKind::Reset,
             };
-            let ir_type = ir::Type {
-                kind: type_kind,
-                width: ir::Shape::new(vec![Some(1)]),
-                ..Default::default()
+            let ir_type = {
+                let mut t = ir::Type::new(type_kind);
+                t.set_concrete_width(ir::Shape::new(vec![Some(1)]));
+                t
             };
             eval_variable(
                 context,
@@ -1344,10 +1383,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
 
                 // insert path of interface instance
                 let path = VarPath::new(value.identifier.text());
-                let r#type = ir::Type {
-                    kind: TypeKind::Instance(sig, InstanceKind::Interface),
-                    array,
-                    ..Default::default()
+                let r#type = {
+                    let mut t = ir::Type::new(TypeKind::Instance(sig, InstanceKind::Interface));
+                    t.array = array;
+                    t
                 };
 
                 let comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
@@ -1588,10 +1627,7 @@ impl Conv<&ModportDeclaration> for () {
 
                 let name = value.identifier.text();
                 let path = VarPath::new(name);
-                let r#type = ir::Type {
-                    kind: ir::TypeKind::Modport(sig, symbol.found.token.text),
-                    ..Default::default()
-                };
+                let r#type = ir::Type::new(ir::TypeKind::Modport(sig, symbol.found.token.text));
                 let token: TokenRange = value.identifier.as_ref().into();
 
                 let comptime = Comptime::from_type(r#type, ClockDomain::None, token);

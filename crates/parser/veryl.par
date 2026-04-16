@@ -705,7 +705,7 @@ Statement: IdentifierStatement
          | SwitchStatement
          ;
 
-LetStatement: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Semicolon;
+LetStatement: Let Identifier [ Colon [ ClockDomain ] ArrayType ] Equ Expression Semicolon;
 
 IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolon;
 
@@ -751,11 +751,11 @@ AttributeItem: Identifier
 // Declaration
 // ----------------------------------------------------------------------------
 
-LetDeclaration: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Semicolon;
+LetDeclaration: Let Identifier [ Colon [ ClockDomain ] ArrayType ] Equ Expression Semicolon;
 
-VarDeclaration: Var Identifier Colon [ ClockDomain ] ArrayType Semicolon;
+VarDeclaration: Var Identifier [ Colon [ ClockDomain ] ArrayType ] Semicolon;
 
-ConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Equ Expression Semicolon;
+ConstDeclaration: Const Identifier [ Colon ( ArrayType | Type ) ] Equ Expression Semicolon;
 
 GenDeclaration: Gen Identifier Colon ( GenericProtoBound | Type ) Equ Expression Semicolon;
 

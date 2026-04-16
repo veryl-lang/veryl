@@ -458,7 +458,7 @@ impl VarSelect {
             let r#type = if is_array {
                 &r#type.array
             } else {
-                &r#type.width
+                r#type.width()
             };
 
             if self.is_empty() {
@@ -595,7 +595,7 @@ impl VarSelect {
         let r#type = if is_array {
             &r#type.array
         } else {
-            &r#type.width
+            r#type.width()
         };
 
         let mut beg = 0;
@@ -861,8 +861,8 @@ impl fmt::Display for Variable {
 
         // adjust type format
         let mut r#type = self.r#type.clone();
-        if &r#type.width == ShapeRef::new(&[Some(1)]) {
-            r#type.width.clear();
+        if r#type.width().as_shape_ref() == ShapeRef::new(&[Some(1)]) {
+            r#type.clear_width();
         }
         r#type.array.clear();
 
@@ -956,11 +956,8 @@ mod tests {
 
         let array = Shape::new(vec![Some(4), Some(5), Some(6)]);
 
-        let r#type = Type {
-            kind: TypeKind::Logic,
-            array: array.clone(),
-            ..Default::default()
-        };
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.array = array.clone();
 
         let y0 = x0.eval_comptime(&mut context, &r#type, true).unwrap();
         let y1 = x1.eval_comptime(&mut context, &r#type, true).unwrap();
@@ -1015,11 +1012,8 @@ mod tests {
 
         let width = Shape::new(vec![Some(4), Some(5), Some(6)]);
 
-        let r#type = Type {
-            kind: TypeKind::Logic,
-            width: width.clone(),
-            ..Default::default()
-        };
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.set_concrete_width(width.clone());
 
         let y0 = x0.eval_comptime(&mut context, &r#type, false).unwrap();
         let y1 = x1.eval_comptime(&mut context, &r#type, false).unwrap();

@@ -252,10 +252,10 @@ impl Conv<&FactorType> for ir::Factor {
                     VariableType::Logic(_) => TypeKind::Logic,
                     VariableType::Bit(_) => TypeKind::Bit,
                 };
-                Type {
-                    kind,
-                    width,
-                    ..Default::default()
+                {
+                    let mut t = Type::new(kind);
+                    t.set_concrete_width(width);
+                    t
                 }
             }
             FactorTypeGroup::FixedType(x) => {
@@ -280,19 +280,16 @@ impl Conv<&FactorType> for ir::Factor {
                         (TypeKind::Unknown, Shape::new(vec![Some(1)]), false, false)
                     }
                 };
-                Type {
-                    kind,
-                    width,
-                    signed,
-                    is_positive,
-                    ..Default::default()
+                {
+                    let mut t = Type::new(kind);
+                    t.set_concrete_width(width);
+                    t.signed = signed;
+                    t.is_positive = is_positive;
+                    t
                 }
             }
         };
-        let r#type = Type {
-            kind: TypeKind::Type,
-            ..Default::default()
-        };
+        let r#type = Type::new(TypeKind::Type);
         let ret = Comptime {
             value: ValueVariant::Type(value),
             r#type,
@@ -401,19 +398,16 @@ impl Conv<&CastingType> for ir::Factor {
                 }
                 CastingType::UserDefinedType(_) => unreachable!(),
             };
-            Type {
-                kind,
-                width,
-                signed,
-                is_positive,
-                ..Default::default()
+            {
+                let mut t = Type::new(kind);
+                t.set_concrete_width(width);
+                t.signed = signed;
+                t.is_positive = is_positive;
+                t
             }
         };
 
-        let r#type = Type {
-            kind: TypeKind::Type,
-            ..Default::default()
-        };
+        let r#type = Type::new(TypeKind::Type);
         let ret = Comptime {
             value: ValueVariant::Type(value),
             r#type,
@@ -440,10 +434,10 @@ impl Conv<&Factor> for ir::Expression {
                     BooleanLiteral::False(_) => 0,
                 };
                 let value = Value::new(x, 1, false);
-                let r#type = Type {
-                    kind: TypeKind::Bit,
-                    width: Shape::new(vec![Some(1)]),
-                    ..Default::default()
+                let r#type = {
+                    let mut t = Type::new(TypeKind::Bit);
+                    t.set_concrete_width(Shape::new(vec![Some(1)]));
+                    t
                 };
                 let ret = Comptime {
                     value: ValueVariant::Numeric(value),
@@ -592,10 +586,10 @@ impl Conv<&Factor> for ir::Expression {
                     veryl_parser::resource_table::get_str_value(text).unwrap_or_default();
                 let value = string_to_byte_value(&text_str);
                 let width = value.width() as usize;
-                let r#type = Type {
-                    kind: TypeKind::String,
-                    width: Shape::new(vec![Some(width)]),
-                    ..Default::default()
+                let r#type = {
+                    let mut t = Type::new(TypeKind::String);
+                    t.set_concrete_width(Shape::new(vec![Some(width)]));
+                    t
                 };
                 let ret = Comptime {
                     value: ValueVariant::Numeric(value),
@@ -634,7 +628,7 @@ impl Conv<&Factor> for ir::Expression {
                                 if comptime.r#type.is_struct() || comptime.r#type.is_unknown() {
                                     comptime.r#type.total_width()
                                 } else {
-                                    comptime.r#type.width[dim]
+                                    comptime.r#type.width()[dim]
                                 };
                             let comptime = if let Some(width) = width {
                                 let msb = width.saturating_sub(1);
@@ -657,7 +651,7 @@ impl Conv<&Factor> for ir::Expression {
                             let width = if r#type.is_struct() {
                                 r#type.total_width()
                             } else {
-                                r#type.width[dim]
+                                r#type.width()[dim]
                             };
                             let msb = if let Some(width) = width {
                                 width - 1
@@ -696,10 +690,7 @@ impl Conv<&Factor> for ir::Expression {
             }
             Factor::TypeExpression(x) => {
                 let (comptime, _) = eval_expr(context, None, &x.type_expression.expression, false)?;
-                let r#type = Type {
-                    kind: TypeKind::Type,
-                    ..Default::default()
-                };
+                let r#type = Type::new(TypeKind::Type);
                 let ret = Comptime {
                     value: ValueVariant::Type(comptime.r#type),
                     r#type,
@@ -768,12 +759,9 @@ impl Conv<&Based> for Comptime {
 
         let width = context.check_size(value.width(), token);
 
-        let r#type = Type {
-            kind,
-            width: Shape::new(vec![width]),
-            signed: value.signed(),
-            ..Default::default()
-        };
+        let mut r#type = Type::new(kind);
+        r#type.signed = value.signed();
+        r#type.set_concrete_width(Shape::new(vec![width]));
 
         Ok(Comptime {
             value: ValueVariant::Numeric(value),
@@ -790,12 +778,9 @@ impl Conv<&BaseLess> for Comptime {
     fn conv(_context: &mut Context, value: &BaseLess) -> IrResult<Self> {
         let token: TokenRange = value.into();
         let value: Value = value.into();
-        let r#type = Type {
-            kind: TypeKind::Bit,
-            width: Shape::new(vec![Some(32)]),
-            signed: true,
-            ..Default::default()
-        };
+        let mut r#type = Type::new(TypeKind::Bit);
+        r#type.signed = true;
+        r#type.set_concrete_width(Shape::new(vec![Some(32)]));
 
         Ok(Comptime {
             value: ValueVariant::Numeric(value),
@@ -819,12 +804,9 @@ impl Conv<&AllBit> for Comptime {
             TypeKind::Bit
         };
 
-        let r#type = Type {
-            kind,
-            width: Shape::new(vec![Some(0)]),
-            signed: true,
-            ..Default::default()
-        };
+        let mut r#type = Type::new(kind);
+        r#type.signed = true;
+        r#type.set_concrete_width(Shape::new(vec![Some(0)]));
 
         Ok(Comptime {
             value: ValueVariant::Numeric(value),
@@ -843,11 +825,8 @@ impl Conv<&RealNumber> for Comptime {
         let ret = match value {
             RealNumber::FixedPoint(x) => {
                 let value: Value = x.fixed_point.as_ref().into();
-                let r#type = Type {
-                    kind: TypeKind::F64,
-                    width: Shape::new(vec![Some(64)]),
-                    ..Default::default()
-                };
+                let mut r#type = Type::new(TypeKind::F64);
+                r#type.set_concrete_width(Shape::new(vec![Some(64)]));
 
                 Comptime {
                     value: ValueVariant::Numeric(value),
@@ -860,11 +839,8 @@ impl Conv<&RealNumber> for Comptime {
             }
             RealNumber::Exponent(x) => {
                 let value: Value = x.exponent.as_ref().into();
-                let r#type = Type {
-                    kind: TypeKind::F64,
-                    width: Shape::new(vec![Some(64)]),
-                    ..Default::default()
-                };
+                let mut r#type = Type::new(TypeKind::F64);
+                r#type.set_concrete_width(Shape::new(vec![Some(64)]));
 
                 Comptime {
                     value: ValueVariant::Numeric(value),

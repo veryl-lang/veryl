@@ -183,18 +183,12 @@ impl Op {
             &self.to_string(),
             &x.token,
         ));
-        Type {
-            kind: TypeKind::Unknown,
-            ..Default::default()
-        }
+        Type::new(TypeKind::Unknown)
     }
 
     fn invalid_logical_operand(&self, context: &mut Context, x: &Comptime) -> Type {
         context.insert_error(AnalyzerError::invalid_logical_operand(true, &x.token));
-        Type {
-            kind: TypeKind::Unknown,
-            ..Default::default()
-        }
+        Type::new(TypeKind::Unknown)
     }
 
     pub fn eval_type_unary(&self, context: &mut Context, x: &Comptime, dst: &mut Comptime) {
@@ -229,7 +223,7 @@ impl Op {
             | Op::BitNor
             | Op::LogicNot => {
                 dst.r#type.signed = false;
-                dst.r#type.width = Shape::new(vec![Some(1)]);
+                dst.r#type.set_concrete_width(Shape::new(vec![Some(1)]));
             }
             Op::BitNot => {
                 dst.r#type.signed = false;
@@ -301,7 +295,7 @@ impl Op {
         let y_width = y.r#type.total_width();
 
         let width = self.eval_binary_width_usize(x_width, y_width, None);
-        dst.r#type.width = Shape::new(vec![width]);
+        dst.r#type.set_concrete_width(Shape::new(vec![width]));
 
         match self {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
@@ -428,7 +422,7 @@ impl Op {
         let z_width = z.r#type.total_width();
         let width = y_width.max(z_width);
 
-        dst.r#type.width = Shape::new(vec![width]);
+        dst.r#type.set_concrete_width(Shape::new(vec![width]));
 
         if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
             dst.r#type.kind = z.r#type.kind.clone();
@@ -494,7 +488,7 @@ impl Op {
         }
 
         dst.r#type.kind = kind;
-        dst.r#type.width = Shape::new(vec![width]);
+        dst.r#type.set_concrete_width(Shape::new(vec![width]));
         dst.is_const = is_const;
         dst.is_global = is_global;
     }

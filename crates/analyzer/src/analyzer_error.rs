@@ -864,6 +864,53 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(generic_inference_failed),
+        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable declaration"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("failed to infer generic arguments for `{identifier}`")]
+    GenericInferenceFailed {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(type_inference_not_supported),
+        help("use a simple variable reference, sized literal, or function call; otherwise provide an explicit type annotation"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("type inference is not supported for this expression")]
+    TypeInferenceNotSupported {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(type_inference_conflict),
+        help("all assignments to an untyped variable must agree on the same type"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("conflicting types in inference for `{identifier}`")]
+    TypeInferenceConflict {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_if_reset),
         help("add if_reset statement"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1612,6 +1659,9 @@ impl AnalyzerError {
             AnalyzerError::MissingClockSignal { token_source, .. } => *token_source,
             AnalyzerError::MissingDefaultArgument { token_source, .. } => *token_source,
             AnalyzerError::MissingIfReset { token_source, .. } => *token_source,
+            AnalyzerError::GenericInferenceFailed { token_source, .. } => *token_source,
+            AnalyzerError::TypeInferenceConflict { token_source, .. } => *token_source,
+            AnalyzerError::TypeInferenceNotSupported { token_source, .. } => *token_source,
             AnalyzerError::MissingPort { token_source, .. } => *token_source,
             AnalyzerError::MissingResetSignal { token_source, .. } => *token_source,
             AnalyzerError::MissingResetStatement { token_source, .. } => *token_source,
@@ -2142,6 +2192,29 @@ impl AnalyzerError {
     pub fn missing_default_argument(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::MissingDefaultArgument {
             identifier: identifier.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn generic_inference_failed(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::GenericInferenceFailed {
+            identifier: identifier.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn type_inference_conflict(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::TypeInferenceConflict {
+            identifier: identifier.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn type_inference_not_supported(token: &TokenRange) -> Self {
+        AnalyzerError::TypeInferenceNotSupported {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

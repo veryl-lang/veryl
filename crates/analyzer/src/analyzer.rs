@@ -1,12 +1,14 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
 use crate::conv::{Context, Conv};
+use crate::generic_inference_table;
 use crate::handlers::*;
 use crate::ir::{Ir, IrResult};
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::reference_table;
+use crate::resolved_type_table;
 use crate::symbol::{DocComment, Symbol, SymbolKind};
 use crate::symbol_table;
 use crate::type_dag;
@@ -102,6 +104,7 @@ impl Analyzer {
         ret.append(&mut symbol_table::apply_bind());
         ret.append(&mut symbol_table::apply_msb());
         ret.append(&mut symbol_table::apply_connect());
+        generic_inference_table::resolve_pending();
         ret.append(&mut reference_table::apply());
         ret.append(&mut type_dag::apply());
 
@@ -161,5 +164,7 @@ impl Analyzer {
         namespace_table::clear();
         symbol_table::clear();
         type_dag::clear();
+        resolved_type_table::clear();
+        generic_inference_table::clear();
     }
 }
