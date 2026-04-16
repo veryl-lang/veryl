@@ -57,7 +57,6 @@ pub struct Context {
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
     pub in_test_module: bool,
-    pub in_sequential_block: bool,
     pub in_global_func: Option<Token>,
     pub in_if_reset: bool,
     pub current_clock: Option<Comptime>,

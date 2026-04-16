@@ -7585,6 +7585,38 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8> [4];
+        always_comb {
+            for i: u32 in 0..4 {
+                a[i] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8> [4];
+        always_comb {
+            for i: u32 in 0..3 {
+                a[i] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnassignVariable { .. }))
+    );
 }
 
 #[test]

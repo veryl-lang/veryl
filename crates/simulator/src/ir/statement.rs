@@ -23,11 +23,11 @@ use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::conv::utils::eval_array_literal;
 use veryl_analyzer::ir as air;
-use veryl_analyzer::ir::FunctionCall;
+use veryl_analyzer::ir::{ControlFlow, FunctionCall};
 use veryl_analyzer::ir::{SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant};
-use veryl_analyzer::value::MaskCache;
 #[cfg(not(target_family = "wasm"))]
 use veryl_analyzer::value::ValueU64;
+use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -144,13 +144,44 @@ pub enum TbMethodKind {
 }
 
 #[derive(Clone)]
+pub enum RuntimeForBound {
+    Const(u64),
+    Dynamic(Box<Expression>),
+}
+
+// SAFETY: Same as Expression — raw pointers are used for memory access.
+unsafe impl Send for RuntimeForBound {}
+
+impl RuntimeForBound {
+    pub fn eval(&self, mask_cache: &mut MaskCache) -> u64 {
+        match self {
+            RuntimeForBound::Const(v) => *v,
+            RuntimeForBound::Dynamic(expr) => {
+                let val = expr.eval(mask_cache);
+                val.to_usize().unwrap_or(0) as u64
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RuntimeForRange {
+    pub start: RuntimeForBound,
+    pub end: RuntimeForBound,
+    pub inclusive: bool,
+    pub step: u64,
+    pub op: Option<air::Op>,
+    pub reverse: bool,
+}
+
+#[derive(Clone)]
 pub struct ForStatement {
     pub var_ptr: *mut u8,
     pub var_native_bytes: usize,
     pub var_use_4state: bool,
     pub var_width: usize,
     pub var_signed: bool,
-    pub range: SimForRange,
+    pub range: RuntimeForRange,
     pub body: Vec<Statement>,
 }
 
@@ -160,6 +191,7 @@ pub enum Statement {
     AssignDynamic(AssignDynamicStatement),
     If(IfStatement),
     For(ForStatement),
+    Break,
     Binary(FuncPtr, *const u8, *const u8),
     BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
     SequentialBlock(Vec<Statement>),
@@ -194,69 +226,92 @@ impl Statement {
             Statement::BinaryBatch(_, _) => "BinaryBatch",
             Statement::SequentialBlock(_) => "SequentialBlock",
             Statement::SystemFunctionCall(_) => "SystemFunctionCall",
+            Statement::Break => "Break",
             Statement::TbMethodCall { .. } => "TbMethodCall",
         }
     }
 
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
         match self {
-            Statement::Assign(x) => x.eval_step(mask_cache),
-            Statement::AssignDynamic(x) => x.eval_step(mask_cache),
+            Statement::Assign(x) => {
+                x.eval_step(mask_cache);
+                ControlFlow::Continue
+            }
+            Statement::AssignDynamic(x) => {
+                x.eval_step(mask_cache);
+                ControlFlow::Continue
+            }
             Statement::If(x) => x.eval_step(mask_cache),
             Statement::For(x) => {
-                let mut step_body = |i: u64| {
+                let r = &x.range;
+                let start = r.start.eval(mask_cache);
+                let mut end = r.end.eval(mask_cache);
+                if r.inclusive {
+                    end += 1;
+                }
+                let mut step_body = |i: u64| -> ControlFlow {
                     let val = Value::new(i, x.var_width, x.var_signed);
                     unsafe {
                         write_native_value(x.var_ptr, x.var_native_bytes, x.var_use_4state, &val);
                     }
                     for s in &x.body {
-                        s.eval_step(mask_cache);
+                        if s.eval_step(mask_cache) == ControlFlow::Break {
+                            return ControlFlow::Break;
+                        }
                     }
+                    ControlFlow::Continue
                 };
-                match &x.range {
-                    SimForRange::Forward { start, end, step } => {
-                        let mut i = *start;
-                        while i < *end {
-                            step_body(i);
-                            i += step;
+                if r.reverse {
+                    let mut i = end;
+                    while i > start {
+                        i -= r.step;
+                        if step_body(i) == ControlFlow::Break {
+                            break;
                         }
                     }
-                    SimForRange::Reverse { start, end, step } => {
-                        let mut i = *end;
-                        while i > *start {
-                            i -= step;
-                            step_body(i);
+                } else if let Some(op) = &r.op {
+                    let mut i = start;
+                    while i < end {
+                        if step_body(i) == ControlFlow::Break {
+                            break;
                         }
+                        i = op.eval(i as usize, r.step as usize) as u64;
                     }
-                    SimForRange::Stepped {
-                        start,
-                        end,
-                        step,
-                        op,
-                    } => {
-                        let mut i = *start;
-                        while i < *end {
-                            step_body(i);
-                            i = op.eval(i as usize, *step as usize) as u64;
+                } else {
+                    let mut i = start;
+                    while i < end {
+                        if step_body(i) == ControlFlow::Break {
+                            break;
                         }
+                        i += r.step;
                     }
                 }
+                ControlFlow::Continue
             }
+            Statement::Break => ControlFlow::Break,
             Statement::Binary(func, ff_values, comb_values) => unsafe {
                 func(*ff_values, *comb_values);
+                ControlFlow::Continue
             },
             Statement::BinaryBatch(func, args) => unsafe {
                 for &(ff_values, comb_values) in args {
                     func(ff_values, comb_values);
                 }
+                ControlFlow::Continue
             },
             Statement::SequentialBlock(body) => {
                 for s in body {
-                    s.eval_step(mask_cache);
+                    if s.eval_step(mask_cache) == ControlFlow::Break {
+                        return ControlFlow::Break;
+                    }
                 }
+                ControlFlow::Continue
             }
-            Statement::SystemFunctionCall(x) => x.eval_step(mask_cache),
-            Statement::TbMethodCall { .. } => (),
+            Statement::SystemFunctionCall(x) => {
+                x.eval_step(mask_cache);
+                ControlFlow::Continue
+            }
+            Statement::TbMethodCall { .. } => ControlFlow::Continue,
         }
     }
 
@@ -270,7 +325,7 @@ impl Statement {
                     s.gather_variable(inputs, outputs);
                 }
             }
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) => (),
+            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) | Statement::Break => (),
             Statement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_variable(inputs, outputs);
@@ -282,7 +337,7 @@ impl Statement {
     }
 }
 
-fn format_display_string(format_str: &str, values: &[veryl_analyzer::value::Value]) -> String {
+fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
     let mut result = String::new();
     let mut chars = format_str.chars().peekable();
     let mut arg_idx = 0;
@@ -686,23 +741,52 @@ pub struct CompiledBlockStatement {
 }
 
 #[derive(Clone, Debug)]
-pub enum SimForRange {
+pub enum ProtoForBound {
+    Const(u64),
+    Dynamic(ProtoExpression),
+}
+
+#[derive(Clone, Debug)]
+pub enum ProtoForRange {
     Forward {
-        start: u64,
-        end: u64,
+        start: ProtoForBound,
+        end: ProtoForBound,
+        inclusive: bool,
         step: u64,
     },
     Reverse {
-        start: u64,
-        end: u64,
+        start: ProtoForBound,
+        end: ProtoForBound,
+        inclusive: bool,
         step: u64,
     },
     Stepped {
-        start: u64,
-        end: u64,
+        start: ProtoForBound,
+        end: ProtoForBound,
+        inclusive: bool,
         step: u64,
         op: air::Op,
     },
+}
+
+impl ProtoForRange {
+    fn is_const(&self) -> bool {
+        let (s, e) = match self {
+            ProtoForRange::Forward { start, end, .. }
+            | ProtoForRange::Reverse { start, end, .. }
+            | ProtoForRange::Stepped { start, end, .. } => (start, end),
+        };
+        matches!(s, ProtoForBound::Const(_)) && matches!(e, ProtoForBound::Const(_))
+    }
+}
+
+impl ProtoForBound {
+    pub fn as_const(&self) -> Option<u64> {
+        match self {
+            ProtoForBound::Const(v) => Some(*v),
+            ProtoForBound::Dynamic(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -711,8 +795,211 @@ pub struct ProtoForStatement {
     pub var_width: usize,
     pub var_native_bytes: usize,
     pub var_signed: bool,
-    pub range: SimForRange,
+    pub range: ProtoForRange,
     pub body: Vec<ProtoStatement>,
+}
+
+impl ProtoForStatement {
+    #[cfg(not(target_family = "wasm"))]
+    pub fn can_build_binary(&self) -> bool {
+        self.range.is_const() && self.body.iter().all(|s| s.can_build_binary())
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn build_binary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        _is_last: bool,
+    ) -> Option<()> {
+        let header_block = builder.create_block();
+        let body_block = builder.create_block();
+        let exit_block = builder.create_block();
+
+        let base_addr = if self.var_offset.is_ff() {
+            context.ff_values
+        } else {
+            context.comb_values
+        };
+        let var_mem_offset = self.var_offset.raw() as i32;
+        let nb = self.var_native_bytes;
+
+        let (start_val, end_val, step_val, is_reverse) = match &self.range {
+            ProtoForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            } => {
+                let mut e = end.as_const()?;
+                if *inclusive {
+                    e += 1;
+                }
+                (start.as_const()?, e, *step, false)
+            }
+            ProtoForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                step,
+            } => {
+                let mut e = end.as_const()?;
+                if *inclusive {
+                    e += 1;
+                }
+                (start.as_const()?, e, *step, true)
+            }
+            ProtoForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                step,
+                ..
+            } => {
+                let mut e = end.as_const()?;
+                if *inclusive {
+                    e += 1;
+                }
+                (start.as_const()?, e, *step, false)
+            }
+        };
+
+        let init_i = if is_reverse {
+            builder.ins().iconst(I64, end_val as i64)
+        } else {
+            builder.ins().iconst(I64, start_val as i64)
+        };
+
+        Self::store_counter(context, builder, init_i, base_addr, var_mem_offset, nb);
+
+        builder.ins().jump(header_block, &[]);
+
+        context.load_cache.clear();
+        builder.switch_to_block(header_block);
+
+        let i_val = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
+
+        let cond = if is_reverse {
+            let start_const = builder.ins().iconst(I64, start_val as i64);
+            builder
+                .ins()
+                .icmp(IntCC::UnsignedGreaterThan, i_val, start_const)
+        } else {
+            let end_const = builder.ins().iconst(I64, end_val as i64);
+            builder
+                .ins()
+                .icmp(IntCC::UnsignedLessThan, i_val, end_const)
+        };
+        builder.ins().brif(cond, body_block, &[], exit_block, &[]);
+
+        context.load_cache.clear();
+        let prev_store_elim = context.store_elim_enabled;
+        context.store_elim_enabled = false;
+        builder.switch_to_block(body_block);
+
+        if is_reverse {
+            let i_cur = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
+            let step_c = builder.ins().iconst(I64, step_val as i64);
+            let new_i = builder.ins().isub(i_cur, step_c);
+            Self::store_counter(context, builder, new_i, base_addr, var_mem_offset, nb);
+        }
+
+        for s in &self.body {
+            s.build_binary(context, builder, false)?;
+        }
+
+        if !is_reverse {
+            let i_cur = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
+            let step_c = builder.ins().iconst(I64, step_val as i64);
+            let new_i = match &self.range {
+                ProtoForRange::Stepped { op, .. } => match op {
+                    air::Op::Mul => builder.ins().imul(i_cur, step_c),
+                    air::Op::LogicShiftL => builder.ins().ishl(i_cur, step_c),
+                    _ => builder.ins().iadd(i_cur, step_c),
+                },
+                _ => builder.ins().iadd(i_cur, step_c),
+            };
+            Self::store_counter(context, builder, new_i, base_addr, var_mem_offset, nb);
+        }
+
+        builder.ins().jump(header_block, &[]);
+
+        context.load_cache.clear();
+        context.store_elim_enabled = prev_store_elim;
+        builder.switch_to_block(exit_block);
+
+        Some(())
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn load_counter_as_i64(
+        builder: &mut FunctionBuilder,
+        base_addr: cranelift::prelude::Value,
+        offset: i32,
+        nb: usize,
+    ) -> cranelift::prelude::Value {
+        if nb <= 4 {
+            let v = builder
+                .ins()
+                .load(I32, MemFlags::trusted(), base_addr, offset);
+            builder.ins().uextend(I64, v)
+        } else if nb <= 8 {
+            builder
+                .ins()
+                .load(I64, MemFlags::trusted(), base_addr, offset)
+        } else {
+            let v = builder
+                .ins()
+                .load(I128, MemFlags::trusted(), base_addr, offset);
+            builder.ins().ireduce(I64, v)
+        }
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn store_counter(
+        context: &CraneliftContext,
+        builder: &mut FunctionBuilder,
+        val_i64: cranelift::prelude::Value,
+        base_addr: cranelift::prelude::Value,
+        offset: i32,
+        nb: usize,
+    ) {
+        if nb <= 4 {
+            let v32 = builder.ins().ireduce(I32, val_i64);
+            builder
+                .ins()
+                .store(MemFlags::trusted(), v32, base_addr, offset);
+            if context.use_4state {
+                let zero = builder.ins().iconst(I32, 0);
+                builder
+                    .ins()
+                    .store(MemFlags::trusted(), zero, base_addr, offset + nb as i32);
+            }
+        } else if nb <= 8 {
+            builder
+                .ins()
+                .store(MemFlags::trusted(), val_i64, base_addr, offset);
+            if context.use_4state {
+                let zero = builder.ins().iconst(I64, 0);
+                builder
+                    .ins()
+                    .store(MemFlags::trusted(), zero, base_addr, offset + nb as i32);
+            }
+        } else {
+            let v128 = builder.ins().uextend(I128, val_i64);
+            builder
+                .ins()
+                .store(MemFlags::trusted(), v128, base_addr, offset);
+            if context.use_4state {
+                builder.ins().store(
+                    MemFlags::trusted(),
+                    context.zero_128,
+                    base_addr,
+                    offset + nb as i32,
+                );
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -721,6 +1008,7 @@ pub enum ProtoStatement {
     AssignDynamic(ProtoAssignDynamicStatement),
     If(ProtoIfStatement),
     For(ProtoForStatement),
+    Break,
     SystemFunctionCall(ProtoSystemFunctionCall),
     CompiledBlock(CompiledBlockStatement),
     /// Sequential statement group (always_comb / inlined function body).
@@ -799,6 +1087,19 @@ impl ProtoStatement {
             }
             ProtoStatement::For(x) => {
                 x.var_offset = x.var_offset.adjust(ff_delta, comb_delta);
+                let adjust_bound = |b: &mut ProtoForBound| {
+                    if let ProtoForBound::Dynamic(expr) = b {
+                        expr.adjust_offsets(ff_delta, comb_delta);
+                    }
+                };
+                match &mut x.range {
+                    ProtoForRange::Forward { start, end, .. }
+                    | ProtoForRange::Reverse { start, end, .. }
+                    | ProtoForRange::Stepped { start, end, .. } => {
+                        adjust_bound(start);
+                        adjust_bound(end);
+                    }
+                }
                 for s in &mut x.body {
                     s.adjust_offsets(ff_delta, comb_delta);
                 }
@@ -823,6 +1124,7 @@ impl ProtoStatement {
                     }
                 }
             },
+            ProtoStatement::Break => {}
         }
     }
 
@@ -832,11 +1134,12 @@ impl ProtoStatement {
             ProtoStatement::Assign(x) => x.can_build_binary(),
             ProtoStatement::AssignDynamic(x) => x.can_build_binary(),
             ProtoStatement::If(x) => x.can_build_binary(),
-            ProtoStatement::For(_) => false,
+            ProtoStatement::For(x) => x.can_build_binary(),
             ProtoStatement::SystemFunctionCall(_) => false,
             ProtoStatement::CompiledBlock(_) => false,
             ProtoStatement::SequentialBlock(body) => body.iter().all(|s| s.can_build_binary()),
             ProtoStatement::TbMethodCall { .. } => false,
+            ProtoStatement::Break => false,
         }
     }
 
@@ -971,6 +1274,7 @@ impl ProtoStatement {
                 outputs.extend(all_outs);
             }
             ProtoStatement::TbMethodCall { .. } => {}
+            ProtoStatement::Break => {}
         }
     }
 
@@ -1021,6 +1325,7 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
+            ProtoStatement::Break => {}
         }
         result
     }
@@ -1206,13 +1511,69 @@ impl ProtoStatement {
                             )
                         })
                         .collect();
+                    let convert_bound = |b: &ProtoForBound| -> RuntimeForBound {
+                        match b {
+                            ProtoForBound::Const(v) => RuntimeForBound::Const(*v),
+                            ProtoForBound::Dynamic(proto_expr) => {
+                                RuntimeForBound::Dynamic(Box::new(proto_expr.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )))
+                            }
+                        }
+                    };
+                    let range = match &x.range {
+                        ProtoForRange::Forward {
+                            start,
+                            end,
+                            inclusive,
+                            step,
+                        } => RuntimeForRange {
+                            start: convert_bound(start),
+                            end: convert_bound(end),
+                            inclusive: *inclusive,
+                            step: *step,
+                            op: None,
+                            reverse: false,
+                        },
+                        ProtoForRange::Reverse {
+                            start,
+                            end,
+                            inclusive,
+                            step,
+                        } => RuntimeForRange {
+                            start: convert_bound(start),
+                            end: convert_bound(end),
+                            inclusive: *inclusive,
+                            step: *step,
+                            op: None,
+                            reverse: true,
+                        },
+                        ProtoForRange::Stepped {
+                            start,
+                            end,
+                            inclusive,
+                            step,
+                            op,
+                        } => RuntimeForRange {
+                            start: convert_bound(start),
+                            end: convert_bound(end),
+                            inclusive: *inclusive,
+                            step: *step,
+                            op: Some(*op),
+                            reverse: false,
+                        },
+                    };
                     Statement::For(ForStatement {
                         var_ptr,
                         var_native_bytes: x.var_native_bytes,
                         var_use_4state: use_4state,
                         var_width: x.var_width,
                         var_signed: x.var_signed,
-                        range: x.range.clone(),
+                        range,
                         body,
                     })
                 }
@@ -1231,6 +1592,7 @@ impl ProtoStatement {
                         .collect();
                     Statement::SequentialBlock(stmts)
                 }
+                ProtoStatement::Break => Statement::Break,
                 ProtoStatement::TbMethodCall { inst, method } => {
                     let method = match method {
                         ProtoTbMethodKind::ClockNext { count, period } => {
@@ -1295,7 +1657,7 @@ impl ProtoStatement {
                 result
             }
             ProtoStatement::If(x) => x.build_binary(context, builder, is_last),
-            ProtoStatement::For(_) => None,
+            ProtoStatement::For(x) => x.build_binary(context, builder, is_last),
             ProtoStatement::SystemFunctionCall(_) => None,
             ProtoStatement::CompiledBlock(_) => None,
             ProtoStatement::SequentialBlock(body) => {
@@ -1305,6 +1667,7 @@ impl ProtoStatement {
                 Some(())
             }
             ProtoStatement::TbMethodCall { .. } => None,
+            ProtoStatement::Break => None,
         }
     }
 }
@@ -2016,7 +2379,7 @@ pub struct IfStatement {
 }
 
 impl IfStatement {
-    pub fn eval_step(&self, mask_cache: &mut MaskCache) {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
         let cond = if let Some(x) = &self.cond {
             let cond = x.eval(mask_cache);
             match &cond {
@@ -2034,13 +2397,18 @@ impl IfStatement {
 
         if cond {
             for x in &self.true_side {
-                x.eval_step(mask_cache);
+                if x.eval_step(mask_cache) == ControlFlow::Break {
+                    return ControlFlow::Break;
+                }
             }
         } else {
             for x in &self.false_side {
-                x.eval_step(mask_cache);
+                if x.eval_step(mask_cache) == ControlFlow::Break {
+                    return ControlFlow::Break;
+                }
             }
         }
+        ControlFlow::Continue
     }
 
     pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
@@ -2359,25 +2727,57 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     body.extend(stmts);
                 }
 
+                let token = x.token;
+                let resolve_bound = |b: &air::ForBound,
+                                     ctx: &mut ConvContext|
+                 -> Result<ProtoForBound, SimulatorError> {
+                    match b {
+                        air::ForBound::Const(v) => Ok(ProtoForBound::Const(*v as u64)),
+                        air::ForBound::Expression(expr) => {
+                            let scope = ctx.scope();
+                            if let Some(v) = b.eval_value(&mut scope.analyzer_context) {
+                                Ok(ProtoForBound::Const(v as u64))
+                            } else {
+                                let proto_expr: ProtoExpression = Conv::conv(ctx, expr.as_ref())
+                                    .map_err(|_| SimulatorError::unsupported_description(&token))?;
+                                Ok(ProtoForBound::Dynamic(proto_expr))
+                            }
+                        }
+                    }
+                };
                 let range = match &x.range {
-                    air::ForRange::Forward { start, end, step } => SimForRange::Forward {
-                        start: *start as u64,
-                        end: *end as u64,
+                    air::ForRange::Forward {
+                        start,
+                        end,
+                        inclusive,
+                        step,
+                    } => ProtoForRange::Forward {
+                        start: resolve_bound(start, context)?,
+                        end: resolve_bound(end, context)?,
+                        inclusive: *inclusive,
                         step: *step as u64,
                     },
-                    air::ForRange::Reverse { start, end, step } => SimForRange::Reverse {
-                        start: *start as u64,
-                        end: *end as u64,
+                    air::ForRange::Reverse {
+                        start,
+                        end,
+                        inclusive,
+                        step,
+                    } => ProtoForRange::Reverse {
+                        start: resolve_bound(start, context)?,
+                        end: resolve_bound(end, context)?,
+                        inclusive: *inclusive,
                         step: *step as u64,
                     },
                     air::ForRange::Stepped {
                         start,
                         end,
+                        inclusive,
                         step,
                         op,
-                    } => SimForRange::Stepped {
-                        start: *start as u64,
-                        end: *end as u64,
+                    } => ProtoForRange::Stepped {
+                        start: resolve_bound(start, context)?,
+                        end: resolve_bound(end, context)?,
+                        inclusive: *inclusive,
                         step: *step as u64,
                         op: *op,
                     },
@@ -2395,6 +2795,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
             air::Statement::Unsupported(token) => {
                 return Err(SimulatorError::unsupported_description(token));
             }
+            air::Statement::Break => vec![ProtoStatement::Break],
             air::Statement::Null => vec![],
         };
 
@@ -2960,7 +3361,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     }
 }
 
-fn parse_hex_file(filename: &str, width: usize) -> Vec<veryl_analyzer::value::Value> {
+fn parse_hex_file(filename: &str, width: usize) -> Vec<AnalyzerValue> {
     let content = match std::fs::read_to_string(filename) {
         Ok(c) => c,
         Err(e) => {
@@ -2971,7 +3372,7 @@ fn parse_hex_file(filename: &str, width: usize) -> Vec<veryl_analyzer::value::Va
     parse_hex_content(&content, width)
 }
 
-pub fn parse_hex_content(content: &str, width: usize) -> Vec<veryl_analyzer::value::Value> {
+pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
     let mut result = Vec::new();
     let mut s = content.to_string();
 
@@ -2998,7 +3399,7 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<veryl_analyzer::val
                 continue;
             }
             if let Ok(val) = u64::from_str_radix(&cleaned, 16) {
-                result.push(veryl_analyzer::value::Value::new(val, width, false));
+                result.push(AnalyzerValue::new(val, width, false));
             }
         }
     }

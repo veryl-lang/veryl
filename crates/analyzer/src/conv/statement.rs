@@ -1,20 +1,17 @@
 use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::utils::{
     TypePosition, argument_list, build_for_range, build_for_statement, case_condition,
-    eval_assign_statement, eval_expr, eval_for_range, eval_variable, expand_connect,
-    expand_connect_const, function_call, get_return_str, switch_condition, tb_method_call,
+    eval_assign_statement, eval_expr, eval_variable, expand_connect, expand_connect_const,
+    function_call, get_return_str, switch_condition, tb_method_call,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
-    self, Comptime, IrResult, Shape, TypeKind, VarIndex, VarKind, VarPath, VarPathSelect,
-    VarSelect, Variable,
+    self, Comptime, IrResult, Shape, TypeKind, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect,
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{Affiliation, SymbolKind};
 use crate::symbol_table;
-use crate::value::Value;
 use crate::{AnalyzerError, ir_error};
-use veryl_parser::resource_table;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -166,7 +163,6 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
 
 impl Conv<&Statement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &Statement) -> IrResult<Self> {
-        let token: TokenRange = value.into();
         match value {
             Statement::IdentifierStatement(x) => {
                 Conv::conv(context, x.identifier_statement.as_ref())
@@ -177,7 +173,7 @@ impl Conv<&Statement> for ir::StatementBlock {
                 context,
                 x.return_statement.as_ref(),
             )?])),
-            Statement::BreakStatement(_) => Err(ir_error!(token)),
+            Statement::BreakStatement(_) => Ok(ir::StatementBlock(vec![ir::Statement::Break])),
             Statement::ForStatement(x) => Conv::conv(context, x.for_statement.as_ref()),
             Statement::CaseStatement(x) => Conv::conv(context, x.case_statement.as_ref()),
             Statement::SwitchStatement(x) => Conv::conv(context, x.switch_statement.as_ref()),
@@ -632,58 +628,79 @@ impl Conv<&ForStatement> for ir::StatementBlock {
             .as_ref()
             .map(|x| (x.assignment_operator.as_ref(), x.expression.as_ref()));
 
-        if context.in_sequential_block {
-            let for_range = build_for_range(context, &value.range, rev, step)?;
-            return build_for_statement(context, value, &r#type, clock_domain, for_range, token);
+        let for_range = build_for_range(context, &value.range, rev, step)?;
+
+        // Testbench for-loops may iterate many times at runtime; do not unroll.
+        if !context.in_test_module
+            && let Some(range) = for_range.eval_iter(context)
+        {
+            return unroll_for(context, value, &r#type, clock_domain, &range, token);
         }
 
-        let range = eval_for_range(context, &value.range, rev, step, token)?;
+        build_for_statement(context, value, &r#type, clock_domain, for_range, token)
+    }
+}
 
-        let mut ret = ir::StatementBlock::default();
+fn unroll_for(
+    context: &mut Context,
+    value: &ForStatement,
+    r#type: &ir::Type,
+    clock_domain: crate::symbol::ClockDomain,
+    range: &[usize],
+    token: TokenRange,
+) -> ir::IrResult<ir::StatementBlock> {
+    use veryl_parser::resource_table;
 
-        for i in range {
-            let label = format!("[{}]", i);
-            let label = resource_table::insert_str(&label);
+    let mut ret = ir::StatementBlock::default();
+    'outer: for &i in range {
+        let label = format!("[{}]", i);
+        let label = resource_table::insert_str(&label);
 
-            context.push_hierarchy(label);
+        context.push_hierarchy(label);
 
-            let block = context.block(|c| {
-                let index = value.identifier.text();
-                let path = VarPath::new(index);
-                let kind = VarKind::Const;
-                let mut comptime = Comptime::from_type(r#type.clone(), clock_domain, token);
-                comptime.is_const = true;
-                if let Some(total_width) = r#type.total_width() {
-                    comptime.value =
-                        ir::ValueVariant::Numeric(Value::new(i as u64, total_width, r#type.signed));
+        let block = context.block(|c| {
+            let index = value.identifier.text();
+            let path = ir::VarPath::new(index);
+            let kind = ir::VarKind::Const;
+            let mut comptime = ir::Comptime::from_type(r#type.clone(), clock_domain, token);
+            comptime.is_const = true;
+            if let Some(total_width) = r#type.total_width() {
+                comptime.value = ir::ValueVariant::Numeric(crate::value::Value::new(
+                    i as u64,
+                    total_width,
+                    r#type.signed,
+                ));
+            }
+
+            let id = c.insert_var_path(path.clone(), comptime.clone());
+            let variable = ir::Variable::new(
+                id,
+                path,
+                kind,
+                comptime.r#type.clone(),
+                vec![comptime.get_value().unwrap().clone()],
+                c.get_affiliation(),
+                &token,
+            );
+            c.insert_variable(id, variable);
+
+            let block: ir::IrResult<ir::StatementBlock> =
+                Conv::conv(c, value.statement_block.as_ref());
+            block
+        });
+
+        context.pop_hierarchy();
+
+        if let Ok(mut block) = block {
+            for stmt in block.0.drain(..) {
+                if matches!(stmt, ir::Statement::Break) {
+                    break 'outer;
                 }
-
-                let id = c.insert_var_path(path.clone(), comptime.clone());
-                let variable = Variable::new(
-                    id,
-                    path,
-                    kind,
-                    comptime.r#type.clone(),
-                    vec![comptime.get_value().unwrap().clone()],
-                    c.get_affiliation(),
-                    &token,
-                );
-                c.insert_variable(id, variable);
-
-                let block: IrResult<ir::StatementBlock> =
-                    Conv::conv(c, value.statement_block.as_ref());
-                block
-            });
-
-            context.pop_hierarchy();
-
-            if let Ok(mut block) = block {
-                ret.0.append(&mut block.0);
+                ret.0.push(stmt);
             }
         }
-
-        Ok(ret)
     }
+    Ok(ret)
 }
 
 impl Conv<&CaseStatement> for ir::StatementBlock {

@@ -486,6 +486,38 @@ module ModuleA {
 }
 
 #[test]
+fn testbench_initial_for_not_unrolled() {
+    let code = r#"
+    #[test(tb_sample)]
+    module tb_sample {
+        var a: logic<32> [4];
+        initial {
+            for i: u32 in 0..4 {
+                a[i] = i;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module tb_sample {
+  var var0[0](a): logic<32> = 32'hxxxxxxxx;
+  var var0[1](a): logic<32> = 32'hxxxxxxxx;
+  var var0[2](a): logic<32> = 32'hxxxxxxxx;
+  var var0[3](a): logic<32> = 32'hxxxxxxxx;
+  const var1(i): bit<32> = 32'hxxxxxxxx;
+
+  initial {
+    for i in 0..4 {
+      var0[var1] = var1;
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn comb_for() {
     let code = r#"
     module ModuleA {
@@ -516,6 +548,75 @@ fn comb_for() {
 "#;
 
     check_ir(code, exp);
+}
+
+#[test]
+fn const_function_with_static_for() {
+    let code = r#"
+    module ModuleA {
+        function sum() -> u32 {
+            var acc: u32;
+            acc = 0;
+            for i: u32 in 0..5 {
+                acc += i;
+            }
+            return acc;
+        }
+        const A: u32 = sum();
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(&code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    Analyzer::analyze_post_pass2();
+    let ir = ir.to_string();
+    // sum() = 0+1+2+3+4 = 10 = 0xa
+    assert!(
+        ir.contains("0000000a"),
+        "const A should be evaluated to 10 (0xa):\n{}",
+        ir,
+    );
+
+    let code = r#"
+    module ModuleA {
+        function sum(n: input u32) -> u32 {
+            var acc: u32;
+            acc = 0;
+            for i: u32 in 0..n {
+                acc += i;
+            }
+            return acc;
+        }
+        const B: u32 = sum(5);
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(&code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    Analyzer::analyze_post_pass2();
+    let ir = ir.to_string();
+    // sum(5) = 0+1+2+3+4 = 10 = 0xa
+    assert!(
+        ir.contains("0000000a"),
+        "const B should be evaluated to 10 (0xa):\n{}",
+        ir,
+    );
 }
 
 #[test]

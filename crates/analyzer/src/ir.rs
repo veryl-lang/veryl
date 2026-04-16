@@ -33,8 +33,8 @@ pub use op::Op;
 pub use shape::{Shape, ShapeRef};
 pub use signature::Signature;
 pub use statement::{
-    AssignDestination, AssignStatement, ForRange, ForStatement, IfResetStatement, IfStatement,
-    Statement, StatementBlock, TbMethod, TbMethodCall,
+    AssignDestination, AssignStatement, ControlFlow, ForBound, ForRange, ForStatement,
+    IfResetStatement, IfStatement, Statement, StatementBlock, TbMethod, TbMethodCall,
 };
 pub use system_function::{Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind};
 pub use utils::convert_cast;
