@@ -266,7 +266,8 @@ impl Statement {
             Statement::Assign(x) => x.gather_ff(context, table, decl),
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
-            Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None),
+            Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None, true),
+            Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, true),
             Statement::For(x) => {
                 for s in &x.body {
                     s.gather_ff(context, table, decl);
@@ -274,7 +275,6 @@ impl Statement {
             }
             Statement::TbMethodCall(_)
             | Statement::Break
-            | Statement::SystemFunctionCall(_)
             | Statement::Unsupported(_)
             | Statement::Null => (),
         }
@@ -300,6 +300,7 @@ impl Statement {
                 }
             }
             Statement::FunctionCall(x) => x.gather_ff_comb_assign(context, table, decl),
+            Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, false),
             Statement::For(x) => {
                 for s in &x.body {
                     s.gather_ff_comb_assign(context, table, decl);
@@ -585,13 +586,23 @@ impl AssignStatement {
                 .and_then(|v| context.get_variable_info(d.id)?.r#type.array.calc_index(&v));
             (d.id, idx)
         });
-        self.expr.gather_ff(context, table, decl, assign_target);
+        self.expr
+            .gather_ff(context, table, decl, assign_target, true);
         for dst in &self.dst {
             dst.gather_ff(context, table, decl);
         }
     }
 
     pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        let assign_target = self.dst.first().map(|d| {
+            let idx = d
+                .index
+                .eval_value(context)
+                .and_then(|v| context.get_variable_info(d.id)?.r#type.array.calc_index(&v));
+            (d.id, idx)
+        });
+        self.expr
+            .gather_ff(context, table, decl, assign_target, false);
         for dst in &self.dst {
             dst.gather_ff_comb_assign(context, table, decl);
         }
@@ -697,7 +708,7 @@ impl IfStatement {
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        self.cond.gather_ff(context, table, decl, None);
+        self.cond.gather_ff(context, table, decl, None, true);
         for x in &self.true_side {
             x.gather_ff(context, table, decl);
         }
