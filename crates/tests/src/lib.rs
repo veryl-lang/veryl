@@ -609,6 +609,18 @@ mod filelist {
         assert!(err.is_empty());
 
         let paths = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &paths, false);
+
+        let input_paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
+        let reference: Vec<_> = paths.iter().map(|x| x.src.clone()).collect();
+        for _ in 0..20 {
+            let again = veryl::cmd_build::CmdBuild::sort_filelist(&metadata, &input_paths, false);
+            let again: Vec<_> = again.into_iter().map(|x| x.src).collect();
+            assert_eq!(
+                reference, again,
+                "sort_filelist must be deterministic across invocations",
+            );
+        }
+
         let paths: Vec<_> = paths
             .into_iter()
             .map(|x| x.src.file_name().unwrap().to_string_lossy().into_owned())
