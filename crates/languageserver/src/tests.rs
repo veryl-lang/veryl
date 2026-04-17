@@ -1,9 +1,7 @@
 #![allow(unnameable_test_items)]
 
 use crate::Backend;
-use mark_flaky_tests::flaky;
 use serde_json::{Value, json};
-use std::collections::VecDeque;
 use std::env;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
@@ -15,7 +13,7 @@ use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 struct TestServer {
     req_stream: DuplexStream,
     res_stream: DuplexStream,
-    responses: VecDeque<String>,
+    recv_buf: Vec<u8>,
 }
 
 impl TestServer {
@@ -34,7 +32,7 @@ impl TestServer {
         Self {
             req_stream: req_client,
             res_stream: res_client,
-            responses: VecDeque::new(),
+            recv_buf: Vec::new(),
         }
     }
 
@@ -42,25 +40,22 @@ impl TestServer {
         format!("Content-Length: {}\r\n\r\n{}", payload.len(), payload)
     }
 
-    fn decode(text: &str) -> Vec<String> {
-        let mut ret = Vec::new();
-        let mut temp = text;
-
-        while !temp.is_empty() {
-            let p = temp.find("\r\n\r\n").unwrap();
-            let (header, body) = temp.split_at(p + 4);
-            let len = header
-                .strip_prefix("Content-Length: ")
-                .unwrap()
-                .strip_suffix("\r\n\r\n")
-                .unwrap();
-            let len: usize = len.parse().unwrap();
-            let (body, rest) = body.split_at(len);
-            ret.push(body.to_string());
-            temp = rest;
+    fn try_decode_one(buf: &mut Vec<u8>) -> Option<String> {
+        let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
+        let header = std::str::from_utf8(&buf[..header_end]).unwrap();
+        let len: usize = header
+            .strip_prefix("Content-Length: ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let body_start = header_end + 4;
+        let body_end = body_start + len;
+        if buf.len() < body_end {
+            return None;
         }
-
-        ret
+        let body = String::from_utf8(buf[body_start..body_end].to_vec()).unwrap();
+        buf.drain(..body_end);
+        Some(body)
     }
 
     async fn send_request(&mut self, req: Request) {
@@ -76,29 +71,25 @@ impl TestServer {
         self.req_stream.write_all(req.as_bytes()).await.unwrap();
     }
 
-    async fn recv_response(&mut self) -> Response {
-        if self.responses.is_empty() {
-            let mut buf = vec![0; 1024];
-            let n = self.res_stream.read(&mut buf).await.unwrap();
-            let ret = String::from_utf8(buf[..n].to_vec()).unwrap();
-            for x in Self::decode(&ret) {
-                self.responses.push_front(x);
+    async fn recv_message(&mut self) -> String {
+        loop {
+            if let Some(msg) = Self::try_decode_one(&mut self.recv_buf) {
+                return msg;
             }
+            let mut tmp = [0u8; 4096];
+            let n = self.res_stream.read(&mut tmp).await.unwrap();
+            assert!(n > 0, "LSP stream closed unexpectedly");
+            self.recv_buf.extend_from_slice(&tmp[..n]);
         }
-        let res = self.responses.pop_back().unwrap();
+    }
+
+    async fn recv_response(&mut self) -> Response {
+        let res = self.recv_message().await;
         serde_json::from_str(&res).unwrap()
     }
 
     async fn recv_notification(&mut self) -> Request {
-        if self.responses.is_empty() {
-            let mut buf = vec![0; 1024];
-            let n = self.res_stream.read(&mut buf).await.unwrap();
-            let ret = String::from_utf8(buf[..n].to_vec()).unwrap();
-            for x in Self::decode(&ret) {
-                self.responses.push_front(x);
-            }
-        }
-        let res = self.responses.pop_back().unwrap();
+        let res = self.recv_message().await;
         serde_json::from_str(&res).unwrap()
     }
 }
@@ -209,7 +200,6 @@ async fn diagnostics() {
 }
 
 #[tokio::test]
-#[flaky]
 #[ntest::timeout(60000)]
 async fn progress() {
     let mut server = TestServer::new(Backend::new);
