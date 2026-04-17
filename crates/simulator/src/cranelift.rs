@@ -33,12 +33,21 @@ pub struct Context {
     pub comb_values: Value,
     pub zero: Value,
     pub zero_128: Value,
-    /// Load CSE cache: VarOffset → (payload, mask_xz)
-    pub load_cache: HashMap<VarOffset, (Value, Option<Value>)>,
-    /// Comb offsets where stores can be skipped (value forwarded via load_cache only).
+    /// Load CSE cache: (VarOffset, nb) → (payload, mask_xz, is_exact_load)
+    /// Keyed on (offset, native_bytes) to avoid mixing I32+uextend and I64 loads.
+    /// `is_exact_load` is true when the value was loaded directly from memory
+    /// (and thus exactly matches memory content). False when the value was
+    /// forwarded from a store (may have masked upper bits when dst_width < nb*8).
+    pub load_cache: HashMap<(VarOffset, usize), (Value, Option<Value>, bool)>,
+    /// Comb offsets where stores can be skipped (value forwarded via Variable).
     pub store_elim_offsets: HashSet<VarOffset>,
     /// Whether store elimination is active (disabled inside If blocks).
     pub store_elim_enabled: bool,
+    /// Cranelift Variables for store_elim offsets, surviving across If blocks.
+    /// Key: (VarOffset, nb). Value: (payload_var, mask_xz_var).
+    pub store_elim_vars: HashMap<(VarOffset, usize), (Variable, Option<Variable>)>,
+    /// Next Variable index for store_elim_vars allocation.
+    pub next_var_index: usize,
     /// Helper function signatures (cached per arity/return type).
     pub helper_sigs: HashMap<HelperSig, SigRef>,
     /// Calling convention for helper functions.
@@ -47,6 +56,38 @@ pub struct Context {
     /// Used for unified comb where helper functions may modify values
     /// between cached loads.
     pub disable_load_cache: bool,
+    /// If set, emit a dirty-flag store when an event writes to a cold comb array.
+    /// Value is the byte offset of the flag within comb_values.
+    pub cold_dirty_flag_offset: Option<i64>,
+    /// Size of the hot comb region in bytes (for cold write detection).
+    pub comb_hot_size: usize,
+    /// If set, emit a dirty-flag store when an event writes to any comb variable.
+    /// Value is the byte offset of the flag within comb_values.
+    pub event_comb_dirty_flag_offset: Option<i64>,
+    /// True when compiling an event-phase function. Gates strict-NBA
+    /// redirection of comb stores to the write-log.
+    pub in_event: bool,
+    /// During If arms, tracks which VarOffsets were stored to.
+    /// Used by If::build_binary to preserve pre-If cache entries
+    /// that weren't modified in either arm.
+    /// (stored_offsets, dynamic_assign_occurred)
+    pub if_store_tracker: Option<(HashSet<VarOffset>, bool)>,
+    /// Enable pre-If cache preservation across If block boundaries.
+    pub enable_if_cache_preserve: bool,
+    /// Write-log buffer pointer (heap address embedded as immediate).
+    /// When Some, event JIT emits log append after each FF store.
+    pub write_log_entries_ptr: Option<i64>,
+    /// Write-log count pointer (heap address of u64 counter).
+    pub write_log_count_ptr: Option<i64>,
+    /// Cranelift Variable holding the current log entry count (SSA).
+    /// Loaded at function entry, stored at function exit.
+    pub log_count_var: Option<Variable>,
+    /// Heap address of WriteLogBuffer.ff_values_base (u64).
+    /// JIT loads this at function entry to compute ff_delta.
+    pub ff_values_base_ptr: Option<i64>,
+    /// Cranelift Variable holding ff_delta = ff_values_param - ff_values_base.
+    /// Used to adjust write-log offsets for JIT-cached instances.
+    pub ff_delta_var: Option<Variable>,
 }
 
 /// Get or create a SigRef for the given helper signature kind.
@@ -141,6 +182,20 @@ pub fn build_binary(context: &mut ConvContext, proto: Vec<ProtoStatement>) -> Op
     build_binary_inner(context, proto, HashSet::default(), false)
 }
 
+/// Build a JIT function for an event-phase statement group.
+/// Sets `in_event = true` so that comb stores are redirected to the
+/// write-log (strict NBA semantics).
+pub fn build_binary_event(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+) -> Option<FuncPtr> {
+    let saved = context.in_event;
+    context.in_event = true;
+    let result = build_binary_inner(context, proto, HashSet::default(), false);
+    context.in_event = saved;
+    result
+}
+
 pub fn build_binary_with_store_elim_and_no_cache(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
@@ -156,7 +211,43 @@ pub fn build_binary_no_cache(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
 ) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, HashSet::default(), true)
+    let saved = context.event_comb_dirty_flag_offset.take();
+    // NOTE: write_log_buffer is NOT suppressed here because this function
+    // is also used for large event chunks (try_jit_group). Only comb-specific
+    // build functions (build_binary_comb_cached*) suppress write-log.
+    let result = build_binary_inner(context, proto, HashSet::default(), true);
+    context.event_comb_dirty_flag_offset = saved;
+    result
+}
+
+/// Build a JIT function with load_cache enabled and alias_analysis enabled.
+/// Used for unified comb chunks. Our load_cache provides explicit CSE,
+/// and Cranelift's alias analysis adds redundant-load elimination and
+/// store-to-load forwarding on top.
+pub fn build_binary_comb_cached(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+) -> Option<FuncPtr> {
+    // Comb JIT does not set event_comb_dirty flag (only event JIT does).
+    // Write-log is kept active: comb chunks may contain FF stores
+    // (e.g., child module output port → parent FF connections).
+    let saved_ecdf = context.event_comb_dirty_flag_offset.take();
+    let result = build_binary_inner2(context, proto, HashSet::default(), false, false);
+    context.event_comb_dirty_flag_offset = saved_ecdf;
+    result
+}
+
+/// Build a JIT function with store_elim and load_cache enabled.
+/// Used for unified comb chunks where internal variables can skip stores.
+pub fn build_binary_comb_cached_with_store_elim(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+    store_elim: HashSet<VarOffset>,
+) -> Option<FuncPtr> {
+    let saved_ecdf = context.event_comb_dirty_flag_offset.take();
+    let result = build_binary_inner2(context, proto, store_elim, false, false);
+    context.event_comb_dirty_flag_offset = saved_ecdf;
+    result
 }
 
 fn build_binary_inner(
@@ -165,12 +256,33 @@ fn build_binary_inner(
     store_elim: HashSet<VarOffset>,
     disable_load_cache: bool,
 ) -> Option<FuncPtr> {
+    build_binary_inner2(
+        context,
+        proto,
+        store_elim,
+        disable_load_cache,
+        disable_load_cache,
+    )
+}
+
+fn build_binary_inner2(
+    context: &mut ConvContext,
+    proto: Vec<ProtoStatement>,
+    store_elim: HashSet<VarOffset>,
+    disable_load_cache: bool,
+    disable_alias_analysis: bool,
+) -> Option<FuncPtr> {
     let config = &context.config;
 
     let mut settings_builder = settings::builder();
     settings_builder.set("opt_level", "speed").unwrap();
     if !config.dump_cranelift {
         settings_builder.set("enable_verifier", "false").unwrap();
+    }
+    if disable_alias_analysis {
+        settings_builder
+            .set("enable_alias_analysis", "false")
+            .unwrap();
     }
     let flags = settings::Flags::new(settings_builder);
 
@@ -210,15 +322,77 @@ fn build_binary_inner(
         load_cache: HashMap::default(),
         store_elim_offsets: store_elim,
         store_elim_enabled: true,
+        store_elim_vars: HashMap::default(),
+        next_var_index: 0,
         helper_sigs: HashMap::default(),
         call_conv,
         disable_load_cache,
+        cold_dirty_flag_offset: context.cold_dirty_flag_offset,
+        comb_hot_size: context.comb_hot_size,
+        event_comb_dirty_flag_offset: context.event_comb_dirty_flag_offset,
+        in_event: context.in_event && context.write_log_buffer.is_some(),
+        if_store_tracker: None,
+        // Test: only enable for event path (disable_load_cache=false,
+        // disable_alias_analysis=false → regular build_binary)
+        // Comb_cached: disable_alias_analysis=false, disable_load_cache=false
+        // Regular: disable_alias_analysis=true, disable_load_cache=false
+        // So we use disable_alias_analysis to distinguish
+        // Enable pre-If cache preservation for paths with load_cache active.
+        // Currently limited to FF reads only (comb value preservation has
+        // correctness issues that need further investigation).
+        enable_if_cache_preserve: !disable_load_cache,
+        write_log_entries_ptr: context
+            .write_log_buffer
+            .as_ref()
+            .map(|buf| buf.entries.as_ptr() as i64),
+        write_log_count_ptr: context
+            .write_log_buffer
+            .as_ref()
+            .map(|buf| &buf.count as *const u64 as i64),
+        log_count_var: None,
+        ff_values_base_ptr: context
+            .write_log_buffer
+            .as_ref()
+            .map(|buf| &buf.ff_values_base as *const u64 as i64),
+        ff_delta_var: None,
     };
+
+    // For event JIT: set up write-log count Variable (SSA).
+    // Load count at function entry from heap address, store back at function exit.
+    if let Some(count_ptr) = cranelift_context.write_log_count_ptr {
+        let var = builder.declare_var(I64);
+        let addr = builder.ins().iconst(I64, count_ptr);
+        let count_val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+        builder.def_var(var, count_val);
+        cranelift_context.log_count_var = Some(var);
+    }
+
+    // For event JIT: compute ff_delta = ff_values_param - ff_values_base.
+    // This allows write-log entries to store absolute offsets even when the
+    // JIT function is reused for a cached module instance with ff_delta != 0.
+    if let Some(base_ptr) = cranelift_context.ff_values_base_ptr {
+        let var = builder.declare_var(I64);
+        let base_addr = builder.ins().iconst(I64, base_ptr);
+        let base_val = builder.ins().load(I64, MemFlags::trusted(), base_addr, 0);
+        let delta = builder.ins().isub(ff_values, base_val);
+        builder.def_var(var, delta);
+        cranelift_context.ff_delta_var = Some(var);
+    }
 
     let len = proto.len();
     for (i, x) in proto.iter().enumerate() {
         let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
+    }
+
+    // Store write-log count back to heap address at function exit.
+    if let (Some(var), Some(count_ptr)) = (
+        cranelift_context.log_count_var,
+        cranelift_context.write_log_count_ptr,
+    ) {
+        let addr = builder.ins().iconst(I64, count_ptr);
+        let count_val = builder.use_var(var);
+        builder.ins().store(MemFlags::trusted(), count_val, addr, 0);
     }
 
     builder.ins().return_(&[]);

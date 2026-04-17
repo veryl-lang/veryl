@@ -14,8 +14,11 @@ fn is_cheap_expr(expr: &ProtoExpression) -> bool {
     fn is_leaf(e: &ProtoExpression) -> bool {
         matches!(
             e,
-            ProtoExpression::Variable { select: None, dynamic_select: None, .. }
-                | ProtoExpression::Value { .. }
+            ProtoExpression::Variable {
+                select: None,
+                dynamic_select: None,
+                ..
+            } | ProtoExpression::Value { .. }
         )
     }
     match expr {
@@ -620,27 +623,33 @@ pub fn optimize_unified(
                 // even with multiple readers. FF sources are always safe
                 // (immutable during comb eval). Comb sources are safe in
                 // single-pass eval (each var written once in dependency order).
-                if !is_event_read && !has_override {
-                    if let ProtoExpression::Variable { var_offset, select: None, dynamic_select: None, .. } = &x.expr {
-                        if var_offset.is_ff() || !multi_write_offsets.contains(&var_offset.raw()) {
-                            inline_map.insert(key, x.expr.clone());
-                            inline_count += 1;
-                            continue;
-                        }
-                    }
+                if !is_event_read
+                    && !has_override
+                    && let ProtoExpression::Variable {
+                        var_offset,
+                        select: None,
+                        dynamic_select: None,
+                        ..
+                    } = &x.expr
+                    && (var_offset.is_ff() || !multi_write_offsets.contains(&var_offset.raw()))
+                {
+                    inline_map.insert(key, x.expr.clone());
+                    inline_count += 1;
+                    continue;
                 }
 
                 // Inline cheap expressions (1-2 JIT instructions) with up to 3
                 // readers. Skip if any reader has select/dynamic_select
                 // (substitute_expr can't apply select to complex expressions).
-                if count <= 3 && !is_event_read && !has_override
+                if count <= 3
+                    && !is_event_read
+                    && !has_override
                     && !non_substitutable.contains(&key)
+                    && is_cheap_expr(&x.expr)
                 {
-                    if is_cheap_expr(&x.expr) {
-                        inline_map.insert(key, x.expr.clone());
-                        inline_count += 1;
-                        continue;
-                    }
+                    inline_map.insert(key, x.expr.clone());
+                    inline_count += 1;
+                    continue;
                 }
 
                 result.push(stmt);
@@ -656,17 +665,18 @@ pub fn optimize_unified(
     let mut event_blocked = 0usize;
     let mut override_blocked = 0usize;
     for stmt in &result {
-        if let ProtoStatement::Assign(x) = stmt {
-            if !x.dst.is_ff() && x.select.is_none() {
-                let key = x.dst;
-                let count = read_counts.get(&key).copied().unwrap_or(0);
-                if event_reads.contains(&x.dst.raw()) {
-                    event_blocked += 1;
-                } else if multi_write_offsets.contains(&x.dst.raw()) {
-                    override_blocked += 1;
-                } else if count > 1 {
-                    multi_use += 1;
-                }
+        if let ProtoStatement::Assign(x) = stmt
+            && !x.dst.is_ff()
+            && x.select.is_none()
+        {
+            let key = x.dst;
+            let count = read_counts.get(&key).copied().unwrap_or(0);
+            if event_reads.contains(&x.dst.raw()) {
+                event_blocked += 1;
+            } else if multi_write_offsets.contains(&x.dst.raw()) {
+                override_blocked += 1;
+            } else if count > 1 {
+                multi_use += 1;
             }
         }
     }
@@ -761,9 +771,7 @@ pub fn optimize_top_level(
         inline_map: &HashMap<CombKey, ProtoExpression>,
     ) -> bool {
         match expr {
-            ProtoExpression::Variable {
-                var_offset, ..
-            } => {
+            ProtoExpression::Variable { var_offset, .. } => {
                 // If this var is already in inline_map, it will be substituted
                 if inline_map.contains_key(var_offset) {
                     return true;
@@ -873,7 +881,10 @@ pub fn optimize_top_level(
 /// the index might be out of range when the branch isn't taken.
 fn is_safe_for_select(expr: &ProtoExpression) -> bool {
     match expr {
-        ProtoExpression::Variable { dynamic_select: None, .. } => true,
+        ProtoExpression::Variable {
+            dynamic_select: None,
+            ..
+        } => true,
         ProtoExpression::Variable { .. } => false, // has dynamic_select
         ProtoExpression::Value { .. } => true,
         // Complex expressions (Unary, Binary, etc.) are excluded for now.
@@ -907,92 +918,83 @@ pub fn flatten_if_to_select(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let mut i = 0;
     while i < stmts.len() {
         // Pattern 1: Assign(X, default) followed by If(cond, [Assign(X, override)], [])
-        if i + 1 < stmts.len() {
-            if let (ProtoStatement::Assign(default_assign), ProtoStatement::If(if_stmt)) =
+        if i + 1 < stmts.len()
+            && let (ProtoStatement::Assign(default_assign), ProtoStatement::If(if_stmt)) =
                 (&stmts[i], &stmts[i + 1])
+            && let Some(cond) = &if_stmt.cond
+            && if_stmt.false_side.is_empty()
+            && if_stmt.true_side.len() == 1
+            && default_assign.select.is_none()
+            && default_assign.dynamic_select.is_none()
+            && let ProtoStatement::Assign(override_assign) = &if_stmt.true_side[0]
+        {
+            let both_safe = is_safe_for_select(&override_assign.expr)
+                && is_safe_for_select(&default_assign.expr);
+            if override_assign.dst == default_assign.dst
+                && override_assign.select.is_none()
+                && override_assign.dynamic_select.is_none()
+                && override_assign.dst_width == default_assign.dst_width
+                && both_safe
             {
-                if let Some(cond) = &if_stmt.cond {
-                    if if_stmt.false_side.is_empty()
-                        && if_stmt.true_side.len() == 1
-                        && default_assign.select.is_none()
-                        && default_assign.dynamic_select.is_none()
-                    {
-                        if let ProtoStatement::Assign(override_assign) = &if_stmt.true_side[0] {
-                            let both_safe = is_safe_for_select(&override_assign.expr)
-                                && is_safe_for_select(&default_assign.expr);
-                            if override_assign.dst == default_assign.dst
-                                && override_assign.select.is_none()
-                                && override_assign.dynamic_select.is_none()
-                                && override_assign.dst_width == default_assign.dst_width
-                                && both_safe
-                            {
-                                let ternary = ProtoExpression::Ternary {
-                                    cond: Box::new(cond.clone()),
-                                    true_expr: Box::new(override_assign.expr.clone()),
-                                    false_expr: Box::new(default_assign.expr.clone()),
-                                    width: default_assign.dst_width,
-                                    expr_context: ExpressionContext {
-                                        width: default_assign.dst_width,
-                                        signed: false,
-                                    },
-                                };
-                                result.push(ProtoStatement::Assign(ProtoAssignStatement {
-                                    expr: ternary,
-                                    ..default_assign.clone()
-                                }));
-                                converted += 1;
-                                i += 2;
-                                continue;
-                            }
-                        }
-                    }
-                }
+                let ternary = ProtoExpression::Ternary {
+                    cond: Box::new(cond.clone()),
+                    true_expr: Box::new(override_assign.expr.clone()),
+                    false_expr: Box::new(default_assign.expr.clone()),
+                    width: default_assign.dst_width,
+                    expr_context: ExpressionContext {
+                        width: default_assign.dst_width,
+                        signed: false,
+                    },
+                };
+                result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                    expr: ternary,
+                    ..default_assign.clone()
+                }));
+                converted += 1;
+                i += 2;
+                continue;
             }
         }
 
         // Pattern 2: If with matching single Assigns on both sides
-        if let ProtoStatement::If(if_stmt) = &stmts[i] {
-            if let Some(cond) = &if_stmt.cond {
-                if if_stmt.true_side.len() == 1 && if_stmt.false_side.len() == 1 {
-                    if let (
-                        ProtoStatement::Assign(true_assign),
-                        ProtoStatement::Assign(false_assign),
-                    ) = (&if_stmt.true_side[0], &if_stmt.false_side[0])
-                    {
-                        // Only convert when both expressions are side-effect free
-                        // and won't produce problematic values when evaluated
-                        // unconditionally (e.g., no DynamicVariable array access
-                        // with potentially out-of-range indices).
-                        let both_safe = is_safe_for_select(&true_assign.expr)
-                            && is_safe_for_select(&false_assign.expr);
-                        if true_assign.dst == false_assign.dst
-                            && true_assign.select.is_none()
-                            && false_assign.select.is_none()
-                            && true_assign.dynamic_select.is_none()
-                            && false_assign.dynamic_select.is_none()
-                            && true_assign.dst_width == false_assign.dst_width
-                            && both_safe
-                        {
-                            let ternary = ProtoExpression::Ternary {
-                                cond: Box::new(cond.clone()),
-                                true_expr: Box::new(true_assign.expr.clone()),
-                                false_expr: Box::new(false_assign.expr.clone()),
-                                width: true_assign.dst_width,
-                                expr_context: ExpressionContext {
-                                    width: true_assign.dst_width,
-                                    signed: false,
-                                },
-                            };
-                            result.push(ProtoStatement::Assign(ProtoAssignStatement {
-                                expr: ternary,
-                                ..true_assign.clone()
-                            }));
-                            converted += 1;
-                            i += 1;
-                            continue;
-                        }
-                    }
-                }
+        if let ProtoStatement::If(if_stmt) = &stmts[i]
+            && let Some(cond) = &if_stmt.cond
+            && if_stmt.true_side.len() == 1
+            && if_stmt.false_side.len() == 1
+            && let (ProtoStatement::Assign(true_assign), ProtoStatement::Assign(false_assign)) =
+                (&if_stmt.true_side[0], &if_stmt.false_side[0])
+        {
+            // Only convert when both expressions are side-effect free
+            // and won't produce problematic values when evaluated
+            // unconditionally (e.g., no DynamicVariable array access
+            // with potentially out-of-range indices).
+            let both_safe =
+                is_safe_for_select(&true_assign.expr) && is_safe_for_select(&false_assign.expr);
+            if true_assign.dst == false_assign.dst
+                && true_assign.select.is_none()
+                && false_assign.select.is_none()
+                && true_assign.dynamic_select.is_none()
+                && false_assign.dynamic_select.is_none()
+                && true_assign.dst_width == false_assign.dst_width
+                && both_safe
+            {
+                let ternary = ProtoExpression::Ternary {
+                    cond: Box::new(cond.clone()),
+                    true_expr: Box::new(true_assign.expr.clone()),
+                    false_expr: Box::new(false_assign.expr.clone()),
+                    width: true_assign.dst_width,
+                    expr_context: ExpressionContext {
+                        width: true_assign.dst_width,
+                        signed: false,
+                    },
+                };
+                result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                    expr: ternary,
+                    ..true_assign.clone()
+                }));
+                converted += 1;
+                i += 1;
+                continue;
             }
         }
 

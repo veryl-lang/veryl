@@ -3,13 +3,16 @@ use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift::Context as CraneliftContext;
 use crate::ir::context::{Context as ConvContext, Conv};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::context::{LOG_KIND_COMB, LOG_KIND_FF, WRITE_LOG_ENTRY_STRIDE_LOG2};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
     build_linear_index_expr,
 };
 #[cfg(not(target_family = "wasm"))]
 use crate::ir::expression::{
-    band_const, build_dynamic_select_shift, gen_mask_for_width, gen_mask_range_128, iconst_128,
+    band_const, build_dynamic_select_shift, ensure_i64, gen_mask_for_width, gen_mask_range_128,
+    iconst_128,
 };
 use crate::ir::variable::{
     VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
@@ -40,8 +43,59 @@ pub enum ProtoStatementBlock {
     Compiled(FuncPtr),
 }
 
+/// Build-time metadata for a cold comb chunk (one that accesses cold region).
+#[derive(Clone, Debug)]
+pub struct ColdChunkMeta {
+    /// Index of this block in ProtoStatements.blocks
+    pub block_index: usize,
+    /// Hot comb input ranges: (comb_byte_offset, native_bytes)
+    pub hot_comb_inputs: Vec<(usize, usize)>,
+    /// FF input ranges: (ff_byte_offset, native_bytes)
+    pub ff_inputs: Vec<(usize, usize)>,
+}
+
+/// Runtime cold chunk info stored parallel to Ir::comb_statements.
+#[derive(Clone, Debug)]
+pub struct ColdChunk {
+    /// Index of this chunk in comb_statements
+    pub stmt_index: usize,
+    /// Hot comb input byte ranges to snapshot: (offset_in_comb_values, num_bytes)
+    pub hot_comb_ranges: Vec<(usize, usize)>,
+    /// FF input byte ranges to snapshot: (offset_in_ff_values, num_bytes)
+    pub ff_ranges: Vec<(usize, usize)>,
+    /// Total snapshot size in bytes
+    pub snapshot_size: usize,
+}
+
+/// Per-chunk activity metadata for FF-change-based comb gating.
+#[derive(Clone, Debug)]
+pub struct ChunkActivityMeta {
+    /// FF byte ranges this chunk reads: (ff_byte_offset, num_bytes).
+    /// If a DynamicVariable reads from FF, the entire array range is included.
+    pub ff_reads: Vec<(usize, usize)>,
+    /// Comb byte offsets this chunk writes (output range starts).
+    pub comb_writes: Vec<isize>,
+    /// Comb byte offsets this chunk reads.
+    pub comb_reads: Vec<isize>,
+    /// True if this chunk has DynamicVariable FF reads (array access with
+    /// runtime index — conservatively treated as reading the entire array).
+    pub has_dynamic_ff_read: bool,
+    /// True if this chunk reads a comb offset that event statements write
+    /// in the hot region (always changes).
+    pub reads_hot_event_comb: bool,
+    /// True if this chunk reads a comb offset that event statements write
+    /// in the cold region (only changes when cold_dirty).
+    pub reads_cold_event_comb: bool,
+}
+
 /// A sequence of statement blocks that may mix interpreted and JIT-compiled groups.
-pub struct ProtoStatements(pub Vec<ProtoStatementBlock>);
+pub struct ProtoStatements {
+    pub blocks: Vec<ProtoStatementBlock>,
+    /// Metadata for cold chunks (those accessing cold comb region).
+    pub cold_chunks: Vec<ColdChunkMeta>,
+    /// Per-block activity metadata for FF-change-based comb gating.
+    pub activity: Vec<ChunkActivityMeta>,
+}
 
 impl ProtoStatements {
     pub(crate) fn to_statements(
@@ -53,7 +107,7 @@ impl ProtoStatements {
         use_4state: bool,
     ) -> Vec<Statement> {
         let mut result = Vec::new();
-        for block in &self.0 {
+        for block in &self.blocks {
             match block {
                 ProtoStatementBlock::Interpreted(proto) => {
                     for s in proto {
@@ -72,6 +126,36 @@ impl ProtoStatements {
             }
         }
         result
+    }
+
+    /// Convert block-level ColdChunkMeta to statement-level ColdChunk indices.
+    /// Each Compiled block becomes 1 statement; each Interpreted block becomes N statements.
+    pub fn resolve_cold_chunks(&self) -> Vec<ColdChunk> {
+        // Build block_index → stmt_index mapping
+        let mut block_to_stmt = Vec::with_capacity(self.blocks.len());
+        let mut stmt_idx = 0usize;
+        for block in &self.blocks {
+            block_to_stmt.push(stmt_idx);
+            match block {
+                ProtoStatementBlock::Interpreted(proto) => stmt_idx += proto.len(),
+                ProtoStatementBlock::Compiled(_) => stmt_idx += 1,
+            }
+        }
+
+        self.cold_chunks
+            .iter()
+            .map(|meta| {
+                let si = block_to_stmt[meta.block_index];
+                let hot_size: usize = meta.hot_comb_inputs.iter().map(|(_, nb)| *nb).sum();
+                let ff_size: usize = meta.ff_inputs.iter().map(|(_, nb)| *nb).sum();
+                ColdChunk {
+                    stmt_index: si,
+                    hot_comb_ranges: meta.hot_comb_inputs.clone(),
+                    ff_ranges: meta.ff_inputs.clone(),
+                    snapshot_size: hot_size + ff_size,
+                }
+            })
+            .collect()
     }
 }
 
@@ -195,8 +279,13 @@ pub enum Statement {
     Binary(FuncPtr, *const u8, *const u8),
     BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
     SequentialBlock(Vec<Statement>),
+    /// Sequence of different JIT functions called with their own (ff, comb) pointers.
+    BinarySequence(Vec<(FuncPtr, *const u8, *const u8)>),
     SystemFunctionCall(SystemFunctionCall),
-    TbMethodCall { inst: StrId, method: TbMethodKind },
+    TbMethodCall {
+        inst: StrId,
+        method: TbMethodKind,
+    },
 }
 
 // SAFETY: Raw pointers point into the owning Ir's exclusively-owned buffers.
@@ -212,7 +301,9 @@ impl Statement {
     pub fn is_binary(&self) -> bool {
         matches!(
             self,
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _)
+            Statement::Binary(_, _, _)
+                | Statement::BinaryBatch(_, _)
+                | Statement::BinarySequence(_)
         )
     }
 
@@ -225,6 +316,7 @@ impl Statement {
             Statement::Binary(_, _, _) => "Binary",
             Statement::BinaryBatch(_, _) => "BinaryBatch",
             Statement::SequentialBlock(_) => "SequentialBlock",
+            Statement::BinarySequence(_) => "BinarySequence",
             Statement::SystemFunctionCall(_) => "SystemFunctionCall",
             Statement::Break => "Break",
             Statement::TbMethodCall { .. } => "TbMethodCall",
@@ -307,6 +399,12 @@ impl Statement {
                 }
                 ControlFlow::Continue
             }
+            Statement::BinarySequence(seq) => unsafe {
+                for &(func, ff_values, comb_values) in seq {
+                    func(ff_values, comb_values);
+                }
+                ControlFlow::Continue
+            },
             Statement::SystemFunctionCall(x) => {
                 x.eval_step(mask_cache);
                 ControlFlow::Continue
@@ -325,7 +423,10 @@ impl Statement {
                     s.gather_variable(inputs, outputs);
                 }
             }
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) | Statement::Break => (),
+            Statement::Binary(_, _, _)
+            | Statement::BinaryBatch(_, _)
+            | Statement::BinarySequence(_)
+            | Statement::Break => (),
             Statement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_variable(inputs, outputs);
@@ -499,6 +600,146 @@ pub enum ProtoSystemFunctionCall {
         message: Option<String>,
     },
     Finish,
+}
+
+impl ProtoSystemFunctionCall {
+    #[cfg(not(target_family = "wasm"))]
+    pub fn can_build_binary(&self) -> bool {
+        match self {
+            ProtoSystemFunctionCall::Display { args, .. }
+            | ProtoSystemFunctionCall::Write { args, .. } => {
+                args.iter().all(|a| a.can_build_binary())
+            }
+            // $assert/$finish use panic which can't unwind from JIT
+            ProtoSystemFunctionCall::Assert { .. }
+            | ProtoSystemFunctionCall::Finish
+            | ProtoSystemFunctionCall::Readmemh { .. } => false,
+        }
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn build_binary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<()> {
+        use crate::cranelift::alloc_wide_slot;
+        use cranelift::prelude::types::I64;
+
+        match self {
+            ProtoSystemFunctionCall::Display { format_str, args }
+            | ProtoSystemFunctionCall::Write { format_str, args } => {
+                let is_write = matches!(self, ProtoSystemFunctionCall::Write { .. });
+                let nargs = args.len();
+
+                // Leak format string to ensure it outlives the JIT code.
+                // ProtoStatement is dropped after to_statements(), but JIT code
+                // captures the pointer as a compile-time constant.
+                let fmt_static: &'static str = Box::leak(format_str.clone().into_boxed_str());
+
+                // Each arg slot: [value: u64, width: u64] = 16 bytes
+                let args_slot = if nargs > 0 {
+                    let slot = alloc_wide_slot(builder, nargs * 16);
+                    let flags = cranelift::codegen::ir::MemFlags::trusted();
+                    for (i, arg) in args.iter().enumerate() {
+                        let (val, _mask_xz) = arg.build_binary(context, builder)?;
+                        let width_val = builder.ins().iconst(I64, arg.width() as i64);
+                        builder.ins().store(flags, val, slot, (i * 16) as i32);
+                        builder
+                            .ins()
+                            .store(flags, width_val, slot, (i * 16 + 8) as i32);
+                    }
+                    slot
+                } else {
+                    context.zero // unused placeholder
+                };
+
+                let helper_fn = if is_write {
+                    sfc_jit_write as *const () as usize
+                } else {
+                    sfc_jit_display as *const () as usize
+                };
+                let fmt_ptr_val = builder
+                    .ins()
+                    .iconst(I64, fmt_static.as_ptr() as usize as i64);
+                let fmt_len_val = builder.ins().iconst(I64, fmt_static.len() as i64);
+                let nargs_val = builder.ins().iconst(I64, nargs as i64);
+
+                let sig_ref = {
+                    let mut sig = cranelift::codegen::ir::Signature::new(context.call_conv);
+                    sig.params.push(cranelift::codegen::ir::AbiParam::new(I64)); // fmt_ptr
+                    sig.params.push(cranelift::codegen::ir::AbiParam::new(I64)); // fmt_len
+                    sig.params.push(cranelift::codegen::ir::AbiParam::new(I64)); // args_ptr
+                    sig.params.push(cranelift::codegen::ir::AbiParam::new(I64)); // nargs
+                    builder.import_signature(sig)
+                };
+                let func_ptr = builder.ins().iconst(I64, helper_fn as i64);
+                builder.ins().call_indirect(
+                    sig_ref,
+                    func_ptr,
+                    &[fmt_ptr_val, fmt_len_val, args_slot, nargs_val],
+                );
+                Some(())
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Reconstruct Values from JIT arg slots: [value: u64, width: u64] × nargs
+fn sfc_read_args(args_ptr: u64, nargs: u64) -> Vec<Value> {
+    if nargs == 0 {
+        return Vec::new();
+    }
+    let n = nargs as usize;
+    let base = args_ptr as *const u64;
+    (0..n)
+        .map(|i| unsafe {
+            let val = *base.add(i * 2);
+            let width = *base.add(i * 2 + 1) as usize;
+            Value::new(val, width, false)
+        })
+        .collect()
+}
+
+/// JIT helper: $write(fmt, args)
+extern "C" fn sfc_jit_write(fmt_ptr: u64, fmt_len: u64, args_ptr: u64, nargs: u64) {
+    let fmt = unsafe {
+        std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+            fmt_ptr as *const u8,
+            fmt_len as usize,
+        ))
+    };
+    let values = sfc_read_args(args_ptr, nargs);
+    if fmt.is_empty() {
+        let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
+        output_buffer::print(&parts.join(" "));
+    } else if values.is_empty() {
+        output_buffer::print(fmt);
+    } else {
+        let output = format_display_string(fmt, &values);
+        output_buffer::print(&output);
+    }
+}
+
+/// JIT helper: $display(fmt, args)
+extern "C" fn sfc_jit_display(fmt_ptr: u64, fmt_len: u64, args_ptr: u64, nargs: u64) {
+    let fmt = unsafe {
+        std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+            fmt_ptr as *const u8,
+            fmt_len as usize,
+        ))
+    };
+    let values = sfc_read_args(args_ptr, nargs);
+    if fmt.is_empty() {
+        let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
+        output_buffer::println(&parts.join(" "));
+    } else if values.is_empty() {
+        output_buffer::println(fmt);
+    } else {
+        let output = format_display_string(fmt, &values);
+        output_buffer::println(&output);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -709,6 +950,41 @@ impl ProtoAssignDynamicStatement {
                     }
                 }
             }
+        }
+
+        // Emit write-log append for FF DynamicAssign (sparse commit).
+        if self.dst_base.is_ff() {
+            let nb = calc_native_bytes(self.dst_width);
+            let vs = if context.use_4state { nb * 2 } else { nb };
+            // current_offset = dst_ff_current_base_offset + clamped * stride
+            let current_off = builder
+                .ins()
+                .iadd_imm(byte_offset, self.dst_ff_current_base_offset as i64);
+            ProtoAssignStatement::emit_write_log_dynamic(context, builder, current_off, vs as i32);
+        }
+
+        // Emit cold dirty flag store when this write targets a large cold array.
+        if let Some(flag_offset) = context.cold_dirty_flag_offset
+            && !self.dst_base.is_ff()
+            && self.dst_num_elements > 256
+            && (self.dst_base.raw() as usize) >= context.comb_hot_size
+        {
+            let flag_addr = builder.ins().iadd_imm(context.comb_values, flag_offset);
+            let one = builder.ins().iconst(I64, 1);
+            builder
+                .ins()
+                .istore8(MemFlags::trusted(), one, flag_addr, 0);
+        }
+
+        // Emit event→comb dirty flag for any comb DynamicAssign.
+        if !self.dst_base.is_ff()
+            && let Some(flag_offset) = context.event_comb_dirty_flag_offset
+        {
+            let flag_addr = builder.ins().iadd_imm(context.comb_values, flag_offset);
+            let one = builder.ins().iconst(I64, 1);
+            builder
+                .ins()
+                .istore8(MemFlags::trusted(), one, flag_addr, 0);
         }
 
         Some(())
@@ -1135,7 +1411,7 @@ impl ProtoStatement {
             ProtoStatement::AssignDynamic(x) => x.can_build_binary(),
             ProtoStatement::If(x) => x.can_build_binary(),
             ProtoStatement::For(x) => x.can_build_binary(),
-            ProtoStatement::SystemFunctionCall(_) => false,
+            ProtoStatement::SystemFunctionCall(x) => x.can_build_binary(),
             ProtoStatement::CompiledBlock(_) => false,
             ProtoStatement::SequentialBlock(body) => body.iter().all(|s| s.can_build_binary()),
             ProtoStatement::TbMethodCall { .. } => false,
@@ -1275,6 +1551,120 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+        }
+    }
+
+    /// Collect (VarOffset, native_bytes) for all inputs.
+    /// For DynamicVariable, only the index expression inputs are collected
+    /// (array base excluded — it may be in the cold region).
+    pub fn gather_input_ranges(&self, inputs: &mut Vec<(VarOffset, usize)>) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.expr.gather_input_ranges(inputs);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_input_ranges(inputs);
+                }
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_index_expr.gather_input_ranges(inputs);
+                x.expr.gather_input_ranges(inputs);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_input_ranges(inputs);
+                }
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &x.cond {
+                    cond.gather_input_ranges(inputs);
+                }
+                for s in &x.true_side {
+                    s.gather_input_ranges(inputs);
+                }
+                for s in &x.false_side {
+                    s.gather_input_ranges(inputs);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.gather_input_ranges(inputs);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                    condition.gather_input_ranges(inputs);
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(x) => {
+                // Use aggregate input_offsets; native_bytes unknown, use 8 (conservative).
+                for &off in &x.input_offsets {
+                    inputs.push((off, 8));
+                }
+            }
+            ProtoStatement::For(x) => {
+                for s in &x.body {
+                    s.gather_input_ranges(inputs);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.gather_input_ranges(inputs);
+                }
+            }
+            ProtoStatement::Break => {}
+            ProtoStatement::TbMethodCall { .. } => {}
+        }
+    }
+
+    /// Returns true if this statement accesses a large cold array.
+    pub fn has_cold_array_access(&self, comb_hot_bytes: usize) -> bool {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.expr.has_cold_array_access(comb_hot_bytes)
+                    || x.dynamic_select
+                        .as_ref()
+                        .is_some_and(|d| d.index_expr.has_cold_array_access(comb_hot_bytes))
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                // Check both the expression and the dst index
+                x.expr.has_cold_array_access(comb_hot_bytes)
+                    || x.dst_index_expr.has_cold_array_access(comb_hot_bytes)
+                    || x.dynamic_select
+                        .as_ref()
+                        .is_some_and(|d| d.index_expr.has_cold_array_access(comb_hot_bytes))
+                    // Also check if the dst itself is a large cold array
+                    || (x.dst_num_elements > 256
+                        && matches!(x.dst_base, VarOffset::Comb(o) if (o as usize) >= comb_hot_bytes))
+            }
+            ProtoStatement::If(x) => {
+                x.cond
+                    .as_ref()
+                    .is_some_and(|c| c.has_cold_array_access(comb_hot_bytes))
+                    || x.true_side
+                        .iter()
+                        .any(|s| s.has_cold_array_access(comb_hot_bytes))
+                    || x.false_side
+                        .iter()
+                        .any(|s| s.has_cold_array_access(comb_hot_bytes))
+            }
+            ProtoStatement::CompiledBlock(x) => {
+                // Check if any input/output offset is in cold region for a large array
+                // Conservative: check stmt_deps for cold offsets
+                x.input_offsets
+                    .iter()
+                    .chain(x.output_offsets.iter())
+                    .any(|off| matches!(off, VarOffset::Comb(o) if (*o as usize) >= comb_hot_bytes))
+            }
+            ProtoStatement::For(x) => x
+                .body
+                .iter()
+                .any(|s| s.has_cold_array_access(comb_hot_bytes)),
+            ProtoStatement::SequentialBlock(body) => {
+                body.iter().any(|s| s.has_cold_array_access(comb_hot_bytes))
+            }
+            ProtoStatement::Break => false,
+            ProtoStatement::SystemFunctionCall(_) | ProtoStatement::TbMethodCall { .. } => false,
         }
     }
 
@@ -1654,11 +2044,15 @@ impl ProtoStatement {
                 let result = x.build_binary(context, builder);
                 // Dynamic assigns write to runtime-computed addresses; invalidate all cached loads
                 context.load_cache.clear();
+                // Notify If store tracker that a dynamic write occurred
+                if let Some((_, ref mut dynamic)) = context.if_store_tracker {
+                    *dynamic = true;
+                }
                 result
             }
             ProtoStatement::If(x) => x.build_binary(context, builder, is_last),
             ProtoStatement::For(x) => x.build_binary(context, builder, is_last),
-            ProtoStatement::SystemFunctionCall(_) => None,
+            ProtoStatement::SystemFunctionCall(x) => x.build_binary(context, builder),
             ProtoStatement::CompiledBlock(_) => None,
             ProtoStatement::SequentialBlock(body) => {
                 for (i, s) in body.iter().enumerate() {
@@ -1941,6 +2335,11 @@ impl ProtoAssignStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        // Track this store for If cache preservation
+        if let Some((ref mut set, _)) = context.if_store_tracker {
+            set.insert(self.dst);
+        }
+
         // Wide path: >128-bit destination
         if self.dst_width > 128 {
             return self.build_binary_wide(context, builder);
@@ -1950,6 +2349,11 @@ impl ProtoAssignStatement {
         let wide = self.dst_width > 64;
 
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
+        // Ensure payload is at least I64 (comparisons may return I8)
+        payload = ensure_i64(builder, payload);
+        if let Some(mxz) = mask_xz {
+            mask_xz = Some(ensure_i64(builder, mxz));
+        }
         let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
@@ -2017,8 +2421,9 @@ impl ProtoAssignStatement {
                 I64
             };
 
+            let stmt_cache_key = (cache_key, nb);
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
-                && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
+                && let Some(&(cached_p, cached_m, _)) = context.load_cache.get(&stmt_cache_key)
             {
                 (cached_p, cached_m)
             } else {
@@ -2050,15 +2455,19 @@ impl ProtoAssignStatement {
 
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            if nb == 4 {
-                builder
-                    .ins()
-                    .istore32(store_mem_flag, result, base_addr, dst_offset);
-            } else {
-                builder
-                    .ins()
-                    .store(store_mem_flag, result, base_addr, dst_offset);
-            }
+            let is_event_comb = !self.dst.is_ff() && context.in_event;
+            // Bit-select NBA: log only the bits selected by `dyn_mask`.
+            Self::emit_store_or_log_comb_masked(
+                context,
+                builder,
+                store_mem_flag,
+                result,
+                dyn_mask,
+                base_addr,
+                dst_offset,
+                nb,
+                self.dst.is_ff(),
+            );
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
@@ -2066,26 +2475,44 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                if nb == 4 {
-                    builder.ins().istore32(
-                        store_mem_flag,
-                        result_m,
-                        base_addr,
-                        dst_offset + nb_i32,
-                    );
-                } else {
-                    builder
-                        .ins()
-                        .store(store_mem_flag, result_m, base_addr, dst_offset + nb_i32);
-                }
+                Self::emit_store_or_log_comb_masked(
+                    context,
+                    builder,
+                    store_mem_flag,
+                    result_m,
+                    dyn_mask,
+                    base_addr,
+                    dst_offset + nb_i32,
+                    nb,
+                    self.dst.is_ff(),
+                );
                 Some(result_m)
             } else {
                 None
             };
 
+            // Mask forwarded value to dst_width to match load-path uextend.
+            // Keep the cache update even for event-phase comb stores so
+            // blocking-like reads inside the same always_ff block see the
+            // just-written value (see simple path for rationale).
+            let fwd = if self.dst_width < 64 {
+                let m = gen_mask_for_width(self.dst_width);
+                band_const(builder, result, m, false)
+            } else {
+                result
+            };
+            let fwd_m = if self.dst_width < 64 {
+                result_mask_xz.map(|v| {
+                    let m = gen_mask_for_width(self.dst_width);
+                    band_const(builder, v, m, false)
+                })
+            } else {
+                result_mask_xz
+            };
             context
                 .load_cache
-                .insert(cache_key, (result, result_mask_xz));
+                .insert(stmt_cache_key, (fwd, fwd_m, false));
+            let _ = is_event_comb;
         } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
@@ -2099,8 +2526,9 @@ impl ProtoAssignStatement {
             };
 
             // Use cached value if available, otherwise load from memory
+            let stmt_cache_key2 = (cache_key, nb);
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
-                && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
+                && let Some(&(cached_p, cached_m, _)) = context.load_cache.get(&stmt_cache_key2)
             {
                 (cached_p, cached_m)
             } else {
@@ -2130,24 +2558,32 @@ impl ProtoAssignStatement {
                 (p, m)
             };
 
-            let not_mask = if wide {
+            let (not_mask, bit_mask) = if wide {
                 let mask = gen_mask_range_128(beg, end);
-                iconst_128(builder, !mask)
+                (iconst_128(builder, !mask), iconst_128(builder, mask))
             } else {
                 let mask = ValueU64::gen_mask_range(beg, end);
-                builder.ins().iconst(I64, !mask as i64)
+                (
+                    builder.ins().iconst(I64, !mask as i64),
+                    builder.ins().iconst(I64, mask as i64),
+                )
             };
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            if nb == 4 {
-                builder
-                    .ins()
-                    .istore32(store_mem_flag, result, base_addr, dst_offset);
-            } else {
-                builder
-                    .ins()
-                    .store(store_mem_flag, result, base_addr, dst_offset);
-            }
+            let is_event_comb = !self.dst.is_ff() && context.in_event;
+            // Bit-select NBA: log only the [beg:end] bits defined by this
+            // statement so multiple bit-select writes compose at drain.
+            Self::emit_store_or_log_comb_masked(
+                context,
+                builder,
+                store_mem_flag,
+                result,
+                bit_mask,
+                base_addr,
+                dst_offset,
+                nb,
+                self.dst.is_ff(),
+            );
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
@@ -2155,150 +2591,474 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                if nb == 4 {
-                    builder.ins().istore32(
-                        store_mem_flag,
-                        result_m,
-                        base_addr,
-                        dst_offset + nb_i32,
-                    );
-                } else {
-                    builder
-                        .ins()
-                        .store(store_mem_flag, result_m, base_addr, dst_offset + nb_i32);
-                }
+                Self::emit_store_or_log_comb_masked(
+                    context,
+                    builder,
+                    store_mem_flag,
+                    result_m,
+                    bit_mask,
+                    base_addr,
+                    dst_offset + nb_i32,
+                    nb,
+                    self.dst.is_ff(),
+                );
                 Some(result_m)
             } else {
                 None
             };
 
-            // Forward stored value to load cache
+            // Mask forwarded value to dst_width to match load-path uextend.
+            // Keep the cache update even for event-phase comb stores so
+            // blocking-like reads inside the same always_ff block see the
+            // just-written value (see simple path for rationale).
+            let fwd = if self.dst_width < 64 {
+                let m = gen_mask_for_width(self.dst_width);
+                band_const(builder, result, m, false)
+            } else {
+                result
+            };
+            let fwd_m = if self.dst_width < 64 {
+                result_mask_xz.map(|v| {
+                    let m = gen_mask_for_width(self.dst_width);
+                    band_const(builder, v, m, false)
+                })
+            } else {
+                result_mask_xz
+            };
             context
                 .load_cache
-                .insert(cache_key, (result, result_mask_xz));
+                .insert(stmt_cache_key2, (fwd, fwd_m, false));
+            let _ = is_event_comb;
         } else {
+            // Event-phase comb stores are redirected to the write-log
+            // (strict NBA). store_elim's load_cache forwarding is unsafe in
+            // that case (memory is not actually updated), so skip store_elim.
+            let is_event_comb = !self.dst.is_ff() && context.in_event;
             // Store elimination relies on load_cache forwarding to
             // serve subsequent reads; skip only when the cache is live.
-            let skip_store = context.store_elim_enabled
+            let skip_store = !is_event_comb
+                && context.store_elim_enabled
                 && !context.disable_load_cache
                 && context.store_elim_offsets.contains(&cache_key);
 
             if !skip_store {
                 let needs_trunc = known_bits > self.dst_width;
-
-                match self.dst_width {
-                    8 => {
-                        builder
-                            .ins()
-                            .istore8(store_mem_flag, payload, base_addr, dst_offset);
-                        if let Some(mask_xz) = mask_xz {
-                            builder.ins().istore8(
-                                store_mem_flag,
-                                mask_xz,
-                                base_addr,
-                                dst_offset + nb_i32,
-                            );
-                        }
-                    }
-                    16 => {
-                        builder
-                            .ins()
-                            .istore16(store_mem_flag, payload, base_addr, dst_offset);
-                        if let Some(mask_xz) = mask_xz {
-                            builder.ins().istore16(
-                                store_mem_flag,
-                                mask_xz,
-                                base_addr,
-                                dst_offset + nb_i32,
-                            );
-                        }
-                    }
-                    32 => {
-                        builder
-                            .ins()
-                            .istore32(store_mem_flag, payload, base_addr, dst_offset);
-                        if let Some(mask_xz) = mask_xz {
-                            builder.ins().istore32(
-                                store_mem_flag,
-                                mask_xz,
-                                base_addr,
-                                dst_offset + nb_i32,
-                            );
-                        }
-                    }
-                    64 => {
-                        builder
-                            .ins()
-                            .store(store_mem_flag, payload, base_addr, dst_offset);
-                        if let Some(mask_xz) = mask_xz {
-                            builder.ins().store(
-                                store_mem_flag,
-                                mask_xz,
-                                base_addr,
-                                dst_offset + nb_i32,
-                            );
-                        }
-                    }
-                    128 => {
-                        builder
-                            .ins()
-                            .store(store_mem_flag, payload, base_addr, dst_offset);
-                        if let Some(mask_xz) = mask_xz {
-                            builder.ins().store(
-                                store_mem_flag,
-                                mask_xz,
-                                base_addr,
-                                dst_offset + nb_i32,
-                            );
-                        }
-                    }
+                // Determine the effective memory store width (bytes) and
+                // optionally narrow the value for non-power-of-two widths.
+                let (store_p, store_m, store_nb) = match self.dst_width {
+                    8 => (payload, mask_xz, 1usize),
+                    16 => (payload, mask_xz, 2usize),
+                    32 => (payload, mask_xz, 4usize),
+                    64 => (payload, mask_xz, 8usize),
+                    128 => (payload, mask_xz, 16usize),
                     _ => {
                         if self.dst_width > 128 {
                             return None;
                         }
-                        // Always mask: effective_bits() reports declared
-                        // width and misses carry-out from Add and friends.
                         let _ = needs_trunc;
                         let mask = gen_mask_for_width(self.dst_width);
-                        let payload = band_const(builder, payload, mask, wide);
-                        // Store using the appropriate native width
-                        if nb == 4 {
-                            builder
-                                .ins()
-                                .istore32(store_mem_flag, payload, base_addr, dst_offset);
-                        } else {
-                            builder
-                                .ins()
-                                .store(store_mem_flag, payload, base_addr, dst_offset);
+                        let p = band_const(builder, payload, mask, wide);
+                        let m = mask_xz.map(|v| band_const(builder, v, mask, wide));
+                        (p, m, nb)
+                    }
+                };
+                // Event-phase simple-path stores write directly to memory
+                // (not logged). Bit-select stores use the write-log.
+                match store_nb {
+                    1 => {
+                        builder
+                            .ins()
+                            .istore8(store_mem_flag, store_p, base_addr, dst_offset);
+                    }
+                    2 => {
+                        builder
+                            .ins()
+                            .istore16(store_mem_flag, store_p, base_addr, dst_offset);
+                    }
+                    4 => {
+                        builder
+                            .ins()
+                            .istore32(store_mem_flag, store_p, base_addr, dst_offset);
+                    }
+                    _ => {
+                        builder
+                            .ins()
+                            .store(store_mem_flag, store_p, base_addr, dst_offset);
+                    }
+                }
+                if let Some(m) = store_m {
+                    match store_nb {
+                        1 => {
+                            builder.ins().istore8(
+                                store_mem_flag,
+                                m,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
                         }
-                        if let Some(mask_xz) = mask_xz {
-                            let mask = gen_mask_for_width(self.dst_width);
-                            let mask_xz = band_const(builder, mask_xz, mask, wide);
-                            if nb == 4 {
-                                builder.ins().istore32(
-                                    store_mem_flag,
-                                    mask_xz,
-                                    base_addr,
-                                    dst_offset + nb_i32,
-                                );
-                            } else {
-                                builder.ins().store(
-                                    store_mem_flag,
-                                    mask_xz,
-                                    base_addr,
-                                    dst_offset + nb_i32,
-                                );
-                            }
+                        2 => {
+                            builder.ins().istore16(
+                                store_mem_flag,
+                                m,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                        4 => {
+                            builder.ins().istore32(
+                                store_mem_flag,
+                                m,
+                                base_addr,
+                                dst_offset + nb_i32,
+                            );
+                        }
+                        _ => {
+                            builder
+                                .ins()
+                                .store(store_mem_flag, m, base_addr, dst_offset + nb_i32);
                         }
                     }
                 }
             }
 
-            // Forward value to load cache (always, even when store is eliminated)
-            context.load_cache.insert(cache_key, (payload, mask_xz));
+            // Forward value to load cache (including event-phase comb stores,
+            // where memory is not updated but load_cache serves re-reads).
+            let needs_fwd_mask = self.dst_width < 64
+                && (known_bits > self.dst_width || self.dst_width != nb * 8)
+                && payload != context.zero; // zero needs no mask
+            let fwd_p = if needs_fwd_mask {
+                let m = gen_mask_for_width(self.dst_width);
+                band_const(builder, payload, m, false)
+            } else {
+                payload
+            };
+            let fwd_m = if needs_fwd_mask {
+                mask_xz.map(|v| {
+                    let m = gen_mask_for_width(self.dst_width);
+                    band_const(builder, v, m, false)
+                })
+            } else {
+                mask_xz
+            };
+            // Forwarding is treated as NOT-exact for event-phase comb stores
+            // because memory holds the pre-event value while load_cache
+            // holds the updated value; we must force future reads of that
+            // offset to come from load_cache, not re-load from memory.
+            let fwd_is_exact = !is_event_comb
+                && (self.dst_width >= 64
+                    || (self.dst_width == nb * 8
+                        && (needs_fwd_mask || known_bits <= self.dst_width)));
+            context
+                .load_cache
+                .insert((cache_key, nb), (fwd_p, fwd_m, fwd_is_exact));
+            let _ = is_event_comb;
+        }
+
+        // Emit write-log append for FF stores (sparse commit).
+        if self.dst.is_ff() {
+            let nb = calc_native_bytes(self.dst_width);
+            let vs = if context.use_4state { nb * 2 } else { nb };
+            Self::emit_write_log_static(
+                context,
+                builder,
+                self.dst_ff_current_offset as i32,
+                vs as i32,
+            );
+        }
+
+        // Emit event→comb dirty flag store when writing to a comb variable.
+        // This flag is checked by activity gating to detect event→comb changes.
+        if !self.dst.is_ff()
+            && let Some(flag_offset) = context.event_comb_dirty_flag_offset
+        {
+            let flag_addr = builder.ins().iadd_imm(context.comb_values, flag_offset);
+            let one = builder.ins().iconst(I64, 1);
+            builder
+                .ins()
+                .istore8(MemFlags::trusted(), one, flag_addr, 0);
         }
 
         Some(())
+    }
+
+    /// Emit write-log append for a static FF store.
+    /// current_offset is a compile-time constant (i32).
+    /// When ff_delta_var is set, the stored offset is adjusted by ff_delta
+    /// so that JIT-cached instances record absolute buffer offsets.
+    #[cfg(not(target_family = "wasm"))]
+    fn emit_write_log_static(
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        current_offset: i32,
+        value_size: i32,
+    ) {
+        if let (Some(var), Some(entries_ptr)) =
+            (context.log_count_var, context.write_log_entries_ptr)
+        {
+            let count = builder.use_var(var);
+            // entry_addr = entries_ptr + count * WRITE_LOG_ENTRY_STRIDE
+            let entry_byte_off = builder.ins().ishl_imm(count, WRITE_LOG_ENTRY_STRIDE_LOG2);
+            let entries_base = builder.ins().iconst(I64, entries_ptr);
+            let entry_addr = builder.ins().iadd(entries_base, entry_byte_off);
+            // Compute absolute offset: current_offset + ff_delta.
+            // For the first instance ff_delta=0; for cached instances ff_delta!=0.
+            let off_val = if let Some(delta_var) = context.ff_delta_var {
+                let delta = builder.use_var(delta_var);
+                let base_off = builder.ins().iconst(I64, current_offset as i64);
+                let abs_off = builder.ins().iadd(base_off, delta);
+                builder.ins().ireduce(I32, abs_off)
+            } else {
+                builder.ins().iconst(I32, current_offset as i64)
+            };
+            let vs_val = builder.ins().iconst(I32, value_size as i64);
+            let kind_val = builder.ins().iconst(I32, LOG_KIND_FF as i64);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), off_val, entry_addr, 0);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), vs_val, entry_addr, 4);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), kind_val, entry_addr, 8);
+            // count++
+            let new_count = builder.ins().iadd_imm(count, 1);
+            builder.def_var(var, new_count);
+        }
+    }
+
+    /// Emit write-log append for a dynamic FF store.
+    /// current_offset_val is a runtime-computed Cranelift Value (I64).
+    /// When ff_delta_var is set, the stored offset is adjusted by ff_delta.
+    #[cfg(not(target_family = "wasm"))]
+    fn emit_write_log_dynamic(
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        current_offset_val: cranelift::prelude::Value,
+        value_size: i32,
+    ) {
+        if let (Some(var), Some(entries_ptr)) =
+            (context.log_count_var, context.write_log_entries_ptr)
+        {
+            let count = builder.use_var(var);
+            let entry_byte_off = builder.ins().ishl_imm(count, WRITE_LOG_ENTRY_STRIDE_LOG2);
+            let entries_base = builder.ins().iconst(I64, entries_ptr);
+            let entry_addr = builder.ins().iadd(entries_base, entry_byte_off);
+            // Adjust by ff_delta for cached instances, then truncate to I32
+            let adjusted = if let Some(delta_var) = context.ff_delta_var {
+                let delta = builder.use_var(delta_var);
+                builder.ins().iadd(current_offset_val, delta)
+            } else {
+                current_offset_val
+            };
+            let off_i32 = builder.ins().ireduce(I32, adjusted);
+            let vs_val = builder.ins().iconst(I32, value_size as i64);
+            let kind_val = builder.ins().iconst(I32, LOG_KIND_FF as i64);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), off_i32, entry_addr, 0);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), vs_val, entry_addr, 4);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), kind_val, entry_addr, 8);
+            let new_count = builder.ins().iadd_imm(count, 1);
+            builder.def_var(var, new_count);
+        }
+    }
+
+    /// Emit a `LOG_KIND_COMB` write-log entry carrying the stored value
+    /// and a bit-mask indicating which bits this statement actually intends
+    /// to update.
+    ///
+    /// Used for event-phase comb stores to defer visibility until after
+    /// `event_eval` (strict NBA with proper bit-select composition).
+    /// `value_size` must be in {1, 2, 4, 8, 16}; wider stores are split
+    /// into 16B chunks at a higher level.
+    ///
+    /// The mask is a Cranelift `Value` whose width matches the stored
+    /// value. For full-word stores it is all-ones; for bit-select stores
+    /// it carries only the bits defined by the select expression.
+    #[cfg(not(target_family = "wasm"))]
+    fn emit_write_log_comb_static(
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        current_offset: i32,
+        value_size: usize,
+        value: cranelift::prelude::Value,
+        mask: cranelift::prelude::Value,
+    ) {
+        if let (Some(var), Some(entries_ptr)) =
+            (context.log_count_var, context.write_log_entries_ptr)
+        {
+            let count = builder.use_var(var);
+            let entry_byte_off = builder.ins().ishl_imm(count, WRITE_LOG_ENTRY_STRIDE_LOG2);
+            let entries_base = builder.ins().iconst(I64, entries_ptr);
+            let entry_addr = builder.ins().iadd(entries_base, entry_byte_off);
+
+            let off_val = builder.ins().iconst(I32, current_offset as i64);
+            let vs_val = builder.ins().iconst(I32, value_size as i64);
+            let kind_val = builder.ins().iconst(I32, LOG_KIND_COMB as i64);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), off_val, entry_addr, 0);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), vs_val, entry_addr, 4);
+            builder
+                .ins()
+                .istore32(MemFlags::trusted(), kind_val, entry_addr, 8);
+
+            // Value payload at offset 16 (WriteLogEntry::value); mask at
+            // offset 32 (WriteLogEntry::mask).
+            match value_size {
+                1 => {
+                    builder
+                        .ins()
+                        .istore8(MemFlags::trusted(), value, entry_addr, 16);
+                    builder
+                        .ins()
+                        .istore8(MemFlags::trusted(), mask, entry_addr, 32);
+                }
+                2 => {
+                    builder
+                        .ins()
+                        .istore16(MemFlags::trusted(), value, entry_addr, 16);
+                    builder
+                        .ins()
+                        .istore16(MemFlags::trusted(), mask, entry_addr, 32);
+                }
+                4 => {
+                    builder
+                        .ins()
+                        .istore32(MemFlags::trusted(), value, entry_addr, 16);
+                    builder
+                        .ins()
+                        .istore32(MemFlags::trusted(), mask, entry_addr, 32);
+                }
+                8 | 16 => {
+                    builder
+                        .ins()
+                        .store(MemFlags::trusted(), value, entry_addr, 16);
+                    builder
+                        .ins()
+                        .store(MemFlags::trusted(), mask, entry_addr, 32);
+                }
+                _ => unreachable!(
+                    "emit_write_log_comb_static: unsupported value_size={}",
+                    value_size
+                ),
+            }
+
+            let new_count = builder.ins().iadd_imm(count, 1);
+            builder.def_var(var, new_count);
+        }
+    }
+
+    /// Build a Cranelift constant for an all-ones bitmask covering the
+    /// low `value_size` bytes. Used as the default write mask for
+    /// non-bit-select full-word event-phase stores.
+    #[cfg(not(target_family = "wasm"))]
+    fn build_full_width_mask(
+        context: &CraneliftContext,
+        builder: &mut FunctionBuilder,
+        value_size: usize,
+    ) -> cranelift::prelude::Value {
+        match value_size {
+            1 => builder.ins().iconst(I64, 0xFF),
+            2 => builder.ins().iconst(I64, 0xFFFF),
+            4 => builder.ins().iconst(I64, 0xFFFF_FFFF),
+            8 => builder.ins().iconst(I64, -1i64),
+            16 => {
+                let lo = builder.ins().iconst(I64, -1i64);
+                let hi = builder.ins().iconst(I64, -1i64);
+                let _ = context; // suppress unused warnings
+                builder.ins().iconcat(lo, hi)
+            }
+            _ => unreachable!(
+                "build_full_width_mask: unsupported value_size={}",
+                value_size
+            ),
+        }
+    }
+
+    /// Event-phase store dispatcher (mask-aware).
+    ///
+    /// For event-context stores to comb memory (`!is_ff` && `context.in_event`),
+    /// redirects the store to a `LOG_KIND_COMB` write-log entry carrying
+    /// `value` and `mask`, and returns `true`. Otherwise emits a normal
+    /// memory store at width `value_size` and returns `false`.
+    #[cfg(not(target_family = "wasm"))]
+    #[allow(clippy::too_many_arguments)]
+    fn emit_store_or_log_comb_masked(
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        flags: MemFlags,
+        value: cranelift::prelude::Value,
+        mask: cranelift::prelude::Value,
+        base_addr: cranelift::prelude::Value,
+        offset: i32,
+        value_size: usize,
+        is_ff: bool,
+    ) -> bool {
+        if !is_ff && context.in_event {
+            Self::emit_write_log_comb_static(context, builder, offset, value_size, value, mask);
+            return true;
+        }
+        match value_size {
+            1 => {
+                builder.ins().istore8(flags, value, base_addr, offset);
+            }
+            2 => {
+                builder.ins().istore16(flags, value, base_addr, offset);
+            }
+            4 => {
+                builder.ins().istore32(flags, value, base_addr, offset);
+            }
+            _ => {
+                builder.ins().store(flags, value, base_addr, offset);
+            }
+        }
+        false
+    }
+
+    /// Event-phase store dispatcher (full-width mask variant).
+    ///
+    /// Convenience wrapper over `emit_store_or_log_comb_masked` that uses
+    /// an all-ones mask for non-bit-select full-word writes.
+    #[cfg(not(target_family = "wasm"))]
+    #[allow(clippy::too_many_arguments)]
+    fn emit_store_or_log_comb(
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        flags: MemFlags,
+        value: cranelift::prelude::Value,
+        base_addr: cranelift::prelude::Value,
+        offset: i32,
+        value_size: usize,
+        is_ff: bool,
+    ) -> bool {
+        if !is_ff && context.in_event {
+            let mask = Self::build_full_width_mask(context, builder, value_size);
+            Self::emit_write_log_comb_static(context, builder, offset, value_size, value, mask);
+            return true;
+        }
+        match value_size {
+            1 => {
+                builder.ins().istore8(flags, value, base_addr, offset);
+            }
+            2 => {
+                builder.ins().istore16(flags, value, base_addr, offset);
+            }
+            4 => {
+                builder.ins().istore32(flags, value, base_addr, offset);
+            }
+            _ => {
+                builder.ins().store(flags, value, base_addr, offset);
+            }
+        }
+        false
     }
 
     /// Wide (>128-bit) store: copy from expression pointer to destination memory.
@@ -2342,11 +3102,21 @@ impl ProtoAssignStatement {
         // Apply width mask to the source to truncate extra bits
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
-        // Copy word by word from source to destination
+        // Copy word by word from source to destination. Event-phase comb
+        // stores are routed to the write-log per 8-byte word (strict NBA).
         for i in 0..n_words {
             let off = (i * 8) as i32;
             let val = builder.ins().load(I64, flags, src_ptr, off);
-            builder.ins().store(flags, val, base_addr, dst_offset + off);
+            Self::emit_store_or_log_comb(
+                context,
+                builder,
+                flags,
+                val,
+                base_addr,
+                dst_offset + off,
+                8,
+                self.dst.is_ff(),
+            );
         }
 
         // 4-state mask
@@ -2361,10 +3131,29 @@ impl ProtoAssignStatement {
             for i in 0..n_words {
                 let off = (i * 8) as i32;
                 let val = builder.ins().load(I64, flags, mask_ptr, off);
-                builder
-                    .ins()
-                    .store(flags, val, base_addr, dst_offset + nb as i32 + off);
+                Self::emit_store_or_log_comb(
+                    context,
+                    builder,
+                    flags,
+                    val,
+                    base_addr,
+                    dst_offset + nb as i32 + off,
+                    8,
+                    self.dst.is_ff(),
+                );
             }
+        }
+
+        // Emit write-log append for wide FF stores.
+        if self.dst.is_ff() {
+            let nb = calc_native_bytes(self.dst_width);
+            let vs = if context.use_4state { nb * 2 } else { nb };
+            Self::emit_write_log_static(
+                context,
+                builder,
+                self.dst_ff_current_offset as i32,
+                vs as i32,
+            );
         }
 
         Some(())
@@ -2505,42 +3294,105 @@ impl ProtoIfStatement {
                 .brif(effective_cond, true_block, &[], false_block, &[]);
         }
 
-        context.load_cache.clear();
-        // Disable store elimination inside If blocks: load_cache is cleared
-        // at block boundaries, so eliminated stores would leave stale values.
+        // Save pre-If cache: SSA values defined before the If remain valid
+        // in the merge block (the entry block dominates the merge block).
+        // Only preserve entries where `is_exact_load` is true: the cached
+        // value exactly matches the memory content. Forwarded values (from
+        // stores with dst_width < nb*8) have masked upper bits that differ
+        // from memory, so they must not be carried across If boundaries.
+        // Also exclude I128 values to avoid type mismatches across blocks.
+        let pre_if_cache = if context.enable_if_cache_preserve {
+            let mut cache = context.load_cache.clone();
+            cache.retain(|&(off, _nb), (val, _mask, is_exact)| {
+                builder.func.dfg.value_type(*val) != I128
+                    && (*is_exact || context.store_elim_offsets.contains(&off))
+                // Exact loads: value matches memory, safe to reuse.
+                // Store-elim entries: value NOT in memory, MUST keep in cache
+                // or subsequent reads would get stale pre-store-elim data.
+            });
+            if cache.is_empty() { None } else { Some(cache) }
+        } else {
+            None
+        };
+        let saved_tracker = context.if_store_tracker.take();
+
+        // Disable store elimination inside If blocks
         let prev_store_elim = context.store_elim_enabled;
         context.store_elim_enabled = false;
 
+        // ---- True arm ----
+        context.if_store_tracker = Some((HashSet::default(), false));
+        if let Some(ref cache) = pre_if_cache {
+            context.load_cache.clone_from(cache);
+        } else {
+            context.load_cache.clear();
+        }
         builder.switch_to_block(true_block);
+        // When write-log is active, disable is_last early-return optimization
+        // inside If arms. Early return skips the write-log count store-back
+        // at function exit, causing write-log entries to be lost.
+        let if_is_last = is_last && context.log_count_var.is_none();
         let len = self.true_side.len();
         for (i, x) in self.true_side.iter().enumerate() {
-            let is_last = is_last && (i + 1 == len);
+            let is_last = if_is_last && (i + 1 == len);
             x.build_binary(context, builder, is_last)?;
         }
-        if is_last {
+        if if_is_last {
             builder.ins().return_(&[]);
         } else {
             builder.ins().jump(final_block, &[]);
         }
+        let (true_modified, true_dynamic) = context.if_store_tracker.take().unwrap_or_default();
 
-        context.load_cache.clear();
-
+        // ---- False arm ----
+        context.if_store_tracker = Some((HashSet::default(), false));
+        if let Some(ref cache) = pre_if_cache {
+            context.load_cache.clone_from(cache);
+        } else {
+            context.load_cache.clear();
+        }
         builder.switch_to_block(false_block);
         let len = self.false_side.len();
         for (i, x) in self.false_side.iter().enumerate() {
-            let is_last = is_last && (i + 1 == len);
+            let is_last = if_is_last && (i + 1 == len);
             x.build_binary(context, builder, is_last)?;
         }
-        if is_last {
+        if if_is_last {
             builder.ins().return_(&[]);
         } else {
             builder.ins().jump(final_block, &[]);
         }
+        let (false_modified, false_dynamic) = context.if_store_tracker.take().unwrap_or_default();
 
+        // ---- Merge ----
         builder.switch_to_block(final_block);
 
-        context.load_cache.clear();
+        let any_dynamic = true_dynamic || false_dynamic;
+        if any_dynamic || pre_if_cache.is_none() {
+            // Dynamic assign in either arm: can't preserve anything
+            context.load_cache.clear();
+        } else if let Some(cache) = pre_if_cache {
+            // Restore pre-If cache, removing entries for offsets stored
+            // in either arm (memory content may have changed).
+            context.load_cache = cache;
+            if !true_modified.is_empty() || !false_modified.is_empty() {
+                context.load_cache.retain(|&(off, _nb), _| {
+                    !true_modified.contains(&off) && !false_modified.contains(&off)
+                });
+            }
+        }
+
         context.store_elim_enabled = prev_store_elim;
+
+        // Restore outer tracker and propagate our modifications
+        context.if_store_tracker = saved_tracker;
+        if let Some((ref mut outer_set, ref mut outer_dyn)) = context.if_store_tracker {
+            outer_set.extend(true_modified);
+            outer_set.extend(false_modified);
+            if any_dynamic {
+                *outer_dyn = true;
+            }
+        }
 
         Some(())
     }
@@ -3372,36 +4224,74 @@ fn parse_hex_file(filename: &str, width: usize) -> Vec<AnalyzerValue> {
 }
 
 pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
-    let mut result = Vec::new();
-    let mut s = content.to_string();
+    let bytes = content.as_bytes();
+    let mut result: Vec<AnalyzerValue> = Vec::with_capacity(bytes.len() / 4 + 1);
+    let mut i = 0usize;
+    let len = bytes.len();
+    let mut digits: Vec<u8> = Vec::with_capacity(32);
 
-    // Remove block comments
-    while let Some(start) = s.find("/*") {
-        if let Some(end) = s[start..].find("*/") {
-            s.replace_range(start..start + end + 2, " ");
-        } else {
-            s.truncate(start);
-            break;
+    while i < len {
+        let c = bytes[i];
+        if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+            i += 1;
+            continue;
         }
-    }
-
-    for line in s.lines() {
-        let line = if let Some(pos) = line.find("//") {
-            &line[..pos]
-        } else {
-            line
-        };
-
-        for token in line.split_whitespace() {
-            let cleaned: String = token.chars().filter(|&c| c != '_').collect();
-            if cleaned.is_empty() {
+        if c == b'/' && i + 1 < len {
+            let n = bytes[i + 1];
+            if n == b'/' {
+                i += 2;
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
                 continue;
             }
-            if let Ok(val) = u64::from_str_radix(&cleaned, 16) {
-                result.push(AnalyzerValue::new(val, width, false));
+            if n == b'*' {
+                i += 2;
+                while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                if i + 1 < len {
+                    i += 2;
+                }
+                continue;
             }
         }
+        let start = i;
+        while i < len {
+            let c = bytes[i];
+            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+                break;
+            }
+            if c == b'/' && i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
+                break;
+            }
+            i += 1;
+        }
+        if start == i {
+            continue;
+        }
+        let tok = &bytes[start..i];
+        let parsed = if tok.contains(&b'_') {
+            digits.clear();
+            for &b in tok {
+                if b != b'_' {
+                    digits.push(b);
+                }
+            }
+            if digits.is_empty() {
+                continue;
+            }
+            std::str::from_utf8(&digits)
+                .ok()
+                .and_then(|s| u64::from_str_radix(s, 16).ok())
+        } else {
+            std::str::from_utf8(tok)
+                .ok()
+                .and_then(|s| u64::from_str_radix(s, 16).ok())
+        };
+        if let Some(val) = parsed {
+            result.push(AnalyzerValue::new(val, width, false));
+        }
     }
-
     result
 }

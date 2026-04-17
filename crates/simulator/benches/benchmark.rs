@@ -33,7 +33,7 @@ const DESIGNS: &[BenchDesign] = &[
     BenchDesign {
         name: "lfsr256",
         code: LFSR256_CODE,
-        cycle: 100_000,
+        cycle: 1_000_000,
     },
 ];
 

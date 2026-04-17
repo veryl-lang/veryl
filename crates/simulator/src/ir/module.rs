@@ -1,16 +1,18 @@
+use crate::FuncPtr;
 use crate::HashMap;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift;
-use crate::ir::context::{Context, Conv, ScopeContext};
+use crate::ir::context::{Context, Conv, ScopeContext, WriteLogBuffer};
 use crate::ir::declaration::stable_topo_sort;
+use crate::ir::statement::ChunkActivityMeta;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
     write_native_value,
 };
 use crate::ir::{
-    Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement,
-    VarId, VarPath,
+    ColdChunk, Event, ProtoDeclaration, ProtoExpression, ProtoStatement, ProtoStatementBlock,
+    ProtoStatements, Statement, VarId, VarPath,
 };
 use crate::simulator_error::SimulatorError;
 use daggy::Dag;
@@ -31,11 +33,27 @@ pub struct Module {
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
+    /// Size of the "hot" comb region (before large arrays).
+    pub comb_hot_size: usize,
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
     /// FF commit entries: (current_offset, value_size) pairs.
     pub ff_commit_entries: Vec<(usize, usize)>,
+    /// Cold comb chunks: chunks that access cold region, with activity-skip metadata.
+    pub cold_chunks: Vec<ColdChunk>,
+    /// Byte offset of cold dirty flag in comb_values.
+    pub cold_dirty_flag_offset: usize,
+    /// Per-comb-block activity metadata (parallel to blocks in ProtoStatements).
+    pub comb_activity_meta: Vec<ChunkActivityMeta>,
+    /// Block→Statement index ranges: block i covers comb_statements[start..end].
+    pub block_stmt_ranges: Vec<(usize, usize)>,
+    /// Comb offsets written by event statements (filtered to comb-read intersection).
+    pub event_comb_writes: HashSet<isize>,
+    /// Byte offset in comb_values for event→comb dirty flag.
+    pub event_comb_dirty_flag_offset: usize,
+    /// Heap-allocated write-log buffer for sparse FF commit.
+    pub write_log_buffer: Option<Box<WriteLogBuffer>>,
 }
 
 pub struct ProtoModule {
@@ -43,6 +61,7 @@ pub struct ProtoModule {
     pub ports: HashMap<VarPath, VarId>,
     pub ff_bytes: usize,
     pub comb_bytes: usize,
+    pub comb_hot_bytes: usize,
     pub use_4state: bool,
     pub module_variable_meta: ModuleVariableMeta,
 
@@ -52,6 +71,14 @@ pub struct ProtoModule {
     pub comb_statements: ProtoStatements,
     /// Number of eval_comb passes needed for full convergence.
     pub required_comb_passes: usize,
+    /// Byte offset of cold dirty flag in comb_values.
+    pub cold_dirty_flag_offset: i64,
+    /// Comb offsets written by event statements (filtered).
+    pub event_comb_writes: HashSet<isize>,
+    /// Byte offset in comb_values for event→comb dirty flag (computed at instantiation).
+    pub event_comb_dirty_flag_offset: usize,
+    /// Heap-allocated write-log buffer for sparse FF commit.
+    pub write_log_buffer: Option<Box<WriteLogBuffer>>,
 }
 
 fn create_buffers(
@@ -181,30 +208,46 @@ fn create_variables_recursive(
 fn collect_ff_commit_entries(
     module_meta: &ModuleVariableMeta,
     use_4state: bool,
-) -> Vec<(usize, usize)> {
+) -> (Vec<(usize, usize)>, HashMap<usize, String>) {
     let mut entries = vec![];
+    let mut name_map = HashMap::default();
+    collect_ff_entries_recursive(module_meta, use_4state, &mut entries, &mut name_map);
+    entries.sort_unstable();
+    (entries, name_map)
+}
+
+fn collect_ff_entries_recursive(
+    module_meta: &ModuleVariableMeta,
+    use_4state: bool,
+    entries: &mut Vec<(usize, usize)>,
+    name_map: &mut HashMap<usize, String>,
+) {
     for meta in module_meta.variable_meta.values() {
-        for element in &meta.elements {
+        for (i, element) in meta.elements.iter().enumerate() {
             if element.is_ff() {
                 let vs = value_size(element.native_bytes, use_4state);
-                entries.push((element.current_offset() as usize, vs));
+                let off = element.current_offset() as usize;
+                entries.push((off, vs));
+                // Skip name_map for large arrays to avoid millions of String allocations
+                if meta.elements.len() <= 4096 {
+                    name_map.insert(off, format!("{}[{}]", meta.path, i));
+                }
             }
         }
     }
     for child in &module_meta.children {
-        entries.extend(collect_ff_commit_entries(child, use_4state));
+        collect_ff_entries_recursive(child, use_4state, entries, name_map);
     }
-    entries.sort_unstable();
-    entries
 }
 
 impl ProtoModule {
-    pub fn instantiate(&self) -> Module {
+    pub fn instantiate(&mut self) -> Module {
         log::trace!(
-            "instantiate: module={}, ff_bytes={}, comb_bytes={}",
+            "instantiate: module={}, ff_bytes={}, comb_bytes={}, comb_hot_bytes={}",
             self.name,
             self.ff_bytes,
             self.comb_bytes,
+            self.comb_hot_bytes,
         );
         let (mut ff_values, mut comb_values) = create_buffers(
             &self.module_variable_meta,
@@ -215,6 +258,11 @@ impl ProtoModule {
 
         let ff_base = ff_values.as_mut_ptr();
         let comb_base = comb_values.as_mut_ptr();
+
+        // Set ff_values_base so JIT-cached functions can compute ff_delta at runtime.
+        if let Some(ref mut wl) = self.write_log_buffer {
+            wl.ff_values_base = ff_base as u64;
+        }
 
         let module_variables =
             create_variables_recursive(&self.module_variable_meta, ff_base, comb_base);
@@ -230,19 +278,32 @@ impl ProtoModule {
             .iter()
             .map(|(event, stmts)| {
                 let s = stmts.to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
-                (event.clone(), batch_binary_statements(s))
+                let (batched, _) = batch_binary_statements(s);
+                // Merge all Binary/BinaryBatch/BinarySequence into a single
+                // BinarySequence to reduce per-cycle function call overhead.
+                let sequenced = sequence_event_statements(batched);
+                (event.clone(), sequenced)
             })
             .collect();
 
-        let comb_statements = batch_binary_statements(self.comb_statements.to_statements(
-            ff_ptr,
-            ff_len,
-            comb_ptr,
-            comb_len,
-            self.use_4state,
-        ));
+        // Resolve cold chunks: first get pre-batch indices, then remap after batching
+        let pre_cold_chunks = self.comb_statements.resolve_cold_chunks();
 
-        let ff_commit_entries =
+        let (comb_statements, batch_index_map) = batch_binary_statements(
+            self.comb_statements
+                .to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state),
+        );
+
+        // Remap cold chunk stmt_index from pre-batch to post-batch
+        let cold_chunks: Vec<ColdChunk> = pre_cold_chunks
+            .into_iter()
+            .map(|mut c| {
+                c.stmt_index = batch_index_map[c.stmt_index];
+                c
+            })
+            .collect();
+
+        let (ff_commit_entries, _ff_entry_names) =
             collect_ff_commit_entries(&self.module_variable_meta, self.use_4state);
 
         #[cfg(debug_assertions)]
@@ -257,9 +318,32 @@ impl ProtoModule {
 
             event_statements,
             comb_statements,
+            comb_hot_size: self.comb_hot_bytes,
             required_comb_passes: self.required_comb_passes,
             ff_commit_entries,
+            cold_chunks,
+            cold_dirty_flag_offset: self.cold_dirty_flag_offset as usize,
+            comb_activity_meta: self.comb_statements.activity.clone(),
+            block_stmt_ranges: Self::compute_block_stmt_ranges(&self.comb_statements),
+            event_comb_writes: self.event_comb_writes.clone(),
+            event_comb_dirty_flag_offset: self.event_comb_dirty_flag_offset,
+            write_log_buffer: self.write_log_buffer.take(),
         }
+    }
+
+    /// Compute block→statement index ranges from ProtoStatements.
+    fn compute_block_stmt_ranges(stmts: &ProtoStatements) -> Vec<(usize, usize)> {
+        let mut ranges = Vec::with_capacity(stmts.blocks.len());
+        let mut idx = 0;
+        for block in &stmts.blocks {
+            let count = match block {
+                ProtoStatementBlock::Interpreted(proto) => proto.len(),
+                ProtoStatementBlock::Compiled(_) => 1,
+            };
+            ranges.push((idx, idx + count));
+            idx += count;
+        }
+        ranges
     }
 
     /// Validate that all variable offsets in statements are within buffer bounds.
@@ -293,7 +377,7 @@ impl ProtoModule {
         };
 
         let validate_stmts = |stmts: &ProtoStatements, label: &str| {
-            for block in &stmts.0 {
+            for block in &stmts.blocks {
                 if let ProtoStatementBlock::Interpreted(proto) = block {
                     for s in proto {
                         let mut ins = vec![];
@@ -376,7 +460,7 @@ fn try_jit_group(
     } else {
         for chunk in group.chunks(JIT_CHUNK_SIZE) {
             let chunk = chunk.to_vec();
-            match cranelift::build_binary(context, chunk.clone()) {
+            match cranelift::build_binary_no_cache(context, chunk.clone()) {
                 Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
                 None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
             }
@@ -386,15 +470,33 @@ fn try_jit_group(
 
 #[cfg(target_family = "wasm")]
 fn try_jit(_context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)])
+    ProtoStatements {
+        blocks: vec![ProtoStatementBlock::Interpreted(proto)],
+        cold_chunks: vec![],
+        activity: vec![],
+    }
 }
 
 #[cfg(not(target_family = "wasm"))]
 fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
     if !context.config.use_jit {
-        return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
+        return ProtoStatements {
+            blocks: vec![ProtoStatementBlock::Interpreted(proto)],
+            cold_chunks: vec![],
+            activity: vec![],
+        };
     }
 
+    // Event-phase JIT: redirect comb stores to the write-log (strict NBA).
+    let saved_in_event = context.in_event;
+    context.in_event = true;
+    let result = try_jit_inner(context, proto);
+    context.in_event = saved_in_event;
+    result
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn try_jit_inner(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
     // Group consecutive statements by can_build_binary() result
     let mut blocks: Vec<ProtoStatementBlock> = Vec::new();
     let mut current_jittable: Option<bool> = None;
@@ -428,24 +530,402 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
         }
     }
 
-    ProtoStatements(blocks)
+    ProtoStatements {
+        blocks,
+        cold_chunks: vec![],
+        activity: vec![],
+    }
 }
 
 /// JIT with load_cache disabled for unified comb.
 /// CompiledBlocks (child comb functions) may modify comb values between
 /// cached loads, so load_cache must be disabled for correctness.
 #[cfg(target_family = "wasm")]
-fn try_jit_no_cache(_context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)])
+fn try_jit_no_cache(
+    _context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    _comb_hot_bytes: usize,
+    _event_reads: &HashSet<isize>,
+    _event_comb_writes: &HashSet<isize>,
+    _event_comb_to_ff: &HashMap<isize, Vec<(usize, usize)>>,
+) -> ProtoStatements {
+    ProtoStatements {
+        blocks: vec![ProtoStatementBlock::Interpreted(proto)],
+        cold_chunks: vec![],
+        activity: vec![],
+    }
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+fn try_jit_no_cache(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    comb_hot_bytes: usize,
+    event_reads: &HashSet<isize>,
+    event_comb_writes: &HashSet<isize>,
+    event_comb_to_ff: &HashMap<isize, Vec<(usize, usize)>>,
+) -> ProtoStatements {
+    use crate::ir::statement::ColdChunkMeta;
+
     if !context.config.use_jit {
-        return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
+        return ProtoStatements {
+            blocks: vec![ProtoStatementBlock::Interpreted(proto)],
+            cold_chunks: vec![],
+            activity: vec![],
+        };
+    }
+
+    // Try compiling ALL comb statements into a single JIT function.
+    // This eliminates inter-chunk function call overhead and extends
+    // load CSE scope across the entire comb evaluation.
+    {
+        // Compute store_elim for the entire function
+        let mut global_comb_reads: HashMap<isize, usize> = HashMap::default();
+        for stmt in &proto {
+            let mut ins = vec![];
+            let mut outs = vec![];
+            stmt.gather_variable_offsets(&mut ins, &mut outs);
+            for off in ins {
+                if !off.is_ff() {
+                    *global_comb_reads.entry(off.raw()).or_insert(0) += 1;
+                }
+            }
+        }
+        let mut store_elim_offsets: HashSet<VarOffset> = HashSet::default();
+        for stmt in &proto {
+            let mut outs = vec![];
+            let mut ins = vec![];
+            stmt.gather_variable_offsets(&mut ins, &mut outs);
+            for off in outs {
+                if !off.is_ff() && !event_reads.contains(&off.raw()) {
+                    let global_count = global_comb_reads.get(&off.raw()).copied().unwrap_or(0);
+                    let mut local_count = 0;
+                    for off2 in &ins {
+                        if off2.raw() == off.raw() && !off2.is_ff() {
+                            local_count += 1;
+                        }
+                    }
+                    if global_count == local_count {
+                        store_elim_offsets.insert(off);
+                    }
+                }
+            }
+        }
+
+        // Collect activity metadata for the single-block case
+        let mut single_comb_to_ff = build_comb_to_ff_map(&proto);
+        for (comb_off, ff_deps) in event_comb_to_ff {
+            let entry = single_comb_to_ff.entry(*comb_off).or_default();
+            entry.extend(ff_deps.iter().cloned());
+            entry.sort();
+            entry.dedup();
+        }
+        let activity = vec![collect_chunk_activity_with_transitive(
+            &proto,
+            &single_comb_to_ff,
+            event_comb_writes,
+            comb_hot_bytes,
+        )];
+
+        if let Some(func) = crate::cranelift::build_binary_comb_cached_with_store_elim(
+            context,
+            proto.clone(),
+            store_elim_offsets,
+        ) {
+            log::info!(
+                "Single-function comb JIT: {} stmts compiled into 1 function",
+                proto.len()
+            );
+            let blocks = vec![ProtoStatementBlock::Compiled(func)];
+            return ProtoStatements {
+                blocks,
+                cold_chunks: vec![],
+                activity,
+            };
+        }
+        log::info!("Single-function comb JIT failed, falling back to per-chunk");
+    }
+
+    // Build transitive FF dependency map for activity gating.
+    let mut comb_to_ff = build_comb_to_ff_map(&proto);
+
+    // Merge event FF→comb dependencies: for comb offsets written by event statements,
+    // add their FF dependencies so activity gating can track them properly.
+    for (comb_off, ff_deps) in event_comb_to_ff {
+        let entry = comb_to_ff.entry(*comb_off).or_default();
+        entry.extend(ff_deps.iter().cloned());
+        entry.sort();
+        entry.dedup();
+    }
+
+    // Pre-compute per-statement comb reads for store elimination.
+    // For each comb offset, count how many statements read it.
+    // This lets each JIT chunk determine which offsets are only read
+    // within that chunk (and thus can skip memory stores).
+    let mut global_comb_reads: HashMap<isize, usize> = HashMap::default();
+    for stmt in &proto {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        stmt.gather_variable_offsets(&mut ins, &mut outs);
+        for off in ins {
+            if !off.is_ff() {
+                *global_comb_reads.entry(off.raw()).or_insert(0) += 1;
+            }
+        }
     }
 
     let mut blocks: Vec<ProtoStatementBlock> = Vec::new();
+    let mut cold_chunks: Vec<ColdChunkMeta> = Vec::new();
+
+    /// Classify a chunk of statements: check if it accesses a large cold array
+    /// (DynamicVariable with >256 elements in cold comb region).
+    fn classify_chunk(stmts: &[ProtoStatement], comb_hot_bytes: usize) -> Option<ColdChunkMeta> {
+        if comb_hot_bytes == 0 {
+            return None;
+        }
+        // Check if any statement contains a DynamicVariable access to a large cold array
+        let has_cold = stmts
+            .iter()
+            .any(|s| s.has_cold_array_access(comb_hot_bytes));
+        if !has_cold {
+            return None;
+        }
+
+        // Collect hot input ranges for snapshot comparison
+        let mut input_ranges = vec![];
+        for s in stmts {
+            s.gather_input_ranges(&mut input_ranges);
+        }
+
+        // Separate into comb and FF inputs, dedup.
+        // gather_input_ranges already excludes large array bases (DynamicVariable),
+        // so ALL remaining comb inputs are "hot" (non-array) and should be tracked.
+        let mut hot_comb_set: Vec<(usize, usize)> = vec![];
+        let mut ff_set: Vec<(usize, usize)> = vec![];
+        for (off, nb) in &input_ranges {
+            match off {
+                VarOffset::Comb(o) => {
+                    let entry = (*o as usize, *nb);
+                    if !hot_comb_set.contains(&entry) {
+                        hot_comb_set.push(entry);
+                    }
+                }
+                VarOffset::Ff(o) => {
+                    let entry = (*o as usize, *nb);
+                    if !ff_set.contains(&entry) {
+                        ff_set.push(entry);
+                    }
+                }
+            }
+        }
+
+        Some(ColdChunkMeta {
+            block_index: 0, // will be set by caller
+            hot_comb_inputs: hot_comb_set,
+            ff_inputs: ff_set,
+        })
+    }
+
+    /// Compile a chunk of hot statements with chunk-local store elimination.
+    /// Comb offsets whose reads are entirely within this chunk can skip
+    /// memory stores — values are forwarded via load_cache (registers).
+    #[allow(clippy::too_many_arguments)]
+    fn compile_hot_chunk(
+        context: &mut Context,
+        blocks: &mut Vec<ProtoStatementBlock>,
+        activity: &mut Vec<ChunkActivityMeta>,
+        chunk: Vec<ProtoStatement>,
+        global_comb_reads: &HashMap<isize, usize>,
+        event_reads: &HashSet<isize>,
+        comb_to_ff: &HashMap<isize, Vec<(usize, usize)>>,
+        event_comb_writes: &HashSet<isize>,
+        comb_hot_bytes: usize,
+    ) {
+        if chunk.is_empty() {
+            return;
+        }
+        activity.push(collect_chunk_activity_with_transitive(
+            &chunk,
+            comb_to_ff,
+            event_comb_writes,
+            comb_hot_bytes,
+        ));
+
+        // Compute store_elim: comb offsets written by top-level simple Assign
+        // whose ALL reads are within this chunk (not read by other chunks or events).
+        // Offsets written inside If blocks are excluded because store_elim values
+        // are not in memory: if an If arm writes the same offset (with store_elim
+        // disabled), the merge block may lose the cached value and reload stale data.
+        let mut chunk_reads: HashMap<isize, usize> = HashMap::default();
+        let mut chunk_writes: HashSet<VarOffset> = HashSet::default();
+        let mut if_writes: HashSet<VarOffset> = HashSet::default();
+        for s in &chunk {
+            let mut ins = vec![];
+            let mut outs = vec![];
+            s.gather_variable_offsets(&mut ins, &mut outs);
+            for off in ins {
+                if !off.is_ff() {
+                    *chunk_reads.entry(off.raw()).or_insert(0) += 1;
+                }
+            }
+            // Only TOP-LEVEL simple Assign (no select) can be store-eliminated
+            if let ProtoStatement::Assign(a) = s
+                && !a.dst.is_ff()
+                && a.select.is_none()
+            {
+                chunk_writes.insert(a.dst);
+            }
+            // Collect offsets referenced inside If blocks for store_elim.
+            if let ProtoStatement::If(if_stmt) = s {
+                let mut ins = vec![];
+                let mut outs = vec![];
+                for arm_s in if_stmt.true_side.iter().chain(if_stmt.false_side.iter()) {
+                    arm_s.gather_variable_offsets(&mut ins, &mut outs);
+                }
+                for off in ins.into_iter().chain(outs) {
+                    if_writes.insert(off);
+                }
+            }
+        }
+
+        let mut store_elim: HashSet<VarOffset> = HashSet::default();
+        for dst in &chunk_writes {
+            let raw = dst.raw();
+            if event_reads.contains(&raw) {
+                continue;
+            }
+            // Exclude offsets also written inside If blocks
+            if if_writes.contains(dst) {
+                continue;
+            }
+            let global = global_comb_reads.get(&raw).copied().unwrap_or(0);
+            let local = chunk_reads.get(&raw).copied().unwrap_or(0);
+            if global == local {
+                store_elim.insert(*dst);
+            }
+        }
+
+        let _store_elim_count = store_elim.len();
+        match cranelift::build_binary_comb_cached(context, chunk.clone()) {
+            Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
+            None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
+        }
+    }
+
+    /// Push a jittable group, splitting cold statements into individual 1-statement
+    /// chunks for activity-skip while keeping hot statements in large chunks.
+    #[allow(clippy::too_many_arguments)]
+    fn push_jittable_group(
+        context: &mut Context,
+        blocks: &mut Vec<ProtoStatementBlock>,
+        activity: &mut Vec<ChunkActivityMeta>,
+        cold_chunks: &mut Vec<ColdChunkMeta>,
+        group: Vec<ProtoStatement>,
+        comb_hot_bytes: usize,
+        global_comb_reads: &HashMap<isize, usize>,
+        event_reads: &HashSet<isize>,
+        comb_to_ff: &HashMap<isize, Vec<(usize, usize)>>,
+        event_comb_writes: &HashSet<isize>,
+    ) {
+        if comb_hot_bytes == 0 {
+            // No cold region — compile everything as hot chunks
+            let chunks: Vec<Vec<ProtoStatement>> = if group.len() <= JIT_CHUNK_SIZE {
+                vec![group]
+            } else {
+                group.chunks(JIT_CHUNK_SIZE).map(|c| c.to_vec()).collect()
+            };
+            for chunk in chunks {
+                compile_hot_chunk(
+                    context,
+                    blocks,
+                    activity,
+                    chunk,
+                    global_comb_reads,
+                    event_reads,
+                    comb_to_ff,
+                    event_comb_writes,
+                    comb_hot_bytes,
+                );
+            }
+            return;
+        }
+
+        // Split at cold statement boundaries, preserving execution order.
+        // Cold statements become individual 1-statement chunks with ColdChunkMeta.
+        // Hot statements between them are grouped into regular-sized chunks.
+        let mut hot_buf: Vec<ProtoStatement> = Vec::new();
+
+        for stmt in group {
+            if stmt.has_cold_array_access(comb_hot_bytes) {
+                // Flush accumulated hot statements first
+                if !hot_buf.is_empty() {
+                    let hot = std::mem::take(&mut hot_buf);
+                    let chunks: Vec<Vec<ProtoStatement>> = if hot.len() <= JIT_CHUNK_SIZE {
+                        vec![hot]
+                    } else {
+                        hot.chunks(JIT_CHUNK_SIZE).map(|c| c.to_vec()).collect()
+                    };
+                    for chunk in chunks {
+                        compile_hot_chunk(
+                            context,
+                            blocks,
+                            activity,
+                            chunk,
+                            global_comb_reads,
+                            event_reads,
+                            comb_to_ff,
+                            event_comb_writes,
+                            comb_hot_bytes,
+                        );
+                    }
+                }
+
+                // Compile cold statement as individual 1-statement chunk
+                let cold_stmt = vec![stmt];
+                let block_idx = blocks.len();
+                if let Some(mut meta) = classify_chunk(&cold_stmt, comb_hot_bytes) {
+                    meta.block_index = block_idx;
+                    cold_chunks.push(meta);
+                }
+                activity.push(collect_chunk_activity_with_transitive(
+                    &cold_stmt,
+                    comb_to_ff,
+                    event_comb_writes,
+                    comb_hot_bytes,
+                ));
+                match cranelift::build_binary_no_cache(context, cold_stmt.clone()) {
+                    Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
+                    None => blocks.push(ProtoStatementBlock::Interpreted(cold_stmt)),
+                }
+            } else {
+                hot_buf.push(stmt);
+            }
+        }
+
+        // Flush remaining hot statements
+        if !hot_buf.is_empty() {
+            let chunks: Vec<Vec<ProtoStatement>> = if hot_buf.len() <= JIT_CHUNK_SIZE {
+                vec![hot_buf]
+            } else {
+                hot_buf.chunks(JIT_CHUNK_SIZE).map(|c| c.to_vec()).collect()
+            };
+            for chunk in chunks {
+                compile_hot_chunk(
+                    context,
+                    blocks,
+                    activity,
+                    chunk,
+                    global_comb_reads,
+                    event_reads,
+                    comb_to_ff,
+                    event_comb_writes,
+                    comb_hot_bytes,
+                );
+            }
+        }
+    }
+
+    let mut activity: Vec<ChunkActivityMeta> = Vec::new();
     let mut current_jittable: Option<bool> = None;
     let mut current_group: Vec<ProtoStatement> = Vec::new();
 
@@ -457,22 +937,26 @@ fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoS
             if let Some(was_jittable) = current_jittable {
                 let group = std::mem::take(&mut current_group);
                 if was_jittable {
-                    // Use no_cache build for unified comb safety
-                    if group.len() <= JIT_CHUNK_SIZE {
-                        match cranelift::build_binary_no_cache(context, group.clone()) {
-                            Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                            None => blocks.push(ProtoStatementBlock::Interpreted(group)),
-                        }
-                    } else {
-                        for chunk in group.chunks(JIT_CHUNK_SIZE) {
-                            let chunk = chunk.to_vec();
-                            match cranelift::build_binary_no_cache(context, chunk.clone()) {
-                                Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                                None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
-                            }
-                        }
-                    }
+                    push_jittable_group(
+                        context,
+                        &mut blocks,
+                        &mut activity,
+                        &mut cold_chunks,
+                        group,
+                        comb_hot_bytes,
+                        &global_comb_reads,
+                        event_reads,
+                        &comb_to_ff,
+                        event_comb_writes,
+                    );
                 } else {
+                    // Interpreted blocks: collect activity too
+                    activity.push(collect_chunk_activity_with_transitive(
+                        &group,
+                        &comb_to_ff,
+                        event_comb_writes,
+                        comb_hot_bytes,
+                    ));
                     blocks.push(ProtoStatementBlock::Interpreted(group));
                 }
             }
@@ -483,26 +967,288 @@ fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoS
 
     if let Some(was_jittable) = current_jittable {
         if was_jittable {
-            if current_group.len() <= JIT_CHUNK_SIZE {
-                match cranelift::build_binary_no_cache(context, current_group.clone()) {
-                    Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                    None => blocks.push(ProtoStatementBlock::Interpreted(current_group)),
-                }
-            } else {
-                for chunk in current_group.chunks(JIT_CHUNK_SIZE) {
-                    let chunk = chunk.to_vec();
-                    match cranelift::build_binary_no_cache(context, chunk.clone()) {
-                        Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                        None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
-                    }
-                }
-            }
+            push_jittable_group(
+                context,
+                &mut blocks,
+                &mut activity,
+                &mut cold_chunks,
+                current_group,
+                comb_hot_bytes,
+                &global_comb_reads,
+                event_reads,
+                &comb_to_ff,
+                event_comb_writes,
+            );
         } else {
+            activity.push(collect_chunk_activity_with_transitive(
+                &current_group,
+                &comb_to_ff,
+                event_comb_writes,
+                comb_hot_bytes,
+            ));
             blocks.push(ProtoStatementBlock::Interpreted(current_group));
         }
     }
 
-    ProtoStatements(blocks)
+    if !cold_chunks.is_empty() {
+        log::info!(
+            "try_jit_no_cache: {} cold chunks out of {} blocks (comb_hot_bytes={})",
+            cold_chunks.len(),
+            blocks.len(),
+            comb_hot_bytes,
+        );
+    }
+
+    // Build per-block activity metadata from the original ProtoStatements.
+    // We re-scan the blocks: for Compiled blocks we don't have the original stmts,
+    // so we collect metadata BEFORE compilation.
+    // Actually, we already lost the original stmts after compilation above.
+    // We'll collect metadata in a second pass approach below.
+
+    if !activity.is_empty() {
+        let with_dyn = activity.iter().filter(|a| a.has_dynamic_ff_read).count();
+        log::debug!(
+            "comb activity: {} chunks ({} with dynamic FF reads)",
+            activity.len(),
+            with_dyn,
+        );
+    }
+
+    ProtoStatements {
+        blocks,
+        cold_chunks,
+        activity,
+    }
+}
+
+/// Build a map from comb offset → set of FF byte ranges that transitively affect it.
+/// Uses the full list of comb statements (before chunking) to trace dependencies.
+fn build_comb_to_ff_map(all_stmts: &[ProtoStatement]) -> HashMap<isize, Vec<(usize, usize)>> {
+    // Phase 1: for each comb Assign, collect direct FF reads and comb reads
+    struct StmtInfo {
+        dst_offset: isize,
+        direct_ff: Vec<(usize, usize)>,
+        comb_deps: Vec<isize>,
+    }
+
+    let mut infos: Vec<StmtInfo> = Vec::new();
+
+    for stmt in all_stmts {
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+
+        let mut direct_ff = Vec::new();
+        let mut comb_deps = Vec::new();
+        for off in &inputs {
+            match off {
+                VarOffset::Ff(o) => direct_ff.push((*o as usize, 8)),
+                VarOffset::Comb(o) => comb_deps.push(*o),
+            }
+        }
+
+        direct_ff.sort();
+        direct_ff.dedup();
+        comb_deps.sort();
+        comb_deps.dedup();
+
+        // Collect comb output offsets for this statement
+        let comb_outputs: Vec<isize> = outputs
+            .iter()
+            .filter(|o| !o.is_ff())
+            .map(|o| o.raw())
+            .collect();
+
+        // Each output gets the same FF dependency set
+        for dst in comb_outputs {
+            infos.push(StmtInfo {
+                dst_offset: dst,
+                direct_ff: direct_ff.clone(),
+                comb_deps: comb_deps.clone(),
+            });
+        }
+    }
+
+    // Phase 2+3: build comb_offset → transitive FF map
+    // Process in topological order (statements are already sorted).
+    // Union with existing entries when multiple statements write the same offset.
+    let mut comb_ff: HashMap<isize, Vec<(usize, usize)>> = HashMap::default();
+    for info in &infos {
+        let mut all_ff = info.direct_ff.clone();
+        // Add transitive FF deps from comb dependencies
+        for &dep in &info.comb_deps {
+            if let Some(dep_ff) = comb_ff.get(&dep) {
+                all_ff.extend(dep_ff.iter().cloned());
+            }
+        }
+        // Union with existing entry (multiple stmts may write same offset)
+        let entry = comb_ff.entry(info.dst_offset).or_default();
+        entry.extend(all_ff);
+        entry.sort();
+        entry.dedup();
+    }
+
+    comb_ff
+}
+
+/// Collect activity metadata for a set of ProtoStatements (one chunk).
+/// `comb_to_ff` provides transitive FF dependencies for comb offsets.
+/// `event_comb_writes` are comb offsets written by event statements.
+fn collect_chunk_activity_with_transitive(
+    stmts: &[ProtoStatement],
+    comb_to_ff: &HashMap<isize, Vec<(usize, usize)>>,
+    event_comb_writes: &HashSet<isize>,
+    comb_hot_bytes: usize,
+) -> ChunkActivityMeta {
+    let mut ff_reads: Vec<(usize, usize)> = Vec::new();
+    let mut comb_writes: Vec<isize> = Vec::new();
+    let mut comb_reads: Vec<isize> = Vec::new();
+    let mut has_dynamic_ff_read = false;
+
+    for stmt in stmts {
+        collect_stmt_activity(
+            stmt,
+            &mut ff_reads,
+            &mut comb_writes,
+            &mut comb_reads,
+            &mut has_dynamic_ff_read,
+        );
+    }
+
+    // Check if any comb_read is an event-written offset, split by hot/cold
+    let mut reads_hot_event_comb = false;
+    let mut reads_cold_event_comb = false;
+    for off in &comb_reads {
+        if event_comb_writes.contains(off) {
+            if *off >= 0 && (*off as usize) < comb_hot_bytes {
+                reads_hot_event_comb = true;
+            } else {
+                reads_cold_event_comb = true;
+            }
+        }
+    }
+
+    // Add transitive FF deps: for each comb_read, add its FF dependencies
+    for &comb_off in &comb_reads {
+        if let Some(trans_ff) = comb_to_ff.get(&comb_off) {
+            ff_reads.extend(trans_ff.iter().cloned());
+        }
+    }
+
+    // Dedup
+    ff_reads.sort();
+    ff_reads.dedup();
+    comb_writes.sort();
+    comb_writes.dedup();
+    comb_reads.sort();
+    comb_reads.dedup();
+
+    ChunkActivityMeta {
+        ff_reads,
+        comb_writes,
+        comb_reads,
+        has_dynamic_ff_read,
+        reads_hot_event_comb,
+        reads_cold_event_comb,
+    }
+}
+
+/// Collect activity metadata without transitive deps (for event stmts).
+#[allow(dead_code)]
+fn collect_chunk_activity(stmts: &[ProtoStatement]) -> ChunkActivityMeta {
+    collect_chunk_activity_with_transitive(stmts, &HashMap::default(), &HashSet::default(), 0)
+}
+
+fn collect_stmt_activity(
+    stmt: &ProtoStatement,
+    ff_reads: &mut Vec<(usize, usize)>,
+    comb_writes: &mut Vec<isize>,
+    comb_reads: &mut Vec<isize>,
+    has_dynamic_ff: &mut bool,
+) {
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    stmt.gather_variable_offsets(&mut inputs, &mut outputs);
+
+    for off in &inputs {
+        match off {
+            VarOffset::Ff(o) => {
+                ff_reads.push((*o as usize, 8)); // conservative size
+            }
+            VarOffset::Comb(o) => {
+                comb_reads.push(*o);
+            }
+        }
+    }
+    for off in &outputs {
+        match off {
+            VarOffset::Ff(_) => {} // comb chunks don't write FF
+            VarOffset::Comb(o) => {
+                comb_writes.push(*o);
+            }
+        }
+    }
+
+    // Check for DynamicVariable with FF base
+    check_dynamic_ff_reads(stmt, has_dynamic_ff);
+}
+
+fn check_dynamic_ff_reads(stmt: &ProtoStatement, has_dynamic_ff: &mut bool) {
+    match stmt {
+        ProtoStatement::Assign(x) => {
+            check_expr_dynamic_ff(&x.expr, has_dynamic_ff);
+        }
+        ProtoStatement::AssignDynamic(x) => {
+            check_expr_dynamic_ff(&x.expr, has_dynamic_ff);
+            check_expr_dynamic_ff(&x.dst_index_expr, has_dynamic_ff);
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &x.cond {
+                check_expr_dynamic_ff(c, has_dynamic_ff);
+            }
+            for s in &x.true_side {
+                check_dynamic_ff_reads(s, has_dynamic_ff);
+            }
+            for s in &x.false_side {
+                check_dynamic_ff_reads(s, has_dynamic_ff);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                check_dynamic_ff_reads(s, has_dynamic_ff);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_expr_dynamic_ff(expr: &ProtoExpression, has_dynamic_ff: &mut bool) {
+    match expr {
+        ProtoExpression::DynamicVariable { base_offset, .. } if base_offset.is_ff() => {
+            *has_dynamic_ff = true;
+        }
+        ProtoExpression::Unary { x, .. } => check_expr_dynamic_ff(x, has_dynamic_ff),
+        ProtoExpression::Binary { x, y, .. } => {
+            check_expr_dynamic_ff(x, has_dynamic_ff);
+            check_expr_dynamic_ff(y, has_dynamic_ff);
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            check_expr_dynamic_ff(cond, has_dynamic_ff);
+            check_expr_dynamic_ff(true_expr, has_dynamic_ff);
+            check_expr_dynamic_ff(false_expr, has_dynamic_ff);
+        }
+        ProtoExpression::Concatenation { elements, .. } => {
+            for (e, _, _) in elements {
+                check_expr_dynamic_ff(e, has_dynamic_ff);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn analyze_dependency(
@@ -1084,8 +1830,12 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
 }
 
 /// Merge consecutive Binary statements with the same function pointer into BinaryBatch.
-fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
+/// Batch consecutive Binary statements with the same func into BinaryBatch.
+/// Returns (batched statements, pre→post index mapping).
+/// The mapping maps each pre-batch index to the post-batch index.
+fn batch_binary_statements(stmts: Vec<Statement>) -> (Vec<Statement>, Vec<usize>) {
     let mut result: Vec<Statement> = Vec::with_capacity(stmts.len());
+    let mut index_map: Vec<usize> = Vec::with_capacity(stmts.len());
 
     for stmt in stmts {
         match stmt {
@@ -1096,6 +1846,7 @@ fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
                         if *batch_func as usize == func_addr =>
                     {
                         args.push((ff, comb));
+                        index_map.push(result.len() - 1);
                     }
                     Some(Statement::Binary(prev_func, prev_ff, prev_comb))
                         if *prev_func as usize == func_addr =>
@@ -1107,16 +1858,68 @@ fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
                             prev_func,
                             vec![(prev_ff, prev_comb), (ff, comb)],
                         );
+                        index_map.push(result.len() - 1);
                     }
                     _ => {
+                        index_map.push(result.len());
                         result.push(Statement::Binary(func, ff, comb));
                     }
                 }
             }
-            other => result.push(other),
+            other => {
+                index_map.push(result.len());
+                result.push(other);
+            }
         }
     }
 
+    (result, index_map)
+}
+
+/// Merge consecutive Binary statements into a single BinarySequence.
+/// Non-Binary statements are kept as-is. This reduces per-cycle indirect
+/// call overhead for event evaluation (16 calls → 1 tight loop).
+fn sequence_event_statements(stmts: Vec<Statement>) -> Vec<Statement> {
+    if stmts.len() <= 1 {
+        return stmts;
+    }
+    let mut result: Vec<Statement> = Vec::new();
+    let mut seq: Vec<(FuncPtr, *const u8, *const u8)> = Vec::new();
+
+    let flush_seq = |seq: &mut Vec<(FuncPtr, *const u8, *const u8)>,
+                     result: &mut Vec<Statement>| {
+        match seq.len() {
+            0 => {}
+            1 => {
+                let (f, ff, comb) = seq[0];
+                result.push(Statement::Binary(f, ff, comb));
+            }
+            _ => {
+                result.push(Statement::BinarySequence(std::mem::take(seq)));
+            }
+        }
+    };
+
+    for stmt in stmts {
+        match stmt {
+            Statement::Binary(func, ff, comb) => {
+                seq.push((func, ff, comb));
+            }
+            Statement::BinaryBatch(func, args) => {
+                for (ff, comb) in args {
+                    seq.push((func, ff, comb));
+                }
+            }
+            Statement::BinarySequence(s) => {
+                seq.extend(s);
+            }
+            other => {
+                flush_seq(&mut seq, &mut result);
+                result.push(other);
+            }
+        }
+    }
+    flush_seq(&mut seq, &mut result);
     result
 }
 
@@ -1129,13 +1932,14 @@ impl Conv<&air::Module> for ProtoModule {
         let mut ff_table = air::FfTable::default();
         src.gather_ff(&mut analyzer_context, &mut ff_table);
         ff_table.update_is_ff();
-        if context.config.disable_ff_opt {
-            ff_table.force_all_ff();
-        }
+        // Force all always_ff-assigned variables to FF classification when JIT is enabled.
+        // With write-log sparse commit, ff_commit cost is O(writes) not O(all_entries),
+        // force_all_ff disabled: reclassifying ff_opt vars back to FF
+        // reduces optimizer inlining opportunities and worsens performance.
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
-        let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
+        let (variable_meta, ff_bytes, comb_bytes, comb_hot_bytes) = create_variable_meta(
             &src.variables,
             &ff_table,
             context.config.use_4state,
@@ -1152,6 +1956,27 @@ impl Conv<&air::Module> for ProtoModule {
             analyzer_context,
         };
         context.scope_contexts.push(scope);
+
+        // The write-log buffer pointer is embedded as an immediate in JIT
+        // code, so it must be allocated before child module JIT compilation.
+        // Skip for small hermetic designs where the per-cycle overhead
+        // exceeds the sparse-commit and bit-select NBA benefits.
+        let has_child_inst = src
+            .declarations
+            .iter()
+            .any(|d| matches!(d, air::Declaration::Inst(_)));
+        let skip_write_log = !has_child_inst && ff_bytes < 256;
+        if !skip_write_log {
+            let write_log_buffer = Box::new(WriteLogBuffer::default());
+            log::info!(
+                "Write-log: heap buffer entries_ptr=0x{:x}, count_ptr=0x{:x}",
+                write_log_buffer.entries.as_ptr() as i64,
+                &write_log_buffer.count as *const u64 as i64,
+            );
+            context.write_log_buffer = Some(write_log_buffer);
+        } else {
+            log::info!("Write-log: skipped (small hermetic design)");
+        }
 
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
@@ -1189,15 +2014,313 @@ impl Conv<&air::Module> for ProtoModule {
             .collect();
 
         let unified_sorted = analyze_dependency(unified)?;
-        // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
         let unified_sorted = reorder_by_level(unified_sorted);
-        let required_comb_passes = compute_required_passes(&unified_sorted);
-        let comb_statements = try_jit_no_cache(context, unified_sorted);
+
+        // Inline CompiledBlocks: expand into their original ProtoStatements.
+        // This eliminates function call overhead and extends load_cache scope
+        // across module boundaries.
+        let pre_expand = unified_sorted.len();
+        let cb_count = unified_sorted
+            .iter()
+            .filter(|s| matches!(s, ProtoStatement::CompiledBlock(_)))
+            .count();
+        let unified_expanded: Vec<ProtoStatement> = unified_sorted
+            .into_iter()
+            .flat_map(|stmt| match stmt {
+                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                    cb.original_stmts
+                }
+                other => vec![other],
+            })
+            .collect();
+        let post_expand = unified_expanded.len();
+        let remaining_cb = unified_expanded
+            .iter()
+            .filter(|s| matches!(s, ProtoStatement::CompiledBlock(_)))
+            .count();
+        if cb_count > 0 {
+            log::info!(
+                "CB inline: {} stmts ({} CBs) -> {} stmts ({} remaining)",
+                pre_expand,
+                cb_count,
+                post_expand,
+                remaining_cb
+            );
+        }
+
+        // Collect comb offsets read by event statements (these must not be
+        // eliminated or inlined by the comb optimizer).
+        let mut event_reads: HashSet<isize> = HashSet::default();
+        let mut event_comb_writes: HashSet<isize> = HashSet::default();
+        // Build event FF→comb dependency map: for each comb offset written by
+        // event statements, collect the FF offsets that the event reads.
+        // This lets activity gating track which FF changes affect event-written comb vars.
+        //
+        // Build preliminary comb_to_ff from comb statements FIRST, so we can
+        // transitively expand event comb reads to their FF dependencies.
+        // Without this, event statements that read comb variables miss the
+        // transitive FF deps, causing activity gating to miss activations.
+        let preliminary_comb_to_ff = build_comb_to_ff_map(&unified_expanded);
+        let mut event_comb_to_ff: HashMap<isize, Vec<(usize, usize)>> = HashMap::default();
+        for stmts in all_event_statements.values() {
+            // Collect all FF reads and comb writes across all statements in this event group
+            let mut group_ff_reads: Vec<(usize, usize)> = Vec::new();
+            let mut group_comb_writes: Vec<isize> = Vec::new();
+            for s in stmts {
+                let mut ins = vec![];
+                let mut outs = vec![];
+                s.gather_variable_offsets(&mut ins, &mut outs);
+                for off in &ins {
+                    if !off.is_ff() {
+                        event_reads.insert(off.raw());
+                        // Transitively expand comb reads to their FF dependencies
+                        if let Some(ff_deps) = preliminary_comb_to_ff.get(&off.raw()) {
+                            group_ff_reads.extend(ff_deps.iter().cloned());
+                        }
+                    } else {
+                        group_ff_reads.push((off.raw() as usize, 8));
+                    }
+                }
+                for off in &outs {
+                    if !off.is_ff() {
+                        event_comb_writes.insert(off.raw());
+                        group_comb_writes.push(off.raw());
+                    }
+                }
+                // CompiledBlock's gather_variable_offsets filters out FF offsets,
+                // so FF reads are missing from `ins`. Extract them directly from
+                // input_offsets to build correct event_comb_to_ff dependencies.
+                if let ProtoStatement::CompiledBlock(cb) = s {
+                    for off in &cb.input_offsets {
+                        if off.is_ff() {
+                            group_ff_reads.push((off.raw() as usize, 8));
+                        } else if let Some(ff_deps) = preliminary_comb_to_ff.get(&off.raw()) {
+                            group_ff_reads.extend(ff_deps.iter().cloned());
+                        }
+                    }
+                }
+            }
+            group_ff_reads.sort();
+            group_ff_reads.dedup();
+            group_comb_writes.sort();
+            group_comb_writes.dedup();
+            // Map each comb output to its event group's FF dependencies
+            for &comb_off in &group_comb_writes {
+                let entry = event_comb_to_ff.entry(comb_off).or_default();
+                entry.extend(group_ff_reads.iter().cloned());
+                entry.sort();
+                entry.dedup();
+            }
+        }
+
+        if !event_comb_writes.is_empty() {
+            log::info!(
+                "event_comb_writes (pre-opt): {} offsets",
+                event_comb_writes.len()
+            );
+        }
+
+        // Merged comb+event optimization: inline single-use comb vars into
+        // event expressions and DCE unused comb vars in a single unified pass.
+        // This replaces the old two-phase approach (optimize_merged then
+        // optimize_unified) which broke because the second pass could remove
+        // comb vars that the first pass had inlined into event expressions.
+        // Convert eligible If blocks to Ternary (select) expressions.
+        // This eliminates basic block splits in JIT, avoiding load_cache
+        // clears at If boundaries.
+        #[cfg(not(target_family = "wasm"))]
+        let unified_expanded = crate::ir::optimize::flatten_if_to_select(unified_expanded);
+
+        #[cfg(not(target_family = "wasm"))]
+        let (unified_expanded, all_event_statements, event_reads) = {
+            // Convert events to indexed groups for the optimizer
+            let event_keys: Vec<Event> = all_event_statements.keys().cloned().collect();
+            let event_groups: Vec<(usize, Vec<ProtoStatement>)> = event_keys
+                .iter()
+                .enumerate()
+                .map(|(i, k)| (i, all_event_statements.remove(k).unwrap()))
+                .collect();
+
+            let (opt_comb, opt_events) = crate::ir::optimize::optimize_top_level(
+                unified_expanded,
+                event_groups,
+                &event_reads,
+            );
+
+            // Reconstruct HashMap
+            let mut result_events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
+            for (idx, stmts) in opt_events {
+                result_events.insert(event_keys[idx].clone(), stmts);
+            }
+            // Recompute event_reads from transformed events (Phase 2 inlining
+            // may have introduced new comb references that weren't in the original).
+            let mut updated_reads: HashSet<isize> = HashSet::default();
+            for stmts in result_events.values() {
+                for s in stmts {
+                    let mut ins = vec![];
+                    let mut outs = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut outs);
+                    for off in ins {
+                        if !off.is_ff() {
+                            updated_reads.insert(off.raw());
+                        }
+                    }
+                }
+            }
+
+            (opt_comb, result_events, updated_reads)
+        };
+
+        #[cfg(target_family = "wasm")]
+        let event_reads = event_reads; // unchanged on wasm
+
+        let required_comb_passes = compute_required_passes(&unified_expanded);
+        log::info!(
+            "comb_stmts={}, required_comb_passes={}",
+            unified_expanded.len(),
+            required_comb_passes
+        );
+
+        // Recompute event_comb_writes and event_comb_to_ff from POST-OPTIMIZATION
+        // event statements using POST-OPTIMIZATION comb_to_ff. This ensures FF
+        // dependency chains aren't broken by optimize_top_level's comb→event inlining.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let post_opt_comb_to_ff = build_comb_to_ff_map(&unified_expanded);
+            event_comb_writes.clear();
+            event_comb_to_ff.clear();
+            for stmts in all_event_statements.values() {
+                let mut group_ff_reads: Vec<(usize, usize)> = Vec::new();
+                let mut group_comb_writes: Vec<isize> = Vec::new();
+                for s in stmts {
+                    let mut ins = vec![];
+                    let mut outs = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut outs);
+                    for off in &ins {
+                        if off.is_ff() {
+                            group_ff_reads.push((off.raw() as usize, 8));
+                        } else if let Some(ff_deps) = post_opt_comb_to_ff.get(&off.raw()) {
+                            group_ff_reads.extend(ff_deps.iter().cloned());
+                        }
+                    }
+                    for off in &outs {
+                        if !off.is_ff() {
+                            event_comb_writes.insert(off.raw());
+                            group_comb_writes.push(off.raw());
+                        }
+                    }
+                    if let ProtoStatement::CompiledBlock(cb) = s {
+                        for off in &cb.input_offsets {
+                            if off.is_ff() {
+                                group_ff_reads.push((off.raw() as usize, 8));
+                            } else if let Some(ff_deps) = post_opt_comb_to_ff.get(&off.raw()) {
+                                group_ff_reads.extend(ff_deps.iter().cloned());
+                            }
+                        }
+                    }
+                }
+                group_ff_reads.sort();
+                group_ff_reads.dedup();
+                group_comb_writes.sort();
+                group_comb_writes.dedup();
+                for &comb_off in &group_comb_writes {
+                    let entry = event_comb_to_ff.entry(comb_off).or_default();
+                    entry.extend(group_ff_reads.iter().cloned());
+                    entry.sort();
+                    entry.dedup();
+                }
+            }
+        }
+
+        // Filter event_comb_writes:
+        // 1. Remove offsets not read by any comb statement
+        // 2. Remove offsets with complete FF deps (tracked by ff_to_chunk)
+        {
+            let pre_filter = event_comb_writes.len();
+            let mut all_comb_reads: HashSet<isize> = HashSet::default();
+            for stmt in &unified_expanded {
+                let mut ins = vec![];
+                let mut outs = vec![];
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                for off in &ins {
+                    if !off.is_ff() {
+                        all_comb_reads.insert(off.raw());
+                    }
+                }
+            }
+            // Keep offset if: (a) read by comb, AND (b) has no FF deps OR is self-referencing.
+            // Self-referencing: event reads AND writes the same comb offset (V = f(V_old, ...)).
+            // These have temporal state that FF tracking can't capture.
+            event_comb_writes.retain(|off| {
+                if !all_comb_reads.contains(off) {
+                    return false;
+                }
+                let has_ff_deps = event_comb_to_ff
+                    .get(off)
+                    .is_some_and(|deps| !deps.is_empty());
+                let is_self_ref = event_reads.contains(off);
+                // Keep if no FF deps (untraceable) or self-referencing (temporal state)
+                !has_ff_deps || is_self_ref
+            });
+            if pre_filter > 0 || !event_comb_writes.is_empty() {
+                let hot_count = event_comb_writes
+                    .iter()
+                    .filter(|&&o| o >= 0 && (o as usize) < comb_hot_bytes)
+                    .count();
+                let cold_count = event_comb_writes.len() - hot_count;
+                log::info!(
+                    "event_comb_writes: {} -> {} (filtered, hot={}, cold={}, comb_hot_bytes={})",
+                    pre_filter,
+                    event_comb_writes.len(),
+                    hot_count,
+                    cold_count,
+                    comb_hot_bytes,
+                );
+                // Show first few cold event_comb_writes offsets for debugging
+                let mut cold_offs: Vec<isize> = event_comb_writes
+                    .iter()
+                    .filter(|&&o| o < 0 || (o as usize) >= comb_hot_bytes)
+                    .copied()
+                    .collect();
+                cold_offs.sort();
+                if cold_offs.len() <= 20 {
+                    log::info!("  cold event_comb_writes offsets: {:?}", cold_offs);
+                } else {
+                    log::info!(
+                        "  cold event_comb_writes offsets (first 20): {:?}",
+                        &cold_offs[..20]
+                    );
+                }
+            }
+        }
+        // Reserve bytes at the end of comb_values for dirty flags.
+        // These must be set BEFORE JIT compilation so event JIT can emit flag stores.
+        let cold_dirty_flag_offset = context.comb_total_bytes as i64;
+        context.comb_total_bytes += 1;
+        let event_comb_dirty_flag_offset = context.comb_total_bytes;
+        context.comb_total_bytes += 1;
+        context.cold_dirty_flag_offset = Some(cold_dirty_flag_offset);
+        context.event_comb_dirty_flag_offset = Some(event_comb_dirty_flag_offset as i64);
+        context.comb_hot_size = comb_hot_bytes;
+
+        // Keep the write-log buffer alive even if this module has no FF
+        // variables: child-module event JIT may already have emitted log
+        // appends (scheduled comb writes for strict NBA) whose pointer was
+        // captured at compile time. Discarding here would leave dangling
+        // references. The modest memory cost is acceptable; if needed, we
+        // can later discard only when both FF commit *and* scheduled comb
+        // writes are statically proven to be empty.
+
+        let comb_statements = try_jit_no_cache(
+            context,
+            unified_expanded,
+            comb_hot_bytes,
+            &event_reads,
+            &event_comb_writes,
+            &event_comb_to_ff,
+        );
 
         // Event statements preserve source order (no topological sorting).
-        // NBA semantics: reads come from current, writes go to next, then
-        // ff_commit copies next → current. Source order must be preserved
-        // for sequential writes to the same variable.
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| (event, try_jit(context, stmts)))
@@ -1214,11 +2337,16 @@ impl Conv<&air::Module> for ProtoModule {
             ports: src.ports.clone(),
             ff_bytes: context.ff_total_bytes,
             comb_bytes: context.comb_total_bytes,
+            comb_hot_bytes,
             use_4state: context.config.use_4state,
             module_variable_meta,
             event_statements,
             comb_statements,
             required_comb_passes,
+            cold_dirty_flag_offset,
+            event_comb_writes,
+            event_comb_dirty_flag_offset,
+            write_log_buffer: context.write_log_buffer.take(),
         })
     }
 }

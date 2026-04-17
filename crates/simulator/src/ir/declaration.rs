@@ -306,13 +306,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_ff_table = air::FfTable::default();
         child_module.gather_ff(&mut child_analyzer_context, &mut child_ff_table);
         child_ff_table.update_is_ff();
-        if context.config.disable_ff_opt {
-            child_ff_table.force_all_ff();
-        }
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
-        let (child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
+        let (child_variable_meta, child_ff_count, child_comb_count, _) = create_variable_meta(
             &child_module.variables,
             &child_ff_table,
             context.config.use_4state,
@@ -533,7 +530,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 for (event, stmts) in all_event_statements.iter_mut() {
                     if stmts.iter().all(|s| s.can_build_binary())
                         && !stmts.is_empty()
-                        && let Some(func) = cranelift::build_binary(context, stmts.clone())
+                        && let Some(func) = cranelift::build_binary_event(context, stmts.clone())
                     {
                         // Event blocks use NBA semantics, so a variable
                         // that is both read and written is not purely

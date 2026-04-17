@@ -84,8 +84,6 @@ pub struct Ir {
     /// FF commit entries: (current_offset, value_size) pairs.
     /// After event execution, next → current copy is performed for each entry.
     pub ff_commit_entries: Vec<(usize, usize)>,
-    /// FF entry offset → variable name (for diagnostics).
-    pub ff_entry_names: HashMap<usize, String>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
     /// Cold comb chunks with activity-skip metadata.
@@ -155,7 +153,7 @@ impl Ir {
             .iter()
             .filter(|(event, _)| !matches!(event, Event::Initial))
             .all(|(_, stmts)| stmts.iter().all(|s| s.is_binary()));
-        let has_write_log = module.write_log_buffer.is_some();
+        let _has_write_log = module.write_log_buffer.is_some();
         let write_log_buffer = if all_events_jit {
             module.write_log_buffer
         } else {
@@ -171,9 +169,7 @@ impl Ir {
                     }
                 }
             }
-            log::info!(
-                "Write-log disabled: not all event statements are JIT-compiled"
-            );
+            log::info!("Write-log disabled: not all event statements are JIT-compiled");
             None
         };
 
@@ -189,7 +185,6 @@ impl Ir {
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             ff_commit_entries: module.ff_commit_entries,
-            ff_entry_names: module.ff_entry_names,
             disable_ff_opt: config.disable_ff_opt,
             cold_chunks: module.cold_chunks,
             comb_hot_size: module.comb_hot_size,
@@ -200,7 +195,9 @@ impl Ir {
             write_log_buffer,
             ff_offset_to_entry,
             event_comb_write_offsets: {
-                let mut v: Vec<usize> = module.event_comb_writes.iter()
+                let mut v: Vec<usize> = module
+                    .event_comb_writes
+                    .iter()
                     .map(|&off| off as usize)
                     .collect();
                 v.sort();
@@ -214,7 +211,7 @@ impl Ir {
     fn build_activity_gating(
         chunk_meta: &[statement::ChunkActivityMeta],
         ff_commit_entries: &[(usize, usize)],
-        event_comb_writes: &HashSet<isize>,
+        _event_comb_writes: &HashSet<isize>,
     ) -> Option<CombActivityGating> {
         if chunk_meta.is_empty() || chunk_meta.len() > 32 || ff_commit_entries.is_empty() {
             return None; // Too many chunks, or no FF entries (all vars comb-classified)
@@ -305,17 +302,22 @@ impl Ir {
             }
         }
         // Propagate always_active through dependents
-        for ci in 0..num_chunks {
+        for (ci, &dep) in chunk_dependents.iter().enumerate().take(num_chunks) {
             if always_active & (1 << ci) != 0 {
-                always_active |= chunk_dependents[ci];
+                always_active |= dep;
             }
         }
 
         log::info!(
             "Activity gating: {} chunks, {} ff_entries, always_active=0x{:x} ({}/{}), event_comb_changed=0x{:x} ({}/{})",
-            num_chunks, ff_commit_entries.len(),
-            always_active, always_active.count_ones(), num_chunks,
-            event_comb_changed_active, event_comb_changed_active.count_ones(), num_chunks,
+            num_chunks,
+            ff_commit_entries.len(),
+            always_active,
+            always_active.count_ones(),
+            num_chunks,
+            event_comb_changed_active,
+            event_comb_changed_active.count_ones(),
+            num_chunks,
         );
 
         let all_mask = (1u32 << num_chunks) - 1;

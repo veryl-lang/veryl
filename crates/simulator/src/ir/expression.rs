@@ -847,24 +847,21 @@ impl ProtoExpression {
     pub fn has_cold_array_access(&self, comb_hot_bytes: usize) -> bool {
         match self {
             ProtoExpression::Variable { dynamic_select, .. } => {
-                if let Some(dyn_sel) = dynamic_select {
-                    if dyn_sel.index_expr.has_cold_array_access(comb_hot_bytes) {
-                        return true;
-                    }
+                if let Some(dyn_sel) = dynamic_select
+                    && dyn_sel.index_expr.has_cold_array_access(comb_hot_bytes)
+                {
+                    return true;
                 }
                 false
             }
             ProtoExpression::Value { .. } => false,
             ProtoExpression::Unary { x, .. } => x.has_cold_array_access(comb_hot_bytes),
             ProtoExpression::Binary { x, y, .. } => {
-                x.has_cold_array_access(comb_hot_bytes)
-                    || y.has_cold_array_access(comb_hot_bytes)
+                x.has_cold_array_access(comb_hot_bytes) || y.has_cold_array_access(comb_hot_bytes)
             }
-            ProtoExpression::Concatenation { elements, .. } => {
-                elements
-                    .iter()
-                    .any(|(e, _, _)| e.has_cold_array_access(comb_hot_bytes))
-            }
+            ProtoExpression::Concatenation { elements, .. } => elements
+                .iter()
+                .any(|(e, _, _)| e.has_cold_array_access(comb_hot_bytes)),
             ProtoExpression::Ternary {
                 cond,
                 true_expr,
@@ -891,10 +888,10 @@ impl ProtoExpression {
                 if index_expr.has_cold_array_access(comb_hot_bytes) {
                     return true;
                 }
-                if let Some(dyn_sel) = dynamic_select {
-                    if dyn_sel.index_expr.has_cold_array_access(comb_hot_bytes) {
-                        return true;
-                    }
+                if let Some(dyn_sel) = dynamic_select
+                    && dyn_sel.index_expr.has_cold_array_access(comb_hot_bytes)
+                {
+                    return true;
                 }
                 false
             }
@@ -1583,7 +1580,9 @@ impl ProtoExpression {
                         None
                     };
 
-                    context.load_cache.insert(expr_cache_key, (payload, mask_xz, true));
+                    context
+                        .load_cache
+                        .insert(expr_cache_key, (payload, mask_xz, true));
                     (payload, mask_xz)
                 };
 
@@ -2083,19 +2082,35 @@ impl ProtoExpression {
                     Op::EqWildcard => builder.ins().icmp(IntCC::Equal, x_payload, y_payload),
                     Op::NeWildcard => builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload),
                     Op::Greater => {
-                        let cc = if signed { IntCC::SignedGreaterThan } else { IntCC::UnsignedGreaterThan };
+                        let cc = if signed {
+                            IntCC::SignedGreaterThan
+                        } else {
+                            IntCC::UnsignedGreaterThan
+                        };
                         builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::GreaterEq => {
-                        let cc = if signed { IntCC::SignedGreaterThanOrEqual } else { IntCC::UnsignedGreaterThanOrEqual };
+                        let cc = if signed {
+                            IntCC::SignedGreaterThanOrEqual
+                        } else {
+                            IntCC::UnsignedGreaterThanOrEqual
+                        };
                         builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::Less => {
-                        let cc = if signed { IntCC::SignedLessThan } else { IntCC::UnsignedLessThan };
+                        let cc = if signed {
+                            IntCC::SignedLessThan
+                        } else {
+                            IntCC::UnsignedLessThan
+                        };
                         builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::LessEq => {
-                        let cc = if signed { IntCC::SignedLessThanOrEqual } else { IntCC::UnsignedLessThanOrEqual };
+                        let cc = if signed {
+                            IntCC::SignedLessThanOrEqual
+                        } else {
+                            IntCC::UnsignedLessThanOrEqual
+                        };
                         builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::LogicShiftL | Op::ArithShiftL => builder.ins().ishl(x_payload, y_payload),

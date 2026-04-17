@@ -432,25 +432,6 @@ pub struct ModuleVariableMeta {
     pub children: Vec<ModuleVariableMeta>,
 }
 
-impl ModuleVariableMeta {
-    /// Find a variable name by its FF current_offset.
-    pub fn find_var_by_ff_offset(&self, offset: usize) -> Option<String> {
-        for meta in self.variable_meta.values() {
-            for (i, elem) in meta.elements.iter().enumerate() {
-                if elem.is_ff() && elem.current_offset() as usize == offset {
-                    return Some(format!("{}[{}]", meta.path, i));
-                }
-            }
-        }
-        for child in &self.children {
-            if let Some(name) = child.find_var_by_ff_offset(offset) {
-                return Some(name);
-            }
-        }
-        None
-    }
-}
-
 /// Hierarchical variable tree with resolved pointers into the flat buffers.
 #[derive(Clone, Debug)]
 pub struct ModuleVariables {
