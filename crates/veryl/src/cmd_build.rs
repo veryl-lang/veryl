@@ -299,7 +299,9 @@ impl CmdBuild {
             }
         }
 
-        for path in used_paths.into_values() {
+        let mut remaining: Vec<_> = used_paths.into_values().collect();
+        remaining.sort_by(|a, b| a.src.cmp(&b.src));
+        for path in remaining {
             ret.push(path.clone());
         }
 
