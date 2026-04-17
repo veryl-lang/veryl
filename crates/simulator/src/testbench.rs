@@ -359,7 +359,47 @@ pub fn run_native_testbench(
         .ok_or_else(|| SimulatorError::no_initial_block(&module_name, &token))?;
 
     let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+    let sim_start = std::time::Instant::now();
     let result = run_testbench(&mut sim, &tb_stmts);
+    let sim_elapsed = sim_start.elapsed();
+    log::info!("simulation time: {:.2}s", sim_elapsed.as_secs_f64());
+
+    // Log interpreter statement breakdown
+    {
+        let mut interp_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut jit_count = 0usize;
+        let count_stmts = |stmts: &[crate::ir::Statement], jit: &mut usize, interp: &mut std::collections::HashMap<&str, usize>| {
+            for s in stmts {
+                if s.is_binary() {
+                    *jit += 1;
+                } else {
+                    *interp.entry(s.type_name()).or_default() += 1;
+                }
+            }
+        };
+        let mut comb_jit = 0usize;
+        let mut comb_interp: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        count_stmts(&sim.ir.comb_statements, &mut comb_jit, &mut comb_interp);
+        jit_count += comb_jit;
+        for (k, v) in &comb_interp { *interp_counts.entry(k).or_default() += v; }
+        for (event, stmts) in &sim.ir.event_statements {
+            let mut ej = 0usize;
+            let mut ei: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+            count_stmts(stmts, &mut ej, &mut ei);
+            jit_count += ej;
+            for (k, v) in &ei { *interp_counts.entry(k).or_default() += v; }
+            if !ei.is_empty() || ej > 0 {
+                let parts: Vec<_> = ei.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                log::info!("  event {:?}: jit={}, interp=[{}]", event, ej, parts.join(", "));
+            }
+        }
+        if !interp_counts.is_empty() {
+            let mut parts: Vec<_> = interp_counts.iter().collect();
+            parts.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
+            let interp_str: Vec<_> = parts.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+            log::info!("stmt breakdown: jit={}, interp=[{}]", jit_count, interp_str.join(", "));
+        }
+    }
 
     #[cfg(feature = "profile")]
     {
@@ -407,7 +447,43 @@ pub fn run_native_testbench(
             fc_total, fc_jit, fc_interp
         );
         eprintln!("  comb_values_len:     {}", sim.ir.comb_values.len());
+        eprintln!("  ff_values_len:       {}", sim.ir.ff_values.len());
+        eprintln!("  ff_commit_entries:   {}", sim.ir.ff_commit_entries.len());
         eprintln!("  required_comb_passes:{}", sim.ir.required_comb_passes);
+        eprintln!("  event_comb_offsets:  {}", sim.ir.event_comb_write_offsets.len());
+        eprintln!(
+            "  event_comb_dirty:    {} / {} ({:.1}%)",
+            p.event_comb_dirty_cycles,
+            p.step_count,
+            if p.step_count > 0 { p.event_comb_dirty_cycles as f64 / p.step_count as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!(
+            "  event_comb_changed:  {} / {} ({:.1}%)",
+            p.event_comb_value_changed_cycles,
+            p.event_comb_dirty_cycles,
+            if p.event_comb_dirty_cycles > 0 { p.event_comb_value_changed_cycles as f64 / p.event_comb_dirty_cycles as f64 * 100.0 } else { 0.0 }
+        );
+        if !p.event_stmt_ns.is_empty() {
+            eprintln!("  event_stmt_ns:");
+            // Show event statement types alongside timing
+            let clock_event = sim.ir.event_statements.iter()
+                .find(|(e, _)| matches!(e, crate::ir::Event::Clock(_)))
+                .map(|(_, stmts)| stmts);
+            for (i, &ns) in p.event_stmt_ns.iter().enumerate() {
+                let type_info = clock_event
+                    .and_then(|stmts| stmts.get(i))
+                    .map(|s| {
+                        match s {
+                            crate::ir::Statement::BinaryBatch(_, args) => {
+                                format!("BinaryBatch({}inst)", args.len())
+                            }
+                            _ => s.type_name().to_string(),
+                        }
+                    })
+                    .unwrap_or_default();
+                eprintln!("    [{}]: {:.2}ms  {}", i, ns as f64 / 1_000_000.0, type_info);
+            }
+        }
         eprintln!("===========================");
     }
 
@@ -450,19 +526,24 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 1
             };
             let has_dump = sim.dump.is_some();
-            for _ in 0..n {
-                if has_dump && let Some(id) = clock.var_id() {
-                    sim.set_var_by_id(&id, Value::new(1, 1, false));
-                }
-                sim.step(clock);
-                sim.time += high_time;
-                if has_dump {
+            if has_dump {
+                for _ in 0..n {
+                    if let Some(id) = clock.var_id() {
+                        sim.set_var_by_id(&id, Value::new(1, 1, false));
+                    }
+                    sim.step(clock);
+                    sim.time += high_time;
                     if let Some(id) = clock.var_id() {
                         sim.set_var_by_id(&id, Value::new(0, 1, false));
                     }
                     sim.dump_variables();
+                    sim.time += low_time;
                 }
-                sim.time += low_time;
+            } else {
+                for _ in 0..n {
+                    sim.step(clock);
+                    sim.time += high_time + low_time;
+                }
             }
             ExecResult::Continue
         }
