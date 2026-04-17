@@ -289,20 +289,29 @@ impl VariableMeta {
 /// (not including the start offset).
 /// Iterates variables sorted by VarId so the iteration order is deterministic
 /// and matches the buffer allocation order in `fill_buffers`.
+/// Returns (variables, ff_bytes, comb_bytes, comb_hot_bytes).
+/// comb_hot_bytes is the size of the "hot" comb region before large arrays.
 pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
     ff_table: &air::FfTable,
     use_4state: bool,
     ff_start_bytes: isize,
     comb_start_bytes: isize,
-) -> Option<(HashMap<VarId, VariableMeta>, usize, usize)> {
+) -> Option<(HashMap<VarId, VariableMeta>, usize, usize, usize)> {
     let mut ff_pos: isize = ff_start_bytes;
     let mut comb_pos: isize = comb_start_bytes;
+    let mut comb_hot_end: isize = 0; // will be set after small vars allocated
 
     let mut src_sorted: Vec<_> = src.iter().collect();
-    src_sorted.sort_by_key(|(k, _)| **k);
+    // Sort small variables first, large arrays last.
+    // This puts hot comb signals (pipeline regs, control flags) at low
+    // offsets in comb_values where they fit in L1 cache (~32KB).
+    // Large arrays (e.g., testbench DRAM) are placed at high offsets
+    // and accessed only via dynamic indexing (cache miss is unavoidable).
+    src_sorted.sort_by_key(|(k, v)| (v.value.len() > 256, **k));
 
     let mut variables = HashMap::default();
+    let mut seen_large = false;
 
     for (k, v) in src_sorted {
         // `string`-typed params/consts have no well-defined native byte
@@ -312,6 +321,11 @@ pub fn create_variable_meta(
             && v.r#type.kind == air::TypeKind::String
         {
             continue;
+        }
+        // Record comb_hot_end: position before first large array
+        if !seen_large && v.value.len() > 256 {
+            comb_hot_end = comb_pos - comb_start_bytes;
+            seen_large = true;
         }
         let width = v.r#type.total_width()?;
         let nb = native_bytes(width);
@@ -396,10 +410,16 @@ pub fn create_variable_meta(
         }
     }
 
+    // If no large arrays were seen, hot region = entire comb
+    if !seen_large {
+        comb_hot_end = comb_pos - comb_start_bytes;
+    }
+
     Some((
         variables,
         (ff_pos - ff_start_bytes) as usize,
         (comb_pos - comb_start_bytes) as usize,
+        comb_hot_end as usize,
     ))
 }
 
@@ -410,6 +430,25 @@ pub struct ModuleVariableMeta {
     pub name: StrId,
     pub variable_meta: HashMap<VarId, VariableMeta>,
     pub children: Vec<ModuleVariableMeta>,
+}
+
+impl ModuleVariableMeta {
+    /// Find a variable name by its FF current_offset.
+    pub fn find_var_by_ff_offset(&self, offset: usize) -> Option<String> {
+        for meta in self.variable_meta.values() {
+            for (i, elem) in meta.elements.iter().enumerate() {
+                if elem.is_ff() && elem.current_offset() as usize == offset {
+                    return Some(format!("{}[{}]", meta.path, i));
+                }
+            }
+        }
+        for child in &self.children {
+            if let Some(name) = child.find_var_by_ff_offset(offset) {
+                return Some(name);
+            }
+        }
+        None
+    }
 }
 
 /// Hierarchical variable tree with resolved pointers into the flat buffers.

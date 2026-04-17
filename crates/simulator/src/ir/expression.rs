@@ -13,7 +13,7 @@ use cranelift::codegen::ir::BlockArg;
 #[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::Value as CraneliftValue;
 #[cfg(not(target_family = "wasm"))]
-use cranelift::prelude::types::{I32, I64, I128};
+use cranelift::prelude::types::{I8, I32, I64, I128};
 #[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::ir as air;
@@ -84,6 +84,17 @@ fn bxor_const(
         builder.ins().bxor(val, c)
     } else {
         builder.ins().bxor_imm(val, imm as i64)
+    }
+}
+
+/// Ensure a value is I64. No-op for I64/I128, uextend for I8/I32.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn ensure_i64(builder: &mut FunctionBuilder, val: CraneliftValue) -> CraneliftValue {
+    let ty = builder.func.dfg.value_type(val);
+    if ty == I64 || ty == I128 {
+        val
+    } else {
+        builder.ins().uextend(I64, val)
     }
 }
 
@@ -777,6 +788,118 @@ impl ProtoExpression {
             }
         }
     }
+
+    /// Collect (VarOffset, native_bytes) pairs for all inputs.
+    /// Unlike gather_variable_offsets, for DynamicVariable only collects the
+    /// index expression inputs — the array base is excluded because it may be
+    /// in the cold region and is too large to snapshot for activity tracking.
+    pub fn gather_input_ranges(&self, inputs: &mut Vec<(VarOffset, usize)>) {
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                width,
+                dynamic_select,
+                ..
+            } => {
+                inputs.push((*var_offset, calc_native_bytes(*width)));
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_input_ranges(inputs);
+                }
+            }
+            ProtoExpression::Value { .. } => (),
+            ProtoExpression::Unary { x, .. } => x.gather_input_ranges(inputs),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.gather_input_ranges(inputs);
+                y.gather_input_ranges(inputs);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.gather_input_ranges(inputs);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.gather_input_ranges(inputs);
+                true_expr.gather_input_ranges(inputs);
+                false_expr.gather_input_ranges(inputs);
+            }
+            ProtoExpression::DynamicVariable {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                // Only collect index expression inputs (hot), NOT the array base
+                // (cold region, too large to snapshot).
+                index_expr.gather_input_ranges(inputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_input_ranges(inputs);
+                }
+            }
+        }
+    }
+
+    /// Returns true if this expression reads from a large array
+    /// whose base is in the cold comb region (offset >= comb_hot_bytes).
+    pub fn has_cold_array_access(&self, comb_hot_bytes: usize) -> bool {
+        match self {
+            ProtoExpression::Variable { dynamic_select, .. } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    if dyn_sel.index_expr.has_cold_array_access(comb_hot_bytes) {
+                        return true;
+                    }
+                }
+                false
+            }
+            ProtoExpression::Value { .. } => false,
+            ProtoExpression::Unary { x, .. } => x.has_cold_array_access(comb_hot_bytes),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.has_cold_array_access(comb_hot_bytes)
+                    || y.has_cold_array_access(comb_hot_bytes)
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                elements
+                    .iter()
+                    .any(|(e, _, _)| e.has_cold_array_access(comb_hot_bytes))
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.has_cold_array_access(comb_hot_bytes)
+                    || true_expr.has_cold_array_access(comb_hot_bytes)
+                    || false_expr.has_cold_array_access(comb_hot_bytes)
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                num_elements,
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                // A DynamicVariable with many elements AND base in cold region
+                if *num_elements > 256
+                    && matches!(base_offset, VarOffset::Comb(o) if (*o as usize) >= comb_hot_bytes)
+                {
+                    return true;
+                }
+                if index_expr.has_cold_array_access(comb_hot_bytes) {
+                    return true;
+                }
+                if let Some(dyn_sel) = dynamic_select {
+                    if dyn_sel.index_expr.has_cold_array_access(comb_hot_bytes) {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
 }
 
 /// Dynamic bit selection for packed arrays.
@@ -1043,7 +1166,7 @@ impl ProtoExpression {
                 | Op::LogicNot
                 | Op::BitXor
                 | Op::BitXnor => 1,
-                Op::Add => x.effective_bits(),
+                Op::Add => (x.effective_bits() + 1).min(64),
                 _ => *width,
             },
             ProtoExpression::Binary {
@@ -1061,6 +1184,19 @@ impl ProtoExpression {
                 | Op::LogicOr => 1,
                 Op::BitAnd => x.effective_bits().min(y.effective_bits()),
                 Op::BitOr | Op::BitXor | Op::BitXnor => x.effective_bits().max(y.effective_bits()),
+                // Add/Sub can produce carry: result may need width+1 bits.
+                // Report conservatively to ensure proper masking in store forward.
+                Op::Add | Op::Sub => {
+                    let max_input = x.effective_bits().max(y.effective_bits());
+                    (max_input + 1).min(64) // capped at 64 (I64)
+                }
+                // Mul can overflow: up to x_bits + y_bits
+                Op::Mul => {
+                    let total = x.effective_bits() + y.effective_bits();
+                    total.min(64)
+                }
+                // Left shift can widen: conservative since shift amount is variable
+                Op::LogicShiftL | Op::ArithShiftL => 64,
                 _ => *width,
             },
             ProtoExpression::Concatenation { width, .. } => *width,
@@ -1394,13 +1530,25 @@ impl ProtoExpression {
                 let wide = read_width > 64;
 
                 // Load CSE: reuse previously loaded values for the same address
+                // and same native byte width.  Keyed on (VarOffset, nb) to prevent
+                // mismatches between I32+uextend (nb=4) and I64 (nb=8) loads of the
+                // same variable when different read_widths are used.
+                let expr_cache_key = (cache_key, nb);
                 let (mut payload, mut mask_xz) = if !context.disable_load_cache
-                    && let Some(&(cached_payload, cached_mask_xz)) =
-                        context.load_cache.get(&cache_key)
+                    && let Some(&(cached_payload, cached_mask_xz, _)) =
+                        context.load_cache.get(&expr_cache_key)
                 {
+                    // Cached values are already correctly sized:
+                    // - nb=4: from uextend(I64, load(I32)) or masked store forward
+                    // - nb=8: from load(I64) or store forward
+                    // No additional masking needed.
                     (cached_payload, cached_mask_xz)
                 } else {
-                    let load_mem_flag = MemFlags::trusted();
+                    let mut load_mem_flag = MemFlags::trusted();
+                    // FF values are readonly during comb evaluation
+                    if var_offset.is_ff() {
+                        load_mem_flag.set_readonly();
+                    }
 
                     let base_addr = if var_offset.is_ff() {
                         context.ff_values
@@ -1411,8 +1559,7 @@ impl ProtoExpression {
                     let payload = if nb == 16 {
                         builder.ins().load(I128, load_mem_flag, base_addr, offset)
                     } else if nb == 4 {
-                        let v = builder.ins().load(I32, load_mem_flag, base_addr, offset);
-                        builder.ins().uextend(I64, v)
+                        builder.ins().uload32(load_mem_flag, base_addr, offset)
                     } else {
                         builder.ins().load(I64, load_mem_flag, base_addr, offset)
                     };
@@ -1423,11 +1570,9 @@ impl ProtoExpression {
                                 .ins()
                                 .load(I128, load_mem_flag, base_addr, mask_xz_offset)
                         } else if nb == 4 {
-                            let v =
-                                builder
-                                    .ins()
-                                    .load(I32, load_mem_flag, base_addr, mask_xz_offset);
-                            builder.ins().uextend(I64, v)
+                            builder
+                                .ins()
+                                .uload32(load_mem_flag, base_addr, mask_xz_offset)
                         } else {
                             builder
                                 .ins()
@@ -1438,7 +1583,7 @@ impl ProtoExpression {
                         None
                     };
 
-                    context.load_cache.insert(cache_key, (payload, mask_xz));
+                    context.load_cache.insert(expr_cache_key, (payload, mask_xz, true));
                     (payload, mask_xz)
                 };
 
@@ -1512,12 +1657,18 @@ impl ProtoExpression {
 
                 match value {
                     Value::U64(x) => {
-                        let payload = x.payload as i64;
-                        let payload = builder.ins().iconst(I64, payload);
+                        let payload = if x.payload == 0 {
+                            context.zero
+                        } else {
+                            builder.ins().iconst(I64, x.payload as i64)
+                        };
 
                         let mask_xz = if context.use_4state {
-                            let mask_xz = x.mask_xz as i64;
-                            let mask_xz = builder.ins().iconst(I64, mask_xz);
+                            let mask_xz = if x.mask_xz == 0 {
+                                context.zero
+                            } else {
+                                builder.ins().iconst(I64, x.mask_xz as i64)
+                            };
                             Some(mask_xz)
                         } else {
                             None
@@ -1588,22 +1739,39 @@ impl ProtoExpression {
                         bxor_const(builder, x_payload, mask, wide)
                     }
                     Op::BitAnd => {
-                        let mask = gen_mask_for_width(x.width());
-                        let ret = icmp_const(builder, IntCC::Equal, x_payload, mask, x_wide);
-                        builder.ins().uextend(I64, ret)
+                        if x.width() == 1 && x_mask_xz.is_none() {
+                            x_payload // already 0 or 1
+                        } else {
+                            let mask = gen_mask_for_width(x.width());
+                            let ret = icmp_const(builder, IntCC::Equal, x_payload, mask, x_wide);
+                            builder.ins().uextend(I64, ret)
+                        }
                     }
                     Op::BitNand => {
-                        let mask = gen_mask_for_width(x.width());
-                        let ret = icmp_const(builder, IntCC::NotEqual, x_payload, mask, x_wide);
-                        builder.ins().uextend(I64, ret)
+                        if x.width() == 1 && x_mask_xz.is_none() {
+                            builder.ins().bxor_imm(x_payload, 1)
+                        } else {
+                            let mask = gen_mask_for_width(x.width());
+                            let ret = icmp_const(builder, IntCC::NotEqual, x_payload, mask, x_wide);
+                            builder.ins().uextend(I64, ret)
+                        }
                     }
                     Op::BitOr => {
-                        let ret = icmp_const(builder, IntCC::NotEqual, x_payload, 0, x_wide);
-                        builder.ins().uextend(I64, ret)
+                        if x.width() == 1 && x_mask_xz.is_none() {
+                            x_payload // already 0 or 1
+                        } else {
+                            let ret = icmp_const(builder, IntCC::NotEqual, x_payload, 0, x_wide);
+                            builder.ins().uextend(I64, ret)
+                        }
                     }
                     Op::BitNor | Op::LogicNot => {
-                        let ret = icmp_const(builder, IntCC::Equal, x_payload, 0, x_wide);
-                        builder.ins().uextend(I64, ret)
+                        if matches!(op, Op::LogicNot) && x.width() == 1 && x_mask_xz.is_none() {
+                            // x is boolean (0 or 1 in I64) — xor with 1 to negate
+                            builder.ins().bxor_imm(x_payload, 1)
+                        } else {
+                            let ret = icmp_const(builder, IntCC::Equal, x_payload, 0, x_wide);
+                            builder.ins().uextend(I64, ret)
+                        }
                     }
                     Op::BitXor => {
                         if x_wide {
@@ -1780,8 +1948,16 @@ impl ProtoExpression {
                 let x_wide = x.width() > 64;
                 let y_wide = y.width() > 64;
 
-                // Ensure operand types match: widen I64 to I128 if the other is I128
-                // (for operations where both operands must be the same type)
+                // Ensure operand types match: promote I8→I64 (from comparisons),
+                // then widen I64→I128 if the other is I128.
+                x_payload = ensure_i64(builder, x_payload);
+                y_payload = ensure_i64(builder, y_payload);
+                if let Some(xm) = x_mask_xz {
+                    x_mask_xz = Some(ensure_i64(builder, xm));
+                }
+                if let Some(ym) = y_mask_xz {
+                    y_mask_xz = Some(ensure_i64(builder, ym));
+                }
                 let needs_wide = wide || x_wide || y_wide;
                 if needs_wide && !x_wide {
                     x_payload = builder.ins().uextend(I128, x_payload);
@@ -1902,57 +2078,25 @@ impl ProtoExpression {
                     Op::BitOr => builder.ins().bor(x_payload, y_payload),
                     Op::BitXor => builder.ins().bxor(x_payload, y_payload),
                     Op::BitXnor => builder.ins().bxor_not(x_payload, y_payload),
-                    Op::Eq => {
-                        let ret = builder.ins().icmp(IntCC::Equal, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
-                    }
-                    Op::Ne => {
-                        let ret = builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
-                    }
-                    Op::EqWildcard => {
-                        let ret = builder.ins().icmp(IntCC::Equal, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
-                    }
-                    Op::NeWildcard => {
-                        let ret = builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
-                    }
+                    Op::Eq => builder.ins().icmp(IntCC::Equal, x_payload, y_payload),
+                    Op::Ne => builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload),
+                    Op::EqWildcard => builder.ins().icmp(IntCC::Equal, x_payload, y_payload),
+                    Op::NeWildcard => builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload),
                     Op::Greater => {
-                        let cc = if signed {
-                            IntCC::SignedGreaterThan
-                        } else {
-                            IntCC::UnsignedGreaterThan
-                        };
-                        let ret = builder.ins().icmp(cc, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
+                        let cc = if signed { IntCC::SignedGreaterThan } else { IntCC::UnsignedGreaterThan };
+                        builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::GreaterEq => {
-                        let cc = if signed {
-                            IntCC::SignedGreaterThanOrEqual
-                        } else {
-                            IntCC::UnsignedGreaterThanOrEqual
-                        };
-                        let ret = builder.ins().icmp(cc, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
+                        let cc = if signed { IntCC::SignedGreaterThanOrEqual } else { IntCC::UnsignedGreaterThanOrEqual };
+                        builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::Less => {
-                        let cc = if signed {
-                            IntCC::SignedLessThan
-                        } else {
-                            IntCC::UnsignedLessThan
-                        };
-                        let ret = builder.ins().icmp(cc, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
+                        let cc = if signed { IntCC::SignedLessThan } else { IntCC::UnsignedLessThan };
+                        builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::LessEq => {
-                        let cc = if signed {
-                            IntCC::SignedLessThanOrEqual
-                        } else {
-                            IntCC::UnsignedLessThanOrEqual
-                        };
-                        let ret = builder.ins().icmp(cc, x_payload, y_payload);
-                        builder.ins().uextend(I64, ret)
+                        let cc = if signed { IntCC::SignedLessThanOrEqual } else { IntCC::UnsignedLessThanOrEqual };
+                        builder.ins().icmp(cc, x_payload, y_payload)
                     }
                     Op::LogicShiftL | Op::ArithShiftL => builder.ins().ishl(x_payload, y_payload),
                     Op::LogicShiftR => builder.ins().ushr(x_payload, y_payload),
@@ -2023,24 +2167,58 @@ impl ProtoExpression {
                         builder.block_params(exit_block)[0]
                     }
                     Op::LogicAnd | Op::LogicOr => {
-                        let x_nonzero = if let Some(ref xm) = x_mask_xz {
-                            let known = builder.ins().band_not(x_payload, *xm);
-                            icmp_const(builder, IntCC::NotEqual, known, 0, needs_wide)
+                        // Optimize: if operand is already boolean (width==1),
+                        // skip icmp_imm ne 0 + uextend and operate on I64 directly.
+                        let x_bool = x.width() == 1 && x_mask_xz.is_none();
+                        let y_bool = y.width() == 1 && y_mask_xz.is_none();
+
+                        // Check if operands are I8 (from icmp) — can operate directly
+                        let x_is_i8 = builder.func.dfg.value_type(x_payload) == I8;
+                        let y_is_i8 = builder.func.dfg.value_type(y_payload) == I8;
+
+                        if (x_bool || x_is_i8) && (y_bool || y_is_i8) {
+                            // Both operands are boolean — use band/bor directly
+                            // Ensure same type (both I8 or both I64)
+                            let (a, b) = if x_is_i8 && y_is_i8 {
+                                (x_payload, y_payload) // both I8
+                            } else if x_is_i8 {
+                                (builder.ins().uextend(I64, x_payload), y_payload)
+                            } else if y_is_i8 {
+                                (x_payload, builder.ins().uextend(I64, y_payload))
+                            } else {
+                                (x_payload, y_payload) // both I64
+                            };
+                            if matches!(op, Op::LogicAnd) {
+                                builder.ins().band(a, b)
+                            } else {
+                                builder.ins().bor(a, b)
+                            }
                         } else {
-                            icmp_const(builder, IntCC::NotEqual, x_payload, 0, needs_wide)
-                        };
-                        let y_nonzero = if let Some(ref ym) = y_mask_xz {
-                            let known = builder.ins().band_not(y_payload, *ym);
-                            icmp_const(builder, IntCC::NotEqual, known, 0, needs_wide)
-                        } else {
-                            icmp_const(builder, IntCC::NotEqual, y_payload, 0, needs_wide)
-                        };
-                        let is_one = if matches!(op, Op::LogicAnd) {
-                            builder.ins().band(x_nonzero, y_nonzero)
-                        } else {
-                            builder.ins().bor(x_nonzero, y_nonzero)
-                        };
-                        builder.ins().uextend(I64, is_one)
+                            let x_nonzero = if x_is_i8 {
+                                x_payload // already I8 boolean
+                            } else if let Some(ref xm) = x_mask_xz {
+                                let known = builder.ins().band_not(x_payload, *xm);
+                                icmp_const(builder, IntCC::NotEqual, known, 0, needs_wide)
+                            } else {
+                                icmp_const(builder, IntCC::NotEqual, x_payload, 0, needs_wide)
+                            };
+                            let y_nonzero = if y_is_i8 {
+                                y_payload // already I8 boolean
+                            } else if y_bool {
+                                builder.ins().ireduce(I8, y_payload)
+                            } else if let Some(ref ym) = y_mask_xz {
+                                let known = builder.ins().band_not(y_payload, *ym);
+                                icmp_const(builder, IntCC::NotEqual, known, 0, needs_wide)
+                            } else {
+                                icmp_const(builder, IntCC::NotEqual, y_payload, 0, needs_wide)
+                            };
+                            let is_one = if matches!(op, Op::LogicAnd) {
+                                builder.ins().band(x_nonzero, y_nonzero)
+                            } else {
+                                builder.ins().bor(x_nonzero, y_nonzero)
+                            };
+                            builder.ins().uextend(I64, is_one)
+                        }
                     }
                     _ => return None,
                 };
@@ -2464,7 +2642,32 @@ impl ProtoExpression {
                     .first()
                     .is_some_and(|(_, repeat, ew)| *ew == 1 && *repeat > 1);
 
-                if first_is_bit_repeat && elements.len() >= 2 {
+                // Single-element bit repeat: {bit repeat N} → ineg(bit) & mask_N
+                if first_is_bit_repeat && elements.len() == 1 {
+                    let (sign_expr, _sign_repeat, _) = &elements[0];
+                    let (sign_payload, sign_mask_xz) = sign_expr.build_binary(context, builder)?;
+                    let sign_payload = if wide && sign_expr.width() <= 64 {
+                        builder.ins().uextend(I128, sign_payload)
+                    } else {
+                        sign_payload
+                    };
+                    let sign_mask_xz = sign_mask_xz.map(|v| {
+                        if wide && sign_expr.width() <= 64 {
+                            builder.ins().uextend(I128, v)
+                        } else {
+                            v
+                        }
+                    });
+                    // ineg(0)=0, ineg(1)=0xFFFF...FFFF
+                    acc_payload = builder.ins().ineg(sign_payload);
+                    let mask = gen_mask_for_width(*width);
+                    acc_payload = band_const(builder, acc_payload, mask, wide);
+
+                    if let Some(sign_xz) = sign_mask_xz {
+                        let xz_fill = builder.ins().ineg(sign_xz);
+                        acc_mask_xz = Some(band_const(builder, xz_fill, mask, wide));
+                    }
+                } else if first_is_bit_repeat && elements.len() >= 2 {
                     let (sign_expr, sign_repeat, _) = &elements[0];
                     let (sign_payload, sign_mask_xz) = sign_expr.build_binary(context, builder)?;
                     // Widen sign bit to accumulator width if needed
@@ -2531,6 +2734,7 @@ impl ProtoExpression {
                 } else {
                     for (expr, repeat, elem_width) in elements {
                         let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+                        let elem_payload = ensure_i64(builder, elem_payload);
                         let elem_payload = if wide && expr.width() <= 64 {
                             builder.ins().uextend(I128, elem_payload)
                         } else {
@@ -2617,7 +2821,16 @@ impl ProtoExpression {
                 } else {
                     cond_payload
                 };
-                let cond_nz = icmp_const(builder, IntCC::NotEqual, effective_cond, 0, cond_wide);
+                let cond_nz = if builder.func.dfg.value_type(effective_cond) == I8 {
+                    effective_cond // already I8 from icmp
+                } else if cond.width() == 1 && cond_mask_xz.is_none() && !cond_wide {
+                    builder.ins().ireduce(I8, effective_cond)
+                } else {
+                    icmp_const(builder, IntCC::NotEqual, effective_cond, 0, cond_wide)
+                };
+                // Ensure true/false branches are same type (both may be I8 from comparisons)
+                let true_payload = ensure_i64(builder, true_payload);
+                let false_payload = ensure_i64(builder, false_payload);
                 let payload = builder.ins().select(cond_nz, true_payload, false_payload);
 
                 let z = zero_for_width(context, builder, *width);
@@ -2677,8 +2890,7 @@ impl ProtoExpression {
                 let mut payload = if nb == 16 {
                     builder.ins().load(I128, load_mem_flag, addr, 0)
                 } else if nb == 4 {
-                    let v = builder.ins().load(I32, load_mem_flag, addr, 0);
-                    builder.ins().uextend(I64, v)
+                    builder.ins().uload32(load_mem_flag, addr, 0)
                 } else {
                     builder.ins().load(I64, load_mem_flag, addr, 0)
                 };
@@ -2686,8 +2898,7 @@ impl ProtoExpression {
                     let mask_xz = if nb == 16 {
                         builder.ins().load(I128, load_mem_flag, addr, nb as i32)
                     } else if nb == 4 {
-                        let v = builder.ins().load(I32, load_mem_flag, addr, nb as i32);
-                        builder.ins().uextend(I64, v)
+                        builder.ins().uload32(load_mem_flag, addr, nb as i32)
                     } else {
                         builder.ins().load(I64, load_mem_flag, addr, nb as i32)
                     };
