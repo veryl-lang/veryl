@@ -1972,7 +1972,7 @@ fn generics_resolve() {
             i_rst: '0,
         );
     }
-    "#;
+"#;
 
     let exp = r#"module ModuleA {
   input var0(i_clk): clock = 1'hx;
@@ -2008,6 +2008,37 @@ module ModuleB {
       }
     }
   }
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    function func_a::<A: u32> -> u32 {
+        return A;
+    }
+    package Pkg::<A: u32> {
+        const B: u32 = A;
+        function func_b() -> u32 {
+            return func_a::<B>();
+        }
+    }
+    module ModuleA {
+        const A: u32 = Pkg::<1>::func_b();
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var1(Pkg.func_b::<1>.return): bit<32> = 32'h00000001;
+  var var3(Pkg.func_a::<__Pkg__1 B>.return): bit<32> = 32'h00000001;
+  const var4(A): bit<32> = 32'h00000001;
+  func var0(Pkg.func_b::<1>) -> var1 {
+    var1 = 32'h00000001;
+  }
+  func var2(Pkg.func_a::<__Pkg__1 B>) -> var3 {
+    var3 = 32'sh00000001;
+  }
+
 }
 "#;
 

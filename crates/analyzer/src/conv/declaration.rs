@@ -946,13 +946,13 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
 
             // insert VarPath for function before statement_block conv
             // because it may be refered by recursive function
-            let (path, name) = if let Some(path) = path {
+            let (path, name, namespace) = if let Some(path) = path {
                 let name = resource_table::insert_str(&path.sig.to_string());
-                (path.clone(), name)
+                (path.clone(), name, path.sig.namespace())
             } else {
                 let name = func_def.identifier.text();
                 let path = FuncPath::new(symbol.found.id);
-                (path, name)
+                (path, name, symbol.found.inner_namespace())
             };
 
             if context.func_paths.contains_key(&path) {
@@ -965,7 +965,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
 
             context.push_affiliation(Affiliation::Function);
             context.push_hierarchy(name);
-            context.push_namespace(symbol.found.inner_namespace());
+            context.push_namespace(namespace);
 
             let arg_items: Vec<_> = if let Some(x) = &func_def.function_declaration_opt0
                 && let Some(x) = &x.port_declaration.port_declaration_opt

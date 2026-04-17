@@ -86,7 +86,7 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         let is_dependency = project_name != self.project_name;
-        namespace_table::set_default(&[project_name.into()]);
+        namespace_table::set_project(project_name.into(), !is_dependency);
         let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt, is_dependency);
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());

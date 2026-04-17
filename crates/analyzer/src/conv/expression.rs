@@ -492,12 +492,14 @@ impl Conv<&Factor> for ir::Expression {
                                 } else {
                                     None
                                 };
+                            let rep = rep.map(Box::new);
                             let exp: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
+                            let exp = Box::new(exp);
                             ir::ArrayLiteralItem::Value(exp, rep)
                         }
                         ArrayLiteralItemGroup::DefaulColonExpression(x) => {
                             let exp: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-                            ir::ArrayLiteralItem::Defaul(exp)
+                            ir::ArrayLiteralItem::Defaul(Box::new(exp))
                         }
                     };
                     ret.push(item);

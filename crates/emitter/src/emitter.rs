@@ -2227,12 +2227,21 @@ impl Emitter {
             .filter(|x| {
                 if let Some(id) = x.id {
                     let symbol = symbol_table::get(id).unwrap();
-                    if let SymbolKind::GenericInstance(x) = &symbol.kind
-                        && let Some(affiliation_symbol) = x.affiliation_symbol
+                    let SymbolKind::GenericInstance(inst) = &symbol.kind else {
+                        unreachable!();
+                    };
+
+                    let affiliation_symbol = inst.affiliation_symbol.unwrap();
+                    if affiliation_symbol == parent_id {
+                        true
+                    } else if let Some(parent_symbol) = symbol_table::get(parent_id)
+                        && let SymbolKind::GenericInstance(inst) = parent_symbol.kind
                     {
-                        affiliation_symbol == parent_id
+                        // The generic map is associated with generic component.
+                        // This means that it is also associated with generic instances generated from the component.
+                        inst.base_symbol().id == affiliation_symbol
                     } else {
-                        unreachable!()
+                        false
                     }
                 } else {
                     true
@@ -6238,7 +6247,9 @@ pub fn resolve_generic_path(
                     arg.apply_map(maps);
                 }
                 arg.unalias();
-                arg.append_namespace_path(namespace, &symbol.namespace);
+                if !symbol.is_global_function() {
+                    arg.append_namespace_path(namespace, &symbol.namespace);
+                }
             }
         }
     }

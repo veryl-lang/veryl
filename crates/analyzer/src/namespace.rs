@@ -2,6 +2,7 @@ use crate::attribute::Attribute;
 use crate::attribute_table;
 use crate::namespace_table;
 use crate::symbol::Symbol;
+use crate::symbol::SymbolKind;
 use crate::symbol_path::SymbolPath;
 use crate::symbol_table;
 use crate::{HashMap, SVec, svec};
@@ -167,6 +168,8 @@ impl Namespace {
 
     pub fn get_symbol(&self) -> Option<Symbol> {
         let mut namespace = self.clone();
+        namespace.strip_anonymous_path();
+
         if let Some(path) = namespace.pop()
             && namespace.depth() >= 1
         {
@@ -176,6 +179,22 @@ impl Namespace {
         } else {
             None
         }
+    }
+
+    pub fn generic_namespace(&self) -> Self {
+        let mut ret = Namespace::new();
+        for i in 0..self.depth() {
+            let path = self.paths[i];
+            if i == 0 || !path.to_string().starts_with("__") {
+                ret.push(path);
+            } else if let Ok(symbol) = symbol_table::resolve((path, &ret))
+                && let SymbolKind::GenericInstance(inst) = &symbol.found.kind
+            {
+                let base = inst.base_symbol();
+                ret.push(base.token.text);
+            }
+        }
+        ret
     }
 }
 

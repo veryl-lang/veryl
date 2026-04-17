@@ -7,6 +7,8 @@ use veryl_parser::resource_table::{PathId, StrId, TokenId};
 #[derive(Clone, Debug)]
 pub struct NamespaceTable {
     default: Namespace,
+    project_names: Vec<StrId>,
+    root_project: Option<StrId>,
     table: HashMap<TokenId, (Namespace, PathId)>,
 }
 
@@ -27,6 +29,24 @@ impl NamespaceTable {
         self.table.retain(|_, x| x.1 != file_path);
     }
 
+    pub fn set_project(&mut self, project_name: StrId, is_root: bool) {
+        if !self.project_names.contains(&project_name) {
+            self.project_names.push(project_name);
+            if is_root {
+                self.root_project = Some(project_name);
+            }
+        }
+        self.set_default(&[project_name]);
+    }
+
+    pub fn match_project_name(&self, name: StrId) -> bool {
+        self.project_names.contains(&name)
+    }
+
+    pub fn root_project_name(&self) -> StrId {
+        self.root_project.unwrap()
+    }
+
     pub fn set_default(&mut self, id: &[StrId]) {
         let mut namespace = Namespace::new();
         for id in id {
@@ -40,6 +60,8 @@ impl NamespaceTable {
     }
 
     pub fn clear(&mut self) {
+        self.project_names.clear();
+        self.root_project = None;
         self.table.clear()
     }
 }
@@ -48,6 +70,8 @@ impl Default for NamespaceTable {
     fn default() -> Self {
         Self {
             default: Namespace::new(),
+            project_names: vec![],
+            root_project: None,
             table: HashMap::default(),
         }
     }
@@ -96,6 +120,18 @@ pub fn dump() -> String {
 
 pub fn drop(file_path: PathId) {
     NAMESPACE_TABLE.with(|f| f.borrow_mut().drop(file_path))
+}
+
+pub fn set_project(project_name: StrId, is_root: bool) {
+    NAMESPACE_TABLE.with(|f| f.borrow_mut().set_project(project_name, is_root))
+}
+
+pub fn match_project_name(name: StrId) -> bool {
+    NAMESPACE_TABLE.with(|f| f.borrow().match_project_name(name))
+}
+
+pub fn root_project_name() -> StrId {
+    NAMESPACE_TABLE.with(|f| f.borrow().root_project_name())
 }
 
 pub fn set_default(id: &[StrId]) {

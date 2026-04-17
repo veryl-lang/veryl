@@ -334,7 +334,11 @@ impl ReferenceTable {
 
                     for arg in args.iter_mut() {
                         arg.unalias();
-                        arg.append_namespace_path(namespace, &target_symbol.namespace);
+                        // Global function is emitted into the caller namespace.
+                        // So namespace expansion is not needed.
+                        if !target_symbol.is_global_function() {
+                            arg.append_namespace_path(namespace, &target_symbol.namespace);
+                        }
                     }
 
                     path.paths[i].arguments.append(&mut args);
@@ -373,8 +377,15 @@ impl ReferenceTable {
         let instance_path = &path.paths[ith];
         let instance = if affiliation_symbol.is_some() || !target.is_global_function() {
             instance_path.get_generic_instance(target, affiliation_symbol)
+        } else if let Some(namespace_symbol) = namespace.get_symbol() {
+            if namespace_symbol.is_component(true) {
+                instance_path.get_generic_instance(target, Some(&namespace_symbol))
+            } else {
+                instance_path
+                    .get_generic_instance(target, namespace_symbol.get_parent_component().as_ref())
+            }
         } else {
-            instance_path.get_generic_instance(target, namespace.get_symbol().as_ref())
+            instance_path.get_generic_instance(target, None)
         };
         let Some((token, symbol)) = instance else {
             return;

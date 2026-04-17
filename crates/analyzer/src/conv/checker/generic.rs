@@ -390,7 +390,7 @@ pub fn check_generic_expression(
 
     let bound_namespace = if let Some(base) = base {
         &base.namespace
-    } else if let Some(namespce) = context.currnet_namespace() {
+    } else if let Some(namespce) = context.current_namespace() {
         &namespce.clone()
     } else {
         &Namespace::default()

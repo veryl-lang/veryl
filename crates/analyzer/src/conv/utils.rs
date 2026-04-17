@@ -339,7 +339,7 @@ pub fn eval_array_literal(
                         vec![ArrayLiteralExpression {
                             index: vec![],
                             select: vec![],
-                            expr: expr.clone(),
+                            expr: expr.as_ref().clone(),
                         }]
                     };
 
@@ -367,7 +367,7 @@ pub fn eval_array_literal(
                         vec![ArrayLiteralExpression {
                             index: vec![],
                             select: vec![],
-                            expr: expr.clone(),
+                            expr: expr.as_ref().clone(),
                         }]
                     };
 
@@ -1654,7 +1654,7 @@ pub fn eval_factor_path(
         Ok(ir::Factor::Anonymous(comptime))
     } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
         let is_inernal = context
-            .currnet_namespace()
+            .current_namespace()
             .map(|x| symbol.found.namespace.included(&x))
             .unwrap_or(false);
         if is_inernal {
@@ -1689,7 +1689,7 @@ pub fn eval_factor_symbol(
     match &symbol.found.kind {
         SymbolKind::Parameter(x) => {
             // Parameter should be found through context.find_path from the defined namespace
-            if let Some(namespace) = context.currnet_namespace()
+            if let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
                 context.insert_error(AnalyzerError::referring_before_definition(
@@ -2640,7 +2640,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         };
 
         let is_local_func = context
-            .currnet_namespace()
+            .current_namespace()
             .map(|namespace| symbol.namespace.included(&namespace))
             .unwrap_or(false);
         if is_local_func {
