@@ -1565,9 +1565,9 @@ impl Emitter {
 
     fn emit_port_identifier(&mut self, identifier: &Identifier) {
         let symbol = symbol_table::resolve((identifier, self.inst_module_namespace.as_ref()))
-            .map(|x| (*x.found).clone())
-            .ok();
-        self.emit_identifier(identifier, symbol.as_ref());
+            .ok()
+            .map(|x| x.found);
+        self.emit_identifier(identifier, symbol.as_deref());
     }
 
     fn emit_inst_unconnected_port(
@@ -2573,8 +2573,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
-        self.emit_identifier(arg, symbol.as_ref());
+        let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+        self.emit_identifier(arg, symbol.as_deref());
     }
 
     /// Semantic action for non-terminal 'Number'
@@ -2604,8 +2604,8 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
-            self.emit_identifier(&arg.identifier, symbol.as_ref());
+            let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+            self.emit_identifier(&arg.identifier, symbol.as_deref());
         } else {
             self.identifier(&arg.identifier);
         }
@@ -2626,8 +2626,8 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
-                self.emit_identifier(&x.identifier, symbol.as_ref());
+                let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+                self.emit_identifier(&x.identifier, symbol.as_deref());
             } else {
                 self.identifier(&x.identifier);
             }
@@ -2762,8 +2762,8 @@ impl VerylWalker for Emitter {
                 if (i + 1) < arg.expression_identifier_list0.len() {
                     self.emit_identifier(&x.identifier, None);
                 } else {
-                    let symbol = symbol_table::resolve(arg).map(|x| (*x.found).clone()).ok();
-                    self.emit_identifier(&x.identifier, symbol.as_ref());
+                    let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+                    self.emit_identifier(&x.identifier, symbol.as_deref());
                 }
             }
 
