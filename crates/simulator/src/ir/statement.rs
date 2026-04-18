@@ -2083,9 +2083,22 @@ impl ProtoAssignStatement {
                 None
             };
 
-            context
-                .load_cache
-                .insert(cache_key, (result, result_mask_xz));
+            // Mask forwarded value to dst_width to match load-path uextend
+            let fwd = if self.dst_width < 64 {
+                let m = gen_mask_for_width(self.dst_width);
+                band_const(builder, result, m, false)
+            } else {
+                result
+            };
+            let fwd_m = if self.dst_width < 64 {
+                result_mask_xz.map(|v| {
+                    let m = gen_mask_for_width(self.dst_width);
+                    band_const(builder, v, m, false)
+                })
+            } else {
+                result_mask_xz
+            };
+            context.load_cache.insert(cache_key, (fwd, fwd_m));
         } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
@@ -2172,10 +2185,22 @@ impl ProtoAssignStatement {
                 None
             };
 
-            // Forward stored value to load cache
-            context
-                .load_cache
-                .insert(cache_key, (result, result_mask_xz));
+            // Mask forwarded value to dst_width to match load-path uextend
+            let fwd = if self.dst_width < 64 {
+                let m = gen_mask_for_width(self.dst_width);
+                band_const(builder, result, m, false)
+            } else {
+                result
+            };
+            let fwd_m = if self.dst_width < 64 {
+                result_mask_xz.map(|v| {
+                    let m = gen_mask_for_width(self.dst_width);
+                    band_const(builder, v, m, false)
+                })
+            } else {
+                result_mask_xz
+            };
+            context.load_cache.insert(cache_key, (fwd, fwd_m));
         } else {
             // Store elimination relies on load_cache forwarding to
             // serve subsequent reads; skip only when the cache is live.
@@ -2294,8 +2319,22 @@ impl ProtoAssignStatement {
                 }
             }
 
-            // Forward value to load cache (always, even when store is eliminated)
-            context.load_cache.insert(cache_key, (payload, mask_xz));
+            // Forward value to load cache. Mask to dst_width to match load+uextend.
+            let fwd_p = if self.dst_width < 64 {
+                let m = gen_mask_for_width(self.dst_width);
+                band_const(builder, payload, m, false)
+            } else {
+                payload
+            };
+            let fwd_m = if self.dst_width < 64 {
+                mask_xz.map(|v| {
+                    let m = gen_mask_for_width(self.dst_width);
+                    band_const(builder, v, m, false)
+                })
+            } else {
+                mask_xz
+            };
+            context.load_cache.insert(cache_key, (fwd_p, fwd_m));
         }
 
         Some(())
@@ -3372,36 +3411,74 @@ fn parse_hex_file(filename: &str, width: usize) -> Vec<AnalyzerValue> {
 }
 
 pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
-    let mut result = Vec::new();
-    let mut s = content.to_string();
+    let bytes = content.as_bytes();
+    let mut result: Vec<AnalyzerValue> = Vec::with_capacity(bytes.len() / 4 + 1);
+    let mut i = 0usize;
+    let len = bytes.len();
+    let mut digits: Vec<u8> = Vec::with_capacity(32);
 
-    // Remove block comments
-    while let Some(start) = s.find("/*") {
-        if let Some(end) = s[start..].find("*/") {
-            s.replace_range(start..start + end + 2, " ");
-        } else {
-            s.truncate(start);
-            break;
+    while i < len {
+        let c = bytes[i];
+        if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+            i += 1;
+            continue;
         }
-    }
-
-    for line in s.lines() {
-        let line = if let Some(pos) = line.find("//") {
-            &line[..pos]
-        } else {
-            line
-        };
-
-        for token in line.split_whitespace() {
-            let cleaned: String = token.chars().filter(|&c| c != '_').collect();
-            if cleaned.is_empty() {
+        if c == b'/' && i + 1 < len {
+            let n = bytes[i + 1];
+            if n == b'/' {
+                i += 2;
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
                 continue;
             }
-            if let Ok(val) = u64::from_str_radix(&cleaned, 16) {
-                result.push(AnalyzerValue::new(val, width, false));
+            if n == b'*' {
+                i += 2;
+                while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                if i + 1 < len {
+                    i += 2;
+                }
+                continue;
             }
         }
+        let start = i;
+        while i < len {
+            let c = bytes[i];
+            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+                break;
+            }
+            if c == b'/' && i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
+                break;
+            }
+            i += 1;
+        }
+        if start == i {
+            continue;
+        }
+        let tok = &bytes[start..i];
+        let parsed = if tok.contains(&b'_') {
+            digits.clear();
+            for &b in tok {
+                if b != b'_' {
+                    digits.push(b);
+                }
+            }
+            if digits.is_empty() {
+                continue;
+            }
+            std::str::from_utf8(&digits)
+                .ok()
+                .and_then(|s| u64::from_str_radix(s, 16).ok())
+        } else {
+            std::str::from_utf8(tok)
+                .ok()
+                .and_then(|s| u64::from_str_radix(s, 16).ok())
+        };
+        if let Some(val) = parsed {
+            result.push(AnalyzerValue::new(val, width, false));
+        }
     }
-
     result
 }

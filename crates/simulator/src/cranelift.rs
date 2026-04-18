@@ -172,6 +172,14 @@ fn build_binary_inner(
     if !config.dump_cranelift {
         settings_builder.set("enable_verifier", "false").unwrap();
     }
+    // Disable alias analysis for unified comb (no_cache path) to avoid
+    // incorrect cross-block load CSE that conflicts with the simulator's
+    // own comb evaluation semantics.
+    if disable_load_cache {
+        settings_builder
+            .set("enable_alias_analysis", "false")
+            .unwrap();
+    }
     let flags = settings::Flags::new(settings_builder);
 
     let isa = match isa::lookup(Triple::host()) {

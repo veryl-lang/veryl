@@ -1393,12 +1393,20 @@ impl ProtoExpression {
                 let cache_key = *var_offset;
                 let wide = read_width > 64;
 
-                // Load CSE: reuse previously loaded values for the same address
+                // Load CSE: reuse previously loaded values for the same address.
+                // For nb==4 variables, mask cached values to 32 bits to match
+                // the I32 load + uextend behavior of fresh loads.
                 let (mut payload, mut mask_xz) = if !context.disable_load_cache
                     && let Some(&(cached_payload, cached_mask_xz)) =
                         context.load_cache.get(&cache_key)
                 {
-                    (cached_payload, cached_mask_xz)
+                    if nb == 4 {
+                        let p = builder.ins().band_imm(cached_payload, 0xFFFFFFFF_i64);
+                        let m = cached_mask_xz.map(|v| builder.ins().band_imm(v, 0xFFFFFFFF_i64));
+                        (p, m)
+                    } else {
+                        (cached_payload, cached_mask_xz)
+                    }
                 } else {
                     let load_mem_flag = MemFlags::trusted();
 

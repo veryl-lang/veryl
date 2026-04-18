@@ -259,28 +259,23 @@ impl Simulator {
     }
 
     /// Commit FF updates: copy next → current for all FF variables.
-    /// Event statements write new values to next; this makes them visible
-    /// in current for the next cycle. Unwritten variables keep their value
-    /// because next still holds the previous commit's value.
+    /// Constant-size copies allow LLVM to inline as MOV instructions.
     #[inline(always)]
     fn ff_commit(ff_values: &mut [u8], entries: &[(usize, usize)]) {
         let ptr = ff_values.as_mut_ptr();
         for &(current_offset, value_size) in entries {
-            let next_offset = current_offset + value_size;
-            #[cfg(debug_assertions)]
-            debug_assert!(
-                next_offset + value_size <= ff_values.len(),
-                "ff_commit: offset {}+{} exceeds buffer len {}",
-                next_offset,
-                value_size,
-                ff_values.len()
-            );
             unsafe {
-                std::ptr::copy_nonoverlapping(
-                    ptr.add(next_offset),
-                    ptr.add(current_offset),
-                    value_size,
-                );
+                let dst = ptr.add(current_offset);
+                let src = ptr.add(current_offset + value_size);
+                match value_size {
+                    1 => std::ptr::copy_nonoverlapping(src, dst, 1),
+                    2 => std::ptr::copy_nonoverlapping(src, dst, 2),
+                    4 => std::ptr::copy_nonoverlapping(src, dst, 4),
+                    8 => std::ptr::copy_nonoverlapping(src, dst, 8),
+                    16 => std::ptr::copy_nonoverlapping(src, dst, 16),
+                    32 => std::ptr::copy_nonoverlapping(src, dst, 32),
+                    n => std::ptr::copy_nonoverlapping(src, dst, n),
+                }
             }
         }
     }
