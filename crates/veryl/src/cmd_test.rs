@@ -86,7 +86,13 @@ impl CmdTest {
         });
 
         let mut ir = veryl_analyzer::ir::Ir::default();
-        build.exec(metadata, true, false, Some(&mut ir))?;
+        build.exec(
+            metadata,
+            true,
+            false,
+            Some(&mut ir),
+            self.opt.test.as_deref(),
+        )?;
 
         let tests = symbol_table::get_tests(&metadata.project.name);
         let doc_tests = symbol_table::get_doc_tests(&metadata.project.name);
