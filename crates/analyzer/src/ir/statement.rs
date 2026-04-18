@@ -465,28 +465,38 @@ impl AssignDestination {
 
             let mut errors = vec![];
             if let Some((beg, end)) = range {
-                for i in beg..=end {
-                    let index = VarIndex::from_index(i, &variable.r#type.array);
-                    if let Some(index) = index.eval_value(context) {
-                        if assign_context.is_comb()
-                            && assign_table.check_refered(&variable.id, &index, &mask)
-                        {
-                            let mut text = variable.path.to_string();
-                            for i in &index {
-                                text.push_str(&format!("[{i}]"));
-                            }
-                            // ignore `#[allow(unassign_variable)]` attribute
-                            errors.push(AnalyzerError::unassign_variable(&text, &self.token));
-                        }
+                // `insert_assign` / `check_refered` both bail out on arrays
+                // over `array_limit`; iterating beg..=end just to hit that
+                // guard is pure waste when the index is non-const.
+                let array_size = end.saturating_sub(beg).saturating_add(1);
+                let skip_large_array = !is_index_const
+                    && variable.r#type.total_array().unwrap_or(0) > assign_table.array_limit
+                    && array_size > assign_table.array_limit;
 
-                        let maybe = !is_const | assign_context.is_system_verilog();
-                        let _ = assign_table.insert_assign(
-                            &variable,
-                            index,
-                            mask.clone(),
-                            maybe,
-                            self.token,
-                        );
+                if !skip_large_array {
+                    for i in beg..=end {
+                        let index = VarIndex::from_index(i, &variable.r#type.array);
+                        if let Some(index) = index.eval_value(context) {
+                            if assign_context.is_comb()
+                                && assign_table.check_refered(&variable.id, &index, &mask)
+                            {
+                                let mut text = variable.path.to_string();
+                                for i in &index {
+                                    text.push_str(&format!("[{i}]"));
+                                }
+                                // ignore `#[allow(unassign_variable)]` attribute
+                                errors.push(AnalyzerError::unassign_variable(&text, &self.token));
+                            }
+
+                            let maybe = !is_const | assign_context.is_system_verilog();
+                            let _ = assign_table.insert_assign(
+                                &variable,
+                                index,
+                                mask.clone(),
+                                maybe,
+                                self.token,
+                            );
+                        }
                     }
                 }
             }

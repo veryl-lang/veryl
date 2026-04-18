@@ -630,6 +630,7 @@ pub fn eval_const_assign(
             if let Some(exprs) = exprs {
                 let values = eval_array_literal_expressions(context, r#type, exprs, token)?;
                 let id = context.insert_var_path(path.clone(), comptime);
+                let array_limit = context.config.evaluate_array_limit;
                 let variable = Variable::new(
                     id,
                     path.clone(),
@@ -638,6 +639,7 @@ pub fn eval_const_assign(
                     values,
                     context.get_affiliation(),
                     &dst.token,
+                    array_limit,
                 );
                 context.insert_variable(id, variable);
             } else {
@@ -667,6 +669,7 @@ pub fn eval_const_assign(
                         value.trunc(total_width);
                     }
 
+                    let array_limit = context.config.evaluate_array_limit;
                     let variable = Variable::new(
                         id,
                         path.clone(),
@@ -675,6 +678,7 @@ pub fn eval_const_assign(
                         vec![value],
                         context.get_affiliation(),
                         &dst.token,
+                        array_limit,
                     );
                     context.insert_variable(id, variable);
                 }
@@ -709,14 +713,12 @@ pub fn eval_variable(
     let signed = comptime.r#type.signed;
     let id = context.insert_var_path(path.clone(), comptime);
 
-    let values = if let Some(total_array) = r#type.total_array()
-        && let Some(total_width) = r#type.total_width()
-    {
-        let mut values = vec![];
-        for _ in 0..total_array {
-            values.push(Value::new_x(total_width, signed));
-        }
-        values
+    // Every element starts as the same x-state template, so store it once;
+    // the simulator replicates it across the full `r#type.total_array()` at
+    // fill time. Const/param arrays with per-element literals go through
+    // `eval_array_literal` instead and keep their Vec<Value> intact.
+    let values = if let Some(total_width) = r#type.total_width() {
+        vec![Value::new_x(total_width, signed)]
     } else {
         vec![]
     };
@@ -729,6 +731,7 @@ pub fn eval_variable(
         context.insert_var_path_with_id(path, id, comptime);
     }
 
+    let array_limit = context.config.evaluate_array_limit;
     let variable = Variable::new(
         id,
         path.clone(),
@@ -737,6 +740,7 @@ pub fn eval_variable(
         values,
         context.get_affiliation(),
         &token,
+        array_limit,
     );
     context.insert_variable(id, variable);
 }
@@ -1438,6 +1442,7 @@ pub fn build_for_statement(
     } else {
         vec![]
     };
+    let array_limit = context.config.evaluate_array_limit;
     let variable = Variable::new(
         loop_var_id,
         path,
@@ -1446,6 +1451,7 @@ pub fn build_for_statement(
         values,
         context.get_affiliation(),
         &token,
+        array_limit,
     );
     context.insert_variable(loop_var_id, variable);
 

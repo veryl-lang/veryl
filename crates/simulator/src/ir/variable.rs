@@ -317,25 +317,30 @@ pub fn create_variable_meta(
         let nb = native_bytes(width);
         let vs = value_size(nb, use_4state);
 
+        // Analyzer collapses all-same initial arrays down to a single
+        // template value (eval_variable), so derive the real array length
+        // from the type.
+        let total_array = v.r#type.total_array().unwrap_or(v.value.len());
+        let total_array = total_array.max(v.value.len()).max(1);
+
         // For multi-element variables (arrays), all elements must have the
         // same FF/comb classification. DynamicVariable expressions assume
         // uniform stride in a single buffer; mixed placement is invalid.
-        let any_ff = v
-            .value
-            .iter()
-            .enumerate()
-            .any(|(i, _)| ff_table.is_ff(v.id, i));
-        let force_ff = any_ff && v.value.len() > 1;
+        let any_ff = (0..total_array).any(|i| ff_table.is_ff(v.id, i));
+        let force_ff = any_ff && total_array > 1;
 
-        let mut elements = vec![];
-        let mut initial_values = vec![];
+        // `v.value.len() < total_array` means the analyzer supplied only
+        // the template entry — replicate it across all elements.
+        let template_mode = v.value.len() < total_array;
 
-        for (i, val) in v.value.iter().enumerate() {
-            let mut val = val.clone();
-            if !use_4state {
-                val.clear_xz();
-            }
+        let mut elements = Vec::with_capacity(total_array);
+        let mut initial_values = if template_mode {
+            Vec::with_capacity(1)
+        } else {
+            Vec::with_capacity(total_array)
+        };
 
+        for i in 0..total_array {
             if force_ff || ff_table.is_ff(v.id, i) {
                 let current_offset = ff_pos;
                 let next_offset = ff_pos + vs as isize;
@@ -355,6 +360,20 @@ pub fn create_variable_meta(
                 comb_pos += vs as isize;
             }
 
+            if template_mode && i > 0 {
+                continue;
+            }
+            let raw = if let Some(val) = v.value.get(i) {
+                val.clone()
+            } else if let Some(template) = v.value.first() {
+                template.clone()
+            } else {
+                Value::new_x(width, v.r#type.signed)
+            };
+            let mut val = raw;
+            if !use_4state {
+                val.clear_xz();
+            }
             initial_values.push(val);
         }
 

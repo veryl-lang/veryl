@@ -319,6 +319,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
 
             let block = context.block(|c| {
                 let id = c.insert_var_path(path.clone(), comptime.clone());
+                let array_limit = c.config.evaluate_array_limit;
                 let variable = Variable::new(
                     id,
                     path,
@@ -327,6 +328,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
                     vec![comptime.get_value().unwrap().clone()],
                     c.get_affiliation(),
                     &token,
+                    array_limit,
                 );
                 c.insert_variable(id, variable);
 
@@ -561,6 +563,7 @@ impl Conv<&PortDeclarationItem> for () {
 
                 // TODO for array
                 let id = context.insert_var_path(path.clone(), comptime);
+                let array_limit = context.config.evaluate_array_limit;
                 let variable = Variable::new(
                     id,
                     path,
@@ -569,6 +572,7 @@ impl Conv<&PortDeclarationItem> for () {
                     vec![value.clone()],
                     context.get_affiliation(),
                     &variable_token,
+                    array_limit,
                 );
                 context.insert_variable(id, variable);
             } else {
@@ -981,17 +985,17 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                     let kind = VarKind::Variable;
                     let r#type = ret_type.r#type.clone();
 
-                    if let Some(total_array) = r#type.total_array()
+                    if let Some(_total_array) = r#type.total_array()
                         && let Some(total_width) = r#type.total_width()
                     {
                         // type.expand is not necessary
                         // because member access is not allowed for return value
-                        let mut values = vec![];
-                        for _ in 0..total_array {
-                            values.push(Value::new_x(total_width, false));
-                        }
+                        // All elements are initialized to the same x-state
+                        // value, so a single template suffices.
+                        let values = vec![Value::new_x(total_width, false)];
 
                         let ret_id = c.insert_var_path(path.clone(), ret_type.clone());
+                        let array_limit = c.config.evaluate_array_limit;
                         let variable = Variable::new(
                             ret_id,
                             path,
@@ -1000,6 +1004,7 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
                             values,
                             c.get_affiliation(),
                             &token,
+                            array_limit,
                         );
                         c.insert_variable(ret_id, variable);
                         Some(ret_id)

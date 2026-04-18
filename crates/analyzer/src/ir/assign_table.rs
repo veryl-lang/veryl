@@ -444,6 +444,7 @@ mod tests {
             vec![],
             Affiliation::Module,
             &TokenRange::default(),
+            context.config.evaluate_array_limit,
         );
         let variable = VariableInfo::new(&variable);
 

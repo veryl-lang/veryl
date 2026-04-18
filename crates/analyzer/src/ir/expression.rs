@@ -733,6 +733,17 @@ impl Factor {
     ) {
         match self {
             Factor::Variable(id, index, select, _) => {
+                // `insert_reference` bails out on arrays over `array_limit`;
+                // short-circuit to avoid cloning the full Variable (value
+                // vec scales with array size).
+                let total_array = context
+                    .variables
+                    .get(id)
+                    .map(|v| v.r#type.total_array().unwrap_or(0))
+                    .unwrap_or(0);
+                if total_array > assign_table.array_limit {
+                    return;
+                }
                 if let Some(index) = index.eval_value(context)
                     && let Some(variable) = context.variables.get(id).cloned()
                     && let Some((beg, end)) = select.eval_value(context, &variable.r#type, false)
