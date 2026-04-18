@@ -3,7 +3,7 @@ use crate::generic_inference_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
-use crate::symbol_path::{GenericSymbolPath, SymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
@@ -248,6 +248,7 @@ impl ReferenceTable {
         generic_maps: Option<&Vec<GenericMap>>,
     ) {
         let mut path = path.clone();
+        let mut resolved_generic_maps = vec![];
 
         let orig_len = path.len();
         path.resolve_imported(namespace, generic_maps);
@@ -352,7 +353,14 @@ impl ReferenceTable {
                     if path.is_generic_reference() {
                         Self::add_generic_reference(&target_symbol, namespace, &path, i);
                     } else {
-                        Self::insert_generic_instance(&path, i, namespace, &target_symbol, None);
+                        Self::insert_generic_instance(
+                            &path,
+                            i,
+                            namespace,
+                            &target_symbol,
+                            &mut resolved_generic_maps,
+                            None,
+                        );
                     }
                 }
                 Err(err) => {
@@ -372,22 +380,13 @@ impl ReferenceTable {
         ith: usize,
         namespace: &Namespace,
         target: &Symbol,
+        generic_maps: &mut Vec<GenericMap>,
         affiliation_symbol: Option<&Symbol>,
     ) {
         let instance_path = &path.paths[ith];
-        let instance = if affiliation_symbol.is_some() || !target.is_global_function() {
-            instance_path.get_generic_instance(target, affiliation_symbol)
-        } else if let Some(namespace_symbol) = namespace.get_symbol() {
-            if namespace_symbol.is_component(true) {
-                instance_path.get_generic_instance(target, Some(&namespace_symbol))
-            } else {
-                instance_path
-                    .get_generic_instance(target, namespace_symbol.get_parent_component().as_ref())
-            }
-        } else {
-            instance_path.get_generic_instance(target, None)
-        };
-        let Some((token, symbol)) = instance else {
+        let Some((token, symbol)) =
+            Self::create_generic_instance(instance_path, target, namespace, affiliation_symbol)
+        else {
             return;
         };
 
@@ -395,10 +394,10 @@ impl ReferenceTable {
             symbol_table::add_generic_instance(target.id, *id);
         }
 
-        let map = vec![GenericMap {
+        generic_maps.push(GenericMap {
             id: None,
             map: target.generic_table(&instance_path.arguments),
-        }];
+        });
 
         let target_namespace = &target.inner_namespace();
         let mut referecnes = target.generic_references();
@@ -408,20 +407,62 @@ impl ReferenceTable {
                 continue;
             }
 
-            path.apply_map(&map);
+            path.apply_map(generic_maps);
             path.unalias();
             path.append_namespace_path(namespace, &target.namespace);
 
-            if let Ok(target) = symbol_table::resolve((&path.generic_path(), target_namespace)) {
+            if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))
+            {
                 let ith = path.len() - 1;
-                Self::insert_generic_instance(
-                    path,
-                    ith,
-                    target_namespace,
-                    &target.found,
-                    Some(&symbol),
-                );
+                if target.is_global_function() {
+                    Self::insert_generic_instance(
+                        path,
+                        ith,
+                        namespace,
+                        &path_symbol.found,
+                        &mut generic_maps.clone(),
+                        None,
+                    );
+                } else {
+                    Self::insert_generic_instance(
+                        path,
+                        ith,
+                        target_namespace,
+                        &path_symbol.found,
+                        &mut generic_maps.clone(),
+                        Some(&symbol),
+                    );
+                }
             }
+        }
+    }
+
+    fn create_generic_instance(
+        symbol: &GenericSymbol,
+        target: &Symbol,
+        namespace: &Namespace,
+        affiliation_symbol: Option<&Symbol>,
+    ) -> Option<(Token, Symbol)> {
+        if !target.is_global_function() {
+            symbol.get_generic_instance(target, affiliation_symbol)
+        } else if let Some(affiliation_symbol) = affiliation_symbol {
+            if affiliation_symbol.is_component(true) {
+                symbol.get_generic_instance(target, Some(affiliation_symbol))
+            } else {
+                symbol.get_generic_instance(
+                    target,
+                    affiliation_symbol.get_parent_component().as_ref(),
+                )
+            }
+        } else if let Some(namespace_symbol) = namespace.get_symbol() {
+            if namespace_symbol.is_component(true) {
+                symbol.get_generic_instance(target, Some(&namespace_symbol))
+            } else {
+                symbol
+                    .get_generic_instance(target, namespace_symbol.get_parent_component().as_ref())
+            }
+        } else {
+            symbol.get_generic_instance(target, None)
         }
     }
 
@@ -448,16 +489,18 @@ impl ReferenceTable {
         };
         let path = path.slice(ith);
 
+        // existing generic maps means that the target symbol has
+        // already been processed.
+        // For this case, need to insert generic instance generated from
+        // the given path explicitly.
         let generic_maps = target.generic_maps();
         for map in generic_maps {
-            // existing generic maps means that the target symbol has
-            // already been processed.
-            // For this case, need to insert generic instance generated from
-            // the given path explicitly.
             let affiliation_symbol = map.id.map(|id| symbol_table::get(id).unwrap());
             let mut path = path.clone();
             let ith = path.len() - 1;
-            path.apply_map(&[map]);
+
+            let mut maps = vec![map];
+            path.apply_map(&maps);
             path.append_namespace_path(&namespace, &symbol.namespace);
 
             Self::insert_generic_instance(
@@ -465,6 +508,7 @@ impl ReferenceTable {
                 ith,
                 &namespace,
                 symbol,
+                &mut maps,
                 affiliation_symbol.as_ref(),
             );
         }
