@@ -741,6 +741,7 @@ pub struct Variable {
 }
 
 impl Variable {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: VarId,
         path: VarPath,
@@ -749,11 +750,19 @@ impl Variable {
         value: Vec<Value>,
         affiliation: Affiliation,
         token: &TokenRange,
+        array_limit: usize,
     ) -> Self {
-        let mut assigned = vec![];
-        for _ in 0..value.len() {
-            assigned.push(0u32.into());
-        }
+        // `assigned` tracks per-element coverage and must match the full
+        // array length (not `value.len()`, since `value` may hold a single
+        // template entry for all-same init). `set_assigned` / `unassigned()`
+        // callers gate on `> array_limit` before touching `assigned`, so
+        // arrays past the limit can leave the vec empty.
+        let total_array = r#type.total_array().unwrap_or(value.len()).max(value.len());
+        let assigned: Vec<BigUint> = if total_array > array_limit {
+            Vec::new()
+        } else {
+            vec![0u32.into(); total_array]
+        };
 
         Self {
             id,
@@ -866,8 +875,23 @@ impl fmt::Display for Variable {
         }
         r#type.array.clear();
 
-        let is_array = self.value.len() != 1;
-        for (i, value) in self.value.iter().enumerate() {
+        // Template form (`value.len() == 1 && total_array > 1`) means every
+        // element shares value[0]; otherwise treat value.len() as the
+        // effective element count.
+        let type_len = self.r#type.total_array();
+        let is_template = self.value.len() == 1 && matches!(type_len, Some(n) if n > 1);
+        let display_len = if is_template {
+            type_len.unwrap()
+        } else {
+            self.value.len()
+        };
+        let is_array = display_len != 1;
+        for i in 0..display_len {
+            let value = if is_template {
+                &self.value[0]
+            } else {
+                &self.value[i]
+            };
             if is_array {
                 ret.push_str(&format!(
                     "{} {}[{}]({}): ",

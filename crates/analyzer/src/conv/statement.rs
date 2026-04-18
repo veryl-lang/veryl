@@ -704,6 +704,7 @@ fn unroll_for(
             }
 
             let id = c.insert_var_path(path.clone(), comptime.clone());
+            let array_limit = c.config.evaluate_array_limit;
             let variable = ir::Variable::new(
                 id,
                 path,
@@ -712,6 +713,7 @@ fn unroll_for(
                 vec![comptime.get_value().unwrap().clone()],
                 c.get_affiliation(),
                 &token,
+                array_limit,
             );
             c.insert_variable(id, variable);
 

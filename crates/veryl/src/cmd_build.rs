@@ -15,6 +15,7 @@ use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{Analyzer, symbol_table, type_dag};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
+use veryl_parser::resource_table::PathId;
 use veryl_parser::{Parser, resource_table, veryl_token::TokenSource};
 use veryl_path::PathSet;
 
@@ -33,6 +34,7 @@ impl CmdBuild {
         include_tests: bool,
         quiet: bool,
         mut ir: Option<&mut veryl_analyzer::ir::Ir>,
+        test_filter: Option<&str>,
     ) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
@@ -73,6 +75,36 @@ impl CmdBuild {
 
         if metadata.build.incremental && metadata.build_info.veryl_version_match() {
             Self::check_skip(metadata, &mut contexts);
+        }
+
+        // Testbench files whose tests don't match `--test` will never be
+        // simulated, so skip pass2/emit for them.
+        if let Some(filter) = test_filter {
+            let tests = veryl_analyzer::symbol_table::get_tests(&metadata.project.name);
+            let mut test_file_ids: HashSet<PathId> = HashSet::new();
+            let mut matching_file_ids: HashSet<PathId> = HashSet::new();
+            for (name, prop) in &tests {
+                test_file_ids.insert(prop.path);
+                let name = name.to_string();
+                if name.contains(filter) {
+                    matching_file_ids.insert(prop.path);
+                }
+            }
+            let mut skipped = 0usize;
+            for context in contexts.iter_mut() {
+                if context.skip {
+                    continue;
+                }
+                let path_id = resource_table::insert_path(&context.path.src);
+                if test_file_ids.contains(&path_id) && !matching_file_ids.contains(&path_id) {
+                    context.skip = true;
+                    skipped += 1;
+                }
+            }
+            debug!(
+                "test filter {:?}: skipped {} non-matching testbench files",
+                filter, skipped
+            );
         }
 
         let mut analyzer_context = veryl_analyzer::Context::default();

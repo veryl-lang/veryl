@@ -84,7 +84,18 @@ fn fill_buffers_recursive(
     sorted.sort_by_key(|(k, _)| **k);
 
     for (_, meta) in &sorted {
-        for (element, initial) in meta.elements.iter().zip(meta.initial_values.iter()) {
+        // Single-entry initial_values on a multi-element variable is the
+        // compact template form used for large arrays.
+        let template_mode = meta.initial_values.len() == 1 && meta.elements.len() > 1;
+        for (i, element) in meta.elements.iter().enumerate() {
+            let initial = if template_mode {
+                &meta.initial_values[0]
+            } else {
+                match meta.initial_values.get(i) {
+                    Some(v) => v,
+                    None => continue,
+                }
+            };
             let nb = element.native_bytes;
             let _vs = value_size(nb, use_4state);
             if element.is_ff() {
