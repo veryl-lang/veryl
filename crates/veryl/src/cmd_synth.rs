@@ -2,12 +2,14 @@ use crate::OptSynth;
 use crate::context::Context;
 use log::{info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
+use std::collections::HashSet;
 use std::fs;
 use veryl_analyzer::Analyzer;
 use veryl_analyzer::ir::{Component, Ir};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
-use veryl_parser::resource_table;
+use veryl_parser::resource_table::{self, PathId};
+use veryl_parser::veryl_token::TokenSource;
 use veryl_synthesizer::synthesize;
 
 pub struct CmdSynth {
@@ -23,6 +25,7 @@ impl CmdSynth {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
         let mut contexts = Vec::new();
+        let mut user_paths: HashSet<PathId> = HashSet::new();
         for path in &paths {
             info!("Processing file ({})", path.src.to_string_lossy());
             let input = fs::read_to_string(&path.src)
@@ -31,6 +34,9 @@ impl CmdSynth {
             let parser = Parser::parse(&input, &path.src)?;
             let analyzer = Analyzer::new(metadata);
             analyzer.analyze_pass1(&path.prj, &parser.veryl);
+            if path.prj != "$std" {
+                user_paths.insert(resource_table::insert_path(&path.src));
+            }
             let context = Context::new(path.clone(), input, parser, analyzer)?;
             contexts.push(context);
         }
@@ -56,7 +62,9 @@ impl CmdSynth {
             None => {
                 let mut candidate = None;
                 for c in &ir.components {
-                    if let Component::Module(m) = c {
+                    if let Component::Module(m) = c
+                        && is_user_module(m, &user_paths)
+                    {
                         candidate = Some(m.name);
                         break;
                     }
@@ -102,5 +110,12 @@ impl CmdSynth {
         }
 
         Ok(true)
+    }
+}
+
+fn is_user_module(m: &veryl_analyzer::ir::Module, user_paths: &HashSet<PathId>) -> bool {
+    match m.token.beg.source {
+        TokenSource::File { path, .. } => user_paths.contains(&path),
+        _ => false,
     }
 }

@@ -32,7 +32,11 @@ pub struct GateModule {
 
 #[derive(Clone)]
 pub struct GatePort {
+    /// Display name — the first segment of `path`, used in SV emit and tests.
     pub name: StrId,
+    /// Full hierarchical path (e.g. `["m_if", "ready"]` for a modport member).
+    /// Used to disambiguate ports whose `name` alone would collide.
+    pub path: Vec<StrId>,
     pub dir: PortDir,
     pub nets: Vec<NetId>,
 }

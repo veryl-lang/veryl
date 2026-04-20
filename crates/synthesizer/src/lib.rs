@@ -1,21 +1,21 @@
 pub mod analysis;
 pub mod conv;
-pub mod error;
 pub mod ir;
 pub mod library;
+pub mod synthesizer_error;
 
 pub use analysis::{AreaReport, PathStep, StepKind, TimingReport};
-pub use error::SynthError;
 pub use ir::{
     Cell, CellKind, ClockEdge, FfCell, GateIr, GateModule, GatePort, NetId, NetInfo, PortDir,
     ResetPolarity, ResetSpec,
 };
 pub use library::{BuiltinLibrary, CellInfo};
+pub use synthesizer_error::SynthesizerError;
 
 use veryl_analyzer::ir::Ir as AnalyzerIr;
 use veryl_parser::resource_table::StrId;
 
-pub fn build_gate_ir(ir: &AnalyzerIr, top: StrId) -> Result<GateIr, SynthError> {
+pub fn build_gate_ir(ir: &AnalyzerIr, top: StrId) -> Result<GateIr, SynthesizerError> {
     for c in &ir.components {
         if let veryl_analyzer::ir::Component::Module(m) = c
             && m.name == top
@@ -24,7 +24,7 @@ pub fn build_gate_ir(ir: &AnalyzerIr, top: StrId) -> Result<GateIr, SynthError> 
             return Ok(GateIr { module });
         }
     }
-    Err(SynthError::TopModuleNotFound {
+    Err(SynthesizerError::TopModuleNotFound {
         name: top.to_string(),
     })
 }
@@ -35,7 +35,7 @@ pub struct SynthResult {
     pub timing: TimingReport,
 }
 
-pub fn synthesize(ir: &AnalyzerIr, top: StrId) -> Result<SynthResult, SynthError> {
+pub fn synthesize(ir: &AnalyzerIr, top: StrId) -> Result<SynthResult, SynthesizerError> {
     let gate_ir = build_gate_ir(ir, top)?;
     let library = BuiltinLibrary::new();
     let area = analysis::compute_area(&gate_ir.module, &library);
