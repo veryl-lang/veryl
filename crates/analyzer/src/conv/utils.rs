@@ -2447,24 +2447,28 @@ pub fn get_port_connects(
 
 pub fn insert_port_connect(
     context: &mut Context,
-    variable: &[&ir::Variable],
+    variable: &ir::Variable,
     dst: Vec<VarPathSelect>,
     expr: ir::Expression,
     inputs: &mut Vec<ir::InstInput>,
     outputs: &mut Vec<ir::InstOutput>,
 ) {
-    match variable[0].kind {
+    match variable.kind {
         VarKind::Input => {
-            let id = variable.iter().map(|x| x.id).collect();
-            inputs.push(ir::InstInput { id, expr });
+            inputs.push(ir::InstInput {
+                id: variable.id,
+                expr,
+            });
         }
         VarKind::Output => {
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }
-            let id = variable.iter().map(|x| x.id).collect();
             let dst = var_path_to_assign_destination(context, dst, false);
-            outputs.push(ir::InstOutput { id, dst });
+            outputs.push(ir::InstOutput {
+                id: variable.id,
+                dst,
+            });
         }
         _ => (),
     }

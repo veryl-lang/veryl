@@ -641,12 +641,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     // read by port connections after the merged function returns
                     let mut external_reads = HashSet::default();
                     for output in &src.outputs {
-                        for child_var_id in &output.id {
-                            if let Some(child_meta) = child_variable_meta.get(child_var_id) {
-                                let element = &child_meta.elements[0];
-                                if !element.is_ff() {
-                                    external_reads.insert(element.current_offset());
-                                }
+                        if let Some(child_meta) = child_variable_meta.get(&output.id) {
+                            let element = &child_meta.elements[0];
+                            if !element.is_ff() {
+                                external_reads.insert(element.current_offset());
                             }
                         }
                     }
@@ -887,59 +885,57 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {
-            for child_var_id in &input.id {
-                let child_meta = child_variable_meta.get(child_var_id).unwrap();
+            let child_meta = child_variable_meta.get(&input.id).unwrap();
 
-                // Array port with a simple variable expression: expand per-element
-                if child_meta.elements.len() > 1
-                    && let air::Expression::Term(factor) = &input.expr
-                    && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
-                    && index.0.is_empty()
-                    && select.is_empty()
-                {
-                    let parent_scope = context.scope();
-                    let parent_meta = parent_scope.variable_meta.get(parent_id).unwrap();
-                    for i in 0..child_meta.elements.len() {
-                        let child_element = &child_meta.elements[i];
-                        let parent_element = &parent_meta.elements[i];
-                        let parent_expr = ProtoExpression::Variable {
-                            var_offset: parent_element.current,
-                            select: None,
-                            dynamic_select: None,
+            // Array port with a simple variable expression: expand per-element
+            if child_meta.elements.len() > 1
+                && let air::Expression::Term(factor) = &input.expr
+                && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
+                && index.0.is_empty()
+                && select.is_empty()
+            {
+                let parent_scope = context.scope();
+                let parent_meta = parent_scope.variable_meta.get(parent_id).unwrap();
+                for i in 0..child_meta.elements.len() {
+                    let child_element = &child_meta.elements[i];
+                    let parent_element = &parent_meta.elements[i];
+                    let parent_expr = ProtoExpression::Variable {
+                        var_offset: parent_element.current,
+                        select: None,
+                        dynamic_select: None,
+                        width: child_meta.width,
+                        var_full_width: child_meta.width,
+                        expr_context: ExpressionContext {
                             width: child_meta.width,
-                            var_full_width: child_meta.width,
-                            expr_context: ExpressionContext {
-                                width: child_meta.width,
-                                signed: false,
-                            },
-                        };
-                        all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                            dst: child_element.current,
-                            dst_width: child_meta.width,
-                            select: None,
-                            dynamic_select: None,
-                            rhs_select: None,
-                            expr: parent_expr,
-                            dst_ff_current_offset: 0, // not FF
-                            token: TokenRange::default(),
-                        }));
-                    }
-                    continue;
+                            signed: false,
+                        },
+                    };
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: parent_expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
                 }
-
-                let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
-                let element = &child_meta.elements[0];
-                all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                    dst: element.current,
-                    dst_width: child_meta.width,
-                    select: None,
-                    dynamic_select: None,
-                    rhs_select: None,
-                    expr: proto_expr.clone(),
-                    dst_ff_current_offset: 0, // not FF
-                    token: TokenRange::default(),
-                }));
+                continue;
             }
+
+            let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
+            let element = &child_meta.elements[0];
+            all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: element.current,
+                dst_width: child_meta.width,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: proto_expr.clone(),
+                dst_ff_current_offset: 0, // not FF
+                token: TokenRange::default(),
+            }));
         }
 
         // Output ports: child port var → parent dst
@@ -949,8 +945,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let needs_post_comb_propagation =
             full_internal_comb.is_some() || !all_post_comb_fns.is_empty();
         for output in &src.outputs {
-            for (child_var_id, parent_dst) in output.id.iter().zip(output.dst.iter()) {
-                let child_meta = child_variable_meta.get(child_var_id).unwrap();
+            if let Some(parent_dst) = output.dst.first() {
+                let child_meta = child_variable_meta.get(&output.id).unwrap();
 
                 let (
                     parent_index,
@@ -1073,9 +1069,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if let air::Expression::Term(factor) = &input.expr
                 && let air::Factor::Variable(parent_var_id, _, _, _) = factor.as_ref()
             {
-                for child_var_id in &input.id {
-                    child_to_parent_var.insert(*child_var_id, *parent_var_id);
-                }
+                child_to_parent_var.insert(input.id, *parent_var_id);
             }
         }
 
