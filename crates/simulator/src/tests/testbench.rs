@@ -1349,6 +1349,40 @@ fn tb_const_function_with_if() {
 }
 
 #[test]
+fn tb_assert_arith_in_initial() {
+    let code = r#"
+    #[test(test_foo)]
+    module test_foo {
+        var a: u32;
+        var b: u32;
+        initial {
+            a = 1;
+            b = a + 1;
+            $assert(b == (a + 1));
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_foo");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_assert_arith_in_initial failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
 fn tb_2d_packed_select() {
     // Selecting a row from a 2D packed type.
     // `h: logic<2, 3>` is 6 bits.  `h[0]` must select the first
