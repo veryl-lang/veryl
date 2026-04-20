@@ -145,9 +145,14 @@ impl Signature {
 
     pub fn to_generic_map(&self) -> Vec<GenericMap> {
         let mut ret = GenericMap::default();
+
         for (key, val) in &self.generic_parameters {
             ret.map.insert(*key, val.clone());
         }
+
+        let symbol = symbol_table::get(self.symbol).unwrap();
+        symbol.eval_generic_consts(&mut ret);
+
         vec![ret]
     }
 

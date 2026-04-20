@@ -1801,8 +1801,15 @@ pub fn eval_factor_symbol(
                     | ProtoBound::Struct((_, t))
                     | ProtoBound::Union((_, t)) => {
                         let r#type = t.to_ir_type(context, TypePosition::Generic)?;
-                        let (mut comptime, _) = eval_generic_expr(context, &x.value)?;
-                        comptime.r#type = r#type;
+
+                        let mut comptime = if context.in_generic {
+                            // RHS value of generic const may not be evaluated in generic component
+                            Comptime::from_type(r#type.clone(), ClockDomain::None, token)
+                        } else {
+                            let (mut comptime, _) = eval_generic_expr(context, &x.value)?;
+                            comptime.r#type = r#type;
+                            comptime
+                        };
                         comptime.is_const = true;
                         comptime.is_global = true;
                         comptime.token = token;

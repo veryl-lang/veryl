@@ -380,22 +380,22 @@ impl Symbol {
                 .insert(param.0, param.1.default_value.as_ref().unwrap().clone());
         }
 
-        let consts = self.generic_consts();
-        if !consts.is_empty() {
-            for (name, r#const) in &consts {
-                let maps = vec![map.clone()];
-                if let Some(path) = Self::expr_to_generic_symbol_path(&r#const.value, &maps) {
-                    map.map.insert(*name, path);
-                }
-            }
-        }
+        self.eval_generic_consts(&mut map);
 
         map.map
     }
 
+    pub fn eval_generic_consts(&self, generic_map: &mut GenericMap) {
+        for (name, r#const) in self.generic_consts() {
+            if let Some(path) = Self::expr_to_generic_symbol_path(&r#const.value, generic_map) {
+                generic_map.map.insert(name, path);
+            }
+        }
+    }
+
     fn expr_to_generic_symbol_path(
         expr: &syntax_tree::Expression,
-        maps: &[GenericMap],
+        generic_map: &GenericMap,
     ) -> Option<GenericSymbolPath> {
         fn eval_value(
             context: &mut Context,
@@ -419,17 +419,20 @@ impl Symbol {
                     if x.identifier_factor.identifier_factor_opt.is_none() =>
                 {
                     let mut context = Context::default();
-                    context.push_generic_map(maps.to_vec());
+                    context.push_generic_map(vec![generic_map.clone()]);
 
                     let path = context
                         .resolve_path(x.identifier_factor.expression_identifier.as_ref().into());
                     return Some(path);
                 }
                 syntax_tree::Factor::LParenExpressionRParen(x) => {
-                    return Self::expr_to_generic_symbol_path(&x.expression, maps);
+                    return Self::expr_to_generic_symbol_path(&x.expression, generic_map);
                 }
                 syntax_tree::Factor::TypeExpression(x) => {
-                    return Self::expr_to_generic_symbol_path(&x.type_expression.expression, maps);
+                    return Self::expr_to_generic_symbol_path(
+                        &x.type_expression.expression,
+                        generic_map,
+                    );
                 }
                 syntax_tree::Factor::FactorTypeFactor(x) => {
                     match x.factor_type_factor.factor_type.factor_type_group.as_ref() {
@@ -440,7 +443,7 @@ impl Symbol {
                             let mut width = Vec::new();
                             if let Some(x) = &x.factor_type_opt {
                                 let mut context = Context::default();
-                                context.push_generic_map(maps.to_vec());
+                                context.push_generic_map(vec![generic_map.clone()]);
 
                                 for expr in Vec::from(x.width.as_ref()) {
                                     if let Some((x, _)) = eval_value(&mut context, expr)
@@ -463,7 +466,7 @@ impl Symbol {
         };
 
         let mut context = Context::default();
-        context.push_generic_map(maps.to_vec());
+        context.push_generic_map(vec![generic_map.clone()]);
         if let Some((value, token)) = eval_value(&mut context, expr)
             && !value.is_xz()
         {

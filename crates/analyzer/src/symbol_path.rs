@@ -338,7 +338,10 @@ impl GenericSymbol {
                 }
                 let head = &arg.paths[0];
                 if let Ok(symbol) = symbol_table::resolve(&head.base)
-                    && matches!(symbol.found.kind, SymbolKind::GenericParameter(_))
+                    && matches!(
+                        symbol.found.kind,
+                        SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+                    )
                 {
                     return self.base();
                 }
