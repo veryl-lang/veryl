@@ -1,10 +1,14 @@
+use crate::BigUint;
 use crate::HashMap;
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::Context;
 use crate::ir::assign_table::AssignTable;
-use crate::ir::{Declaration, FfTable, Function, Type, VarId, VarIndex, VarPath, Variable};
+use crate::ir::{
+    Declaration, FfTable, Function, Type, VarId, VarIndex, VarKind, VarPath, Variable,
+};
 use crate::symbol::ClockDomain;
+use crate::value::ValueBigUint;
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -60,12 +64,40 @@ impl Module {
         }
 
         for variable in variables.values() {
-            // skip to check systemverilog type or large array
+            // inout ports are driven externally; unknown-size arrays can't be iterated.
             let check_skip = variable.r#type.is_systemverilog()
-                || variable.r#type.total_array().unwrap_or(0) > context.config.evaluate_array_limit;
+                || variable.r#type.total_array().unwrap_or(0) > context.config.evaluate_array_limit
+                || matches!(variable.kind, VarKind::Inout)
+                || variable.r#type.array.total().is_none();
 
             if variable.is_assignable() && !check_skip {
+                let zero: BigUint = 0u32.into();
+                let full_mask = variable
+                    .total_width()
+                    .map(ValueBigUint::gen_mask)
+                    .unwrap_or_else(|| zero.clone());
+                let accumulated_reads = assign_table.accumulated_reads.get(&variable.id);
+
                 for index in &variable.unassigned() {
+                    let assigned_mask = variable
+                        .assigned
+                        .get(*index)
+                        .cloned()
+                        .unwrap_or_else(|| zero.clone());
+                    // BigUint has no bit-complement: full_mask ^ (full_mask & assigned).
+                    let unassigned_bits = &full_mask ^ &(&full_mask & &assigned_mask);
+                    let read_mask = accumulated_reads
+                        .and_then(|r| r.get(*index))
+                        .cloned()
+                        .unwrap_or_else(|| zero.clone());
+                    // Accept dead bits of a partially driven register; still
+                    // warn if nothing was assigned at all.
+                    let any_assigned = assigned_mask != zero;
+                    let any_read_unassigned = (&read_mask & &unassigned_bits) != zero;
+                    if any_assigned && !any_read_unassigned {
+                        continue;
+                    }
+
                     if !attribute_table::contains(
                         &variable.token.beg,
                         Attribute::Allow(AllowItem::UnassignVariable),

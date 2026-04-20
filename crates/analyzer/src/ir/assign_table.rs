@@ -200,6 +200,7 @@ pub struct AssignTable {
     pub array_limit: usize,
     pub table: HashMap<VarId, AssignTableEntry>,
     pub refernced: HashMap<VarId, ReferencedEntry>,
+    pub accumulated_reads: HashMap<VarId, Vec<BigUint>>,
 }
 
 impl AssignTable {
@@ -208,6 +209,7 @@ impl AssignTable {
             array_limit: context.config.evaluate_array_limit,
             table: HashMap::default(),
             refernced: HashMap::default(),
+            accumulated_reads: HashMap::default(),
         }
     }
 
@@ -258,6 +260,18 @@ impl AssignTable {
             .entry(variable.id)
             .and_modify(|x| x.add_ref(&index, &mask))
             .or_insert(ReferencedEntry::new_ref(&index, array, &mask));
+
+        if let Some(flat) = array.calc_index(&index)
+            && let Some(total) = array.total()
+        {
+            let entry = self
+                .accumulated_reads
+                .entry(variable.id)
+                .or_insert_with(|| (0..total).map(|_| BigUint::from(0u32)).collect());
+            if let Some(x) = entry.get_mut(flat) {
+                *x |= &mask;
+            }
+        }
     }
 
     pub fn merge_by_or(
@@ -288,6 +302,19 @@ impl AssignTable {
             } else {
                 self.table.insert(key, val);
             }
+        }
+
+        for (key, src) in value.accumulated_reads.drain() {
+            self.accumulated_reads
+                .entry(key)
+                .and_modify(|dst| {
+                    for (i, m) in src.iter().enumerate() {
+                        if let Some(d) = dst.get_mut(i) {
+                            *d |= m;
+                        }
+                    }
+                })
+                .or_insert(src);
         }
     }
 

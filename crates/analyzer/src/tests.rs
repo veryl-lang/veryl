@@ -4427,6 +4427,60 @@ fn mismatch_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // Array size from a `$sv::` constant: unknown dimensions should match any size.
+    let code = r#"
+    module Inner (
+        i_data: input  logic [4],
+        o_data: output logic [4],
+    ) {
+        assign o_data = i_data;
+    }
+    module ModuleA #(
+        param CHANNELS: u32 = $sv::pkg::CHANNELS,
+    ) (
+        i_data: input  logic [CHANNELS / 2],
+        o_data: output logic [CHANNELS / 2],
+    ) {
+        inst u: Inner (
+            i_data: i_data,
+            o_data: o_data,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A function argument sharing a module port's name must not shadow the
+    // port's entry in `port_types`.
+    let code = r#"
+    module Callee (
+        i_arr: input  logic<2> [4],
+        o_or : output logic<2>    ,
+    ) {
+        function decode (
+            i_arr: input logic<2>,
+        ) -> logic<2> {
+            return ~i_arr;
+        }
+        always_comb {
+            o_or = decode(i_arr[0]) | i_arr[1] | i_arr[2] | i_arr[3];
+        }
+    }
+    module ModuleA (
+        i_arr: input  logic<2> [4],
+        o_or : output logic<2>    ,
+    ) {
+        inst u_callee: Callee (
+            i_arr: i_arr,
+            o_or : o_or ,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7617,6 +7671,101 @@ fn unassign_variable() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::UnassignVariable { .. }))
     );
+
+    // Partial-slice assignment whose unassigned bits are never read is OK.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  clock     ,
+        i_rst : input  reset     ,
+        i_addr: input  logic <48>,
+        o_addr: output logic <48>,
+    ) {
+        var r_addr: logic<48>;
+
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_addr[47:3] = '0;
+            } else {
+                r_addr[47:3] = i_addr[47:3] + 1;
+            }
+        }
+
+        assign o_addr = {r_addr[47:3], 3'b0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // But reading an unassigned bit-slice still fires the warning.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  clock     ,
+        i_rst : input  reset     ,
+        i_addr: input  logic <48>,
+        o_addr: output logic <48>,
+    ) {
+        var r_addr: logic<48>;
+
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_addr[47:3] = '0;
+            } else {
+                r_addr[47:3] = i_addr[47:3] + 1;
+            }
+        }
+
+        assign o_addr = {r_addr[47:3], r_addr[2:0]};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnassignVariable { .. }))
+    );
+
+    // Instance output driving an unpacked-array range slice must mark each
+    // covered element as assigned.
+    let code = r#"
+    module Inner (
+        i_data: input  logic<8>   ,
+        o_data: output logic<8> [2],
+    ) {
+        assign o_data[0] = i_data;
+        assign o_data[1] = i_data;
+    }
+    module ModuleA (
+        i_data: input  logic<8>,
+        o_data: output logic<8>,
+    ) {
+        var w_arr: logic<8> [4];
+        for n in 0..2 :g {
+            inst u_inner: Inner (
+                i_data: i_data        ,
+                o_data: w_arr[2 * n+:2],
+            );
+        }
+        assign o_data = w_arr[0] ^ w_arr[1] ^ w_arr[2] ^ w_arr[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // `inout (tri logic)` pads are driven externally; no internal assignment needed.
+    let code = r#"
+    module ModuleA (
+        io_pad: inout  tri logic<4>,
+        o_data: output     logic<4>,
+    ) {
+        assign o_data = io_pad;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -7703,11 +7852,15 @@ fn unassignable_output() {
     assert!(errors.is_empty());
 
     let code = r#"
-    module ModuleA {
+    module ModuleA (
+        o: output logic,
+    ) {
         var y: logic<2>;
         inst u: $sv::SvModule (
             x: y[0],
         );
+        // Read y[1] so the unassigned bit is not treated as dead.
+        assign o = y[1];
     }
     "#;
 
@@ -8640,6 +8793,82 @@ fn invalid_logical_operand() {
         const X : u32      = $sv::pkg::X;
         let a : logic<2> = 1;
         let _b: logic    = a[X - 1] && 1'b1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // `inside` comparing an enum reached through a $sv-imported interface
+    // must yield a 1-bit result (not the enum's width).
+    let code = r#"
+    package Pkg {
+        enum op_t: logic<3> {
+            A = 3'd0,
+            B = 3'd1,
+            C = 3'd2,
+        }
+        struct payload_t {
+            val: logic<32>,
+            op : op_t     ,
+        }
+    }
+    module ModuleA (
+        o_drop: output logic,
+    ) {
+        inst fo_if: $sv::Bus #( PAYLOAD: Pkg::payload_t );
+        always_comb {
+            fo_if.valid   = '0;
+            fo_if.payload = '0;
+        }
+        always_comb {
+            o_drop = inside fo_if.payload.op {Pkg::op_t::A, Pkg::op_t::B, Pkg::op_t::C};
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Bit-select on a `param` must narrow the type to 1 bit.
+    let code = r#"
+    module ModuleA #(
+        param USE_PIPE: u32 = 1'b1,
+    ) (
+        i_data: input  logic<32>,
+        o_data: output logic<32>,
+    ) {
+        assign o_data = if USE_PIPE[0] ? i_data : '0;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Same kind-inheritance bug triggered via `if (enum == enum)` condition.
+    let code = r#"
+    package Pkg {
+        enum op_t: logic<3> {
+            A = 3'd0,
+            B = 3'd1,
+        }
+        struct payload_t {
+            val: logic<32>,
+            op : op_t     ,
+        }
+    }
+    module ModuleA (
+        o_st: output logic<2>,
+    ) {
+        inst control_if: $sv::Bus #( PAYLOAD: Pkg::payload_t );
+        always_comb {
+            control_if.valid   = '0;
+            control_if.payload = '0;
+        }
+        always_comb {
+            if control_if.payload.op == Pkg::op_t::A {
+                o_st = 2'h1;
+            } else {
+                o_st = 2'h2;
+            }
+        }
     }"#;
 
     let errors = analyze(code);
@@ -10758,6 +10987,29 @@ fn mixed_struct_union_member() {
     }
     module top () {
         let _: pkg::<types::T>::Struct = pkg::<types::T>::make();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // $sv-imported members don't claim either 2-state or 4-state, so the
+    // state-uniformity check must accept them in any combination.
+    let code = r#"
+    package Pkg {
+        struct all_sv_struct {
+            a: $sv::Cfg   ,
+            b: $sv::Cfg   ,
+            c: $sv::Cfg<2>,
+        }
+        struct sv_with_2state {
+            a: $sv::Cfg,
+            b: bit<8>  ,
+        }
+        struct sv_with_4state {
+            a: $sv::Cfg,
+            b: logic<8>,
+        }
     }
     "#;
 

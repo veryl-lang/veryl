@@ -341,15 +341,13 @@ impl Op {
             | Op::NeWildcard
             | Op::LogicAnd
             | Op::LogicOr => {
-                if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
-                    dst.r#type.kind = y.r#type.kind.clone();
-                } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
-                    dst.r#type.kind = x.r#type.kind.clone();
-                } else if x.r#type.is_2state() && y.r#type.is_2state() {
-                    dst.r#type.kind = TypeKind::Bit;
+                // Inheriting an Enum/Struct kind here would make
+                // `total_width()` report the operand's width instead of 1.
+                dst.r#type.kind = if x.r#type.is_2state() && y.r#type.is_2state() {
+                    TypeKind::Bit
                 } else {
-                    dst.r#type.kind = TypeKind::Logic;
-                }
+                    TypeKind::Logic
+                };
             }
             Op::ArithShiftL | Op::ArithShiftR | Op::LogicShiftL | Op::LogicShiftR => {
                 if x.r#type.is_2state() {
