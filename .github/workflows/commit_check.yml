@@ -1,0 +1,23 @@
+name: Commit Check
+
+on:
+  pull_request:
+
+jobs:
+  ai-coauthor:
+    name: No AI co-authors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check commits for AI co-authors
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          PATTERN='^Co-Authored-By:.*(claude|copilot|chatgpt|gpt-|openai|anthropic|gemini|cursor|codex|devin|aider)'
+          if git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -iE "$PATTERN"; then
+            echo "::error::AI tools must not be listed as co-authors (see CONTRIBUTING.md#ai-assisted-contributions)"
+            exit 1
+          fi
