@@ -111,6 +111,7 @@ fn substitute_expr(
             select,
             dynamic_select,
             width,
+            var_full_width,
             expr_context,
         } => {
             if let Some(inlined) = inline_map.get(&var_offset) {
@@ -125,6 +126,7 @@ fn substitute_expr(
                         select,
                         dynamic_select,
                         width,
+                        var_full_width,
                         expr_context,
                     }
                 }
@@ -134,6 +136,7 @@ fn substitute_expr(
                     select,
                     dynamic_select,
                     width,
+                    var_full_width,
                     expr_context,
                 }
             }

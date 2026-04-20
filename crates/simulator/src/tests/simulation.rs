@@ -11424,3 +11424,224 @@ fn for_static_step_and_rev() {
         );
     }
 }
+
+#[test]
+fn wide_dynamic_bit_select() {
+    // `bits[j]` with a runtime `j` on a 128-bit variable must return the
+    // actual bit at position `j`, not a u64-truncated view (bits past 63
+    // wrapping to the low half).
+    let code = r#"
+    module Top (
+        bits: input  logic<128>,
+        idx:  input  logic<7>,
+        out:  output logic,
+    ) {
+        assign out = bits[idx];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let one_at_lsb = Value::from_u128(1, 0, 128, false);
+        sim.set("bits", one_at_lsb);
+        for j in [0u8, 1, 63, 64, 65, 127] {
+            sim.set("idx", Value::new(j as u64, 7, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let expected = if j == 0 { 1 } else { 0 };
+            assert_eq!(
+                sim.get("out").unwrap().payload_u64(),
+                expected,
+                "bits=1<<0 idx={} JIT={} 4st={}",
+                j,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+
+        let one_at_msb = Value::from_u128(1u128 << 127, 0, 128, false);
+        sim.set("bits", one_at_msb);
+        for j in [0u8, 1, 63, 64, 65, 126, 127] {
+            sim.set("idx", Value::new(j as u64, 7, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let expected = if j == 127 { 1 } else { 0 };
+            assert_eq!(
+                sim.get("out").unwrap().payload_u64(),
+                expected,
+                "bits=1<<127 idx={} JIT={} 4st={}",
+                j,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+
+        let one_at_64 = Value::from_u128(1u128 << 64, 0, 128, false);
+        sim.set("bits", one_at_64);
+        for j in [0u8, 63, 64, 65, 127] {
+            sim.set("idx", Value::new(j as u64, 7, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let expected = if j == 64 { 1 } else { 0 };
+            assert_eq!(
+                sim.get("out").unwrap().payload_u64(),
+                expected,
+                "bits=1<<64 idx={} JIT={} 4st={}",
+                j,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_all_bit_equality() {
+    // `x == '1` must compare `x` against the all-ones fill at `x`'s width,
+    // not against the integer literal 1. Same for `'0`.
+    let code = r#"
+    module Top (
+        x:         input  logic<2>,
+        x_wide:    input  logic<128>,
+        is_all1:   output logic,
+        is_all0:   output logic,
+        wide_all1: output logic,
+    ) {
+        assign is_all1   = x      == '1;
+        assign is_all0   = x      == '0;
+        assign wide_all1 = x_wide == '1;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("x", Value::new(0b11, 2, false));
+        sim.set("x_wide", Value::from_u128(u128::MAX, 0, 128, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("is_all1").unwrap().payload_u64(),
+            1,
+            "2'b11 == '1 should be true (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("is_all0").unwrap().payload_u64(),
+            0,
+            "2'b11 == '0 should be false (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("wide_all1").unwrap().payload_u64(),
+            1,
+            "128'h{{ff*16}} == '1 should be true (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("x", Value::new(0b01, 2, false));
+        sim.set("x_wide", Value::from_u128(1, 0, 128, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("is_all1").unwrap().payload_u64(),
+            0,
+            "2'b01 == '1 should be false (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("is_all0").unwrap().payload_u64(),
+            0,
+            "2'b01 == '0 should be false (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("wide_all1").unwrap().payload_u64(),
+            0,
+            "128'h1 == '1 should be false (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("x", Value::new(0, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("is_all0").unwrap().payload_u64(),
+            1,
+            "2'b00 == '0 should be true (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn wide_bit_reverse() {
+    // Integration check for bit-select reads and writes that cross the
+    // u64 boundary on a 128-bit variable. 4-state storage layout (payload
+    // + mask_xz) is particularly sensitive: a read that uses the wrong
+    // native width overlaps the two regions.
+    let code = r#"
+    module Top (
+        bits: input  logic<128>,
+        reversed: output logic<128>,
+    ) {
+        always_comb {
+            for i: u32 in 0..128 {
+                reversed[i] = bits[128 - i - 1];
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let cases: &[(u128, u128)] = &[
+            (1, 1u128 << 127),
+            (1u128 << 127, 1),
+            (1u128 << 64, 1u128 << 63),
+            (1u128 << 63, 1u128 << 64),
+        ];
+        for &(input, expected) in cases {
+            // Fresh sim per case so prior `reversed` state (or 4-state
+            // default X) can't accidentally satisfy the next assertion.
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("bits", Value::from_u128(input, 0, 128, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("reversed").unwrap(),
+                Value::from_u128(expected, 0, 128, false),
+                "rev({:#x}) JIT={} 4st={}",
+                input,
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let pat: u128 = 0xdead_beef_0000_0001_8000_0000_cafe_babe;
+        let mut rev_pat: u128 = 0;
+        for i in 0..128 {
+            if (pat >> i) & 1 != 0 {
+                rev_pat |= 1u128 << (127 - i);
+            }
+        }
+        sim.set("bits", Value::from_u128(pat, 0, 128, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("reversed").unwrap(),
+            Value::from_u128(rev_pat, 0, 128, false),
+            "rev(pat) JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
