@@ -1,4 +1,6 @@
-module unassign_variable_struct {
+module unassign_variable_struct (
+    o: output logic,
+) {
     struct StructA {
         x: logic,
         y: logic,
@@ -7,4 +9,6 @@ module unassign_variable_struct {
     var a: StructA;
 
     assign a.x = 0;
+    // Read a.y so the unassigned field is not treated as dead.
+    assign o   = a.y;
 }

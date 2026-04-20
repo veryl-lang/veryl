@@ -1217,9 +1217,15 @@ fn check_struct_union_members(
         return;
     }
 
-    if !(members.iter().all(|x| x.r#type.is_4state())
-        || members.iter().all(|x| x.r#type.is_2state()))
-    {
+    // SV-imported and unknown types have indeterminate 2/4-state, so accept them as either.
+    let is_indeterminate = |t: &ir::Type| t.is_systemverilog() || t.is_unknown();
+    let all_4state = members
+        .iter()
+        .all(|x| x.r#type.is_4state() || is_indeterminate(&x.r#type));
+    let all_2state = members
+        .iter()
+        .all(|x| x.r#type.is_2state() || is_indeterminate(&x.r#type));
+    if !(all_4state || all_2state) {
         let token: TokenRange = symbol.token.into();
         context.insert_error(AnalyzerError::mixed_struct_union_member(&token));
     }
@@ -1641,6 +1647,11 @@ pub fn eval_factor_path(
             if comptime.r#type.is_type() {
                 Ok(ir::Factor::Value(comptime))
             } else {
+                // Params arrive with evaluated=true (set by eval_expr), which
+                // would make gather_context skip applying the select width.
+                if !width_select.is_empty() {
+                    comptime.evaluated = false;
+                }
                 Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
             }
         }
@@ -2602,14 +2613,7 @@ pub fn var_path_to_assign_destination(
     ignore_error: bool,
 ) -> Vec<ir::AssignDestination> {
     path.into_iter()
-        .flat_map(|x| {
-            let mut ret = vec![];
-            let dst = x.to_assign_destination(context, ignore_error);
-            if let Some(dst) = dst {
-                ret.push(dst);
-            }
-            ret
-        })
+        .flat_map(|x| x.to_assign_destinations(context, ignore_error))
         .collect()
 }
 

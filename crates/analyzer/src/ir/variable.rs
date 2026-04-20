@@ -69,7 +69,7 @@ impl VarPathSelect {
             // TODO invalid_select
 
             if array_select.is_range() {
-                // TODO
+                // Range selects are expanded by `to_assign_destinations`.
                 None
             } else {
                 Some(AssignDestination {
@@ -102,6 +102,66 @@ impl VarPathSelect {
                 None
             }
         }
+    }
+
+    /// Like `to_assign_destination` but expands an array range select
+    /// (e.g., `w_arr[2*n+:2]`) into one destination per covered element.
+    pub fn to_assign_destinations(
+        self,
+        context: &mut Context,
+        ignore_error: bool,
+    ) -> Vec<AssignDestination> {
+        let (path, select, token) = self.clone().into();
+
+        let Some((id, mut base_comptime)) = context.find_path(&path) else {
+            return self
+                .to_assign_destination(context, ignore_error)
+                .into_iter()
+                .collect();
+        };
+        if let Some(part_select) = &base_comptime.part_select {
+            base_comptime.r#type = part_select.base.clone();
+        }
+
+        let (array_select, _) = select.clone().split(base_comptime.r#type.array.dims());
+        if !array_select.is_range() {
+            return self
+                .to_assign_destination(context, ignore_error)
+                .into_iter()
+                .collect();
+        }
+
+        let Some((beg, end)) = array_select.eval_value(context, &base_comptime.r#type, true) else {
+            return vec![];
+        };
+
+        if let Some(variable) = context.variables.get(&id)
+            && !variable.is_assignable()
+            && !ignore_error
+        {
+            context.insert_error(AnalyzerError::invalid_assignment(
+                &path.to_string(),
+                &variable.kind.description(),
+                &token,
+            ));
+        }
+
+        let mut comptime = base_comptime.clone();
+        comptime.r#type.array.drain(0..array_select.dimension());
+
+        let width_select = VarSelect::default();
+
+        let array_shape = base_comptime.r#type.array.clone();
+        (beg..=end)
+            .map(|i| AssignDestination {
+                id,
+                path: path.clone(),
+                index: VarIndex::from_index(i, &array_shape),
+                select: width_select.clone(),
+                comptime: comptime.clone(),
+                token,
+            })
+            .collect()
     }
 
     pub fn to_expression(self, context: &Context) -> Option<Expression> {

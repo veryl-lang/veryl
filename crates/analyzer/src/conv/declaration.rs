@@ -474,7 +474,11 @@ impl Conv<&PortDeclarationItem> for () {
             let r#type = x.r#type.to_ir_type(context, pos)?;
             let clock_domain = x.clock_domain;
 
-            context.insert_port_type(path.clone(), r#type.clone(), clock_domain);
+            // Function args share the PortDeclarationItem grammar; skip here
+            // so they don't shadow same-named module ports in port_types.
+            if !context.is_affiliated(Affiliation::Function) {
+                context.insert_port_type(path.clone(), r#type.clone(), clock_domain);
+            }
 
             let kind = match x.direction {
                 Direction::Input => VarKind::Input,

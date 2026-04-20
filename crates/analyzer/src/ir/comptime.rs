@@ -546,7 +546,7 @@ impl Type {
         } else if self.is_2state() {
             src.r#type.is_2state()
         } else if self.is_array() || src.r#type.is_array() {
-            self.array == src.r#type.array
+            array_compatible(&self.array, &src.r#type.array)
         } else if self.is_clock() {
             src.r#type.is_clock() || src.is_const
         } else if self.is_reset() {
@@ -703,6 +703,16 @@ impl Type {
             (array_dim, width_dim)
         }
     }
+}
+
+/// Compare array shapes with `None` (e.g. a dimension from a `$sv::`
+/// constant that Veryl can't evaluate) treated as a wildcard.
+fn array_compatible(a: &Shape, b: &Shape) -> bool {
+    a.dims() == b.dims()
+        && a.iter().zip(b.iter()).all(|(x, y)| match (x, y) {
+            (None, _) | (_, None) => true,
+            (Some(x), Some(y)) => x == y,
+        })
 }
 
 impl From<&TypeLiteral> for Type {
