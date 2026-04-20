@@ -184,51 +184,25 @@ impl fmt::Display for FfDeclaration {
 
 #[derive(Clone)]
 pub struct InstInput {
-    pub id: Vec<VarId>,
+    pub id: VarId,
     pub expr: Expression,
 }
 
 impl fmt::Display for InstInput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = String::new();
-
-        if self.id.len() == 1 {
-            ret.push_str(&format!("{}", self.id[0]));
-        } else if !self.id.is_empty() {
-            ret.push_str(&format!("{{{}", self.id[0]));
-            for x in &self.id[1..] {
-                ret.push_str(&format!(", {}", x));
-            }
-            ret.push('}');
-        }
-
-        ret.push_str(&format!(" <- {}", self.expr));
-
-        ret.fmt(f)
+        write!(f, "{} <- {}", self.id, self.expr)
     }
 }
 
 #[derive(Clone)]
 pub struct InstOutput {
-    pub id: Vec<VarId>,
+    pub id: VarId,
     pub dst: Vec<AssignDestination>,
 }
 
 impl fmt::Display for InstOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = String::new();
-
-        if self.id.len() == 1 {
-            ret.push_str(&format!("{}", self.id[0]));
-        } else {
-            ret.push_str(&format!("{{{}", self.id[0]));
-            for x in &self.id[1..] {
-                ret.push_str(&format!(", {}", x));
-            }
-            ret.push('}');
-        }
-
-        ret.push_str(" -> ");
+        let mut ret = format!("{} -> ", self.id);
 
         if self.dst.len() == 1 {
             ret.push_str(&format!("{}", self.dst[0]));

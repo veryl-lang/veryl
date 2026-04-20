@@ -1324,14 +1324,9 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                                 Comptime::from_type(dst_type.clone(), *clock_domain, token);
 
                             for (path, dst, mut expr) in connects {
-                                let mut variables = vec![];
                                 if let Some(id) = component.ports.get(&path)
                                     && let Some(variable) = component.variables.get(id)
                                 {
-                                    variables.push(variable);
-                                }
-
-                                if !variables.is_empty() {
                                     let expr_comptime = expr.eval_comptime(context, None);
 
                                     if let Some(x) =
@@ -1347,7 +1342,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
 
                                     insert_port_connect(
                                         context,
-                                        &variables,
+                                        variable,
                                         dst,
                                         expr,
                                         &mut inputs,
