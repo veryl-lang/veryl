@@ -1953,10 +1953,13 @@ impl ProtoAssignStatement {
         let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
-        // Widen expression result to I128 if destination is 128-bit
-        if wide && self.expr.width() <= 64 {
+        // Widen expression result to I128 for a 128-bit destination,
+        // skipping if already I128 (unsized all_bit literal).
+        if wide && self.expr.width() <= 64 && builder.func.dfg.value_type(payload) != I128 {
             payload = builder.ins().uextend(I128, payload);
-            if let Some(mxz) = mask_xz {
+            if let Some(mxz) = mask_xz
+                && builder.func.dfg.value_type(mxz) != I128
+            {
                 mask_xz = Some(builder.ins().uextend(I128, mxz));
             }
         }
@@ -3356,6 +3359,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 select: None,
                 dynamic_select: None,
                 width: arg_meta.width,
+                var_full_width: arg_meta.width,
                 expr_context: ExpressionContext {
                     width: arg_meta.width,
                     signed: false,

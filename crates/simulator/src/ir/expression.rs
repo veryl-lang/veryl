@@ -541,8 +541,18 @@ impl Expression {
                 width,
                 signed,
             } => {
+                // With a bit-select, `width` is the select output width (1
+                // for x[63]); we must read the full variable so that
+                // `val.select` can reach past `width` and so that mask_xz
+                // bytes don't overlap the payload region in 4-state mode.
+                let has_sel = select.is_some() || dynamic_select.is_some();
+                let read_width = if has_sel {
+                    (*native_bytes * 8) as u32
+                } else {
+                    *width as u32
+                };
                 let val = unsafe {
-                    read_native_value(*value, *native_bytes, *use_4state, *width as u32, *signed)
+                    read_native_value(*value, *native_bytes, *use_4state, read_width, *signed)
                 };
                 if let Some(dyn_sel) = dynamic_select {
                     let idx = dyn_sel
@@ -631,8 +641,16 @@ impl Expression {
                     "DynamicVariable: stride*idx overflow"
                 );
                 let ptr = unsafe { (*base_ptr).offset(*stride * idx as isize) };
+                // Read the full variable when a bit-select is present (see
+                // Expression::Variable above for the rationale).
+                let has_sel = select.is_some() || dynamic_select.is_some();
+                let read_width = if has_sel {
+                    (*native_bytes * 8) as u32
+                } else {
+                    *width as u32
+                };
                 let value = unsafe {
-                    read_native_value(ptr, *native_bytes, *use_4state, *width as u32, *signed)
+                    read_native_value(ptr, *native_bytes, *use_4state, read_width, *signed)
                 };
                 if let Some(dyn_sel) = dynamic_select {
                     let idx = dyn_sel
@@ -803,6 +821,12 @@ pub enum ProtoExpression {
         select: Option<(usize, usize)>,
         dynamic_select: Option<ProtoDynamicBitSelect>,
         width: usize,
+        /// Full bit width of the underlying variable, independent of
+        /// `select`. Bit-select reads must size `native_bytes` by this
+        /// width so the mask_xz section (at `ptr + nb` in 4-state storage)
+        /// doesn't overlap the payload region when the select fits in
+        /// fewer bytes than the variable.
+        var_full_width: usize,
         expr_context: ExpressionContext,
     },
     Value {
@@ -1106,18 +1130,20 @@ impl ProtoExpression {
                     select,
                     dynamic_select,
                     width,
+                    var_full_width,
                     expr_context,
                 } => {
-                    // When select is present, width is the select output width
-                    // (e.g., 1 for x[63]). But native_bytes must cover the FULL
-                    // variable so that read_native_value reads all bytes needed
-                    // for the bit-select to work correctly.
+                    // Size `nb` from the variable's full width so a bit-
+                    // select doesn't under-size the read (see the doc
+                    // comment on `var_full_width` above).
                     let read_width = if let Some(dyn_sel) = dynamic_select {
-                        dyn_sel.elem_width * dyn_sel.num_elements
+                        std::cmp::max(*var_full_width, dyn_sel.elem_width * dyn_sel.num_elements)
                     } else {
                         match select {
-                            Some((beg, _)) => std::cmp::max(*width, *beg + 1),
-                            None => *width,
+                            Some((beg, _)) => {
+                                std::cmp::max(*var_full_width, std::cmp::max(*width, *beg + 1))
+                            }
+                            None => std::cmp::max(*var_full_width, *width),
                         }
                     };
                     let nb = calc_native_bytes(read_width);
@@ -1352,12 +1378,13 @@ impl ProtoExpression {
                 var_offset,
                 dynamic_select,
                 width,
+                var_full_width,
                 select,
                 ..
             } => {
                 // Wide path: >128-bit variable → return memory pointer
-                if is_wide_ptr(*width) {
-                    let nb = calc_native_bytes(*width);
+                if is_wide_ptr(*var_full_width) {
+                    let nb = calc_native_bytes(*var_full_width);
                     let base_addr = if var_offset.is_ff() {
                         context.ff_values
                     } else {
@@ -1379,13 +1406,16 @@ impl ProtoExpression {
                     return Some((ptr, mask_xz));
                 }
 
-                // native_bytes must cover the full variable for correct bit-select.
+                // See `var_full_width` doc: `nb` must match the variable's
+                // true storage size, not the select range.
                 let read_width = if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.elem_width * dyn_sel.num_elements
+                    std::cmp::max(*var_full_width, dyn_sel.elem_width * dyn_sel.num_elements)
                 } else {
                     match select {
-                        Some((beg, _)) => std::cmp::max(*width, *beg + 1),
-                        None => *width,
+                        Some((beg, _)) => {
+                            std::cmp::max(*var_full_width, std::cmp::max(*width, *beg + 1))
+                        }
+                        None => std::cmp::max(*var_full_width, *width),
                     }
                 };
                 let nb = calc_native_bytes(read_width);
@@ -1396,16 +1426,36 @@ impl ProtoExpression {
                 // Load CSE: reuse previously loaded values for the same address.
                 // For nb==4 variables, mask cached values to 32 bits to match
                 // the I32 load + uextend behavior of fresh loads.
+                // When the cached value's cranelift type differs from what a
+                // fresh load of size `nb` would produce (e.g. I128 cached but
+                // narrow select wants I64), coerce it so downstream wide /
+                // non-wide code sees consistent types.
                 let (mut payload, mut mask_xz) = if !context.disable_load_cache
                     && let Some(&(cached_payload, cached_mask_xz)) =
                         context.load_cache.get(&cache_key)
                 {
-                    if nb == 4 {
-                        let p = builder.ins().band_imm(cached_payload, 0xFFFFFFFF_i64);
-                        let m = cached_mask_xz.map(|v| builder.ins().band_imm(v, 0xFFFFFFFF_i64));
+                    let cached_ty = builder.func.dfg.value_type(cached_payload);
+                    let want_wide = nb == 16;
+                    let cached_wide = cached_ty == I128;
+
+                    let (p, m) = if cached_wide && !want_wide {
+                        let p = builder.ins().ireduce(I64, cached_payload);
+                        let m = cached_mask_xz.map(|v| builder.ins().ireduce(I64, v));
+                        (p, m)
+                    } else if !cached_wide && want_wide {
+                        let p = builder.ins().uextend(I128, cached_payload);
+                        let m = cached_mask_xz.map(|v| builder.ins().uextend(I128, v));
                         (p, m)
                     } else {
                         (cached_payload, cached_mask_xz)
+                    };
+
+                    if nb == 4 {
+                        let p = builder.ins().band_imm(p, 0xFFFFFFFF_i64);
+                        let m = m.map(|v| builder.ins().band_imm(v, 0xFFFFFFFF_i64));
+                        (p, m)
+                    } else {
+                        (p, m)
                     }
                 } else {
                     let load_mem_flag = MemFlags::trusted();
@@ -1460,6 +1510,15 @@ impl ProtoExpression {
                         let mxz = builder.ins().ushr(mxz, shift);
                         mask_xz = Some(band_const(builder, mxz, mask, wide));
                     }
+                    // Match the cranelift value type to the reported
+                    // expression width so downstream ops don't uextend an
+                    // I128 again.
+                    if wide && dyn_sel.elem_width <= 64 {
+                        payload = builder.ins().ireduce(I64, payload);
+                        if let Some(mxz) = mask_xz {
+                            mask_xz = Some(builder.ins().ireduce(I64, mxz));
+                        }
+                    }
                 } else if let Some((beg, end)) = select {
                     let select_width = beg - end + 1;
 
@@ -1478,6 +1537,15 @@ impl ProtoExpression {
                                 mxz
                             };
                             mask_xz = Some(apply_mask_128(builder, mxz, mask));
+                        }
+
+                        // Match the cranelift value type to the reported
+                        // expression width (see dynamic_select branch).
+                        if select_width <= 64 {
+                            payload = builder.ins().ireduce(I64, payload);
+                            if let Some(mxz) = mask_xz {
+                                mask_xz = Some(builder.ins().ireduce(I64, mxz));
+                            }
                         }
                     } else {
                         let mask = ValueU64::gen_mask(select_width);
@@ -1500,7 +1568,63 @@ impl ProtoExpression {
 
                 Some((payload, mask_xz))
             }
-            ProtoExpression::Value { value, width, .. } => {
+            ProtoExpression::Value {
+                value,
+                width,
+                expr_context,
+            } => {
+                // Materialize the unsized all_bit sentinel (Value width == 0)
+                // by replicating its 1-bit pattern across the context width;
+                // otherwise `x == '1` would compare against integer 1
+                // instead of the all-ones fill.
+                let (payload_bit, mask_xz_bit, is_all_bit) = match value {
+                    Value::U64(x) if x.width == 0 => (x.payload != 0, x.mask_xz != 0, true),
+                    _ => (false, false, false),
+                };
+                if is_all_bit {
+                    let target = std::cmp::max(expr_context.width, *width);
+                    if is_wide_ptr(target) {
+                        let nb = calc_native_bytes(target);
+                        let count = nb / 8;
+                        let payload_digits = if payload_bit {
+                            vec![u64::MAX; count]
+                        } else {
+                            vec![0u64; count]
+                        };
+                        let payload = emit_wide_const(builder, &payload_digits, nb);
+                        let mask_xz = if context.use_4state {
+                            let mask_digits = if mask_xz_bit {
+                                vec![u64::MAX; count]
+                            } else {
+                                vec![0u64; count]
+                            };
+                            Some(emit_wide_const(builder, &mask_digits, nb))
+                        } else {
+                            None
+                        };
+                        return Some((payload, mask_xz));
+                    }
+                    let filled_mask = gen_mask_for_width(target);
+                    let payload_val = if payload_bit { filled_mask } else { 0 };
+                    let mask_xz_val = if mask_xz_bit { filled_mask } else { 0 };
+                    if target > 64 {
+                        let payload = iconst_128(builder, payload_val);
+                        let mask_xz = if context.use_4state {
+                            Some(iconst_128(builder, mask_xz_val))
+                        } else {
+                            None
+                        };
+                        return Some((payload, mask_xz));
+                    }
+                    let payload = builder.ins().iconst(I64, payload_val as i64);
+                    let mask_xz = if context.use_4state {
+                        Some(builder.ins().iconst(I64, mask_xz_val as i64))
+                    } else {
+                        None
+                    };
+                    return Some((payload, mask_xz));
+                }
+
                 // If expression width is >128, always return a wide pointer
                 // to ensure consistency with is_wide_ptr() checks in callers.
                 if is_wide_ptr(*width) {
@@ -1788,16 +1912,18 @@ impl ProtoExpression {
                 let x_wide = x.width() > 64;
                 let y_wide = y.width() > 64;
 
-                // Ensure operand types match: widen I64 to I128 if the other is I128
-                // (for operations where both operands must be the same type)
+                // Ensure operand types match: widen I64 to I128 if the other is I128.
+                // Dispatch on the actual cranelift value type since an
+                // unsized all_bit literal may already be I128 even though
+                // its logical width is 0.
                 let needs_wide = wide || x_wide || y_wide;
-                if needs_wide && !x_wide {
+                if needs_wide && builder.func.dfg.value_type(x_payload) != I128 {
                     x_payload = builder.ins().uextend(I128, x_payload);
                     if let Some(xm) = x_mask_xz {
                         x_mask_xz = Some(builder.ins().uextend(I128, xm));
                     }
                 }
-                if needs_wide && !y_wide {
+                if needs_wide && builder.func.dfg.value_type(y_payload) != I128 {
                     y_payload = builder.ins().uextend(I128, y_payload);
                     if let Some(ym) = y_mask_xz {
                         y_mask_xz = Some(builder.ins().uextend(I128, ym));
@@ -2475,14 +2601,18 @@ impl ProtoExpression {
                 if first_is_bit_repeat && elements.len() >= 2 {
                     let (sign_expr, sign_repeat, _) = &elements[0];
                     let (sign_payload, sign_mask_xz) = sign_expr.build_binary(context, builder)?;
-                    // Widen sign bit to accumulator width if needed
-                    let sign_payload = if wide && sign_expr.width() <= 64 {
+                    // Widen the sign bit to accumulator width, skipping if
+                    // the value is already I128 (unsized all_bit literal).
+                    let sign_needs_widen = wide
+                        && sign_expr.width() <= 64
+                        && builder.func.dfg.value_type(sign_payload) != I128;
+                    let sign_payload = if sign_needs_widen {
                         builder.ins().uextend(I128, sign_payload)
                     } else {
                         sign_payload
                     };
                     let sign_mask_xz = sign_mask_xz.map(|v| {
-                        if wide && sign_expr.width() <= 64 {
+                        if sign_needs_widen && builder.func.dfg.value_type(v) != I128 {
                             builder.ins().uextend(I128, v)
                         } else {
                             v
@@ -2493,13 +2623,16 @@ impl ProtoExpression {
                     let mut lower_width = 0usize;
                     for (expr, repeat, elem_width) in &elements[1..] {
                         let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
-                        let elem_payload = if wide && expr.width() <= 64 {
+                        let needs_widen = wide
+                            && expr.width() <= 64
+                            && builder.func.dfg.value_type(elem_payload) != I128;
+                        let elem_payload = if needs_widen {
                             builder.ins().uextend(I128, elem_payload)
                         } else {
                             elem_payload
                         };
                         let elem_mask_xz = elem_mask_xz.map(|v| {
-                            if wide && expr.width() <= 64 {
+                            if needs_widen && builder.func.dfg.value_type(v) != I128 {
                                 builder.ins().uextend(I128, v)
                             } else {
                                 v
@@ -2539,13 +2672,16 @@ impl ProtoExpression {
                 } else {
                     for (expr, repeat, elem_width) in elements {
                         let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
-                        let elem_payload = if wide && expr.width() <= 64 {
+                        let needs_widen = wide
+                            && expr.width() <= 64
+                            && builder.func.dfg.value_type(elem_payload) != I128;
+                        let elem_payload = if needs_widen {
                             builder.ins().uextend(I128, elem_payload)
                         } else {
                             elem_payload
                         };
                         let elem_mask_xz = elem_mask_xz.map(|v| {
-                            if wide && expr.width() <= 64 {
+                            if needs_widen && builder.func.dfg.value_type(v) != I128 {
                                 builder.ins().uextend(I128, v)
                             } else {
                                 v
@@ -2604,17 +2740,22 @@ impl ProtoExpression {
                 let t_wide = true_expr.width() > 64;
                 let f_wide = false_expr.width() > 64;
 
-                // Widen branches to match if needed
+                // Widen branches to match; skip when the value is already
+                // I128 (unsized all_bit literal).
                 if result_wide || t_wide || f_wide {
-                    if !t_wide {
+                    if !t_wide && builder.func.dfg.value_type(true_payload) != I128 {
                         true_payload = builder.ins().uextend(I128, true_payload);
-                        if let Some(v) = true_mask_xz {
+                        if let Some(v) = true_mask_xz
+                            && builder.func.dfg.value_type(v) != I128
+                        {
                             true_mask_xz = Some(builder.ins().uextend(I128, v));
                         }
                     }
-                    if !f_wide {
+                    if !f_wide && builder.func.dfg.value_type(false_payload) != I128 {
                         false_payload = builder.ins().uextend(I128, false_payload);
-                        if let Some(v) = false_mask_xz {
+                        if let Some(v) = false_mask_xz
+                            && builder.func.dfg.value_type(v) != I128
+                        {
                             false_mask_xz = Some(builder.ins().uextend(I128, v));
                         }
                     }
@@ -3860,12 +4001,18 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let meta = scope.variable_meta.get(id).unwrap();
                         let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                         let element = &meta.elements[index];
+                        let var_full_width = kind_width
+                            * width_shape
+                                .iter()
+                                .map(|d| d.unwrap_or(1))
+                                .product::<usize>();
 
                         Ok(ProtoExpression::Variable {
                             var_offset: element.current,
                             select: select_val,
                             dynamic_select,
                             width,
+                            var_full_width,
                             expr_context,
                         })
                     } else {
@@ -3931,6 +4078,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let meta = scope.variable_meta.get(&ret_id).unwrap();
                     let element = &meta.elements[0];
                     let width = call.comptime.r#type.total_width().unwrap();
+                    let var_full_width = width;
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
                     Ok(ProtoExpression::Variable {
@@ -3938,6 +4086,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                         select: None,
                         dynamic_select: None,
                         width,
+                        var_full_width,
                         expr_context,
                     })
                 }

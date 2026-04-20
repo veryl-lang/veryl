@@ -907,6 +907,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             select: None,
                             dynamic_select: None,
                             width: child_meta.width,
+                            var_full_width: child_meta.width,
                             expr_context: ExpressionContext {
                                 width: child_meta.width,
                                 signed: false,
@@ -1030,6 +1031,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         select: None,
                         dynamic_select: None,
                         width: child_meta.width,
+                        var_full_width: child_meta.width,
                         expr_context: ExpressionContext {
                             width: child_meta.width,
                             signed: false,

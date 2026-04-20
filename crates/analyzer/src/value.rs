@@ -1071,9 +1071,54 @@ impl Value {
     }
 
     pub fn expand(&self, width: usize, use_sign: bool) -> Cow<'_, Self> {
-        if (self.width() == 0 && width <= 64) || self.width() >= width {
-            Cow::Borrowed(self)
-        } else if width > 64 {
+        if self.width() >= width && self.width() != 0 {
+            return Cow::Borrowed(self);
+        }
+
+        // Materialize the unsized all_bit sentinel (width == 0) by
+        // replicating its 1-bit pattern across the target width.
+        if self.width() == 0 {
+            let Self::U64(x) = self else {
+                unreachable!();
+            };
+            if width > 64 {
+                let payload = if x.payload != 0 {
+                    ValueBigUint::gen_mask(width)
+                } else {
+                    zero()
+                };
+                let mask_xz = if x.mask_xz != 0 {
+                    ValueBigUint::gen_mask(width)
+                } else {
+                    zero()
+                };
+                return Cow::Owned(Value::BigUint(ValueBigUint {
+                    payload: Box::new(payload),
+                    mask_xz: Box::new(mask_xz),
+                    width: width as u32,
+                    signed: false,
+                }));
+            } else {
+                let payload = if x.payload != 0 {
+                    ValueU64::gen_mask(width)
+                } else {
+                    0
+                };
+                let mask_xz = if x.mask_xz != 0 {
+                    ValueU64::gen_mask(width)
+                } else {
+                    0
+                };
+                return Cow::Owned(Value::U64(ValueU64 {
+                    payload,
+                    mask_xz,
+                    width: width as u32,
+                    signed: false,
+                }));
+            }
+        }
+
+        if width > 64 {
             let ret = match self {
                 Self::U64(x) => {
                     let mut payload = Box::new(BigUint::from(x.payload));
@@ -1171,14 +1216,26 @@ impl Value {
     pub fn assign(&mut self, value: Value, beg: usize, end: usize) {
         match self {
             Self::U64(x) => {
-                let Value::U64(value) = value else {
-                    unreachable!();
+                let value = match value {
+                    Value::U64(v) => v,
+                    Value::BigUint(v) => ValueU64 {
+                        payload: v.payload.to_u64().unwrap_or(0),
+                        mask_xz: v.mask_xz.to_u64().unwrap_or(0),
+                        width: v.width,
+                        signed: v.signed,
+                    },
                 };
                 x.assign(value, beg, end)
             }
             Self::BigUint(x) => {
-                let Value::BigUint(value) = value else {
-                    unreachable!();
+                let value = match value {
+                    Value::BigUint(v) => v,
+                    Value::U64(v) => ValueBigUint {
+                        payload: Box::new(BigUint::from(v.payload)),
+                        mask_xz: Box::new(BigUint::from(v.mask_xz)),
+                        width: v.width,
+                        signed: v.signed,
+                    },
                 };
                 x.assign(value, beg, end)
             }
@@ -2096,6 +2153,112 @@ mod tests {
         assert_eq!(format!("{:x}", x05.as_ref()), "68'shffffffffffffffff6");
         assert_eq!(format!("{:x}", x06.as_ref()), "68'shxxxxxxxxxxxxxxxx7");
         assert_eq!(format!("{:x}", x07.as_ref()), "68'shzzzzzzzzzzzzzzzz8");
+    }
+
+    #[test]
+    fn all_bit_expand() {
+        // Unsized all_bit literals (width=0) must be materialized by
+        // replicating the 1-bit pattern across the target width, including
+        // widths <= 64.
+        let all0 = Value::from_str("'0").unwrap();
+        let all1 = Value::from_str("'1").unwrap();
+        let allx = Value::from_str("'x").unwrap();
+        let allz = Value::from_str("'z").unwrap();
+
+        assert_eq!(format!("{:b}", all0.expand(2, false).as_ref()), "2'b00");
+        assert_eq!(format!("{:b}", all1.expand(2, false).as_ref()), "2'b11");
+        assert_eq!(format!("{:b}", allx.expand(2, false).as_ref()), "2'bxx");
+        assert_eq!(format!("{:b}", allz.expand(2, false).as_ref()), "2'bzz");
+
+        assert_eq!(
+            format!("{:x}", all0.expand(64, false).as_ref()),
+            "64'h0000000000000000"
+        );
+        assert_eq!(
+            format!("{:x}", all1.expand(64, false).as_ref()),
+            "64'hffffffffffffffff"
+        );
+
+        assert_eq!(
+            format!("{:x}", all0.expand(128, false).as_ref()),
+            "128'h00000000000000000000000000000000"
+        );
+        assert_eq!(
+            format!("{:x}", all1.expand(128, false).as_ref()),
+            "128'hffffffffffffffffffffffffffffffff"
+        );
+
+        // `x == '1` must compare against the width-filled pattern, not 1.
+        let two_b11 = Value::from_str("2'b11").unwrap();
+        let two_b01 = Value::from_str("2'b01").unwrap();
+        let mut cache = MaskCache::default();
+        let eq_op = Op::Eq;
+        let r0 = eq_op.eval_value_binary(&two_b11, &all1, 1, false, &mut cache);
+        let r1 = eq_op.eval_value_binary(&two_b01, &all1, 1, false, &mut cache);
+        assert_eq!(format!("{:b}", r0), "1'b1");
+        assert_eq!(format!("{:b}", r1), "1'b0");
+    }
+
+    #[test]
+    fn assign_into_all_x_biguint() {
+        // Writing a 2-state bit (mask_xz=0) via `assign` into a single
+        // position of a 4-state BigUint must clear mask_xz at that bit
+        // even when the incoming value is a U64 (triggering variant
+        // conversion).
+        use num_bigint::BigUint;
+
+        let all_ones: BigUint = (BigUint::from(1u8) << 128u32) - BigUint::from(1u8);
+        let mut reversed = Value::BigUint(ValueBigUint {
+            payload: Box::new(BigUint::from(0u64)),
+            mask_xz: Box::new(all_ones.clone()),
+            width: 128,
+            signed: false,
+        });
+
+        for i in 0usize..128 {
+            let j = 127 - i;
+            let bit = if j == 127 { 1u64 } else { 0u64 };
+            let v = Value::new(bit, 1, false);
+            reversed.assign(v, i, i);
+        }
+
+        match reversed {
+            Value::BigUint(r) => {
+                assert_eq!(*r.payload, BigUint::from(1u64));
+                assert_eq!(*r.mask_xz, BigUint::from(0u64));
+            }
+            Value::U64(_) => panic!("expected BigUint"),
+        }
+    }
+
+    #[test]
+    fn assign_mixed_u64_biguint() {
+        // Assigning a narrow U64 into a BigUint target (and vice versa)
+        // must succeed instead of hitting `unreachable!()` — this is what
+        // `bits[i] = '1` on a logic<128> does.
+        let mut target = Value::new(0, 128, false);
+        let one_bit = Value::new(1, 1, false);
+        target.assign(one_bit, 127, 127);
+        assert_eq!(
+            format!("{:x}", target),
+            "128'h80000000000000000000000000000000"
+        );
+
+        let mut target = Value::new(0, 128, false);
+        let one_bit = Value::new(1, 1, false);
+        target.assign(one_bit, 63, 63);
+        assert_eq!(
+            format!("{:x}", target),
+            "128'h00000000000000008000000000000000"
+        );
+
+        let mut target = Value::new(0, 128, false);
+        let nibble = Value::new(0xf, 4, false);
+        target.assign(nibble, 67, 64);
+        assert_eq!(
+            format!("{:x}", target),
+            "128'h000000000000000f0000000000000000"
+        );
     }
 
     #[test]
