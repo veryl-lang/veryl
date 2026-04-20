@@ -267,17 +267,12 @@ impl ReferenceTable {
                     let params = symbol.found.generic_parameters();
 
                     let mut inference_attempted_failed = false;
-                    if i + 1 == path.paths.len()
-                        && path.paths[i].arguments.is_empty()
-                        && !params.is_empty()
-                        && matches!(symbol.found.kind, SymbolKind::Function(_))
-                    {
-                        let call_token_id = path.paths[i].base.id;
-                        if let Some(inferred) = generic_inference_table::get_inferred(call_token_id)
+                    if i + 1 == path.paths.len() {
+                        use generic_inference_table::InferredApply;
+                        match generic_inference_table::apply_inferred_args(&mut path, &symbol.found)
                         {
-                            path.paths[i].arguments = inferred;
-                        } else {
-                            inference_attempted_failed = true;
+                            InferredApply::Missing => inference_attempted_failed = true,
+                            InferredApply::Applied | InferredApply::NotApplicable => {}
                         }
                     }
 
