@@ -2619,3 +2619,72 @@ fn array_literal_default_with_explicit() {
 
     check_ir(code, exp);
 }
+
+#[test]
+fn generic_function_inference() {
+    let code = r#"
+    module ModuleA {
+        function FuncId::<T: u32> (
+            x: input logic<T>,
+        ) -> logic<T> {
+            return x;
+        }
+
+        function FuncWide::<T: u32> (
+            x: input logic<T>,
+        ) -> logic<T + 1> {
+            return {1'b0, x};
+        }
+
+        let _a: logic<8>  = 0;
+        let _b: logic<16> = 0;
+
+        let _r1: logic<8>  = FuncId(_a);
+        let _r2: logic<16> = FuncId(_b);
+
+        let _rw: logic<9> = FuncWide(_a);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  let var4(_a): logic<8> = 8'hxx;
+  let var5(_b): logic<16> = 16'hxxxx;
+  let var6(_r1): logic<8> = 8'hxx;
+  var var8(FuncId::<8>.return): logic<8> = 8'hxx;
+  input var9(FuncId::<8>.x): logic<8> = 8'hxx;
+  let var10(_r2): logic<16> = 16'hxxxx;
+  var var12(FuncId::<16>.return): logic<16> = 16'hxxxx;
+  input var13(FuncId::<16>.x): logic<16> = 16'hxxxx;
+  let var14(_rw): logic<9> = 9'hxxx;
+  var var16(FuncWide::<8>.return): logic<9> = 9'h0xx;
+  input var17(FuncWide::<8>.x): logic<8> = 8'hxx;
+  func var7(FuncId::<8>) -> var8 {
+    var8 = var9;
+  }
+  func var11(FuncId::<16>) -> var12 {
+    var12 = var13;
+  }
+  func var15(FuncWide::<8>) -> var16 {
+    var16 = {1'h0, var17};
+  }
+
+  comb {
+    var4 = 32'sh00000000;
+  }
+  comb {
+    var5 = 32'sh00000000;
+  }
+  comb {
+    var6 = var7(x: var4);
+  }
+  comb {
+    var10 = var11(x: var5);
+  }
+  comb {
+    var14 = var15(x: var4);
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}

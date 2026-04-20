@@ -5,11 +5,14 @@
 
 use crate::HashMap;
 use crate::ir::{WidthExpr, WidthOp};
+use crate::literal::Literal;
+use crate::literal_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{GenericParameterProperty, SymbolKind};
+use crate::symbol::{GenericParameterProperty, Symbol, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table;
+use crate::value::Value;
 use std::cell::RefCell;
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{self, StrId, TokenId};
@@ -49,6 +52,39 @@ pub fn insert_inferred(call_token_id: TokenId, args: Vec<GenericSymbolPath>) {
 
 pub fn get_inferred(call_token_id: TokenId) -> Option<Vec<GenericSymbolPath>> {
     INFERRED.with(|f| f.borrow().get(&call_token_id).cloned())
+}
+
+/// Apply inferred generic arguments to the last path segment when the call
+/// site omitted `::<…>`.
+pub fn apply_inferred_args(path: &mut GenericSymbolPath, symbol: &Symbol) -> InferredApply {
+    let Some(last) = path.paths.last_mut() else {
+        return InferredApply::NotApplicable;
+    };
+    if !last.arguments.is_empty() {
+        return InferredApply::NotApplicable;
+    }
+    if !matches!(symbol.kind, SymbolKind::Function(_)) {
+        return InferredApply::NotApplicable;
+    }
+    if symbol.generic_parameters().is_empty() {
+        return InferredApply::NotApplicable;
+    }
+    if let Some(inferred) = get_inferred(last.base.id) {
+        last.arguments = inferred;
+        InferredApply::Applied
+    } else {
+        InferredApply::Missing
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InferredApply {
+    /// Inference does not apply (non-generic, non-function, or args present).
+    NotApplicable,
+    /// Call site expects inference, and args were applied.
+    Applied,
+    /// Call site expects inference, but no inferred args were recorded.
+    Missing,
 }
 
 pub fn clear() {
@@ -283,8 +319,17 @@ fn resolve_argument_width(expr: &Expression) -> Option<usize> {
 
 fn numeric_arg_path(base: &Token, value: usize) -> GenericSymbolPath {
     let text_id = resource_table::insert_str(&value.to_string());
-    let mut token = *base;
-    token.text = text_id;
+    // A fresh token id keeps the synthetic literal separate from the call-site
+    // token. Without the new id, `literal_table::get(token.id)` would miss,
+    // and downstream `to_literal()` lookups during IR generation would fail.
+    let token = if let Some(path) = base.source.get_path() {
+        Token::generate(text_id, path)
+    } else {
+        let mut token = *base;
+        token.text = text_id;
+        token
+    };
+    literal_table::insert(token.id, Literal::Value(Value::new(value as u64, 32, true)));
     GenericSymbolPath {
         paths: vec![GenericSymbol {
             base: token,

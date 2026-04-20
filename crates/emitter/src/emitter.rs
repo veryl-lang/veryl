@@ -6220,19 +6220,11 @@ pub fn resolve_generic_path(
 
     for (i, symbol) in &path_symbols {
         if symbol.kind.is_generic() {
-            let params = symbol.generic_parameters();
-
-            // Inferred generic arguments (call site omitted `::<…>`).
-            if path.paths[*i].arguments.is_empty()
-                && !params.is_empty()
-                && i + 1 == path.paths.len()
-            {
-                let call_token_id = path.paths[*i].base.id;
-                if let Some(inferred) = generic_inference_table::get_inferred(call_token_id) {
-                    path.paths[*i].arguments = inferred;
-                }
+            if i + 1 == path.paths.len() {
+                generic_inference_table::apply_inferred_args(&mut path, symbol);
             }
 
+            let params = symbol.generic_parameters();
             let n_args = path.paths[*i].arguments.len();
 
             // Apply default value

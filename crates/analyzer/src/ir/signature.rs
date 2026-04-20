@@ -1,4 +1,5 @@
 use crate::conv::Context;
+use crate::generic_inference_table;
 use crate::ir::ValueVariant;
 use crate::namespace::Namespace;
 use crate::symbol::GenericMap;
@@ -45,6 +46,8 @@ impl Signature {
         path.unalias();
 
         let symbol = symbol_table::resolve(&path).ok()?;
+
+        generic_inference_table::apply_inferred_args(&mut path, &symbol.found);
         let mut sig = match &symbol.found.kind {
             SymbolKind::Module(_)
             | SymbolKind::Interface(_)
