@@ -488,7 +488,7 @@ impl Context {
         self.namespaces.pop();
     }
 
-    pub fn currnet_namespace(&self) -> Option<Namespace> {
+    pub fn current_namespace(&self) -> Option<Namespace> {
         self.namespaces.last().cloned()
     }
 

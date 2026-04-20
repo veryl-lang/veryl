@@ -203,9 +203,9 @@ impl TypeDag {
                 if !base_symbol.namespace.included(&parent_symbol.namespace) {
                     let (parent_symbol, parent_context) =
                         if let Some(symbol) = parent_symbol.get_parent_component() {
-                            let context = if parent_symbol.is_module(true) {
+                            let context = if symbol.is_module(true) {
                                 Context::Module
-                            } else if parent_symbol.is_interface(true) {
+                            } else if symbol.is_interface(true) {
                                 Context::Interface
                             } else {
                                 Context::Package

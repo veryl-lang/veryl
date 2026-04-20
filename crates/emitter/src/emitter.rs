@@ -1892,7 +1892,7 @@ impl Emitter {
 
         let mut emitted_functions = Vec::new();
         for path in &func_paths {
-            self.emit_global_function(path, &mut emitted_functions);
+            self.emit_global_function(path, component_symbol, &mut emitted_functions);
         }
 
         self.bound_namespace = None;
@@ -1902,6 +1902,7 @@ impl Emitter {
     fn emit_global_function(
         &mut self,
         path: &GenericSymbolPath,
+        component_symbol: &Symbol,
         emitted_functions: &mut Vec<SymbolId>,
     ) {
         let (Ok(func_symbol), _) = self.resolve_generic_path(path, None) else {
@@ -1929,11 +1930,13 @@ impl Emitter {
                 if let Some(base_symbol) = symbol_table::get(x.base)
                     && let SymbolKind::Function(base_func) = &base_symbol.kind
                 {
-                    (
-                        base_symbol.id,
-                        base_func.definition,
-                        func_symbol.found.generic_maps(),
-                    )
+                    let mut maps = func_symbol.found.generic_maps();
+                    for map in &mut maps {
+                        // Generic instance of global functoin belongs to
+                        // component where it is emitted into.
+                        map.id = Some(component_symbol.id);
+                    }
+                    (base_symbol.id, base_func.definition, maps)
                 } else {
                     return;
                 }
@@ -1944,7 +1947,7 @@ impl Emitter {
         if let Some(func_paths) = &symbol_table::get_reference_functions(func_id) {
             self.generic_map.push(generic_map);
             for func_path in func_paths {
-                self.emit_global_function(func_path, emitted_functions);
+                self.emit_global_function(func_path, component_symbol, emitted_functions);
             }
             self.generic_map.pop();
         }
@@ -2227,12 +2230,21 @@ impl Emitter {
             .filter(|x| {
                 if let Some(id) = x.id {
                     let symbol = symbol_table::get(id).unwrap();
-                    if let SymbolKind::GenericInstance(x) = &symbol.kind
-                        && let Some(affiliation_symbol) = x.affiliation_symbol
+                    let SymbolKind::GenericInstance(inst) = &symbol.kind else {
+                        unreachable!();
+                    };
+
+                    let affiliation_symbol = inst.affiliation_symbol.unwrap();
+                    if affiliation_symbol == parent_id {
+                        true
+                    } else if let Some(parent_symbol) = symbol_table::get(parent_id)
+                        && let SymbolKind::GenericInstance(inst) = parent_symbol.kind
                     {
-                        affiliation_symbol == parent_id
+                        // The generic map is associated with generic component.
+                        // This means that it is also associated with generic instances generated from the component.
+                        inst.base_symbol().id == affiliation_symbol
                     } else {
-                        unreachable!()
+                        false
                     }
                 } else {
                     true
@@ -6238,7 +6250,9 @@ pub fn resolve_generic_path(
                     arg.apply_map(maps);
                 }
                 arg.unalias();
-                arg.append_namespace_path(namespace, &symbol.namespace);
+                if !symbol.is_global_function() {
+                    arg.append_namespace_path(namespace, &symbol.namespace);
+                }
             }
         }
     }

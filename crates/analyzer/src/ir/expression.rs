@@ -862,8 +862,8 @@ impl fmt::Display for Factor {
 
 #[derive(Clone, Debug)]
 pub enum ArrayLiteralItem {
-    Value(Expression, Option<Expression>),
-    Defaul(Expression),
+    Value(Box<Expression>, Option<Box<Expression>>),
+    Defaul(Box<Expression>),
 }
 
 impl ArrayLiteralItem {

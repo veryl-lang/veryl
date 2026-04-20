@@ -2751,6 +2751,12 @@ pub struct GenericInstanceProperty {
     pub affiliation_symbol: Option<SymbolId>,
 }
 
+impl GenericInstanceProperty {
+    pub fn base_symbol(&self) -> Symbol {
+        symbol_table::get(self.base).unwrap()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum TestType {
     Inline,

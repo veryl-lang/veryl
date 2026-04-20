@@ -1,5 +1,6 @@
 use crate::conv::Context;
 use crate::ir::ValueVariant;
+use crate::namespace::Namespace;
 use crate::symbol::GenericMap;
 use crate::symbol::{GenericBoundKind, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
@@ -10,6 +11,7 @@ use veryl_parser::resource_table::StrId;
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signature {
     pub symbol: SymbolId,
+    pub full_path: Vec<StrId>,
     pub parameters: Vec<(StrId, ValueVariant)>,
     pub generic_parameters: Vec<(StrId, GenericSymbolPath)>,
 }
@@ -18,6 +20,7 @@ impl Signature {
     pub fn new(symbol: SymbolId) -> Self {
         Self {
             symbol,
+            full_path: vec![],
             parameters: vec![],
             generic_parameters: vec![],
         }
@@ -108,6 +111,7 @@ impl Signature {
 
                 let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
                 if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), &namespace)) {
+                    let current_namespace = context.current_namespace();
                     for id in &symbol.full_path {
                         let symbol = symbol_table::get(*id).unwrap();
                         let SymbolKind::GenericInstance(inst) = &symbol.kind else {
@@ -118,10 +122,17 @@ impl Signature {
                         let params = base.generic_parameters();
                         if inst.arguments.len() == params.len() {
                             for (i, (name, _)) in params.iter().enumerate() {
-                                sig.add_generic_parameter(*name, inst.arguments[i].clone());
+                                let mut arg = inst.arguments[i].clone();
+                                if let Some(current_namespace) = &current_namespace {
+                                    arg.append_namespace_path(current_namespace, &base.namespace);
+                                }
+                                sig.add_generic_parameter(*name, arg);
                             }
                         }
                     }
+
+                    sig.full_path
+                        .append(&mut symbol.found.inner_namespace().paths.to_vec());
                 }
             }
         }
@@ -135,6 +146,21 @@ impl Signature {
             ret.map.insert(*key, val.clone());
         }
         vec![ret]
+    }
+
+    pub fn namespace(&self) -> Namespace {
+        if self.full_path.is_empty() {
+            let symbol = symbol_table::get(self.symbol).unwrap();
+            symbol.inner_namespace()
+        } else {
+            let mut ret = Namespace::new();
+
+            for path in &self.full_path {
+                ret.push(*path);
+            }
+
+            ret
+        }
     }
 }
 

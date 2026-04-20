@@ -2937,6 +2937,84 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+function func_a::<A: u32> -> u32 {
+    return A;
+}
+package Pkg::<A: u32> {
+    const B: u32 = A;
+    function func_b() -> u32 {
+        return func_a::<B>();
+    }
+}
+module ModuleA {
+    let _a: u32 = Pkg::<1>::func_b();
+}
+"#;
+
+    let expect = r#"
+
+package prj___Pkg__1;
+    localparam int unsigned B = 1;
+    function automatic int unsigned func_b() ;
+        return __func_a__B();
+    endfunction
+
+    function automatic int unsigned __func_a__B;
+        return B;
+    endfunction
+endpackage
+module prj_ModuleA;
+    int unsigned _a; always_comb _a = prj___Pkg__1::func_b();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+function func_a::<A: u32> -> u32 {
+    return A;
+}
+package Pkg::<A: u32> {
+    function func_b::<B: u32>() -> u32 {
+        return func_a::<A>() + B;
+    }
+}
+module ModuleA {
+    let _a: u32 = Pkg::<1>::func_b::<2>();
+}
+"#;
+
+    let expect = r#"
+
+package prj___Pkg__1;
+    function automatic int unsigned __func_b__2() ;
+        return __func_a__1() + 2;
+    endfunction
+
+    function automatic int unsigned __func_a__1;
+        return 1;
+    endfunction
+endpackage
+module prj_ModuleA;
+    int unsigned _a; always_comb _a = prj___Pkg__1::__func_b__2();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]

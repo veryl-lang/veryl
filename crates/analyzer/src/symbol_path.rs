@@ -521,15 +521,21 @@ impl GenericSymbolPath {
         for path in &self.paths {
             full_path.push(path.base);
             if let Ok(symbol) = symbol_table::resolve(&full_path) {
-                let params = symbol.found.generic_parameters();
-
                 let mut map = GenericMap::default();
 
-                for (i, (name, value)) in params.into_iter().enumerate() {
-                    if let Some(x) = path.arguments.get(i) {
-                        map.map.insert(name, x.clone());
-                    } else if let Some(x) = value.default_value {
-                        map.map.insert(name, x);
+                if let SymbolKind::GenericInstance(inst) = &symbol.found.kind {
+                    let params = inst.base_symbol().generic_parameters();
+                    for (i, (name, _)) in params.iter().enumerate() {
+                        map.map.insert(*name, inst.arguments[i].clone());
+                    }
+                } else {
+                    let params = symbol.found.generic_parameters();
+                    for (i, (name, value)) in params.into_iter().enumerate() {
+                        if let Some(x) = path.arguments.get(i) {
+                            map.map.insert(name, x.clone());
+                        } else if let Some(x) = value.default_value {
+                            map.map.insert(name, x);
+                        }
                     }
                 }
 
@@ -670,38 +676,53 @@ impl GenericSymbolPath {
     }
 
     pub fn append_namespace_path(&mut self, namespace: &Namespace, target_namespace: &Namespace) {
-        fn is_defined_in_package(path: &GenericSymbolPath, namespace: &Namespace) -> bool {
-            if !namespace
-                .get_symbol()
-                .map(|x| x.is_package(true))
-                .unwrap_or(false)
-            {
-                // The given namespace does not point a package
+        fn is_defined_in_package(symbol: &Symbol) -> bool {
+            if matches!(symbol.kind, SymbolKind::GenericParameter(_)) {
+                // Generic parameter is not visible from other namespace
                 return false;
             }
 
-            symbol_table::resolve((&path.base_path(0), namespace))
-                .map(|symbol| {
-                    // Generic parameter is not visible from other namespace.
-                    !matches!(symbol.found.kind, SymbolKind::GenericParameter(_))
-                        && symbol.found.namespace.matched(namespace)
-                })
+            symbol
+                .namespace
+                .get_symbol()
+                .map(|x| x.is_package(true))
                 .unwrap_or(false)
         }
 
-        fn is_component_path(path: &GenericSymbolPath, namespace: &Namespace) -> bool {
-            symbol_table::resolve((&path.base_path(0), namespace))
-                .map(|x| x.found.is_component(true))
-                .unwrap_or(false)
+        fn start_with_project_name(namespace: &Namespace) -> bool {
+            namespace.depth() >= 1 && namespace_table::match_project_name(namespace.paths[0])
         }
 
-        if let Some(file_path) = self.file_path() {
-            if !namespace.matched(target_namespace) && is_defined_in_package(self, namespace) {
+        fn add_root_project_name(namespace: &Namespace) -> Namespace {
+            let mut ret = namespace.clone();
+            if !start_with_project_name(&ret) {
+                ret.paths.insert(0, namespace_table::root_project_name());
+            }
+            ret
+        }
+
+        if let Ok(head_symbol) =
+            symbol_table::resolve((&self.base_path(0), &namespace.generic_namespace()))
+            && let Some(file_path) = self.file_path()
+        {
+            let head_symbol = &head_symbol.found;
+            let head_namespace = &head_symbol.namespace;
+
+            let mut namespace = add_root_project_name(namespace);
+            if start_with_project_name(head_namespace) {
+                namespace.paths.drain(head_namespace.depth()..);
+            } else {
+                namespace.paths.drain((head_namespace.depth() + 1)..);
+            }
+
+            let target_namespace = add_root_project_name(target_namespace);
+
+            if !namespace.matched(&target_namespace) && is_defined_in_package(head_symbol) {
                 // The given path is referened from the `target_namespace`
                 // but it is not visible because it has no package paths.
                 for i in 1..namespace.depth() {
                     let token = Token::generate(namespace.paths[i], file_path);
-                    namespace_table::insert(token.id, file_path, namespace);
+                    namespace_table::insert(token.id, file_path, &namespace);
 
                     let symbol_path = GenericSymbol {
                         base: token,
@@ -711,11 +732,10 @@ impl GenericSymbolPath {
                 }
             }
 
-            if namespace.paths[0] != target_namespace.paths[0] && is_component_path(self, namespace)
-            {
+            if namespace.paths[0] != target_namespace.paths[0] && head_symbol.is_component(true) {
                 // Append the project prefix to the path.
                 let token = Token::generate(namespace.paths[0], file_path);
-                namespace_table::insert(token.id, file_path, namespace);
+                namespace_table::insert(token.id, file_path, &namespace);
 
                 let symbol_path = GenericSymbol {
                     base: token,
