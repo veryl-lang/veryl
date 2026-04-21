@@ -29,7 +29,7 @@ veryl-parser   = {version = "0.19.1", path = "../parser"}
 veryl-path     = {version = "0.19.1", path = "../path"}
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-cranelift      = "0.130.1"
+cranelift      = "0.131.0"
 memmap2        = "0.9.9"
 target-lexicon = "0.13.4"
 
