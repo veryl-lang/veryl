@@ -10,9 +10,7 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::veryl_token::TokenSource;
-use veryl_synthesizer::{
-    BuiltinLibrary, compute_power, compute_timing_top_n, port_label, synthesize,
-};
+use veryl_synthesizer::{compute_power, compute_timing_top_n, library_for, port_label, synthesize};
 
 pub struct CmdSynth {
     opt: OptSynth,
@@ -59,8 +57,7 @@ impl CmdSynth {
 
         Analyzer::analyze_post_pass2();
 
-        // CLI `--top` beats the toml default; otherwise fall back to
-        // inferring from the first user module.
+        // CLI `--top` > toml default > first user module.
         let top_override = self.opt.top.as_ref().or(metadata.synth.top.as_ref());
         let top_id = match top_override {
             Some(name) => resource_table::insert_str(name),
@@ -84,15 +81,15 @@ impl CmdSynth {
             }
         };
 
-        let result = match synthesize(&ir, top_id) {
+        let library = library_for(metadata.synth.library);
+
+        let result = match synthesize(&ir, top_id, metadata.synth.library) {
             Ok(r) => r,
             Err(err) => {
                 warn!("Synthesis failed: {}", err);
                 return Ok(false);
             }
         };
-
-        let library = BuiltinLibrary::new();
         println!(
             "synth: {} — {} gates, {} FFs",
             top_id,
@@ -113,7 +110,7 @@ impl CmdSynth {
         // Computed once; the summary line and the detail block both need it.
         let power = compute_power(
             &result.gate_ir.module,
-            &library,
+            library,
             metadata.synth.clock_freq,
             metadata.synth.activity,
         );
@@ -123,15 +120,13 @@ impl CmdSynth {
             println!("{}", result.gate_ir);
         }
 
-        // Top-level numbers up front so the report can be scanned without
-        // paging through the per-kind / per-step breakdowns.
+        // Top-level numbers up front so detail blocks don't have to be scanned.
         if show_any_report {
             let start = port_label(result.timing.critical_path.first());
             let end = port_label(result.timing.critical_path.last());
             println!();
             println!("summary:");
-            // Width 11 for the numeric field covers kB-scale modules up to
-            // ~10 M um² / 1 W without breaking label/value alignment.
+            // Width 11 fits up to ~10 M um² / 1 W without breaking alignment.
             println!(
                 "  {:<8}{:>11.2} um²  (comb {:.2}, seq {:.2} × {} FF)",
                 "area:",
@@ -162,8 +157,7 @@ impl CmdSynth {
         if show_area {
             println!();
             println!("area:");
-            // Skip the Display's first line — its content is already in the
-            // summary above.
+            // Skip Display's first line — already shown in the summary.
             let full = format!("{}", result.area);
             for line in full.lines().skip(1) {
                 println!("{}", line);
@@ -183,7 +177,7 @@ impl CmdSynth {
                     println!("{}", line);
                 }
             } else {
-                let reports = compute_timing_top_n(&result.gate_ir.module, &library, n);
+                let reports = compute_timing_top_n(&result.gate_ir.module, library, n);
                 println!();
                 println!("timing (top {} endpoints):", reports.len());
                 for (rank, report) in reports.iter().enumerate() {
@@ -192,8 +186,7 @@ impl CmdSynth {
                 for (rank, report) in reports.iter().enumerate() {
                     println!();
                     println!("path #{}", rank + 1);
-                    // Skip the Display header ("timing:") since we already
-                    // printed a per-rank label above.
+                    // Skip Display's "timing:" — we print a per-rank label above.
                     let full = format!("{}", report);
                     for line in full.lines().skip(1) {
                         println!("{}", line);
@@ -204,8 +197,7 @@ impl CmdSynth {
         if show_power {
             println!();
             println!("power:");
-            // Skip the first two Display lines (mW totals + assumptions) —
-            // both appear in the summary block above; keep the per-kind rows.
+            // Skip Display's first two lines (totals + assumptions) — in summary.
             let full = format!("{}", power);
             for line in full.lines().skip(2) {
                 println!("{}", line);

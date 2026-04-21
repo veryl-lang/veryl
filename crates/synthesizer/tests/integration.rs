@@ -5,7 +5,7 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table;
 use veryl_synthesizer::ir::{CellKind, NetDriver};
-use veryl_synthesizer::{BuiltinLibrary, build_gate_ir, compute_power, synthesize};
+use veryl_synthesizer::{Library, build_gate_ir, compute_power, library_for, synthesize};
 
 #[track_caller]
 fn analyze(code: &str, top: &str) -> (air::Ir, veryl_parser::resource_table::StrId) {
@@ -123,7 +123,7 @@ fn ripple_carry_adder() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     // Full adder: 2x XOR + 2x AND + 1x OR. Four of them for a 4-bit adder
     // gives 8 XORs before optimization; const-prop folds the bit-0 sum XOR
     // against cin=0 down to a single XOR, so we end up with ≥7.
@@ -156,7 +156,7 @@ fn kogge_stone_wider_add_has_log_depth() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert!(
         result.timing.critical_path_depth < 12,
         "8-bit Kogge-Stone depth should be ~log2(8)+const ≈ 7, got {}",
@@ -273,7 +273,7 @@ fn counter_context_width() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     let xor_count = result
         .gate_ir
         .module
@@ -361,7 +361,7 @@ fn counter_without_reset() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert_eq!(result.gate_ir.module.ffs.len(), 4);
     for ff in &result.gate_ir.module.ffs {
         assert!(matches!(
@@ -442,7 +442,7 @@ fn array_register_file_ff() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     // Only rf[1] is ever written after reset; rf[0], rf[2], rf[3] hold their
     // reset_value=0 forever, so D=Q FF elimination folds their 12 FFs into
     // constants. Only rf[1]'s 4 FFs remain.
@@ -559,7 +559,7 @@ fn array_dynamic_index_write_ff() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     // 4 entries × 4 bits = 16 FFs.
     assert_eq!(result.gate_ir.module.ffs.len(), 16);
 }
@@ -614,7 +614,7 @@ fn dynamic_bit_select_write_ff() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert_eq!(result.gate_ir.module.ffs.len(), 4);
 }
 
@@ -633,7 +633,7 @@ fn wallace_tree_multiplier_shallower_than_shift_add() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert!(
         result.timing.critical_path_depth < 30,
         "8-bit Wallace multiplier depth should be well below shift-add's 30+, got {}",
@@ -657,7 +657,7 @@ fn unsigned_multiply_4bit() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     let and_count = result
         .gate_ir
         .module
@@ -725,7 +725,7 @@ fn signed_multiply_truncates_correctly() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert!(!result.gate_ir.module.cells.is_empty());
 }
 
@@ -743,7 +743,7 @@ fn unsigned_divide_4bit() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     // Restoring division for 4 bits: 4 subtractor stages + 4 mux layers.
     // Each subtractor is a ripple-carry adder-like structure ≈ 5 cells × width.
     assert!(
@@ -785,7 +785,7 @@ fn signed_divide_synthesizes() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert!(result.gate_ir.module.cells.len() > 40);
 }
 
@@ -803,7 +803,7 @@ fn signed_remainder_synthesizes() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert!(result.gate_ir.module.cells.len() > 40);
 }
 
@@ -879,7 +879,7 @@ fn hierarchical_register() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert_eq!(
         result.gate_ir.module.ffs.len(),
         4,
@@ -1068,7 +1068,7 @@ fn struct_wide_member_assign() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let _ = synthesize(&ir, top).expect("synthesize");
+    let _ = synthesize(&ir, top, Library::default()).expect("synthesize");
 }
 
 #[test]
@@ -1252,7 +1252,7 @@ fn enum_state_machine() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     // 1-bit enum state → 1 FF.
     assert_eq!(result.gate_ir.module.ffs.len(), 1);
 }
@@ -1714,8 +1714,8 @@ fn timing_top_n_returns_sorted_endpoints() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let library = veryl_synthesizer::BuiltinLibrary::new();
-    let reports = veryl_synthesizer::compute_timing_top_n(&gate.module, &library, 5);
+    let library = library_for(Library::default());
+    let reports = veryl_synthesizer::compute_timing_top_n(&gate.module, library, 5);
     assert!(
         reports.len() >= 3,
         "expected at least 3 endpoints, got {}",
@@ -2179,7 +2179,7 @@ fn dq_ff_with_reset_folds_to_constant() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert_eq!(
         result.gate_ir.module.ffs.len(),
         0,
@@ -2216,7 +2216,7 @@ fn dq_ff_without_reset_is_preserved() {
         }
     "#;
     let (ir, top) = analyze(code, "Top");
-    let result = synthesize(&ir, top).expect("synthesize");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
     assert_eq!(
         result.gate_ir.module.ffs.len(),
         4,
@@ -2397,9 +2397,9 @@ fn power_leakage_independent_of_frequency_and_activity() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let library = BuiltinLibrary::new();
-    let p1 = compute_power(&gate.module, &library, 100.0, 0.1);
-    let p2 = compute_power(&gate.module, &library, 500.0, 0.5);
+    let library = library_for(Library::default());
+    let p1 = compute_power(&gate.module, library, 100.0, 0.1);
+    let p2 = compute_power(&gate.module, library, 500.0, 0.5);
     // Leakage should be identical; dynamic should scale with f × α.
     assert!((p1.leakage_mw - p2.leakage_mw).abs() < 1e-9);
     let scale = (500.0 * 0.5) / (100.0 * 0.1);
@@ -2437,9 +2437,9 @@ fn power_scales_with_cell_count() {
     let gate4 = build_gate_ir(&ir4, top4).expect("synthesize");
     let (ir8, top8) = analyze(&make_code(8), "Top");
     let gate8 = build_gate_ir(&ir8, top8).expect("synthesize");
-    let library = BuiltinLibrary::new();
-    let p4 = compute_power(&gate4.module, &library, 100.0, 0.1);
-    let p8 = compute_power(&gate8.module, &library, 100.0, 0.1);
+    let library = library_for(Library::default());
+    let p4 = compute_power(&gate4.module, library, 100.0, 0.1);
+    let p8 = compute_power(&gate8.module, library, 100.0, 0.1);
     // 8-bit design has 2× the And2 cells → 2× leakage and 2× dynamic.
     assert!(
         (p8.leakage_mw / p4.leakage_mw - 2.0).abs() < 0.05,
@@ -2476,10 +2476,10 @@ fn power_ff_dynamic_uses_full_clock() {
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
     assert_eq!(gate.module.ffs.len(), 4, "expected 4 FFs");
-    let library = BuiltinLibrary::new();
+    let library = library_for(Library::default());
     // Activity varies but FF dynamic should only respond to frequency.
-    let p_low_act = compute_power(&gate.module, &library, 100.0, 0.05);
-    let p_high_act = compute_power(&gate.module, &library, 100.0, 0.95);
+    let p_low_act = compute_power(&gate.module, library, 100.0, 0.05);
+    let p_high_act = compute_power(&gate.module, library, 100.0, 0.95);
     assert!(
         (p_low_act.ff_dynamic_uw - p_high_act.ff_dynamic_uw).abs() < 1e-9,
         "FF dynamic should not depend on activity: {} vs {}",
@@ -2487,7 +2487,7 @@ fn power_ff_dynamic_uses_full_clock() {
         p_high_act.ff_dynamic_uw
     );
     // But it must scale with frequency.
-    let p_fast = compute_power(&gate.module, &library, 500.0, 0.1);
+    let p_fast = compute_power(&gate.module, library, 500.0, 0.1);
     let ratio = p_fast.ff_dynamic_uw / p_low_act.ff_dynamic_uw;
     assert!(
         (ratio - 5.0).abs() < 0.01,

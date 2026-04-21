@@ -28,7 +28,7 @@ pub use project::Project;
 pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;
-pub use synth::Synth;
+pub use synth::{Library, Synth};
 pub use test::{SimType, Test, WaveFormFormat, WaveFormTarget};
 
 include!(concat!(env!("OUT_DIR"), "/veryl_version.rs"));

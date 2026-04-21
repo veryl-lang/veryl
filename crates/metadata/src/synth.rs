@@ -16,6 +16,29 @@ pub struct Synth {
     /// FF clock input is always assumed to toggle every cycle.
     #[serde(default = "default_activity")]
     pub activity: f64,
+    /// Built-in cell library / PDK to use.
+    #[serde(default)]
+    pub library: Library,
+}
+
+/// Built-in PDK library identifiers. Each variant maps to a hard-coded
+/// cell-data table in `veryl-synthesizer`.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Library {
+    /// SkyWater SKY130 130nm PDK (sky130_fd_sc_hd, Apache 2.0).
+    #[default]
+    #[serde(rename = "sky130")]
+    Sky130,
+    /// ASU ASAP7 7nm predictive PDK (asap7sc7p5t RVT, BSD 3-Clause).
+    #[serde(rename = "asap7")]
+    Asap7,
+    /// GlobalFoundries GF180MCU 180nm PDK (gf180mcu_fd_sc_mcu7t5v0,
+    /// Apache 2.0).
+    #[serde(rename = "gf180mcu")]
+    Gf180mcu,
+    /// IHP SG13G2 130nm SiGe BiCMOS PDK (sg13g2_stdcell, Apache 2.0).
+    #[serde(rename = "ihp-sg13g2")]
+    IhpSg13g2,
 }
 
 impl Default for Synth {

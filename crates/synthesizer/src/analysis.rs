@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::ir::{CellKind, GateModule, NetDriver, NetId, PortDir};
-use crate::library::BuiltinLibrary;
+use crate::library::CellLibrary;
 
 #[derive(Clone, Debug, Default)]
 pub struct AreaReport {
@@ -21,9 +21,7 @@ impl fmt::Display for AreaReport {
             "area: {:.2} um²  (comb {:.2}, seq {:.2} × {} FF)",
             self.total, self.combinational, self.sequential, self.ff_count
         )?;
-        // Size count / area columns to the widest entry so everything
-        // stays aligned even for designs with 6-digit cell counts and
-        // 7-digit areas (e.g. heliodor_top).
+        // Size columns from data so large counts/areas don't break alignment.
         let count_w = self
             .by_kind
             .iter()
@@ -51,7 +49,7 @@ impl fmt::Display for AreaReport {
     }
 }
 
-pub fn compute_area(module: &GateModule, library: &BuiltinLibrary) -> AreaReport {
+pub fn compute_area(module: &GateModule, library: &dyn CellLibrary) -> AreaReport {
     let mut buckets: HashMap<CellKind, (usize, f64)> = HashMap::new();
     let mut comb_total = 0.0;
     for cell in &module.cells {
@@ -168,7 +166,7 @@ impl fmt::Display for PowerReport {
 
 pub fn compute_power(
     module: &GateModule,
-    library: &BuiltinLibrary,
+    library: &dyn CellLibrary,
     clock_freq_mhz: f64,
     activity: f64,
 ) -> PowerReport {
@@ -177,9 +175,7 @@ pub fn compute_power(
     let mut comb_dyn_uw = 0.0_f64;
     for cell in &module.cells {
         let info = library.info(cell.kind);
-        // dynamic power contributed by internal energy:
-        //   P (uW) = energy (pJ/tr) × activity × f_clk (MHz)
-        // since pJ × MHz = uW.
+        // P (uW) = energy (pJ/tr) × activity × f_clk (MHz); pJ × MHz = uW.
         let dyn_uw = info.internal_energy * activity * clock_freq_mhz;
         let entry = buckets.entry(cell.kind).or_insert((0, 0.0, 0.0));
         entry.0 += 1;
@@ -266,11 +262,8 @@ pub enum Endpoint {
 }
 
 impl TimingReport {
-    /// Short single-line summary, suitable for top-N tables. Format:
-    /// `0.580 ns   6 gates   i_imm_type[0] → o_imm[1]`.
-    /// Widths accommodate up to 3-digit ns (e.g. flatten-synthesised
-    /// CPU cores at ~130 ns) and 4-digit gate counts without wrecking
-    /// column alignment.
+    /// Short single-line summary for top-N tables: `<ns> ns  <N> gates  <start> → <end>`.
+    /// Widths fit 3-digit ns and 4-digit gate counts.
     pub fn summary(&self) -> String {
         let start = port_label(self.critical_path.first());
         let end = port_label(self.critical_path.last());
@@ -287,10 +280,7 @@ impl TimingReport {
         }
         let last_idx = self.critical_path.len() - 1;
 
-        // Build all per-step label strings first so we can measure column
-        // widths from the actual data rather than guessing a minimum. This
-        // keeps arrival / label columns aligned regardless of path length
-        // or which port names happen to appear.
+        // Build rows first, then measure column widths from the data.
         let rows: Vec<(f64, String, String)> = self
             .critical_path
             .iter()
@@ -358,8 +348,7 @@ impl TimingReport {
     }
 }
 
-/// Extract the port/FF label from a path step, falling back to `?` when
-/// the step has no origin. Shared between summary and per-path rendering.
+/// Extract the port/FF label from a path step, or `?` when the step has no origin.
 pub fn port_label(step: Option<&PathStep>) -> String {
     match step.and_then(|s| s.origin.as_ref()) {
         Some((name, bit)) => format!("{}[{}]", name, bit),
@@ -374,38 +363,34 @@ impl fmt::Display for TimingReport {
     }
 }
 
-pub fn compute_timing(module: &GateModule, library: &BuiltinLibrary) -> TimingReport {
+pub fn compute_timing(module: &GateModule, library: &dyn CellLibrary) -> TimingReport {
     compute_timing_top_n(module, library, 1)
         .into_iter()
         .next()
         .unwrap_or_default()
 }
 
-/// Returns the `n` endpoints with the longest arrival time, each paired
-/// with its critical path. The list is sorted with the worst first. Useful
-/// for spotting cases where the absolute top path is accidentally shadowed
-/// by a close second (e.g. when a different tech-mapping would pick
-/// another endpoint as critical).
+/// Returns the `n` endpoints with the longest arrival time, each with its
+/// critical path, worst first. A single top-1 can shadow a close second;
+/// top-N exposes near-critical paths a different tech-mapping might prefer.
 pub fn compute_timing_top_n(
     module: &GateModule,
-    library: &BuiltinLibrary,
+    library: &dyn CellLibrary,
     n: usize,
 ) -> Vec<TimingReport> {
     if n == 0 {
         return Vec::new();
     }
 
-    // arrival[net] is the latest input-signal arrival time for `net`; FF Q
-    // outputs and primary inputs start at 0. predecessor[n] records the
-    // fan-in that produced that max, so we can walk the critical path.
+    // arrival[net] = latest input arrival for `net`; FF Q and primary inputs start at 0.
+    // predecessor[n] = fan-in that produced the max, used to walk the path back.
     let n_nets = module.nets.len();
     let mut arrival = vec![0.0_f64; n_nets];
     let mut depth = vec![0_usize; n_nets];
     let mut predecessor = vec![None::<NetId>; n_nets];
 
-    // Cell indices already honor topological order for straight expression
-    // trees, but branch-merging MUXes can land out of order. Iterate to a
-    // fixed point instead of pre-sorting.
+    // Cells are roughly topological but branch-merging MUXes can land out of
+    // order; iterate to a fixed point rather than pre-sort.
     let mut changed = true;
     while changed {
         changed = false;
@@ -436,9 +421,7 @@ pub fn compute_timing_top_n(
         }
     }
 
-    // Collect every candidate endpoint along with its effective delay.
-    // FF D pins pay an extra setup cost on top of their arrival; primary
-    // outputs don't. The endpoint's `net` is what we trace back from.
+    // FF D pins pay an extra setup cost on top of their arrival; primary outputs don't.
     let mut endpoints: Vec<(f64, usize, Endpoint, NetId)> = Vec::new();
     for (i, ff) in module.ffs.iter().enumerate() {
         let d = ff.d as usize;
@@ -454,10 +437,8 @@ pub fn compute_timing_top_n(
         }
     }
 
-    // Sort endpoints by delay descending; deduplicate by the `net` field
-    // so reporting the same wire twice (e.g. a net driving both a FF d
-    // and a port output) doesn't spam the top-N list. We keep the higher-
-    // delay variant (FF d with setup vs port arrival without setup).
+    // Sort worst-first, then dedup by net so a wire driving both a FF D and a
+    // port output doesn't appear twice; the FF-D variant wins (includes setup).
     endpoints.sort_by(|a, b| {
         b.0.partial_cmp(&a.0)
             .unwrap_or(Ordering::Equal)
@@ -466,13 +447,9 @@ pub fn compute_timing_top_n(
     let mut seen_nets: HashSet<NetId> = HashSet::new();
     endpoints.retain(|(_, _, _, net)| seen_nets.insert(*net));
 
-    // Build a report for each of the top n endpoints. Path tracing uses
-    // the shared predecessor table, so the cost of adding more reports
-    // is O(path_length) per extra report — cheap.
-    // Build per-endpoint-net → (name, bit-index) reverse index so end-point
-    // labels show the destination (output port or register variable)
-    // rather than whichever intermediate let-variable happened to share
-    // the origin net via cell-output inheritance.
+    // endpoint_label: net → (port/register name, bit). Without this, the final
+    // step would inherit whatever intermediate let-variable shares the net via
+    // cell-output origin propagation.
     let mut endpoint_label: HashMap<NetId, (String, usize)> = HashMap::new();
     for port in &module.ports {
         if matches!(port.dir, PortDir::Output | PortDir::Inout) {
@@ -481,13 +458,8 @@ pub fn compute_timing_top_n(
             }
         }
     }
-    // FF D / Q nets prefer the FF's own `origin` (the register variable
-    // it stores) over the net's inherited origin. Without this, we'd
-    // report e.g. the first cell-input variable propagated through
-    // add_cell even though the net is actually at a FF boundary.
-    //
-    // This map is used both for path endpoints (FF D) and for any step
-    // in the trace that sits on an FF boundary (Q outputs at path start).
+    // FF D/Q nets prefer the FF's own `origin` (register variable) over an
+    // inherited one, so Q-outputs and D-inputs report the register name.
     for ff in &module.ffs {
         if let Some((name, bit)) = ff.origin {
             endpoint_label.insert(ff.d, (name.to_string(), bit));
@@ -518,9 +490,7 @@ pub fn compute_timing_top_n(
                     NetDriver::Cell(i) => StepKind::CellOutput(*i, module.cells[*i].kind),
                     NetDriver::Undriven => StepKind::StartPoint,
                 };
-                // Prefer the explicit endpoint label when the net sits
-                // on a port/FF boundary (avoids misleading cell-input-
-                // inherited origins for FF Q outputs and port outputs).
+                // Prefer explicit boundary label; fall back to net origin.
                 let origin = endpoint_label
                     .get(&net)
                     .cloned()
@@ -537,9 +507,6 @@ pub fn compute_timing_top_n(
                 }
             }
             trace.reverse();
-            // Prefer the dedicated endpoint label (output port or FF
-            // register variable). Fallback to the net's stored origin
-            // only when no explicit label is registered.
             let end_origin = endpoint_label.get(&end_net).cloned().or_else(|| {
                 module.nets[end_net as usize]
                     .origin

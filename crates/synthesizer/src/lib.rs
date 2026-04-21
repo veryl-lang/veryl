@@ -12,8 +12,9 @@ pub use ir::{
     Cell, CellKind, ClockEdge, FfCell, GateIr, GateModule, GatePort, NetId, NetInfo, PortDir,
     ResetPolarity, ResetSpec,
 };
-pub use library::{BuiltinLibrary, CellInfo};
+pub use library::{CellInfo, CellLibrary, library_for};
 pub use synthesizer_error::SynthesizerError;
+pub use veryl_metadata::Library;
 
 use veryl_analyzer::ir::Ir as AnalyzerIr;
 use veryl_parser::resource_table::StrId;
@@ -38,11 +39,15 @@ pub struct SynthResult {
     pub timing: TimingReport,
 }
 
-pub fn synthesize(ir: &AnalyzerIr, top: StrId) -> Result<SynthResult, SynthesizerError> {
+pub fn synthesize(
+    ir: &AnalyzerIr,
+    top: StrId,
+    library: Library,
+) -> Result<SynthResult, SynthesizerError> {
     let gate_ir = build_gate_ir(ir, top)?;
-    let library = BuiltinLibrary::new();
-    let area = analysis::compute_area(&gate_ir.module, &library);
-    let timing = analysis::compute_timing(&gate_ir.module, &library);
+    let lib = library_for(library);
+    let area = analysis::compute_area(&gate_ir.module, lib);
+    let timing = analysis::compute_timing(&gate_ir.module, lib);
     Ok(SynthResult {
         gate_ir,
         area,
