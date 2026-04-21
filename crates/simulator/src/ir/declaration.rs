@@ -296,7 +296,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
 
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
-        let air::Component::Module(child_module) = &src.component else {
+        let air::Component::Module(child_module) = src.component.as_ref() else {
             panic!("InstDeclaration for non-Module component");
         };
 

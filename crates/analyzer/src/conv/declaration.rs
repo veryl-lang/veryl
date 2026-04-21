@@ -29,6 +29,7 @@ use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::value::Value;
 use crate::{HashMap, ir_error};
+use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -489,9 +490,10 @@ impl Conv<&PortDeclarationItem> for () {
                         ir::TypeKind::Modport(sig, name) => {
                             let component = get_component(context, sig, token)?;
                             let base = value.identifier.text();
-                            let ir::Component::Interface(component) = component else {
+                            let ir::Component::Interface(component) = component.as_ref() else {
                                 return Err(ir_error!(token));
                             };
+                            let component = component.clone();
                             context.extract_interface_member(
                                 base,
                                 &r#type.array,
@@ -1298,7 +1300,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
 
         context.pop_override();
 
-        match component? {
+        let component_arc = component?;
+        match component_arc.as_ref() {
             ir::Component::Module(component) => {
                 let mut inputs = vec![];
                 let mut outputs = vec![];
@@ -1313,9 +1316,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                         let path = VarPath::new(name);
                         let token: TokenRange = port.identifier.as_ref().into();
                         if let Some((dst_type, clock_domain)) = component.port_types.get(&path) {
-                            let connects = get_port_connects(
-                                context, &component, port, &path, dst_type, token,
-                            );
+                            let connects =
+                                get_port_connects(context, component, port, &path, dst_type, token);
                             let Ok(connects) = connects else {
                                 continue;
                             };
@@ -1357,12 +1359,11 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 // TOOD modport parameter override
 
                 let name = value.identifier.text();
-                let component = ir::Component::Module(component);
                 Ok(ir::Declaration::Inst(Box::new(ir::InstDeclaration {
                     name,
                     inputs,
                     outputs,
-                    component,
+                    component: component_arc,
                 })))
             }
             ir::Component::Interface(component) => {
@@ -1379,7 +1380,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 context.extract_interface_member(
                     base,
                     &array,
-                    component,
+                    component.clone(),
                     None,
                     clock_domain,
                     token,
@@ -1398,7 +1399,11 @@ impl Conv<&InstDeclaration> for ir::Declaration {
 
                 Ok(ir::Declaration::Null)
             }
-            ir::Component::SystemVerilog(mut component) => {
+            ir::Component::SystemVerilog(component) => {
+                // SV blackboxes are small (just a connects list) and the
+                // conv path mutates them here to add ports — take an owned
+                // copy instead of sharing through the Arc cache.
+                let mut component = component.clone();
                 if let Some(x) = &value.component_instantiation_opt2
                     && let Some(x) = &x.inst_port.inst_port_opt
                 {
@@ -1467,7 +1472,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     }
                 }
                 let name = value.identifier.text();
-                let component = ir::Component::SystemVerilog(component);
+                let component = Arc::new(ir::Component::SystemVerilog(component));
                 Ok(ir::Declaration::Inst(Box::new(ir::InstDeclaration {
                     name,
                     inputs: vec![],

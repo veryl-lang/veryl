@@ -6,6 +6,7 @@ use crate::ir::{
 };
 use indent::indent_all_by;
 use std::fmt;
+use std::sync::Arc;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -223,7 +224,9 @@ pub struct InstDeclaration {
     pub name: StrId,
     pub inputs: Vec<InstInput>,
     pub outputs: Vec<InstOutput>,
-    pub component: Component,
+    /// `Arc`-shared: without it, repeated instantiations of the same generic
+    /// module each deep-clone the `Component`, blowing pass2 memory.
+    pub component: Arc<Component>,
 }
 
 impl InstDeclaration {
@@ -234,7 +237,7 @@ impl InstDeclaration {
             }
         }
 
-        if let Component::SystemVerilog(x) = &self.component {
+        if let Component::SystemVerilog(x) = self.component.as_ref() {
             for dst in &x.connects {
                 dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
             }

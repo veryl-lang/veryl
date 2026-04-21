@@ -581,7 +581,7 @@ impl Type {
         match &self.kind {
             TypeKind::Modport(sig, name) => {
                 let component = get_component(context, sig, token)?;
-                let Component::Interface(component) = component else {
+                let Component::Interface(component) = component.as_ref() else {
                     unreachable!();
                 };
 
@@ -600,7 +600,7 @@ impl Type {
             }
             TypeKind::Instance(sig, kind) if *kind == InstanceKind::Interface => {
                 let component = get_component(context, sig, token)?;
-                let Component::Interface(component) = component else {
+                let Component::Interface(component) = component.as_ref() else {
                     unreachable!();
                 };
                 let mut temp = vec![];
@@ -626,7 +626,7 @@ impl Type {
         let mut ret = vec![];
         if let TypeKind::Modport(sig, name) = &self.kind {
             let component = get_component(context, sig, token)?;
-            let Component::Interface(component) = component else {
+            let Component::Interface(component) = component.as_ref() else {
                 unreachable!();
             };
 

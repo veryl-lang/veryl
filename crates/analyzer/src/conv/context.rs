@@ -11,6 +11,7 @@ use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
 use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
+use std::sync::Arc;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::Token;
@@ -408,11 +409,11 @@ impl Context {
         self.instance_history.get_current_signature()
     }
 
-    pub fn get_instance_history(&self, sig: &Signature) -> Option<Component> {
+    pub fn get_instance_history(&self, sig: &Signature) -> Option<Arc<Component>> {
         self.instance_history.get(sig)
     }
 
-    pub fn set_instance_history(&mut self, sig: &Signature, component: Component) {
+    pub fn set_instance_history(&mut self, sig: &Signature, component: Arc<Component>) {
         self.instance_history.set(sig, component);
     }
 

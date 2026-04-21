@@ -20,6 +20,7 @@ use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
 use crate::{HashMap, ir_error};
+use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
@@ -2160,7 +2161,7 @@ pub fn get_component(
     context: &mut Context,
     sig: &Signature,
     token: TokenRange,
-) -> IrResult<ir::Component> {
+) -> IrResult<Arc<ir::Component>> {
     let symbol = symbol_table::get(sig.symbol).unwrap();
 
     if let SymbolKind::SystemVerilog = symbol.kind {
@@ -2168,7 +2169,7 @@ pub fn get_component(
             name: symbol.token.text,
             connects: vec![],
         };
-        return Ok(ir::Component::SystemVerilog(component));
+        return Ok(Arc::new(ir::Component::SystemVerilog(component)));
     }
 
     if let Some(component) = context.get_instance_history(sig) {
@@ -2217,7 +2218,7 @@ pub fn get_component(
                             component.declarations.clear();
                         }
 
-                        let component = ir::Component::Module(component);
+                        let component = Arc::new(ir::Component::Module(component));
                         c.set_instance_history(sig, component.clone());
                         c.pop_instance_history();
                         Ok(component)
@@ -2238,7 +2239,7 @@ pub fn get_component(
                 let component: IrResult<ir::Interface> = Conv::conv(c, &x);
                 match component {
                     Ok(component) => {
-                        let component = ir::Component::Interface(component);
+                        let component = Arc::new(ir::Component::Interface(component));
                         c.set_instance_history(sig, component.clone());
                         c.pop_instance_history();
                         Ok(component)
@@ -2264,7 +2265,7 @@ pub fn get_component(
                             component.declarations.clear();
                         }
 
-                        let component = ir::Component::Module(component);
+                        let component = Arc::new(ir::Component::Module(component));
                         c.set_instance_history(sig, component.clone());
                         c.pop_instance_history();
                         Ok(component)
