@@ -1,19 +1,22 @@
 use crate::HashMap;
 use crate::conv::context::Config;
 use crate::ir::{Component, Signature};
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub struct InstanceHistory {
     pub hierarchy: Vec<Signature>,
-    full: HashMap<Signature, Option<Component>>,
+    /// `Arc`-wrapped so repeated `get` hands out references instead of
+    /// deep-cloning the component tree — matters on testbench-heavy designs.
+    full: HashMap<Signature, Option<Arc<Component>>>,
 }
 
 impl InstanceHistory {
-    pub fn get(&self, sig: &Signature) -> Option<Component> {
+    pub fn get(&self, sig: &Signature) -> Option<Arc<Component>> {
         self.full.get(sig).cloned().flatten()
     }
 
-    pub fn set(&mut self, sig: &Signature, component: Component) {
+    pub fn set(&mut self, sig: &Signature, component: Arc<Component>) {
         if let Some(x) = self.full.get_mut(sig) {
             *x = Some(component);
         }
