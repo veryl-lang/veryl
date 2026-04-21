@@ -2602,6 +2602,81 @@ fn operator_precedence() {
 }
 
 #[test]
+fn cast_operation() {
+    let code = r#"
+    module ModuleA {
+        const W: u32  = 32;
+        const T: type = bit<W>;
+
+        const A: u32 = 33'h1_FFFF_FFFF as 32;
+        const B: u32 = 33'h1_FFFF_FFFF as u32;
+        const C: u32 = 33'h1_FFFF_FFFF as W;
+        const D: u32 = 33'h1_FFFF_FFFF as T;
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0(W): bit<32> = 32'sh00000020;
+  const var2(A): bit<32> = 32'hffffffff;
+  const var3(B): bit<32> = 32'hffffffff;
+  const var4(C): bit<32> = 32'hffffffff;
+  const var5(D): bit<32> = 32'hffffffff;
+
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        const W: u32  = 8;
+        const T: type = bit<W>;
+
+        const A: u32 = 33'h1_FFFF_FFFF as 8;
+        const B: u32 = 33'h1_FFFF_FFFF as u8;
+        const C: u32 = 33'h1_FFFF_FFFF as W;
+        const D: u32 = 33'h1_FFFF_FFFF as T;
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0(W): bit<32> = 32'sh00000008;
+  const var2(A): bit<32> = 8'hff;
+  const var3(B): bit<32> = 8'hff;
+  const var4(C): bit<32> = 8'hff;
+  const var5(D): bit<32> = 8'hff;
+
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        const W: u32  = 64;
+        const T: type = bit<W>;
+
+        const A: u64 = 32'hFFFF_FFFF as 64;
+        const B: u64 = 32'hFFFF_FFFF as u64;
+        const C: u64 = 32'hFFFF_FFFF as W;
+        const D: u64 = 32'hFFFF_FFFF as T;
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  const var0(W): bit<32> = 32'sh00000040;
+  const var2(A): bit<64> = 64'h00000000ffffffff;
+  const var3(B): bit<64> = 64'h00000000ffffffff;
+  const var4(C): bit<64> = 64'h00000000ffffffff;
+  const var5(D): bit<64> = 64'h00000000ffffffff;
+
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn array_literal_default_only() {
     // Regression: '{default: expr} must produce exactly target_len elements,
     // not target_len + 1 (the old code computed remaining as target_len - (x.len()-1)
