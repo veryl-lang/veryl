@@ -5484,6 +5484,22 @@ fn undefined_identifier() {
     //    errors[0],
     //    AnalyzerError::UndefinedIdentifier { .. }
     //));
+
+    let code = r#"
+    package PkgA::<W: u32> {
+        type T = logic<W>;
+    }
+    module ModuleB::<W: u32> {
+        gen WW: u32 = 2 * W;
+        let _a: PkgA::<WW>::T = '0;
+    }
+    module ModuleC {
+        inst u: ModuleB::<1>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

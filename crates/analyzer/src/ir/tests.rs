@@ -2043,6 +2043,43 @@ module ModuleB {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    package PkgA::<W: u32> {
+        type T = logic<W>;
+    }
+    module ModuleB::<W: u32> {
+        gen WW: u32 = 2 * W;
+        let _a: PkgA::<WW>::T = '0;
+    }
+    module ModuleC {
+        inst u: ModuleB::<1>;
+    }
+    "#;
+
+    let exp = r#"module ModuleB {
+
+
+  comb {
+    var0 = '0;
+  }
+}
+module ModuleC {
+
+  inst u (
+  ) {
+    module ModuleB {
+      let var0(_a): logic<2> = 2'hx;
+
+      comb {
+        var0 = '0;
+      }
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
