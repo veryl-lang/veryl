@@ -8,6 +8,7 @@ use crate::lockfile::Lockfile;
 use crate::project::Project;
 use crate::pubfile::{Pubfile, Release};
 use crate::publish::Publish;
+use crate::synth::Synth;
 use crate::test::Test;
 use crate::{FilelistType, MetadataError, SourceMapTarget};
 use log::{debug, info, warn};
@@ -49,6 +50,8 @@ pub struct Metadata {
     pub doc: Doc,
     #[serde(default)]
     pub test: Test,
+    #[serde(default)]
+    pub synth: Synth,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(skip)]

@@ -10,7 +10,9 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::veryl_token::TokenSource;
-use veryl_synthesizer::{BuiltinLibrary, compute_timing_top_n, synthesize};
+use veryl_synthesizer::{
+    BuiltinLibrary, compute_power, compute_timing_top_n, port_label, synthesize,
+};
 
 pub struct CmdSynth {
     opt: OptSynth,
@@ -57,7 +59,10 @@ impl CmdSynth {
 
         Analyzer::analyze_post_pass2();
 
-        let top_id = match &self.opt.top {
+        // CLI `--top` beats the toml default; otherwise fall back to
+        // inferring from the first user module.
+        let top_override = self.opt.top.as_ref().or(metadata.synth.top.as_ref());
+        let top_id = match top_override {
             Some(name) => resource_table::insert_str(name),
             None => {
                 let mut candidate = None;
@@ -96,21 +101,87 @@ impl CmdSynth {
         );
         println!("library: {}", library.banner());
 
-        let nothing_selected = !self.opt.dump_ir && !self.opt.dump_area && !self.opt.dump_timing;
+        let nothing_selected = !self.opt.dump_ir
+            && !self.opt.dump_area
+            && !self.opt.dump_timing
+            && !self.opt.dump_power;
+        let show_area = self.opt.dump_area || nothing_selected;
+        let show_timing = self.opt.dump_timing || nothing_selected;
+        let show_power = self.opt.dump_power || nothing_selected;
+        let show_any_report = show_area || show_timing || show_power;
+
+        // Computed once; the summary line and the detail block both need it.
+        let power = compute_power(
+            &result.gate_ir.module,
+            &library,
+            metadata.synth.clock_freq,
+            metadata.synth.activity,
+        );
 
         if self.opt.dump_ir {
             println!("\n-- gate ir --");
             println!("{}", result.gate_ir);
         }
-        if self.opt.dump_area || nothing_selected {
+
+        // Top-level numbers up front so the report can be scanned without
+        // paging through the per-kind / per-step breakdowns.
+        if show_any_report {
+            let start = port_label(result.timing.critical_path.first());
+            let end = port_label(result.timing.critical_path.last());
             println!();
-            print!("{}", result.area);
+            println!("summary:");
+            // Width 11 for the numeric field covers kB-scale modules up to
+            // ~10 M um² / 1 W without breaking label/value alignment.
+            println!(
+                "  {:<8}{:>11.2} um²  (comb {:.2}, seq {:.2} × {} FF)",
+                "area:",
+                result.area.total,
+                result.area.combinational,
+                result.area.sequential,
+                result.area.ff_count,
+            );
+            println!(
+                "  {:<8}{:>11.3} ns   {:>5} gates  {} → {}",
+                "timing:",
+                result.timing.critical_path_delay,
+                result.timing.critical_path_depth,
+                start,
+                end,
+            );
+            println!(
+                "  {:<8}{:>11.4} mW   (leak {:.4} mW, dyn {:.4} mW)",
+                "power:", power.total_mw, power.leakage_mw, power.dynamic_mw,
+            );
+            // Pad the continuation to the same column as values above.
+            println!(
+                "  {:<8}{:>11} @ f_clk = {} MHz, activity = {:.2}",
+                "", "", power.clock_freq_mhz, power.activity,
+            );
         }
-        if self.opt.dump_timing || nothing_selected {
-            let n = self.opt.top_paths.max(1);
+
+        if show_area {
+            println!();
+            println!("area:");
+            // Skip the Display's first line — its content is already in the
+            // summary above.
+            let full = format!("{}", result.area);
+            for line in full.lines().skip(1) {
+                println!("{}", line);
+            }
+        }
+        if show_timing {
+            let n = self
+                .opt
+                .timing_paths
+                .unwrap_or(metadata.synth.timing_paths)
+                .max(1);
             if n == 1 {
                 println!();
-                print!("{}", result.timing);
+                println!("timing:");
+                let full = format!("{}", result.timing);
+                for line in full.lines().skip(1) {
+                    println!("{}", line);
+                }
             } else {
                 let reports = compute_timing_top_n(&result.gate_ir.module, &library, n);
                 println!();
@@ -128,6 +199,16 @@ impl CmdSynth {
                         println!("{}", line);
                     }
                 }
+            }
+        }
+        if show_power {
+            println!();
+            println!("power:");
+            // Skip the first two Display lines (mW totals + assumptions) —
+            // both appear in the summary block above; keep the per-kind rows.
+            let full = format!("{}", power);
+            for line in full.lines().skip(2) {
+                println!("{}", line);
             }
         }
 

@@ -5,7 +5,7 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table;
 use veryl_synthesizer::ir::{CellKind, NetDriver};
-use veryl_synthesizer::{build_gate_ir, synthesize};
+use veryl_synthesizer::{BuiltinLibrary, build_gate_ir, compute_power, synthesize};
 
 #[track_caller]
 fn analyze(code: &str, top: &str) -> (air::Ir, veryl_parser::resource_table::StrId) {
@@ -2379,5 +2379,119 @@ fn function_call_void_via_statement() {
         xor_count >= 3,
         "4-bit +1 adder should generate ≥3 Xor2 cells, got {}",
         xor_count
+    );
+}
+
+#[test]
+fn power_leakage_independent_of_frequency_and_activity() {
+    let code = r#"
+        module Top (
+            a: input  logic<4>,
+            b: input  logic<4>,
+            y: output logic<4>,
+        ) {
+            always_comb {
+                y = a & b;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let library = BuiltinLibrary::new();
+    let p1 = compute_power(&gate.module, &library, 100.0, 0.1);
+    let p2 = compute_power(&gate.module, &library, 500.0, 0.5);
+    // Leakage should be identical; dynamic should scale with f × α.
+    assert!((p1.leakage_mw - p2.leakage_mw).abs() < 1e-9);
+    let scale = (500.0 * 0.5) / (100.0 * 0.1);
+    // The combinational dynamic scales linearly with f × α, but the FF
+    // dynamic scales only with f. Derive expected dynamic separately:
+    let comb_dyn_1 = p1.dynamic_mw - (p1.ff_dynamic_uw / 1e3);
+    let comb_dyn_2 = p2.dynamic_mw - (p2.ff_dynamic_uw / 1e3);
+    assert!(
+        (comb_dyn_2 - comb_dyn_1 * scale).abs() < 1e-6,
+        "comb dyn 1={} 2={} scale={}",
+        comb_dyn_1,
+        comb_dyn_2,
+        scale
+    );
+}
+
+#[test]
+fn power_scales_with_cell_count() {
+    let make_code = |w: usize| -> String {
+        format!(
+            r#"
+            module Top (
+                a: input  logic<{w}>,
+                b: input  logic<{w}>,
+                y: output logic<{w}>,
+            ) {{
+                always_comb {{
+                    y = a & b;
+                }}
+            }}
+        "#
+        )
+    };
+    let (ir4, top4) = analyze(&make_code(4), "Top");
+    let gate4 = build_gate_ir(&ir4, top4).expect("synthesize");
+    let (ir8, top8) = analyze(&make_code(8), "Top");
+    let gate8 = build_gate_ir(&ir8, top8).expect("synthesize");
+    let library = BuiltinLibrary::new();
+    let p4 = compute_power(&gate4.module, &library, 100.0, 0.1);
+    let p8 = compute_power(&gate8.module, &library, 100.0, 0.1);
+    // 8-bit design has 2× the And2 cells → 2× leakage and 2× dynamic.
+    assert!(
+        (p8.leakage_mw / p4.leakage_mw - 2.0).abs() < 0.05,
+        "expected ~2× leakage scaling, got {} vs {}",
+        p8.leakage_mw,
+        p4.leakage_mw
+    );
+    assert!(
+        (p8.dynamic_mw / p4.dynamic_mw - 2.0).abs() < 0.05,
+        "expected ~2× dynamic scaling, got {} vs {}",
+        p8.dynamic_mw,
+        p4.dynamic_mw
+    );
+}
+
+#[test]
+fn power_ff_dynamic_uses_full_clock() {
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            d:   input  logic<4>,
+            q:   output logic<4>,
+        ) {
+            always_ff {
+                if_reset {
+                    q = 0;
+                } else {
+                    q = d;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(gate.module.ffs.len(), 4, "expected 4 FFs");
+    let library = BuiltinLibrary::new();
+    // Activity varies but FF dynamic should only respond to frequency.
+    let p_low_act = compute_power(&gate.module, &library, 100.0, 0.05);
+    let p_high_act = compute_power(&gate.module, &library, 100.0, 0.95);
+    assert!(
+        (p_low_act.ff_dynamic_uw - p_high_act.ff_dynamic_uw).abs() < 1e-9,
+        "FF dynamic should not depend on activity: {} vs {}",
+        p_low_act.ff_dynamic_uw,
+        p_high_act.ff_dynamic_uw
+    );
+    // But it must scale with frequency.
+    let p_fast = compute_power(&gate.module, &library, 500.0, 0.1);
+    let ratio = p_fast.ff_dynamic_uw / p_low_act.ff_dynamic_uw;
+    assert!(
+        (ratio - 5.0).abs() < 0.01,
+        "FF dynamic should scale 5× with 5× clock, got {}",
+        ratio
     );
 }

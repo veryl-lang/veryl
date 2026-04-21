@@ -11,6 +11,7 @@ mod metadata_error;
 mod project;
 mod pubfile;
 mod publish;
+mod synth;
 mod test;
 #[cfg(test)]
 mod tests;
@@ -27,6 +28,7 @@ pub use project::Project;
 pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;
+pub use synth::Synth;
 pub use test::{SimType, Test, WaveFormFormat, WaveFormTarget};
 
 include!(concat!(env!("OUT_DIR"), "/veryl_version.rs"));

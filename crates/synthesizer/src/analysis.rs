@@ -76,6 +76,149 @@ pub fn compute_area(module: &GateModule, library: &BuiltinLibrary) -> AreaReport
     }
 }
 
+/// Static power estimate. Unlike area/timing, this depends on two user-supplied
+/// assumptions: `clock_freq_mhz` (how fast the design is clocked) and
+/// `activity` (average per-cycle toggle rate of a combinational output).
+/// The model is:
+///   P_cell = leakage + internal_energy × activity × f_clk
+///   P_ff   = leakage_ff + internal_energy_ff × f_clk     (clock toggles every cycle)
+/// Net switching (C × V² × f) is intentionally omitted — it would require a
+/// capacitance-per-fanout estimate and adds ~2× complexity for little gain at
+/// this accuracy level.
+#[derive(Clone, Debug, Default)]
+pub struct PowerReport {
+    pub total_mw: f64,
+    pub leakage_mw: f64,
+    pub dynamic_mw: f64,
+    pub by_kind: Vec<PowerKindRow>,
+    pub ff_count: usize,
+    pub ff_leakage_nw: f64,
+    pub ff_dynamic_uw: f64,
+    pub clock_freq_mhz: f64,
+    pub activity: f64,
+}
+
+/// Per-cell-kind breakdown row in a [`PowerReport`].
+#[derive(Clone, Debug)]
+pub struct PowerKindRow {
+    pub kind: CellKind,
+    pub count: usize,
+    pub leakage_nw: f64,
+    pub dynamic_uw: f64,
+}
+
+impl fmt::Display for PowerReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "power: {:.4} mW  (leakage {:.4} mW, dynamic {:.4} mW)",
+            self.total_mw, self.leakage_mw, self.dynamic_mw
+        )?;
+        writeln!(
+            f,
+            "  assumptions: f_clk = {} MHz, activity = {:.2}",
+            self.clock_freq_mhz, self.activity
+        )?;
+        let count_w = self
+            .by_kind
+            .iter()
+            .map(|r| r.count.to_string().len())
+            .max()
+            .unwrap_or(1);
+        let leak_w = self
+            .by_kind
+            .iter()
+            .map(|r| format!("{:.3}", r.leakage_nw).len())
+            .max()
+            .unwrap_or(1);
+        let dyn_w = self
+            .by_kind
+            .iter()
+            .map(|r| format!("{:.3}", r.dynamic_uw).len())
+            .max()
+            .unwrap_or(1);
+        for row in &self.by_kind {
+            writeln!(
+                f,
+                "  {:<6} ×{:>cw$}  leak {:>lw$.3} nW  dyn {:>dw$.3} uW",
+                row.kind.symbol(),
+                row.count,
+                row.leakage_nw,
+                row.dynamic_uw,
+                cw = count_w,
+                lw = leak_w,
+                dw = dyn_w,
+            )?;
+        }
+        if self.ff_count > 0 {
+            writeln!(
+                f,
+                "  FF     ×{:>cw$}  leak {:>lw$.3} nW  dyn {:>dw$.3} uW",
+                self.ff_count,
+                self.ff_leakage_nw,
+                self.ff_dynamic_uw,
+                cw = count_w,
+                lw = leak_w,
+                dw = dyn_w,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+pub fn compute_power(
+    module: &GateModule,
+    library: &BuiltinLibrary,
+    clock_freq_mhz: f64,
+    activity: f64,
+) -> PowerReport {
+    let mut buckets: HashMap<CellKind, (usize, f64, f64)> = HashMap::new();
+    let mut comb_leak_nw = 0.0_f64;
+    let mut comb_dyn_uw = 0.0_f64;
+    for cell in &module.cells {
+        let info = library.info(cell.kind);
+        // dynamic power contributed by internal energy:
+        //   P (uW) = energy (pJ/tr) × activity × f_clk (MHz)
+        // since pJ × MHz = uW.
+        let dyn_uw = info.internal_energy * activity * clock_freq_mhz;
+        let entry = buckets.entry(cell.kind).or_insert((0, 0.0, 0.0));
+        entry.0 += 1;
+        entry.1 += info.leakage;
+        entry.2 += dyn_uw;
+        comb_leak_nw += info.leakage;
+        comb_dyn_uw += dyn_uw;
+    }
+    let mut by_kind: Vec<PowerKindRow> = buckets
+        .into_iter()
+        .map(|(kind, (count, leakage_nw, dynamic_uw))| PowerKindRow {
+            kind,
+            count,
+            leakage_nw,
+            dynamic_uw,
+        })
+        .collect();
+    by_kind.sort_by_key(|r| r.kind.symbol());
+
+    let ff_count = module.ffs.len();
+    let ff_leakage_nw = ff_count as f64 * library.ff_leakage();
+    let ff_dynamic_uw = ff_count as f64 * library.ff_internal_energy() * clock_freq_mhz;
+
+    let total_leak_nw = comb_leak_nw + ff_leakage_nw;
+    let total_dyn_uw = comb_dyn_uw + ff_dynamic_uw;
+
+    PowerReport {
+        total_mw: total_leak_nw / 1e6 + total_dyn_uw / 1e3,
+        leakage_mw: total_leak_nw / 1e6,
+        dynamic_mw: total_dyn_uw / 1e3,
+        by_kind,
+        ff_count,
+        ff_leakage_nw,
+        ff_dynamic_uw,
+        clock_freq_mhz,
+        activity,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TimingReport {
     pub critical_path_delay: f64,
@@ -217,7 +360,7 @@ impl TimingReport {
 
 /// Extract the port/FF label from a path step, falling back to `?` when
 /// the step has no origin. Shared between summary and per-path rendering.
-fn port_label(step: Option<&PathStep>) -> String {
+pub fn port_label(step: Option<&PathStep>) -> String {
     match step.and_then(|s| s.origin.as_ref()) {
         Some((name, bit)) => format!("{}[{}]", name, bit),
         None => "?".to_string(),

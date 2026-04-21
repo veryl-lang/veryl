@@ -44,13 +44,13 @@ VERYL="${VERYL:-veryl}"
 project_dir=""
 pkg_csv=""
 mod_csv=""
-top_paths=0
+timing_paths=0
 while getopts "C:p:m:t:h" opt; do
   case "$opt" in
     C) project_dir="$OPTARG" ;;
     p) pkg_csv="$OPTARG" ;;
     m) mod_csv="$OPTARG" ;;
-    t) top_paths="$OPTARG" ;;
+    t) timing_paths="$OPTARG" ;;
     h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option" >&2; exit 1 ;;
   esac
@@ -164,7 +164,7 @@ for entry in "${mods[@]}"; do
 
   # --- Timing detail (-t N): show our top-N paths and yosys's single path
   # side-by-side so the endpoints and path structure can be compared.
-  if [[ "$top_paths" -gt 0 ]]; then
+  if [[ "$timing_paths" -gt 0 ]]; then
     echo "    yosys path:"
     echo "$ylog" | awk '/ABC: Start-point/ {print "      "$0}' || true
     echo "$ylog" \
@@ -175,9 +175,9 @@ for entry in "${mods[@]}"; do
           for (i=1; i<=NF; i++) if ($i ~ /^sky130_/) { cell = $i; break }
           printf "      Df=%s ps cell=%s\n", delay, cell
         }' || true
-    echo "    veryl top-$top_paths:"
+    echo "    veryl top-$timing_paths:"
     timing_out=$(cd "$project_abs" && "$VERYL" synth --quiet --top "$veryl_top" \
-        "${veryl_pkgs[@]}" "$veryl_src" --dump-timing --top-paths "$top_paths" 2>&1 || true)
+        "${veryl_pkgs[@]}" "$veryl_src" --dump-timing --timing-paths "$timing_paths" 2>&1 || true)
     echo "$timing_out" \
       | awk '/^-- rank/ {rank=$0; next} /^  from/ {print "      "rank"  "$0}' || true
   fi

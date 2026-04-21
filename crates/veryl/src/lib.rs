@@ -313,14 +313,24 @@ pub struct OptDump {
 }
 
 /// Synthesize to a simple gate-level netlist and report area / critical path.
+///
+/// Design-parameter knobs (`clock_freq`, `activity`) and the default `top` /
+/// `timing_paths` live in the `[synth]` section of `Veryl.toml`. CLI
+/// `--top` and `--timing-paths` override the toml setting when supplied.
 #[derive(Args)]
 pub struct OptSynth {
     /// Target files
     pub files: Vec<PathBuf>,
 
-    /// Top module name (default: inferred from the first module)
+    /// Top module name (overrides `synth.top` in Veryl.toml; otherwise
+    /// inferred from the first user module)
     #[arg(long)]
     pub top: Option<String>,
+
+    /// Number of worst-delay endpoints to report when dumping timing
+    /// (overrides `synth.timing_paths` in Veryl.toml)
+    #[arg(long)]
+    pub timing_paths: Option<usize>,
 
     /// Dump the gate-level IR (netlist of gates and flip-flops)
     #[arg(long)]
@@ -330,13 +340,11 @@ pub struct OptSynth {
     #[arg(long)]
     pub dump_timing: bool,
 
-    /// How many worst-delay endpoints to report when dumping timing.
-    /// Useful for checking whether close-second endpoints diverge from the
-    /// single-path report (e.g. alternative tech mappings).
-    #[arg(long, default_value_t = 1)]
-    pub top_paths: usize,
-
     /// Dump the per-cell-kind area breakdown
     #[arg(long)]
     pub dump_area: bool,
+
+    /// Dump the power estimate (leakage + dynamic breakdown)
+    #[arg(long)]
+    pub dump_power: bool,
 }
