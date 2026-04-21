@@ -287,8 +287,24 @@ impl Expression {
                 if op == &Op::As {
                     let src_kind = &x.comptime().r#type.kind;
                     let dst_kind = &comptime.r#type.kind;
+
                     let val = x.eval_value(context)?;
-                    return Some(convert_cast(val, src_kind, dst_kind, context_width));
+                    if src_kind.is_float() || dst_kind.is_float() {
+                        return Some(convert_cast(val, src_kind, dst_kind, context_width));
+                    }
+
+                    let cast_width = comptime.r#type.total_width()?;
+                    let val_width = val.width();
+                    if val_width > cast_width {
+                        let mut val = val.clone();
+                        val.trunc(cast_width);
+                        return Some(convert_cast(val, src_kind, dst_kind, context_width));
+                    } else if val_width < cast_width {
+                        let val = val.expand(cast_width, false).into_owned();
+                        return Some(convert_cast(val, src_kind, dst_kind, context_width));
+                    } else {
+                        return Some(convert_cast(val, src_kind, dst_kind, context_width));
+                    }
                 }
 
                 // Re-derive signed from the operands for Div/Rem: the

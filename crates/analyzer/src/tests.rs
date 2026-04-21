@@ -8711,6 +8711,26 @@ fn invalid_operand() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA::<N: u32> {
+        const W: u32 = $clog2(N);
+        function func() -> bit<W> {
+            var n: bit<W>;
+            n = N as W;
+            return N as W;
+        }
+    }
+    module ModuleB::<N: u32> {
+        const B: bit<PkgA::<N>::W> = PkgA::<N>::func();
+    }
+    module ModuleC {
+        inst u: ModuleB::<4>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

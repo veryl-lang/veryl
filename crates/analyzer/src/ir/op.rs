@@ -358,10 +358,12 @@ impl Op {
             }
             Op::As => {
                 if let ValueVariant::Numeric(y) = &y.value
-                    && let Some(_width) = y.to_usize()
+                    && let Some(width) = y.to_usize()
                 {
                     // TODO
                     // Check width range
+                    let shape = Shape::new(vec![Some(width)]);
+                    dst.r#type.set_concrete_width(shape);
                 } else if let ValueVariant::Type(y_value) = &y.value {
                     let invalid_clock_cast = y_value.is_clock() && !x.r#type.is_clock();
                     let invalid_reset_cast = y_value.is_reset() && x.r#type.is_clock();
@@ -375,7 +377,9 @@ impl Op {
                     }
 
                     dst.r#type = y_value.clone();
-                } else {
+                } else if !context.in_generic {
+                    // RHS expressions may not be evaluted in generic components.
+                    // No error is reported for this case.
                     dst.r#type = self.invalid_operand(context, y);
                 }
             }
