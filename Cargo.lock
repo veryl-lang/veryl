@@ -6472,6 +6472,7 @@ dependencies = [
 name = "veryl-synthesizer"
 version = "0.19.1"
 dependencies = [
+ "fxhash",
  "indent",
  "log",
  "miette",

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
-use veryl_analyzer::ir::{self as air, Expression, Factor, Op};
+use veryl_analyzer::ir::{
+    self as air, Expression, Factor, Op, SystemFunctionInput, SystemFunctionKind,
+};
 
 use crate::conv::ConvContext;
 use crate::conv::arith;
-use crate::ir::{CellKind, NetId};
+use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetId};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
 /// Returns `target_width` nets in LSB-first order. Narrower results are
@@ -46,11 +48,7 @@ fn build_constant(value: u64, width: usize) -> Vec<NetId> {
     let mut out = Vec::with_capacity(width);
     for i in 0..width {
         let bit_set = i < 64 && (value >> i) & 1 == 1;
-        out.push(if bit_set {
-            crate::ir::NET_CONST1
-        } else {
-            crate::ir::NET_CONST0
-        });
+        out.push(if bit_set { NET_CONST1 } else { NET_CONST0 });
     }
     out
 }
@@ -64,22 +62,14 @@ fn value_to_nets(value: &veryl_analyzer::value::Value, width: usize) -> Vec<NetI
         Value::U64(v) => {
             for i in 0..width {
                 let bit = i < 64 && (v.payload >> i) & 1 == 1;
-                out.push(if bit {
-                    crate::ir::NET_CONST1
-                } else {
-                    crate::ir::NET_CONST0
-                });
+                out.push(if bit { NET_CONST1 } else { NET_CONST0 });
             }
         }
         Value::BigUint(v) => {
             let payload = v.payload();
             for i in 0..width {
                 let bit = payload.bit(i as u64);
-                out.push(if bit {
-                    crate::ir::NET_CONST1
-                } else {
-                    crate::ir::NET_CONST0
-                });
+                out.push(if bit { NET_CONST1 } else { NET_CONST0 });
             }
         }
     }
@@ -98,7 +88,7 @@ fn resize(mut nets: Vec<NetId>, target: usize, signed: bool) -> Vec<NetId> {
             let pad = if signed && !nets.is_empty() {
                 *nets.last().unwrap()
             } else {
-                crate::ir::NET_CONST0
+                NET_CONST0
             };
             nets.resize(target, pad);
             nets
@@ -313,14 +303,11 @@ fn synth_factor(
             Ok(arith::dynamic_mux_tree(ctx, &elements, &idx_nets))
         }
         Factor::FunctionCall(call) => synth_function_call(ctx, call, current),
-        Factor::SystemFunctionCall(call) => Err(SynthesizerError::unsupported(
-            UnsupportedKind::SystemFunctionCall,
-            &call.comptime.token,
-        )),
+        Factor::SystemFunctionCall(call) => synth_system_function_call(ctx, call, current),
         Factor::Anonymous(ct) => {
             // `_` placeholder — drive with all-zero at the declared width.
             let width = ct.r#type.total_width().unwrap_or(0);
-            Ok(vec![crate::ir::NET_CONST0; width])
+            Ok(vec![NET_CONST0; width])
         }
         Factor::Unknown(ct) => Err(SynthesizerError::unsupported(
             UnsupportedKind::UnknownFactor,
@@ -393,7 +380,7 @@ fn synth_unary(
         Op::Sub => {
             // Two's complement: -x = 0 - x.
             let xs = synthesize_expr(ctx, inner, current, result_width)?;
-            let zero = vec![crate::ir::NET_CONST0; result_width];
+            let zero = vec![NET_CONST0; result_width];
             arith::ripple_sub(ctx, &zero, &xs)
         }
         _ => Err(SynthesizerError::internal(format!(
@@ -444,7 +431,7 @@ fn synth_binary(
         Op::Add => {
             let xs = synthesize_expr(ctx, x, current, result_width)?;
             let ys = synthesize_expr(ctx, y, current, result_width)?;
-            arith::ripple_add(ctx, &xs, &ys, crate::ir::NET_CONST0)
+            arith::ripple_add(ctx, &xs, &ys, NET_CONST0)
         }
         Op::Sub => {
             let xs = synthesize_expr(ctx, x, current, result_width)?;
@@ -543,16 +530,12 @@ fn synth_binary(
                 let mut bits = Vec::new();
                 for (i, pat_bit) in pattern.iter().enumerate().take(w) {
                     if let Some(b) = *pat_bit {
-                        let const_net = if b {
-                            crate::ir::NET_CONST1
-                        } else {
-                            crate::ir::NET_CONST0
-                        };
+                        let const_net = if b { NET_CONST1 } else { NET_CONST0 };
                         bits.push(ctx.add_cell(CellKind::Xnor2, vec![xs[i], const_net]));
                     }
                 }
                 if bits.is_empty() {
-                    crate::ir::NET_CONST1
+                    NET_CONST1
                 } else {
                     reduce_and(ctx, &bits)
                 }
@@ -578,6 +561,70 @@ fn synth_binary(
             op
         ))),
     }
+}
+
+/// Synthesizes the synthesizable subset of SystemVerilog system functions.
+/// `$signed` / `$unsigned` are bit-pattern pass-throughs (signedness is a
+/// type-level attribute the bit vector is already sized for). `$clog2`,
+/// `$bits`, `$size`, `$onehot` on constant-foldable args use the analyzer's
+/// comptime value. Truly runtime-only calls ($display / $readmemh / etc)
+/// stay unsupported.
+fn synth_system_function_call(
+    ctx: &mut ConvContext,
+    call: &air::SystemFunctionCall,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<Vec<NetId>, SynthesizerError> {
+    let ret_width = call.comptime.r#type.total_width().unwrap_or(0);
+    match &call.kind {
+        SystemFunctionKind::Signed(SystemFunctionInput(inner))
+        | SystemFunctionKind::Unsigned(SystemFunctionInput(inner)) => {
+            synthesize_expr(ctx, inner, current, ret_width)
+        }
+        SystemFunctionKind::Bits(_)
+        | SystemFunctionKind::Size(_)
+        | SystemFunctionKind::Clog2(_) => {
+            let value = call.comptime.get_value().map_err(|_| {
+                SynthesizerError::unsupported(
+                    UnsupportedKind::SystemFunctionCall,
+                    &call.comptime.token,
+                )
+            })?;
+            Ok(value_to_nets(value, ret_width))
+        }
+        SystemFunctionKind::Onehot(SystemFunctionInput(inner)) => {
+            // `$onehot(x)` is 1 iff exactly one bit of x is set. Walk bits
+            // carrying (any, more) state: `any` becomes true once any bit
+            // has been seen, `more` flips once a second bit is seen. Final
+            // result is `any AND NOT more`.
+            let inner_width = inner.comptime().r#type.total_width().unwrap_or(1).max(1);
+            let bits = synthesize_expr(ctx, inner, current, inner_width)?;
+            let result = onehot_reduce(ctx, &bits);
+            Ok(resize(vec![result], ret_width.max(1), false))
+        }
+        _ => Err(SynthesizerError::unsupported(
+            UnsupportedKind::SystemFunctionCall,
+            &call.comptime.token,
+        )),
+    }
+}
+
+/// Returns the 1-bit net that is true iff exactly one input bit is set.
+/// Scans bits linearly carrying `(any, more)` state: `any` becomes true once
+/// any bit has been seen, `more` becomes true as soon as a bit is seen while
+/// `any` already holds. Final result is `any AND NOT more`.
+fn onehot_reduce(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
+    if bits.is_empty() {
+        return NET_CONST0;
+    }
+    let mut any = bits[0];
+    let mut more = NET_CONST0;
+    for &b in &bits[1..] {
+        let both = ctx.add_cell(CellKind::And2, vec![any, b]);
+        more = ctx.add_cell(CellKind::Or2, vec![more, both]);
+        any = ctx.add_cell(CellKind::Or2, vec![any, b]);
+    }
+    let not_more = ctx.add_cell(CellKind::Not, vec![more]);
+    ctx.add_cell(CellKind::And2, vec![any, not_more])
 }
 
 /// Inlines a user-defined function call. The body runs against a clone of
@@ -654,11 +701,11 @@ fn synth_function_call(
                 call.comptime.r#type.signed,
             ))
         } else {
-            Ok(vec![crate::ir::NET_CONST0; ret_width])
+            Ok(vec![NET_CONST0; ret_width])
         }
     } else {
         // Void function in expression context (shouldn't happen per analyzer) — stand-in.
-        Ok(vec![crate::ir::NET_CONST0; ret_width])
+        Ok(vec![NET_CONST0; ret_width])
     }
 }
 
@@ -735,15 +782,15 @@ fn try_wildcard_pattern(expr: &Expression, width: usize) -> Option<Vec<Option<bo
 }
 
 pub(crate) fn reduce_and(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
-    reduce(ctx, bits, CellKind::And2, crate::ir::NET_CONST1)
+    reduce(ctx, bits, CellKind::And2, NET_CONST1)
 }
 
 pub(crate) fn reduce_or(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
-    reduce(ctx, bits, CellKind::Or2, crate::ir::NET_CONST0)
+    reduce(ctx, bits, CellKind::Or2, NET_CONST0)
 }
 
 pub(crate) fn reduce_xor(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
-    reduce(ctx, bits, CellKind::Xor2, crate::ir::NET_CONST0)
+    reduce(ctx, bits, CellKind::Xor2, NET_CONST0)
 }
 
 fn reduce(ctx: &mut ConvContext, bits: &[NetId], kind: CellKind, identity: NetId) -> NetId {

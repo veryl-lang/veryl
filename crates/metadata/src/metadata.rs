@@ -309,20 +309,41 @@ impl Metadata {
         let base = self.project_path();
         let mut ret = Vec::new();
 
+        // Pre-canonicalize explicit file args once so we can route each to
+        // the source dir it actually belongs to (without re-processing the
+        // same file for every configured source dir).
+        let canonical_files = if files.is_empty() {
+            None
+        } else {
+            let mut v = Vec::new();
+            for file in files {
+                v.push(
+                    fs::canonicalize(file.as_ref())
+                        .map_err(|x| MetadataError::file_io(x, file.as_ref()))?,
+                );
+            }
+            Some(v)
+        };
+        let mut explicit_routed = canonical_files.as_ref().map(|v| vec![false; v.len()]);
+
         for source in &sources {
             let src_base = base.join(source);
 
-            let src_files = if files.is_empty() {
-                veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
-            } else {
+            let src_files = if let Some(cf) = canonical_files.as_ref() {
+                // Only keep files that live under this source dir; other
+                // source dirs in `sources` will pick them up.
                 let mut ret = Vec::new();
-                for file in files {
-                    ret.push(
-                        fs::canonicalize(file.as_ref())
-                            .map_err(|x| MetadataError::file_io(x, file.as_ref()))?,
-                    );
+                for (i, path) in cf.iter().enumerate() {
+                    if path.starts_with(&src_base) {
+                        ret.push(path.clone());
+                        if let Some(ref mut flags) = explicit_routed {
+                            flags[i] = true;
+                        }
+                    }
                 }
                 ret
+            } else {
+                veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
             };
 
             for src in src_files {
@@ -360,6 +381,14 @@ impl Metadata {
                     map,
                 });
             }
+        }
+
+        // Any explicit file that wasn't claimed by a configured source dir
+        // is outside the project — preserve the original error semantics.
+        if let (Some(cf), Some(flags)) = (canonical_files.as_ref(), explicit_routed.as_ref())
+            && let Some(pos) = flags.iter().position(|f| !f)
+        {
+            return Err(MetadataError::InvalidSourceLocation(cf[pos].clone()));
         }
 
         let base_dst = self.project_dependencies_path();

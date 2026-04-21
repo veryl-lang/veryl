@@ -4,7 +4,7 @@ pub mod ir;
 pub mod library;
 pub mod synthesizer_error;
 
-pub use analysis::{AreaReport, PathStep, StepKind, TimingReport};
+pub use analysis::{AreaReport, PathStep, StepKind, TimingReport, compute_timing_top_n};
 pub use ir::{
     Cell, CellKind, ClockEdge, FfCell, GateIr, GateModule, GatePort, NetId, NetInfo, PortDir,
     ResetPolarity, ResetSpec,

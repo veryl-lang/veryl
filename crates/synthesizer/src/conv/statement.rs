@@ -5,7 +5,7 @@ use veryl_analyzer::ir::{self as air, Statement};
 use crate::conv::ConvContext;
 use crate::conv::arith;
 use crate::conv::expression::synthesize_expr;
-use crate::ir::{CellKind, NetId};
+use crate::ir::{CellKind, NET_CONST0, NetId};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
 pub(crate) fn process_statements(
@@ -315,10 +315,18 @@ pub(crate) fn write_to_dst(
     };
 
     for (i, &b) in bit_positions.iter().enumerate() {
-        if i >= slice_width || i >= src.len() {
-            break;
-        }
-        let new_val = src[i];
+        // DynamicSingle gives one bit_position per member bit (all potential
+        // targets), so we iterate every entry and gate with bit_match[i].
+        // Static maps src[i] → bit_positions[i] one-for-one, so we stop at
+        // slice_width / src.len().
+        let new_val = if bit_match.is_some() {
+            *src.first().unwrap_or(&NET_CONST0)
+        } else {
+            if i >= slice_width || i >= src.len() {
+                break;
+            }
+            src[i]
+        };
         for (e, &offset) in element_offsets.iter().enumerate() {
             let target_bit = offset + b;
             if target_bit >= var_current.len() {
@@ -376,8 +384,8 @@ fn merge_branches(
         let width = base_nets.len().max(t_nets.len()).max(f_nets.len());
         let mut new_nets = Vec::with_capacity(width);
         for i in 0..width {
-            let tn = *t_nets.get(i).unwrap_or(&crate::ir::NET_CONST0);
-            let fn_ = *f_nets.get(i).unwrap_or(&crate::ir::NET_CONST0);
+            let tn = *t_nets.get(i).unwrap_or(&NET_CONST0);
+            let fn_ = *f_nets.get(i).unwrap_or(&NET_CONST0);
             if tn == fn_ {
                 new_nets.push(tn);
             } else {

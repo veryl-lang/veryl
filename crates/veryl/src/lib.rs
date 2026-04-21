@@ -330,6 +330,12 @@ pub struct OptSynth {
     #[arg(long)]
     pub dump_timing: bool,
 
+    /// How many worst-delay endpoints to report when dumping timing.
+    /// Useful for checking whether close-second endpoints diverge from the
+    /// single-path report (e.g. alternative tech mappings).
+    #[arg(long, default_value_t = 1)]
+    pub top_paths: usize,
+
     /// Dump the per-cell-kind area breakdown
     #[arg(long)]
     pub dump_area: bool,

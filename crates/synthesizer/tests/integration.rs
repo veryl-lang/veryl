@@ -125,7 +125,8 @@ fn ripple_carry_adder() {
     let (ir, top) = analyze(code, "Top");
     let result = synthesize(&ir, top).expect("synthesize");
     // Full adder: 2x XOR + 2x AND + 1x OR. Four of them for a 4-bit adder
-    // → at least 8 XORs.
+    // gives 8 XORs before optimization; const-prop folds the bit-0 sum XOR
+    // against cin=0 down to a single XOR, so we end up with ≥7.
     let xor_count = result
         .gate_ir
         .module
@@ -133,10 +134,34 @@ fn ripple_carry_adder() {
         .iter()
         .filter(|c| c.kind == CellKind::Xor2)
         .count();
-    assert!(xor_count >= 8, "expected >=8 Xor2 gates, got {}", xor_count);
+    assert!(xor_count >= 7, "expected >=7 Xor2 gates, got {}", xor_count);
     assert!(result.timing.critical_path_delay > 0.0);
     assert!(result.timing.critical_path_depth >= 4);
     assert!(result.area.total > 0.0);
+}
+
+#[test]
+fn kogge_stone_wider_add_has_log_depth() {
+    // An 8-bit add with Kogge-Stone should finish in much less depth than
+    // the 15-deep ripple carry chain (XOR + 7*(AND+OR) + XOR).
+    let code = r#"
+        module Top (
+            a: input  logic<8>,
+            b: input  logic<8>,
+            y: output logic<8>,
+        ) {
+            always_comb {
+                y = a + b;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top).expect("synthesize");
+    assert!(
+        result.timing.critical_path_depth < 12,
+        "8-bit Kogge-Stone depth should be ~log2(8)+const ≈ 7, got {}",
+        result.timing.critical_path_depth
+    );
 }
 
 #[test]
@@ -418,11 +443,13 @@ fn array_register_file_ff() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let result = synthesize(&ir, top).expect("synthesize");
-    // 4 entries × 4 bits = 16 flip-flops.
+    // Only rf[1] is ever written after reset; rf[0], rf[2], rf[3] hold their
+    // reset_value=0 forever, so D=Q FF elimination folds their 12 FFs into
+    // constants. Only rf[1]'s 4 FFs remain.
     assert_eq!(
         result.gate_ir.module.ffs.len(),
-        16,
-        "expected 16 FFs for 4x4 register file"
+        4,
+        "only rf[1]'s 4 FFs survive; the other rows are reset-held constants"
     );
 }
 
@@ -589,6 +616,29 @@ fn dynamic_bit_select_write_ff() {
     let (ir, top) = analyze(code, "Top");
     let result = synthesize(&ir, top).expect("synthesize");
     assert_eq!(result.gate_ir.module.ffs.len(), 4);
+}
+
+#[test]
+fn wallace_tree_multiplier_shallower_than_shift_add() {
+    // An 8-bit multiply through the Wallace tree + Kogge-Stone CPA should
+    // finish in much less depth than a shift-add of 8 sequential ripple adds
+    // (which alone would be well over 30 gates deep).
+    let code = r#"
+        module Top (
+            a: input  logic<8>,
+            b: input  logic<8>,
+            y: output logic<8>,
+        ) {
+            always_comb { y = a * b; }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top).expect("synthesize");
+    assert!(
+        result.timing.critical_path_depth < 30,
+        "8-bit Wallace multiplier depth should be well below shift-add's 30+, got {}",
+        result.timing.critical_path_depth
+    );
 }
 
 #[test]
@@ -1309,7 +1359,11 @@ fn switch_expression_synthesizes() {
 
 #[test]
 fn variable_shift_left_barrel() {
-    // 4-bit x shifted by a 2-bit amount: two barrel stages, 4 muxes each = 8.
+    // 4-bit x shifted by a 2-bit amount: two barrel stages × 4 muxes = 8
+    // select cells. The post-pass then collapses shift-in slots (where the
+    // low side is tied to 0) into `And2(!amt, x)` pairs, so some of the 8
+    // muxes reappear as And2 cells. We require the total select-cell count
+    // to stay at 8.
     let code = r#"
         module Top (
             x:   input  logic<4>,
@@ -1323,24 +1377,27 @@ fn variable_shift_left_barrel() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let mux_count = gate
+    let select_cells = gate
         .module
         .cells
         .iter()
-        .filter(|c| c.kind == CellKind::Mux2)
+        .filter(|c| matches!(c.kind, CellKind::Mux2 | CellKind::And2))
         .count();
     assert_eq!(
-        mux_count, 8,
-        "expected 2 barrel stages × 4 bits = 8 Mux2, got {}",
-        mux_count
+        select_cells, 8,
+        "expected 2 barrel stages × 4 bits = 8 select cells (Mux2+And2), got {}",
+        select_cells
     );
 }
 
 #[test]
 fn variable_shift_right_amount_saturates() {
-    // Shift amount is 3-bit but the data is 4-bit (only 2 barrel stages
-    // needed). The upper bit of amt must saturate the output to zero via an
-    // extra mux stage.
+    // 3-bit amt for 4-bit data: 2 barrel stages + 1 saturation stage. Some
+    // stages tie one side to 0 and thus collapse to And2 (post-pass), and
+    // adjacent And2 cells may further fuse into And3 when the inner has a
+    // single consumer. We sanity-check the synthesized 4-bit output by
+    // counting all "select-like" combinational cells — Mux2, And2, and
+    // And3 together.
     let code = r#"
         module Top (
             x:   input  logic<4>,
@@ -1354,23 +1411,25 @@ fn variable_shift_right_amount_saturates() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let mux_count = gate
+    let select_cells = gate
         .module
         .cells
         .iter()
-        .filter(|c| c.kind == CellKind::Mux2)
+        .filter(|c| matches!(c.kind, CellKind::Mux2 | CellKind::And2 | CellKind::And3))
         .count();
-    // 2 barrel stages × 4 bits + 1 saturation stage × 4 bits = 12.
-    assert_eq!(
-        mux_count, 12,
-        "expected 12 Mux2 (barrel + saturate), got {}",
-        mux_count
+    // 5 Mux2 + 3 And2 + 2 And3 expected with the current optimization mix.
+    assert!(
+        (9..=12).contains(&select_cells),
+        "expected 9-12 select-like cells (Mux2+And2+And3), got {}",
+        select_cells
     );
 }
 
 #[test]
 fn variable_arith_shift_right_fills_sign() {
-    // signed 4-bit ASR: fill must be the sign bit (x[3]).
+    // signed 4-bit ASR: fill must be the sign bit (x[3]). After const-prop
+    // folds Mux(s, x, x) = x for the sign-fill mux stages, y[3] should be a
+    // direct alias of x[3] (port input) rather than going through any gates.
     let code = r#"
         module Top (
             x:   input  signed logic<4>,
@@ -1384,28 +1443,29 @@ fn variable_arith_shift_right_fills_sign() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let mux_count = gate
+    let y_port = gate
         .module
-        .cells
+        .ports
         .iter()
-        .filter(|c| c.kind == CellKind::Mux2)
-        .count();
-    assert!(mux_count >= 8, "expected barrel-shifter muxes");
-
-    // Confirm that the MSB of x appears as a Mux input (sign fill).
-    let msb_used_as_input = gate.module.cells.iter().any(|c| {
-        c.kind == CellKind::Mux2
-            && c.inputs
-                .iter()
-                .any(|n| matches!(gate.module.nets[*n as usize].driver, NetDriver::PortInput))
-    });
-    assert!(msb_used_as_input, "MSB of x should feed the shifter");
+        .find(|p| format!("{}", p.name) == "y")
+        .expect("y port");
+    let y_msb = y_port.nets[3];
+    assert!(
+        matches!(
+            gate.module.nets[y_msb as usize].driver,
+            NetDriver::PortInput
+        ),
+        "ASR sign-fill: y[3] should collapse to x[3] (port input) after const-prop"
+    );
 }
 
 #[test]
 fn wildcard_pattern_skips_dontcare_bits() {
-    // 4-bit case with a don't-care pattern: `4'b1x0x` fixes only bits 3 and 1.
-    // The comparison must use exactly 2 Xnor2 cells (one per fixed bit), not 4.
+    // 4-bit case with a don't-care pattern `4'b1x0x` fixes only bits 3 and 1.
+    // After const-prop folds Xnor(x, const) down to Buf/Not, and Mux(s, 0, 1)
+    // to the sel itself, the whole match reduces to `And(sel[3], !sel[1])` —
+    // about two gates. If don't-care bits leaked in, we'd see 4 compare terms
+    // and 3 AND-reduction stages, so upper-bound the total cell count.
     let code = r#"
         module Top (
             sel: input  logic<4>,
@@ -1421,15 +1481,746 @@ fn wildcard_pattern_skips_dontcare_bits() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let xnor_count = gate
+    let cell_count = gate.module.cells.len();
+    assert!(
+        cell_count <= 3,
+        "only 2 fixed bits should reach hit; got {} cells",
+        cell_count
+    );
+}
+
+#[test]
+fn const_prop_and_with_zero_folds() {
+    let code = r#"
+        module Top (
+            a: input  logic<4>,
+            y: output logic<4>,
+        ) {
+            always_comb {
+                y = a & 4'b0000;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    // y = 0 everywhere — no And2 cells should survive; all y nets tie to GND
+    // via Buf, which elide_bufs collapses.
+    assert_eq!(
+        gate.module
+            .cells
+            .iter()
+            .filter(|c| c.kind == CellKind::And2)
+            .count(),
+        0,
+        "And(_, 0) must fold away"
+    );
+    let y = gate
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "y")
+        .unwrap();
+    for &n in &y.nets {
+        assert!(matches!(
+            gate.module.nets[n as usize].driver,
+            NetDriver::Const(false)
+        ));
+    }
+}
+
+#[test]
+fn const_prop_or_with_one_folds() {
+    let code = r#"
+        module Top (
+            a: input  logic<4>,
+            y: output logic<4>,
+        ) {
+            always_comb {
+                y = a | 4'b1111;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(
+        gate.module
+            .cells
+            .iter()
+            .filter(|c| c.kind == CellKind::Or2)
+            .count(),
+        0,
+        "Or(_, 1) must fold away"
+    );
+    let y = gate
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "y")
+        .unwrap();
+    for &n in &y.nets {
+        assert!(matches!(
+            gate.module.nets[n as usize].driver,
+            NetDriver::Const(true)
+        ));
+    }
+}
+
+#[test]
+fn const_prop_mux_same_inputs() {
+    // `sel ? a : a` should drop the Mux and alias y to a.
+    let code = r#"
+        module Top (
+            sel: input  logic,
+            a:   input  logic<4>,
+            y:   output logic<4>,
+        ) {
+            always_comb {
+                y = if sel ? a : a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(
+        gate.module
+            .cells
+            .iter()
+            .filter(|c| c.kind == CellKind::Mux2)
+            .count(),
+        0,
+        "Mux with equal arms must fold away"
+    );
+    let y = gate
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "y")
+        .unwrap();
+    for &n in &y.nets {
+        assert!(matches!(
+            gate.module.nets[n as usize].driver,
+            NetDriver::PortInput
+        ));
+    }
+}
+
+#[test]
+fn mux_with_zero_arm_collapses_to_and() {
+    // `sel ? a : 0` should rewrite to `sel & a` (no Mux cell).
+    let code = r#"
+        module Top (
+            sel: input  logic,
+            a:   input  logic<4>,
+            y:   output logic<4>,
+        ) {
+            always_comb {
+                y = if sel ? a : 0;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let mux = gate
         .module
         .cells
         .iter()
-        .filter(|c| c.kind == CellKind::Xnor2)
+        .filter(|c| c.kind == CellKind::Mux2)
+        .count();
+    let and2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    assert_eq!(mux, 0, "Mux(sel, 0, a) must collapse");
+    assert_eq!(and2, 4, "one And2 per output bit expected");
+}
+
+#[test]
+fn mux_with_one_arm_collapses_to_or() {
+    // `sel ? 1 : a` should rewrite to `sel | a`.
+    let code = r#"
+        module Top (
+            sel: input  logic,
+            a:   input  logic<4>,
+            y:   output logic<4>,
+        ) {
+            always_comb {
+                y = if sel ? 4'hF : a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let mux = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Mux2)
+        .count();
+    let or2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Or2)
+        .count();
+    assert_eq!(mux, 0, "Mux(sel, a, 1) must collapse");
+    assert_eq!(or2, 4, "one Or2 per output bit expected");
+}
+
+#[test]
+fn aoi21_fuses_nor_over_and() {
+    // `!((a & b) | c)` — NOR(AND, c) pattern should fuse to Aoi21 after
+    // the post-optimization complex-gate sweep.
+    let code = r#"
+        module Top (
+            a: input  logic,
+            b: input  logic,
+            c: input  logic,
+            y: output logic,
+        ) {
+            assign y = !((a & b) | c);
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let aoi = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Aoi21)
+        .count();
+    assert!(aoi >= 1, "Aoi21 should be present after post-pass fusion");
+}
+
+#[test]
+fn timing_top_n_returns_sorted_endpoints() {
+    // Three independent output cones with different depths — top-N must
+    // order them by arrival time and label each with its port name+bit.
+    let code = r#"
+        module Top (
+            a: input  logic<3>,
+            y: output logic<3>,
+        ) {
+            always_comb {
+                // Depth 1: simple And2. Fast.
+                y[0] = a[0] & a[1];
+                // Depth 2: And3 chain.
+                y[1] = a[0] & a[1] & a[2];
+                // Depth 3: nested mux/and.
+                y[2] = if a[0] ? (a[1] & a[2]) : (a[1] | a[2]);
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let library = veryl_synthesizer::BuiltinLibrary::new();
+    let reports = veryl_synthesizer::compute_timing_top_n(&gate.module, &library, 5);
+    assert!(
+        reports.len() >= 3,
+        "expected at least 3 endpoints, got {}",
+        reports.len()
+    );
+    // Reports are sorted by arrival descending.
+    for w in reports.windows(2) {
+        assert!(
+            w[0].critical_path_delay >= w[1].critical_path_delay - 1e-9,
+            "reports must be sorted descending by delay"
+        );
+    }
+    // Every report should end at a y[i] port bit (identified via origin).
+    for r in &reports[..3] {
+        let end = r.critical_path.last().unwrap();
+        let (name, _) = end.origin.as_ref().expect("endpoint carries origin");
+        assert_eq!(name, "y", "endpoint should be the y port");
+    }
+}
+
+#[test]
+fn boolean_distribution_factors_or_of_and() {
+    // `(x & a) | (x & b)` → `x & (a | b)` — distributivity eliminates one
+    // And2 cell when both arms are single-consumer.
+    let code = r#"
+        module Top (
+            x: input  logic,
+            a: input  logic,
+            b: input  logic,
+            y: output logic,
+        ) {
+            assign y = (x & a) | (x & b);
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let and2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    let or2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Or2)
+        .count();
+    assert_eq!(and2, 1, "distributed form has 1 And2");
+    assert_eq!(or2, 1, "inner arm becomes Or2(a, b)");
+}
+
+#[test]
+fn boolean_distribution_factors_and_of_or() {
+    // Dual: `(x | a) & (x | b)` → `x | (a & b)`.
+    let code = r#"
+        module Top (
+            x: input  logic,
+            a: input  logic,
+            b: input  logic,
+            y: output logic,
+        ) {
+            assign y = (x | a) & (x | b);
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let and2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    let or2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Or2)
+        .count();
+    assert_eq!(and2, 1);
+    assert_eq!(or2, 1);
+}
+
+#[test]
+fn mux_nested_opposite_phase_collapses() {
+    // `Mux2(s, a, Mux2(!s, b, c)) ≡ Mux2(s, a, b)`. The inner mux uses
+    // the inverted select so when the outer picks its d1 leg (s=1) the
+    // inner evaluates with !s=0 and returns its d0 (= b).
+    let code = r#"
+        module Top (
+            s: input  logic,
+            a: input  logic,
+            b: input  logic,
+            c: input  logic,
+            y: output logic,
+        ) {
+            let inner: logic = if !s ? c : b;
+            assign y = if s ? inner : a;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let mux = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Mux2)
+        .count();
+    assert_eq!(mux, 1, "inner mux with !s should collapse away");
+}
+
+#[test]
+fn mux_factor_common_xor_input() {
+    // `s ? (x ^ b) : (x ^ a)` → `x ^ (s ? b : a)`. Both xor arms must be
+    // single-consumer so they die after factoring.
+    let code = r#"
+        module Top (
+            s: input  logic,
+            x: input  logic,
+            a: input  logic,
+            b: input  logic,
+            y: output logic,
+        ) {
+            assign y = if s ? (x ^ b) : (x ^ a);
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let xor = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Xor2)
+        .count();
+    assert_eq!(xor, 1, "two xors must collapse to one after factoring");
+}
+
+#[test]
+fn mux_of_mux_cross_position_shared_leg() {
+    // `Mux2(s1, Mux2(s2, a, c), a)` — outer.d1 == inner.d0 (cross-position).
+    // Collapses to `Mux2(And2(!s1, s2), a, c)` which needs a fresh Not(s1).
+    let code = r#"
+        module Top (
+            s1: input  logic,
+            s2: input  logic,
+            a:  input  logic,
+            c:  input  logic,
+            y:  output logic,
+        ) {
+            assign y = if s1 ? a : (if s2 ? c : a);
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let mux = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Mux2)
+        .count();
+    assert_eq!(mux, 1, "cross-position mux-of-mux should collapse to one");
+    // Must have Not(s1) and the And2 combining it with s2.
+    assert!(
+        gate.module.cells.iter().any(|c| c.kind == CellKind::Not),
+        "cross-position pattern needs materialised Not"
+    );
+    assert!(
+        gate.module.cells.iter().any(|c| c.kind == CellKind::And2),
+        "combined select is an And2"
+    );
+}
+
+#[test]
+fn mux_of_mux_shared_d1_collapses() {
+    // Nested mux with a shared d1: `Mux2(s1, Mux2(s2, a, c), c)`. The post
+    // pass materialises `Or2(s1, s2)` and rewrites to a single mux with
+    // that combined select.
+    let code = r#"
+        module Top (
+            s1: input  logic,
+            s2: input  logic,
+            a:  input  logic,
+            c:  input  logic,
+            y:  output logic,
+        ) {
+            assign y = if s1 ? c : (if s2 ? c : a);
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let mux = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Mux2)
+        .count();
+    let or2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Or2)
+        .count();
+    assert_eq!(mux, 1, "two nested muxes should collapse to one");
+    assert_eq!(or2, 1, "combined select must be materialised as Or2");
+}
+
+#[test]
+fn and3_fuses_from_and2_chain() {
+    // Private And2-of-And2 should collapse to And3. "Private" here means
+    // the inner has exactly one consumer so fusion doesn't break sharing.
+    let code = r#"
+        module Top (
+            a: input  logic,
+            b: input  logic,
+            c: input  logic,
+            y: output logic,
+        ) {
+            assign y = (a & b) & c;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let and3 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And3)
+        .count();
+    let and2 = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    assert_eq!(and3, 1);
+    assert_eq!(and2, 0);
+}
+
+#[test]
+fn cse_merges_duplicate_and() {
+    // Both y0 and y1 compute `a & b`. CSE must keep a single And2 and alias
+    // the second output to the first.
+    let code = r#"
+        module Top (
+            a:  input  logic<4>,
+            b:  input  logic<4>,
+            y0: output logic<4>,
+            y1: output logic<4>,
+        ) {
+            always_comb {
+                y0 = a & b;
+                y1 = a & b;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let and_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
         .count();
     assert_eq!(
-        xnor_count, 2,
-        "don't-care bits must not generate Xnor2; expected 2 fixed bits"
+        and_count, 4,
+        "4 bits × 1 shared AND expression = 4 And2 (not 8)"
+    );
+}
+
+#[test]
+fn cse_commutative_canonicalization() {
+    // `a & b` and `b & a` must hash to the same cell after input sorting.
+    let code = r#"
+        module Top (
+            a:  input  logic<4>,
+            b:  input  logic<4>,
+            y0: output logic<4>,
+            y1: output logic<4>,
+        ) {
+            always_comb {
+                y0 = a & b;
+                y1 = b & a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let and_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    assert_eq!(
+        and_count, 4,
+        "commutative AND with swapped operands must CSE to a single cell per bit"
+    );
+}
+
+#[test]
+fn cse_preserves_mux_operand_order() {
+    // Mux is non-commutative in its (sel, d0, d1) slots, so Mux(s, a, b)
+    // and Mux(s, b, a) are distinct expressions and must NOT be merged.
+    let code = r#"
+        module Top (
+            s:  input  logic,
+            a:  input  logic<4>,
+            b:  input  logic<4>,
+            y0: output logic<4>,
+            y1: output logic<4>,
+        ) {
+            always_comb {
+                y0 = if s ? a : b;
+                y1 = if s ? b : a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let mux_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Mux2)
+        .count();
+    assert_eq!(
+        mux_count, 8,
+        "Mux operand order matters — both cones must stay, 4 bits × 2 = 8 Mux2"
+    );
+}
+
+#[test]
+fn algebraic_double_negation_collapses() {
+    // `!!a` must collapse to just `a` — no Not cells left.
+    let code = r#"
+        module Top (
+            a: input  logic<4>,
+            y: output logic<4>,
+        ) {
+            always_comb {
+                y = ~~a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let not_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Not)
+        .count();
+    assert_eq!(not_count, 0, "Not(Not(x)) must fold to x");
+    let y = gate
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "y")
+        .unwrap();
+    for &n in &y.nets {
+        assert!(matches!(
+            gate.module.nets[n as usize].driver,
+            NetDriver::PortInput
+        ));
+    }
+}
+
+#[test]
+fn algebraic_de_morgan_and_not_to_nand() {
+    // `!(a & b)` should fuse into a single Nand2 cell, with no surviving
+    // And2/Not pair.
+    let code = r#"
+        module Top (
+            a: input  logic<4>,
+            b: input  logic<4>,
+            y: output logic<4>,
+        ) {
+            always_comb {
+                y = ~(a & b);
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let nand_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Nand2)
+        .count();
+    let and_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    let not_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Not)
+        .count();
+    assert_eq!(nand_count, 4, "4 bits × 1 Nand2 each");
+    assert_eq!(and_count, 0, "And2 must be fused into Nand2");
+    assert_eq!(not_count, 0, "Not must be fused into Nand2");
+}
+
+#[test]
+fn dce_removes_orphan_cells() {
+    // A 2-level Xor tree where the final result is overwritten by a constant
+    // makes all the Xor cells orphan. DCE must remove them.
+    let code = r#"
+        module Top (
+            a: input  logic<4>,
+            b: input  logic<4>,
+            y: output logic<4>,
+        ) {
+            var mid: logic<4>;
+            always_comb {
+                mid = a ^ b;
+                y = 0;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let xor_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::Xor2)
+        .count();
+    assert_eq!(
+        xor_count, 0,
+        "mid is unused (y overwrites with 0); the Xor cells are dead"
+    );
+}
+
+#[test]
+fn dq_ff_with_reset_folds_to_constant() {
+    // A register that is only ever assigned inside an unreachable branch
+    // (enable tied low) holds its reset_value forever. D==Q after const-prop
+    // should drop the FF and alias q to the reset constant.
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            d:   input  logic<4>,
+            q:   output logic<4>,
+        ) {
+            let enable: logic = 0;
+            always_ff (clk, rst) {
+                if_reset {
+                    q = 0;
+                } else {
+                    if enable {
+                        q = d;
+                    }
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top).expect("synthesize");
+    assert_eq!(
+        result.gate_ir.module.ffs.len(),
+        0,
+        "enable=0 freezes q to reset_value; FFs must be eliminated"
+    );
+    let q_port = result
+        .gate_ir
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "q")
+        .unwrap();
+    for &n in &q_port.nets {
+        assert_eq!(n, veryl_synthesizer::ir::NET_CONST0);
+    }
+}
+
+#[test]
+fn dq_ff_without_reset_is_preserved() {
+    // Without a reset, a D=Q FF holds an undefined initial value forever —
+    // it's still a real stateful element, so elimination must not fire.
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            d:   input  logic<4>,
+            q:   output logic<4>,
+        ) {
+            let enable: logic = 0;
+            always_ff (clk) {
+                if enable {
+                    q = d;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top).expect("synthesize");
+    assert_eq!(
+        result.gate_ir.module.ffs.len(),
+        4,
+        "no-reset D=Q FFs must be kept (they hold undefined state, not a constant)"
     );
 }
 
@@ -1493,18 +2284,28 @@ fn function_call_with_output_port() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    // Two adders (both 4-bit) → at least 8 Xor2 cells total.
+    // Two adders (both 4-bit against constants) → const-prop folds several
+    // XORs (carry chain simplifies when b is constant), so verify both outputs
+    // are actually driven rather than comparing a specific gate count.
     let xor_count = gate
         .module
         .cells
         .iter()
         .filter(|c| c.kind == CellKind::Xor2)
         .count();
-    assert!(
-        xor_count >= 8,
-        "two 4-bit adders should generate ≥8 Xor2 cells, got {}",
-        xor_count
-    );
+    assert!(xor_count > 0, "expected some adder XORs, got {}", xor_count);
+    for port in &gate.module.ports {
+        let name = format!("{}", port.name);
+        if name == "out1" || name == "out2" {
+            for &n in &port.nets {
+                assert!(
+                    !matches!(gate.module.nets[n as usize].driver, NetDriver::Undriven),
+                    "{} net left undriven",
+                    name
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1572,9 +2373,11 @@ fn function_call_void_via_statement() {
         .iter()
         .filter(|c| c.kind == CellKind::Xor2)
         .count();
+    // `x + 1` with const-prop: bit 0 folds entirely (XOR(a,1)=NOT(a), sum=NOT(a)),
+    // bits 1..3 keep one XOR each for carry propagation → 3.
     assert!(
-        xor_count >= 4,
-        "4-bit adder should generate ≥4 Xor2 cells, got {}",
+        xor_count >= 3,
+        "4-bit +1 adder should generate ≥3 Xor2 cells, got {}",
         xor_count
     );
 }

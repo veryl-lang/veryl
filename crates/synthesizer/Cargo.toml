@@ -11,6 +11,7 @@ description.workspace = true
 edition.workspace     = true
 
 [dependencies]
+fxhash         = {workspace = true}
 indent         = {workspace = true}
 log            = {workspace = true}
 thiserror      = {workspace = true}

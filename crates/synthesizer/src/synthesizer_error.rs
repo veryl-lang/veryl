@@ -66,8 +66,6 @@ pub enum UnsupportedKind {
     ForStatement,
     UnsupportedVariableType { path: String, type_kind: String },
     SystemVerilogBlackbox,
-    BundledInstInput,
-    BundledInstOutput,
 }
 
 impl fmt::Display for UnsupportedKind {
@@ -95,8 +93,6 @@ impl fmt::Display for UnsupportedKind {
                 write!(f, "variable '{}' has unsupported {} type", path, type_kind)
             }
             Self::SystemVerilogBlackbox => "SystemVerilog blackbox instantiation".fmt(f),
-            Self::BundledInstInput => "bundled InstInput id".fmt(f),
-            Self::BundledInstOutput => "bundled InstOutput id".fmt(f),
         }
     }
 }

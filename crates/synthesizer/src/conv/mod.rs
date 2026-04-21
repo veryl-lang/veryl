@@ -1,15 +1,21 @@
 pub(crate) mod arith;
 pub(crate) mod expression;
+mod postpass;
 pub(crate) mod statement;
+mod worklist;
 
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
 use veryl_analyzer::ir::{self as air, Declaration, Function, Shape, Statement, VarKind};
 use veryl_parser::resource_table::StrId;
 
+use crate::conv::expression::synthesize_expr;
+use crate::conv::postpass::complex_gate_replacement;
+use crate::conv::worklist::{dead_cell_elimination, worklist_simplify};
 use crate::ir::{
-    Cell, CellKind, ClockEdge, FfCell, GateModule, GatePort, NetDriver, NetId, NetInfo, PortDir,
-    RESERVED_NETS, ResetPolarity, ResetSpec,
+    Cell, CellKind, ClockEdge, FfCell, GateModule, GatePort, NET_CONST0, NET_CONST1, NetDriver,
+    NetId, NetInfo, PortDir, RESERVED_NETS, ResetPolarity, ResetSpec,
 };
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
@@ -462,7 +468,7 @@ impl ConvContext {
         current: &mut HashMap<air::VarId, Vec<NetId>>,
         module_token: &veryl_parser::token_range::TokenRange,
     ) -> Result<(), SynthesizerError> {
-        let child_module = match &inst.component {
+        let child_module = match inst.component.as_ref() {
             air::Component::Module(m) => m,
             air::Component::Interface(_) => {
                 // Analyzer flattens interface instantiations to Declaration::Null
@@ -481,8 +487,8 @@ impl ConvContext {
 
         let child_gate = convert_module(child_module)?;
         let mut net_map: Vec<NetId> = Vec::with_capacity(child_gate.nets.len());
-        net_map.push(crate::ir::NET_CONST0);
-        net_map.push(crate::ir::NET_CONST1);
+        net_map.push(NET_CONST0);
+        net_map.push(NET_CONST1);
         for _ in (RESERVED_NETS as usize)..child_gate.nets.len() {
             net_map.push(self.alloc_net(None));
         }
@@ -495,14 +501,7 @@ impl ConvContext {
         }
 
         for input in &inst.inputs {
-            let input_token = &input.expr.comptime().token;
-            if input.id.len() != 1 {
-                return Err(SynthesizerError::unsupported(
-                    UnsupportedKind::BundledInstInput,
-                    input_token,
-                ));
-            }
-            let vid = input.id[0];
+            let vid = input.id;
             let port_path = child_module
                 .variables
                 .get(&vid)
@@ -519,12 +518,7 @@ impl ConvContext {
                     port_path
                 )));
             }
-            let expr_nets = crate::conv::expression::synthesize_expr(
-                self,
-                &input.expr,
-                current,
-                child_nets.len(),
-            )?;
+            let expr_nets = synthesize_expr(self, &input.expr, current, child_nets.len())?;
             for (cn, en) in child_nets.iter().zip(expr_nets.iter()) {
                 net_map[*cn as usize] = *en;
             }
@@ -572,18 +566,11 @@ impl ConvContext {
         }
 
         for output in &inst.outputs {
-            let output_token = output.dst.first().map(|d| &d.token).unwrap_or(module_token);
-            if output.id.len() != 1 {
-                return Err(SynthesizerError::unsupported(
-                    UnsupportedKind::BundledInstOutput,
-                    output_token,
-                ));
-            }
             if output.dst.is_empty() {
                 // `y: _` — unconnected, child's output nets are discarded.
                 continue;
             }
-            let vid = output.id[0];
+            let vid = output.id;
             let port_path = child_module
                 .variables
                 .get(&vid)
@@ -638,7 +625,7 @@ impl ConvContext {
                         let idx = self.cells.len();
                         self.cells.push(Cell {
                             kind: CellKind::Buf,
-                            inputs: vec![crate::ir::NET_CONST0],
+                            inputs: vec![NET_CONST0],
                             output: n,
                         });
                         self.nets[n as usize].driver = NetDriver::Cell(idx);
@@ -653,80 +640,105 @@ impl ConvContext {
             cells: self.cells,
             ffs: self.ffs,
         };
-        elide_bufs(&mut gate);
+        // Worklist-based convergence. Each cell is revisited only when one
+        // of its inputs has been rewritten since the last visit, instead of
+        // scanning the whole cell list every outer iteration. Drops outer
+        // iteration count from ~1000 to a small handful for designs with
+        // long alias chains (carry rings, Kogge-Stone prefix networks).
+        loop {
+            let before_cells = gate.cells.len();
+            let before_ffs = gate.ffs.len();
+            worklist_simplify(&mut gate);
+            eliminate_dq_ffs(&mut gate);
+            if gate.cells.len() == before_cells && gate.ffs.len() == before_ffs {
+                break;
+            }
+        }
+        dead_cell_elimination(&mut gate);
+        // Technology-style rewrite: fuse 2-input primitives into sky130
+        // compound cells when the upstream has exactly one live consumer.
+        // Runs after DCE so the consumer counts are clean (no stale dead
+        // cells inflating the check). A final DCE sweep removes the orphan
+        // upstream cells produced by each fusion.
+        complex_gate_replacement(&mut gate);
+        dead_cell_elimination(&mut gate);
         Ok(gate)
     }
 }
 
-/// Removes `Buf` cells by routing their consumers directly to the Buf's input.
-/// Chains of `Buf(Buf(x))` collapse to `x`. Buf cells are allocated during
-/// comb finalize just to alias the "current computed value" back onto a
-/// variable's persistent net; once gate IR construction is done they have no
-/// physical meaning and only inflate area/timing reports.
-fn elide_bufs(module: &mut GateModule) {
-    let mut buf_alias: HashMap<NetId, NetId> = HashMap::new();
-    for cell in &module.cells {
-        if cell.kind == CellKind::Buf {
-            buf_alias.insert(cell.output, cell.inputs[0]);
+/// Removes FFs whose D input is the same net as their Q output (a hold-forever
+/// register). If the FF has a reset, Q is effectively the reset_value constant
+/// after reset, so we alias Q to NET_CONST0/1 and drop the FF. Without a reset
+/// the FF holds X forever — conservative: leave it alone.
+fn eliminate_dq_ffs(module: &mut GateModule) {
+    let mut alias: HashMap<NetId, NetId> = HashMap::new();
+    let mut remove: HashSet<usize> = HashSet::new();
+
+    for (i, ff) in module.ffs.iter().enumerate() {
+        if ff.d != ff.q || ff.reset.is_none() {
+            continue;
         }
+        let const_net = if ff.reset_value {
+            NET_CONST1
+        } else {
+            NET_CONST0
+        };
+        alias.insert(ff.q, const_net);
+        remove.insert(i);
     }
-    if buf_alias.is_empty() {
+
+    if remove.is_empty() {
         return;
     }
 
     for cell in module.cells.iter_mut() {
-        if cell.kind == CellKind::Buf {
-            continue;
-        }
         for inp in cell.inputs.iter_mut() {
-            *inp = resolve_buf(*inp, &buf_alias);
+            if let Some(&new) = alias.get(inp) {
+                *inp = new;
+            }
         }
     }
     for ff in module.ffs.iter_mut() {
-        ff.d = resolve_buf(ff.d, &buf_alias);
-        ff.clock = resolve_buf(ff.clock, &buf_alias);
-        if let Some(r) = ff.reset.as_mut() {
-            r.net = resolve_buf(r.net, &buf_alias);
+        if let Some(&new) = alias.get(&ff.d) {
+            ff.d = new;
+        }
+        if let Some(&new) = alias.get(&ff.clock) {
+            ff.clock = new;
+        }
+        if let Some(r) = ff.reset.as_mut()
+            && let Some(&new) = alias.get(&r.net)
+        {
+            r.net = new;
         }
     }
     for port in module.ports.iter_mut() {
         for n in port.nets.iter_mut() {
-            *n = resolve_buf(*n, &buf_alias);
+            if let Some(&new) = alias.get(n) {
+                *n = new;
+            }
         }
     }
 
-    let old = std::mem::take(&mut module.cells);
-    let mut index_map: Vec<Option<usize>> = vec![None; old.len()];
-    let mut new_cells: Vec<Cell> = Vec::with_capacity(old.len());
-    for (old_idx, cell) in old.into_iter().enumerate() {
-        if cell.kind == CellKind::Buf {
+    let old_ffs = mem::take(&mut module.ffs);
+    let mut index_map: Vec<Option<usize>> = vec![None; old_ffs.len()];
+    let mut new_ffs: Vec<FfCell> = Vec::with_capacity(old_ffs.len() - remove.len());
+    for (old_idx, ff) in old_ffs.into_iter().enumerate() {
+        if remove.contains(&old_idx) {
             continue;
         }
-        index_map[old_idx] = Some(new_cells.len());
-        new_cells.push(cell);
+        index_map[old_idx] = Some(new_ffs.len());
+        new_ffs.push(ff);
     }
-    module.cells = new_cells;
+    module.ffs = new_ffs;
 
     for net in module.nets.iter_mut() {
-        if let NetDriver::Cell(idx) = &mut net.driver {
+        if let NetDriver::FfQ(idx) = &mut net.driver {
             match index_map[*idx] {
                 Some(new_idx) => *idx = new_idx,
                 None => net.driver = NetDriver::Undriven,
             }
         }
     }
-}
-
-fn resolve_buf(net: NetId, buf_alias: &HashMap<NetId, NetId>) -> NetId {
-    let mut cur = net;
-    let mut seen: HashSet<NetId> = HashSet::new();
-    while let Some(&next) = buf_alias.get(&cur) {
-        if !seen.insert(cur) {
-            break;
-        }
-        cur = next;
-    }
-    cur
 }
 
 /// Walks nested statements, calling `f` once per `VarId` that appears as an
@@ -759,6 +771,16 @@ pub(crate) fn collect_assigned(stmt: &Statement, f: &mut impl FnMut(air::VarId))
                 collect_assigned(s, f);
             }
         }
+        Statement::FunctionCall(call) => {
+            // Void-style function call drives caller variables via output args;
+            // without this, classify_drivers misses them and the comb block's
+            // end-of-block wiring skips them.
+            for dsts in call.outputs.values() {
+                for d in dsts {
+                    f(d.id);
+                }
+            }
+        }
         _ => (),
     }
 }
@@ -770,7 +792,7 @@ fn init_current_comb(ctx: &ConvContext, decl_idx: usize) -> HashMap<air::VarId, 
     let mut map = HashMap::new();
     for (vid, slot) in &ctx.variables {
         if slot.driver == VarDriverKind::Comb(decl_idx) {
-            let nets = vec![crate::ir::NET_CONST0; slot.width];
+            let nets = vec![NET_CONST0; slot.width];
             map.insert(*vid, nets);
         }
     }
