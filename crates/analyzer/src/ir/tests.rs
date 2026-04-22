@@ -2674,6 +2674,29 @@ fn cast_operation() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    module top (
+        i_x: input logic<32>,
+    ) {
+        enum Enum: logic<8> {
+            A = 8'b0,
+        }
+        let _: logic<32> = (Enum::A as 32) + i_x;
+    }
+    "#;
+
+    let exp = r#"module top {
+  input var0(i_x): logic<32> = 32'hxxxxxxxx;
+  let var1(_): logic<32> = 32'hxxxxxxxx;
+
+  comb {
+    var1 = ((8'h00 as 32'sh00000020) + var0);
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
