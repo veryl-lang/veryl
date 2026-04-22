@@ -128,15 +128,11 @@ impl CmdSynth {
             println!("summary:");
             // Width 11 fits up to ~10 M um² / 1 W without breaking alignment.
             println!(
-                "  {:<8}{:>11.2} um²  (comb {:.2}, seq {:.2} × {} FF)",
-                "area:",
-                result.area.total,
-                result.area.combinational,
-                result.area.sequential,
-                result.area.ff_count,
+                "  {:<8}{:>11.2} um²  (comb {:.2}, seq {:.2})",
+                "area:", result.area.total, result.area.combinational, result.area.sequential,
             );
             println!(
-                "  {:<8}{:>11.3} ns   {:>5} gates  {} → {}",
+                "  {:<8}{:>11.3} ns   {:>5} levels  {} → {}",
                 "timing:",
                 result.timing.critical_path_delay,
                 result.timing.critical_path_depth,

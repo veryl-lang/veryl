@@ -5,6 +5,20 @@ use std::fmt;
 use crate::ir::{CellKind, GateModule, NetDriver, NetId, PortDir};
 use crate::library::CellLibrary;
 
+fn max_float_width(vs: impl IntoIterator<Item = f64>, prec: usize) -> usize {
+    vs.into_iter()
+        .map(|v| format!("{:.*}", prec, v).len())
+        .max()
+        .unwrap_or(1)
+}
+
+fn max_int_width(vs: impl IntoIterator<Item = usize>) -> usize {
+    vs.into_iter()
+        .map(|v| v.to_string().len())
+        .max()
+        .unwrap_or(1)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AreaReport {
     pub total: f64,
@@ -18,22 +32,15 @@ impl fmt::Display for AreaReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "area: {:.2} um²  (comb {:.2}, seq {:.2} × {} FF)",
-            self.total, self.combinational, self.sequential, self.ff_count
+            "area: {:.2} um²  (comb {:.2}, seq {:.2})",
+            self.total, self.combinational, self.sequential
         )?;
-        // Size columns from data so large counts/areas don't break alignment.
-        let count_w = self
-            .by_kind
-            .iter()
-            .map(|(_, c, _)| c.to_string().len())
-            .max()
-            .unwrap_or(1);
-        let area_w = self
-            .by_kind
-            .iter()
-            .map(|(_, _, a)| format!("{:.2}", a).len())
-            .max()
-            .unwrap_or(1);
+        let kind_counts = self.by_kind.iter().map(|(_, c, _)| *c);
+        let kind_areas = self.by_kind.iter().map(|(_, _, a)| *a);
+        let ff_count = (self.ff_count > 0).then_some(self.ff_count);
+        let ff_area = (self.ff_count > 0).then_some(self.sequential);
+        let count_w = max_int_width(kind_counts.chain(ff_count));
+        let area_w = max_float_width(kind_areas.chain(ff_area), 2);
         for (kind, count, area) in &self.by_kind {
             writeln!(
                 f,
@@ -41,6 +48,17 @@ impl fmt::Display for AreaReport {
                 kind.symbol(),
                 count,
                 area,
+                cw = count_w,
+                aw = area_w
+            )?;
+        }
+        if self.ff_count > 0 {
+            writeln!(
+                f,
+                "  {:<6} ×{:>cw$} {:>aw$.2}",
+                "FF",
+                self.ff_count,
+                self.sequential,
                 cw = count_w,
                 aw = area_w
             )?;
@@ -117,24 +135,15 @@ impl fmt::Display for PowerReport {
             "  assumptions: f_clk = {} MHz, activity = {:.2}",
             self.clock_freq_mhz, self.activity
         )?;
-        let count_w = self
-            .by_kind
-            .iter()
-            .map(|r| r.count.to_string().len())
-            .max()
-            .unwrap_or(1);
-        let leak_w = self
-            .by_kind
-            .iter()
-            .map(|r| format!("{:.3}", r.leakage_nw).len())
-            .max()
-            .unwrap_or(1);
-        let dyn_w = self
-            .by_kind
-            .iter()
-            .map(|r| format!("{:.3}", r.dynamic_uw).len())
-            .max()
-            .unwrap_or(1);
+        let kind_counts = self.by_kind.iter().map(|r| r.count);
+        let kind_leaks = self.by_kind.iter().map(|r| r.leakage_nw);
+        let kind_dyns = self.by_kind.iter().map(|r| r.dynamic_uw);
+        let ff_count = (self.ff_count > 0).then_some(self.ff_count);
+        let ff_leak = (self.ff_count > 0).then_some(self.ff_leakage_nw);
+        let ff_dyn = (self.ff_count > 0).then_some(self.ff_dynamic_uw);
+        let count_w = max_int_width(kind_counts.chain(ff_count));
+        let leak_w = max_float_width(kind_leaks.chain(ff_leak), 3);
+        let dyn_w = max_float_width(kind_dyns.chain(ff_dyn), 3);
         for row in &self.by_kind {
             writeln!(
                 f,
@@ -262,13 +271,13 @@ pub enum Endpoint {
 }
 
 impl TimingReport {
-    /// Short single-line summary for top-N tables: `<ns> ns  <N> gates  <start> → <end>`.
-    /// Widths fit 3-digit ns and 4-digit gate counts.
+    /// Short single-line summary for top-N tables: `<ns> ns  <N> levels  <start> → <end>`.
+    /// Widths fit 3-digit ns and 4-digit level counts.
     pub fn summary(&self) -> String {
         let start = port_label(self.critical_path.first());
         let end = port_label(self.critical_path.last());
         format!(
-            "{:>8.3} ns  {:>5} gates  {} → {}",
+            "{:>8.3} ns  {:>5} levels  {} → {}",
             self.critical_path_delay, self.critical_path_depth, start, end
         )
     }
@@ -326,11 +335,7 @@ impl TimingReport {
             })
             .collect();
 
-        let arr_w = rows
-            .iter()
-            .map(|(a, _, _)| format!("{:.3}", a).len())
-            .max()
-            .unwrap_or(5);
+        let arr_w = max_float_width(rows.iter().map(|(a, _, _)| *a), 3).max(5);
         let label_w = rows.iter().map(|(_, l, _)| l.len()).max().unwrap_or(4);
 
         for (arrival, label, tail) in rows {
