@@ -364,6 +364,31 @@ impl Op {
                     // Check width range
                     let shape = Shape::new(vec![Some(width)]);
                     dst.r#type.set_concrete_width(shape);
+
+                    match &dst.r#type.kind {
+                        TypeKind::Struct(x) => {
+                            dst.r#type.kind = if x.is_4state() {
+                                TypeKind::Logic
+                            } else {
+                                TypeKind::Bit
+                            };
+                        }
+                        TypeKind::Union(x) => {
+                            dst.r#type.kind = if x.is_4state() {
+                                TypeKind::Logic
+                            } else {
+                                TypeKind::Bit
+                            };
+                        }
+                        TypeKind::Enum(x) => {
+                            dst.r#type.kind = if x.is_4state() {
+                                TypeKind::Logic
+                            } else {
+                                TypeKind::Bit
+                            };
+                        }
+                        _ => {}
+                    }
                 } else if let ValueVariant::Type(y_value) = &y.value {
                     let invalid_clock_cast = y_value.is_clock() && !x.r#type.is_clock();
                     let invalid_reset_cast = y_value.is_reset() && x.r#type.is_clock();
