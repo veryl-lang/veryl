@@ -6054,8 +6054,10 @@ pub fn symbol_string(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
+            let global_func = base.namespace.paths[0] != context.project_name.unwrap()
+                && base.is_global_function();
 
-            let add_namespace = (scope_depth >= 2) | !visible | top_level;
+            let add_namespace = (scope_depth >= 2) | !visible | top_level | global_func;
             if add_namespace {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
             }
@@ -6063,7 +6065,7 @@ pub fn symbol_string(
                 let name = symbol
                     .generic_maps()
                     .first()
-                    .map(|x| x.name(!add_namespace, true))
+                    .map(|x| x.name(false, true)) // namespace has already been added
                     .unwrap();
                 ret.push_str(&name);
             } else {
