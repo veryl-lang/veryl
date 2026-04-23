@@ -1,5 +1,6 @@
 use crate::ir::{
-    Event, Ir, ModuleVariables, Value, VarId, VarPath, read_native_value, write_native_value,
+    Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, read_native_value,
+    write_native_value,
 };
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::str::FromStr;
@@ -40,6 +41,8 @@ pub struct Simulator {
     convergence_verified: bool,
     /// Remaining warmup iterations before convergence can be trusted.
     convergence_warmup: u32,
+    last_event: Option<Event>,
+    last_event_stmts: *const Vec<Statement>,
 }
 
 impl Simulator {
@@ -64,6 +67,8 @@ impl Simulator {
             } else {
                 0
             },
+            last_event: None,
+            last_event_stmts: std::ptr::null(),
         };
 
         if let Some(dumper) = dump {
@@ -232,7 +237,20 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let event_start = std::time::Instant::now();
 
-        if let Some(statements) = self.ir.event_statements.get(event) {
+        let stmts_ptr = if self.last_event.as_ref() == Some(event) {
+            self.last_event_stmts
+        } else {
+            let ptr: *const Vec<Statement> = match self.ir.event_statements.get(event) {
+                Some(v) => v as *const _,
+                None => std::ptr::null(),
+            };
+            self.last_event = Some(event.clone());
+            self.last_event_stmts = ptr;
+            ptr
+        };
+        if !stmts_ptr.is_null() {
+            // SAFETY: event_statements is never mutated after Ir construction.
+            let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             for x in statements {
                 x.eval_step(&mut self.mask_cache);
             }

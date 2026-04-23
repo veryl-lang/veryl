@@ -80,10 +80,15 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
     }
 
     // Build a map: variable → set of statement indices that write it.
+    // Dedup per stmt so repeated writes (e.g. multiple case arms touching
+    // the same var) don't inflate the downstream in-degree count.
     let mut writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
     for (i, outs) in stmt_outputs.iter().enumerate() {
+        let mut unique_outs: HashSet<VarOffset> = HashSet::default();
         for &key in outs {
-            writers.entry(key).or_default().push(i);
+            if unique_outs.insert(key) {
+                writers.entry(key).or_default().push(i);
+            }
         }
     }
 
