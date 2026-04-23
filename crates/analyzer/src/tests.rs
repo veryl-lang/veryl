@@ -11881,6 +11881,40 @@ fn positive_type_validation() {
     //     .filter(|e| matches!(e, AnalyzerError::NonPositiveValue { .. }))
     //     .collect();
     // assert_eq!(non_pos_errors.len(), 0);
+
+    let code = r#"
+    module ModuleA {
+        function func(a: input p16) -> p16 {
+            return a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        function func(a: input p16, b: input p16) -> p16 {
+            return a + b;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        function func(a: input p8, b: input p8) -> p8 {
+            return a + b;
+        }
+        const A: p8 = func(8'hff, 8'h01);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::NonPositiveValue { .. }));
 }
 
 #[test]
