@@ -59,6 +59,11 @@ pub struct Ir {
     /// FF commit entries: (current_offset, value_size) pairs.
     /// After event execution, next → current copy is performed for each entry.
     pub ff_commit_entries: Vec<(usize, usize)>,
+    /// (offset, size) byte ranges of comb_values written by comb_statements.
+    /// settle_comb snapshots/compares only these ranges so that ff-opt
+    /// demoted memory arrays — stored in comb_values but never changed
+    /// during comb iterations — do not dominate convergence-check cost.
+    pub comb_output_ranges: Vec<(usize, usize)>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
@@ -94,6 +99,7 @@ impl Ir {
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             ff_commit_entries: module.ff_commit_entries,
+            comb_output_ranges: module.comb_output_ranges,
             disable_ff_opt: config.disable_ff_opt,
             _binary: binary,
         }
@@ -127,38 +133,26 @@ impl Ir {
                 profile.comb_eval_count += 1;
             }
         }
-        // In debug builds, verify that required_comb_passes is sufficient
-        // by checking that one more eval doesn't change comb_values.
-        #[cfg(debug_assertions)]
-        if !skip_convergence_check {
-            snapshot_buf.resize(self.comb_values.len(), 0);
-            snapshot_buf.copy_from_slice(&self.comb_values);
-            self.eval_comb_full(mask_cache, profile);
-            debug_assert!(
-                self.comb_values[..] == snapshot_buf[..],
-                "comb did not converge after {} required passes ({} stmts) — \
-                 required_comb_passes may be underestimated",
-                min_passes,
-                self.comb_statements.len()
-            );
-        }
         if min_passes <= 1 {
             return true;
         }
         if skip_convergence_check {
             return true;
         }
+        // compute_required_passes cannot capture the iteration count of
+        // comb cycles broken by cross-module register reads (the cycle has
+        // no DAG chain depth).  Give such designs up to MAX_EXTRA extras
+        // to reach a fixed point.
         const MAX_EXTRA: usize = 4;
         for _i in 0..MAX_EXTRA {
-            snapshot_buf.resize(self.comb_values.len(), 0);
-            snapshot_buf.copy_from_slice(&self.comb_values);
+            self.snapshot_comb_output(snapshot_buf);
             self.eval_comb_full(mask_cache, profile);
             #[cfg(feature = "profile")]
             {
                 profile.comb_eval_count += 1;
                 profile.extra_pass_count += 1;
             }
-            if self.comb_values[..] == snapshot_buf[..] {
+            if self.comb_output_matches(snapshot_buf) {
                 #[cfg(feature = "profile")]
                 if _i == 0 {
                     profile.converged_first_try += 1;
@@ -166,6 +160,16 @@ impl Ir {
                 return _i == 0;
             }
         }
+        // Cycle did not settle within min_passes + MAX_EXTRA.  Debug
+        // builds panic (simulator correctness bug worth catching), release
+        // falls through to log::warn so users can still inspect state.
+        debug_assert!(
+            false,
+            "comb convergence failed after {} + {} passes ({} stmts)",
+            min_passes,
+            MAX_EXTRA,
+            self.comb_statements.len()
+        );
         log::warn!(
             "comb convergence failed after {} + {} passes ({} stmts)",
             min_passes,
@@ -173,6 +177,39 @@ impl Ir {
             self.comb_statements.len()
         );
         false
+    }
+
+    /// Copy the bytes covered by `comb_output_ranges` into `buf` as a flat
+    /// concatenation of the ranges in order.
+    fn snapshot_comb_output(&self, buf: &mut Vec<u8>) {
+        let total: usize = self.comb_output_ranges.iter().map(|(_, s)| s).sum();
+        buf.resize(total, 0);
+        let mut pos = 0;
+        for &(off, sz) in &self.comb_output_ranges {
+            let end = off + sz;
+            debug_assert!(
+                end <= self.comb_values.len(),
+                "comb_output_ranges out of bounds: [{off}..{end}) exceeds comb_values.len()={}",
+                self.comb_values.len()
+            );
+            buf[pos..pos + sz].copy_from_slice(&self.comb_values[off..end]);
+            pos += sz;
+        }
+    }
+
+    /// Compare `buf` (produced by `snapshot_comb_output`) against the
+    /// current `comb_values` bytes across every range.
+    fn comb_output_matches(&self, buf: &[u8]) -> bool {
+        let mut pos = 0;
+        for &(off, sz) in &self.comb_output_ranges {
+            let end = off + sz;
+            debug_assert!(end <= self.comb_values.len());
+            if buf[pos..pos + sz] != self.comb_values[off..end] {
+                return false;
+            }
+            pos += sz;
+        }
+        true
     }
 
     /// Evaluate unified comb once.

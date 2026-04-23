@@ -1,4 +1,5 @@
 use crate::FuncPtr;
+use crate::HashMap;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift::Context as CraneliftContext;
@@ -1275,6 +1276,96 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+        }
+    }
+
+    /// Emit (byte_offset, byte_size) ranges for every comb write this
+    /// statement performs, recursing into nested bodies.
+    ///
+    /// Differs from [`Self::gather_variable_offsets`] on dynamic array
+    /// writes: this walk emits the full array span instead of the
+    /// `(base, last)` dependency hint, so the caller can take an
+    /// exhaustive snapshot for convergence checking.  FF outputs are
+    /// skipped (they commit in the event phase, not during comb iteration).
+    ///
+    /// `size_map` resolves element sizes when the statement itself does
+    /// not carry a width (e.g. opaque CompiledBlocks); `fallback_size` is
+    /// the per-module upper bound used when neither source knows.
+    pub fn gather_comb_output_ranges(
+        &self,
+        use_4state: bool,
+        size_map: &HashMap<usize, usize>,
+        fallback_size: usize,
+        out: &mut Vec<(usize, usize)>,
+    ) {
+        fn push_scalar(
+            off: VarOffset,
+            size_hint: Option<usize>,
+            size_map: &HashMap<usize, usize>,
+            fallback_size: usize,
+            out: &mut Vec<(usize, usize)>,
+        ) {
+            if off.is_ff() {
+                return;
+            }
+            let raw = off.raw() as usize;
+            let sz = size_hint
+                .or_else(|| size_map.get(&raw).copied())
+                .unwrap_or(fallback_size);
+            out.push((raw, sz));
+        }
+
+        match self {
+            ProtoStatement::Assign(x) => {
+                let nb = crate::ir::variable::native_bytes(x.dst_width);
+                let vs = crate::ir::variable::value_size(nb, use_4state);
+                push_scalar(x.dst, Some(vs), size_map, fallback_size, out);
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                if x.dst_base.is_ff() {
+                    return;
+                }
+                // Any element in [0, dst_num_elements) may be the target at
+                // runtime, so cover the full `stride * N` span (safe even
+                // when stride > element value_size).
+                let base = x.dst_base.raw() as usize;
+                let span = x.dst_stride as usize * x.dst_num_elements;
+                out.push((base, span));
+            }
+            ProtoStatement::If(x) => {
+                for s in &x.true_side {
+                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                }
+                for s in &x.false_side {
+                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                }
+            }
+            ProtoStatement::For(x) => {
+                for s in &x.body {
+                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                }
+            }
+            ProtoStatement::CompiledBlock(x) => {
+                if !x.original_stmts.is_empty() {
+                    for s in &x.original_stmts {
+                        s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                    }
+                } else {
+                    for &off in &x.output_offsets {
+                        if !off.is_ff() {
+                            push_scalar(off, None, size_map, fallback_size, out);
+                        }
+                    }
+                }
+            }
+            ProtoStatement::SystemFunctionCall(_)
+            | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::Break => {}
         }
     }
 
