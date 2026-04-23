@@ -1,6 +1,4 @@
 use directories::ProjectDirs;
-#[cfg(not(target_family = "wasm"))]
-use fs4::fs_std::FileExt;
 use log::debug;
 #[cfg(not(target_family = "wasm"))]
 use std::fs::File;
@@ -73,13 +71,13 @@ pub fn lock_dir<T: AsRef<Path>>(path: T) -> Result<File, PathError> {
     let base_dir = cache_path().join(path);
     let lock = base_dir.join("lock");
     let lock = File::create(lock)?;
-    lock.lock_exclusive()?;
+    fs4::FileExt::lock(&lock)?;
     Ok(lock)
 }
 
 #[cfg(not(target_family = "wasm"))]
 pub fn unlock_dir(lock: File) -> Result<(), PathError> {
-    fs4::fs_std::FileExt::unlock(&lock)?;
+    fs4::FileExt::unlock(&lock)?;
     Ok(())
 }
 
