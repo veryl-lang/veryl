@@ -1436,3 +1436,71 @@ fn tb_2d_packed_select() {
         );
     }
 }
+
+#[test]
+fn tb_multi_inst_distinct_params() {
+    // Regression for veryl-lang/veryl#2557.
+    let code = r#"
+    module Foo #(
+        param length: u32 = 32,
+    ) (
+        i: input  logic<length>,
+        o: output logic<length>,
+    ) {
+        assign o = i;
+    }
+
+    #[test(test_multi_inst)]
+    module test_multi_inst {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        var i_32: logic<32>;
+        var o_32: logic<32>;
+
+        var i_5: logic<5>;
+        var o_5: logic<5>;
+
+        inst foo_5: Foo #(
+            length: 5,
+        ) (
+            i: i_5,
+            o: o_5,
+        );
+
+        inst foo_32: Foo #(
+            length: 32,
+        ) (
+            i: i_32,
+            o: o_32,
+        );
+
+        initial {
+            rst.assert(clk);
+            i_32 = 'hFFFFFFFF;
+            i_5 = 'b11111;
+            clk.next(1);
+            $assert(o_5 == 'b11111, "Incorrect for 5-bit wide module");
+            $assert(o_32 == 'hFFFFFFFF, "Incorrect for 32-bit wide module");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_multi_inst");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_multi_inst_distinct_params failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

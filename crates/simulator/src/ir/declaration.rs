@@ -13,6 +13,8 @@ use crate::ir::variable::{ModuleVariableMeta, VarOffset, create_variable_meta};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use crate::simulator_error::SimulatorError;
 use std::collections::VecDeque;
+#[cfg(not(target_family = "wasm"))]
+use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
 
@@ -402,9 +404,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         if context.config.use_jit {
             let ff_start_bytes = ff_start;
             let comb_start_bytes = comb_start;
-            let module_name = child_module.name;
+            let component_key: *const air::Component = Arc::as_ptr(&src.component);
 
-            if let Some(cache_entry) = context.jit_cache.get(&module_name) {
+            if let Some(cache_entry) = context.jit_cache.get(&component_key) {
                 // Cache hit: replace internal logic with CompiledBlocks using delta
                 let ff_delta = ff_start_bytes - cache_entry.ref_ff_start_bytes;
                 let comb_delta = comb_start_bytes - cache_entry.ref_comb_start_bytes;
@@ -810,7 +812,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 };
 
                 context.jit_cache.insert(
-                    module_name,
+                    component_key,
                     JitCacheEntry {
                         ref_ff_start_bytes: ff_start_bytes,
                         ref_comb_start_bytes: comb_start_bytes,

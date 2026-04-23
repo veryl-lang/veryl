@@ -9,7 +9,7 @@ use crate::ir::event::Event;
 use crate::ir::statement::StmtDep;
 use crate::ir::variable::VarOffset;
 use crate::simulator_error::SimulatorError;
-use veryl_parser::resource_table::StrId;
+use veryl_analyzer::ir as air;
 
 pub struct ScopeContext {
     pub variable_meta: HashMap<VarId, VariableMeta>,
@@ -54,7 +54,9 @@ pub struct Context {
     pub ff_total_bytes: usize,
     pub comb_total_bytes: usize,
     pub pending_statements: Vec<ProtoStatement>,
-    pub jit_cache: HashMap<StrId, JitCacheEntry>,
+    /// Keyed by `Arc<Component>` pointer so that distinct parameter
+    /// specializations (distinct `Arc`s from the analyzer) do not collide.
+    pub jit_cache: HashMap<*const air::Component, JitCacheEntry>,
     pub expanding_functions: HashSet<VarId>,
     pub in_initial: bool,
 }
