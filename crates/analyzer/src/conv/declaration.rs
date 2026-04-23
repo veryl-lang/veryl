@@ -24,7 +24,9 @@ use crate::ir::{
     ValueVariant, VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::namespace::DefineContext;
-use crate::symbol::{ClockDomain, Direction, GenericBoundKind, SymbolKind, TbComponentKind};
+use crate::symbol::{
+    ClockDomain, Direction, GenericBoundKind, Symbol, SymbolKind, TbComponentKind,
+};
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::value::Value;
@@ -931,170 +933,21 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
         }
 
         if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
-            && let SymbolKind::Function(x) = &symbol.found.kind
+            && let SymbolKind::Function(_) = &symbol.found.kind
         {
-            let is_const = x.constantable.unwrap();
-            let ret_type = if let Some(x) = &x.ret {
-                let mut r#type = x.to_ir_type(context, TypePosition::Variable)?;
-                if r#type.is_struct() {
-                    r#type.set_concrete_width(Shape::new(vec![r#type.total_width()]));
-                    r#type.kind = if r#type.is_2state() {
-                        TypeKind::Bit
-                    } else {
-                        TypeKind::Logic
-                    };
-                }
-                Comptime::from_type(r#type, ClockDomain::None, token)
-            } else {
-                let r#type = ir::Type::new(TypeKind::Void);
-                Comptime::from_type(r#type, ClockDomain::None, token)
-            };
-
-            // insert VarPath for function before statement_block conv
-            // because it may be refered by recursive function
-            let (path, name, namespace) = if let Some(path) = path {
-                let name = resource_table::insert_str(&path.sig.to_string());
-                (path.clone(), name, path.sig.namespace())
-            } else {
-                let name = func_def.identifier.text();
-                let path = FuncPath::new(symbol.found.id);
-                (path, name, symbol.found.inner_namespace())
-            };
-
-            if context.func_paths.contains_key(&path) {
-                // The given function has already been added through function reference before definition.
-                return Ok(());
-            }
-
-            let token: TokenRange = symbol.found.token.into();
-            let id = context.insert_func_path(path.clone());
-
-            context.push_affiliation(Affiliation::Function);
-            context.push_hierarchy(name);
-            context.push_namespace(namespace);
-
-            let arg_items: Vec<_> = if let Some(x) = &func_def.function_declaration_opt0
-                && let Some(x) = &x.port_declaration.port_declaration_opt
-            {
-                x.port_declaration_list.as_ref().into()
-            } else {
-                vec![]
-            };
-            let arity = arg_items.len();
-            let mut arg_map = HashMap::default();
-            let mut args = vec![];
-
-            let body = context.block(|c| {
-                // insert return value as variable
-                let ret_id = if ret_type.r#type.kind != TypeKind::Void {
-                    let path = VarPath::new(get_return_str());
-                    let kind = VarKind::Variable;
-                    let r#type = ret_type.r#type.clone();
-
-                    if let Some(_total_array) = r#type.total_array()
-                        && let Some(total_width) = r#type.total_width()
-                    {
-                        // type.expand is not necessary
-                        // because member access is not allowed for return value
-                        // All elements are initialized to the same x-state
-                        // value, so a single template suffices.
-                        let values = vec![Value::new_x(total_width, false)];
-
-                        let ret_id = c.insert_var_path(path.clone(), ret_type.clone());
-                        let array_limit = c.config.evaluate_array_limit;
-                        let variable = Variable::new(
-                            ret_id,
-                            path,
-                            kind,
-                            r#type,
-                            values,
-                            c.get_affiliation(),
-                            &token,
-                            array_limit,
-                        );
-                        c.insert_variable(ret_id, variable);
-                        Some(ret_id)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                for item in arg_items {
-                    let _: IrResult<()> = Conv::conv(c, item);
-
-                    let name = item.identifier.text();
-                    let path = VarPath::new(name);
-                    if let Some((_, comptime)) = c.var_paths.get(&path).cloned() {
-                        let modport_members = comptime.r#type.expand_modport(c, &path, token)?;
-                        if modport_members.is_empty() {
-                            let mut members = vec![];
-                            if let Some((id, comptime)) = c.var_paths.get(&path).cloned() {
-                                let variable =
-                                    c.variables.get(&id).ok_or_else(|| ir_error!(token))?;
-                                let direction = match variable.kind {
-                                    VarKind::Input => Direction::Input,
-                                    VarKind::Output => Direction::Output,
-                                    _ => unreachable!(),
-                                };
-
-                                arg_map.insert(path.clone(), id);
-                                members.push((path.clone(), comptime, direction));
-                            }
-                            let arg = FuncArg {
-                                name: path.first(),
-                                comptime,
-                                members,
-                            };
-                            args.push(arg);
-                        } else {
-                            let mut members = vec![];
-                            for (path, direction) in modport_members {
-                                if let Some((id, comptime)) = c.var_paths.get(&path) {
-                                    arg_map.insert(path.clone(), *id);
-                                    members.push((path, comptime.clone(), direction));
-                                }
-                            }
-                            let arg = FuncArg {
-                                name: path.first(),
-                                comptime,
-                                members,
-                            };
-                            args.push(arg);
-                        }
-                    }
-                }
-
-                let statements: ir::StatementBlock =
-                    Conv::conv(c, func_def.statement_block.as_ref())?;
-                Ok(ir::FunctionBody {
-                    ret: ret_id,
-                    arg_map,
-                    statements: statements.0,
-                })
-            });
-
-            context.pop_affiliation();
-            context.pop_hierarchy();
-            context.pop_namespace();
-
-            let function = ir::Function {
-                name,
-                id,
+            let port_declaration = func_def
+                .function_declaration_opt0
+                .as_ref()
+                .map(|x| x.port_declaration.as_ref());
+            let statement_block = Some(func_def.statement_block.as_ref());
+            conv_function(
+                context,
                 path,
-                r#type: ret_type,
-                array: Shape::default(),
-                arity,
-                args,
-                is_const,
-                functions: vec![body?],
+                &symbol.found,
+                port_declaration,
+                statement_block,
                 token,
-            };
-
-            // function should be inserted outside the function scope
-            context.insert_function(id, function);
-            Ok(())
+            )
         } else {
             Err(ir_error!(token))
         }
@@ -1117,6 +970,212 @@ impl Conv<&FunctionDeclaration> for () {
             ret
         }
     }
+}
+
+impl Conv<(&ProtoFunctionDeclaration, Option<&FuncPath>)> for () {
+    fn conv(
+        context: &mut Context,
+        value: (&ProtoFunctionDeclaration, Option<&FuncPath>),
+    ) -> IrResult<Self> {
+        let (func_def, path) = value;
+        let token: TokenRange = (&func_def.identifier.identifier_token).into();
+
+        if let Some(x) = &func_def.proto_function_declaration_opt {
+            check_generic_bound(context, &x.with_generic_parameter);
+        }
+
+        if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
+            && let SymbolKind::ProtoFunction(_) = &symbol.found.kind
+        {
+            let port_declaration = func_def
+                .proto_function_declaration_opt0
+                .as_ref()
+                .map(|x| x.port_declaration.as_ref());
+            conv_function(context, path, &symbol.found, port_declaration, None, token)
+        } else {
+            Err(ir_error!(token))
+        }
+    }
+}
+
+fn conv_function(
+    context: &mut Context,
+    path: Option<&FuncPath>,
+    symbol: &Symbol,
+    port_declaratoin: Option<&PortDeclaration>,
+    statement_block: Option<&StatementBlock>,
+    token: TokenRange,
+) -> IrResult<()> {
+    // insert VarPath for function before statement_block conv
+    // because it may be refered by recursive function
+    let (path, name, namespace) = if let Some(path) = path {
+        let name = resource_table::insert_str(&path.sig.to_string());
+        (path.clone(), name, path.sig.namespace())
+    } else {
+        let path = FuncPath::new(symbol.id);
+        (path, symbol.token.text, symbol.inner_namespace())
+    };
+
+    if context.func_paths.contains_key(&path) {
+        // The given function has already been added through function reference before definition.
+        return Ok(());
+    }
+    let id = context.insert_func_path(path.clone());
+
+    let proeprty = match &symbol.kind {
+        SymbolKind::Function(x) => x,
+        SymbolKind::ProtoFunction(x) => x,
+        _ => unreachable!(),
+    };
+
+    let ret_type = if let Some(ret_type) = proeprty.ret.as_ref() {
+        let mut r#type = ret_type.to_ir_type(context, TypePosition::Variable)?;
+        if r#type.is_struct() {
+            r#type.set_concrete_width(Shape::new(vec![r#type.total_width()]));
+            r#type.kind = if r#type.is_2state() {
+                TypeKind::Bit
+            } else {
+                TypeKind::Logic
+            };
+        }
+        Comptime::from_type(r#type, ClockDomain::None, token)
+    } else {
+        let r#type = ir::Type::new(TypeKind::Void);
+        Comptime::from_type(r#type, ClockDomain::None, token)
+    };
+
+    let mut args = vec![];
+    let ports: Vec<_> = if let Some(port_declaratoin) = port_declaratoin
+        && let Some(ref x) = port_declaratoin.port_declaration_opt
+    {
+        x.port_declaration_list.as_ref().into()
+    } else {
+        vec![]
+    };
+    let arity = ports.len();
+
+    context.push_affiliation(Affiliation::Function);
+    context.push_hierarchy(name);
+    context.push_namespace(namespace);
+
+    let token: TokenRange = symbol.token.into();
+    let func = context.block(|c| {
+        let ret_id = if ret_type.r#type.kind != TypeKind::Void {
+            let path = VarPath::new(get_return_str());
+            let kind = VarKind::Variable;
+            let r#type = ret_type.r#type.clone();
+
+            // insert return value as variable
+            if let Some(_total_array) = r#type.total_array()
+                && let Some(total_width) = r#type.total_width()
+            {
+                // type.expand is not necessary
+                // because member access is not allowed for return value
+                // All elements are initialized to the same x-state
+                // value, so a single template suffices.
+                let values = vec![Value::new_x(total_width, false)];
+
+                let ret_id = c.insert_var_path(path.clone(), ret_type.clone());
+                let array_limit = c.config.evaluate_array_limit;
+                let variable = Variable::new(
+                    ret_id,
+                    path,
+                    kind,
+                    r#type,
+                    values,
+                    c.get_affiliation(),
+                    &token,
+                    array_limit,
+                );
+                c.insert_variable(ret_id, variable);
+                Some(ret_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let mut arg_map = HashMap::default();
+        for port in ports {
+            let _: IrResult<()> = Conv::conv(c, port);
+
+            let name = port.identifier.text();
+            let path = VarPath::new(name);
+            if let Some((_, comptime)) = c.var_paths.get(&path).cloned() {
+                let modport_members = comptime.r#type.expand_modport(c, &path, token)?;
+                if modport_members.is_empty() {
+                    let mut members = vec![];
+                    if let Some((id, comptime)) = c.var_paths.get(&path).cloned() {
+                        let variable = c.variables.get(&id).ok_or_else(|| ir_error!(token))?;
+                        let direction = match variable.kind {
+                            VarKind::Input => Direction::Input,
+                            VarKind::Output => Direction::Output,
+                            _ => unreachable!(),
+                        };
+
+                        arg_map.insert(path.clone(), id);
+                        members.push((path.clone(), comptime, direction));
+                    }
+                    let arg = FuncArg {
+                        name: path.first(),
+                        comptime,
+                        members,
+                    };
+                    args.push(arg);
+                } else {
+                    let mut members = vec![];
+                    for (path, direction) in modport_members {
+                        if let Some((id, comptime)) = c.var_paths.get(&path) {
+                            arg_map.insert(path.clone(), *id);
+                            members.push((path, comptime.clone(), direction));
+                        }
+                    }
+                    let arg = FuncArg {
+                        name: path.first(),
+                        comptime,
+                        members,
+                    };
+                    args.push(arg);
+                }
+            }
+        }
+
+        let body = if let Some(block) = statement_block {
+            let statements: ir::StatementBlock = Conv::conv(c, block)?;
+            vec![ir::FunctionBody {
+                ret: ret_id,
+                arg_map,
+                statements: statements.0,
+            }]
+        } else {
+            vec![]
+        };
+
+        Ok((args, body))
+    });
+
+    context.pop_affiliation();
+    context.pop_hierarchy();
+    context.pop_namespace();
+
+    let (args, body) = func?;
+    let func = ir::Function {
+        name,
+        id,
+        path,
+        r#type: ret_type,
+        array: Shape::default(),
+        arity,
+        args,
+        is_const: proeprty.constantable.unwrap(),
+        functions: body,
+        token,
+    };
+
+    // function should be inserted outside the function scope
+    context.insert_function(id, func);
+    Ok(())
 }
 
 impl Conv<&StructUnionDeclaration> for () {

@@ -2275,9 +2275,13 @@ fn proto_function() {
   input var0(a): unknown = 1'hx;
   input var1(b): unknown = 1'hx;
   output var2(r): logic = 1'hx;
+  var var4(E.gt.return): logic = 1'hx;
+  input var5(E.gt.a): unknown = 1'hx;
+  input var6(E.gt.b): unknown = 1'hx;
+
 
   comb {
-    var2 = unknown;
+    var2 = var3(a: var0, b: var1);
   }
 }
 module Top {

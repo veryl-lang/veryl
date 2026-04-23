@@ -76,7 +76,9 @@ impl Signature {
                 let resolved = context.resolve_path(path.clone());
                 let symbol = symbol_table::resolve(&resolved).ok()?;
                 match &symbol.found.kind {
-                    SymbolKind::Function(_) => Self::new(symbol.found.id),
+                    SymbolKind::Function(_) | SymbolKind::ProtoFunction(_) => {
+                        Self::new(symbol.found.id)
+                    }
                     _ => return None,
                 }
             }

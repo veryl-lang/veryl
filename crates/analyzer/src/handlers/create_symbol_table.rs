@@ -2492,6 +2492,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let range =
                     TokenRange::new(&arg.function.function_token, &arg.semicolon.semicolon_token);
 
+                let definition = definition_table::insert(Definition::ProtoFunction(arg.clone()));
                 let property = FunctionProperty {
                     affiliation,
                     range,
@@ -2502,7 +2503,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     ret,
                     reference_paths: vec![],
                     constantable: None,
-                    definition: None,
+                    definition: Some(definition),
                 };
 
                 if let Some(id) = self.insert_symbol(

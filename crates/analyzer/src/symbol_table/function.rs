@@ -9,23 +9,26 @@ pub fn resolve_function(list: &[Symbol]) {
 }
 
 fn resolve_constantable(symbol: &Symbol) -> bool {
-    if let SymbolKind::Function(func) = &symbol.kind
-        && let Some(constantable) = func.constantable
-    {
-        return constantable;
+    match &symbol.kind {
+        SymbolKind::Function(func) | SymbolKind::ProtoFunction(func) => {
+            if let Some(constantable) = func.constantable {
+                return constantable;
+            }
+        }
+        _ => {}
     }
 
-    let mut symbol = symbol.clone();
     let namespace = symbol.inner_namespace();
-    let SymbolKind::Function(mut func) = symbol.kind else {
-        unreachable!();
+    let mut symbol = symbol.clone();
+    let func = match &mut symbol.kind {
+        SymbolKind::Function(func) | SymbolKind::ProtoFunction(func) => func,
+        _ => unreachable!(),
     };
 
-    let constantable = is_constantable_function(&func, symbol.id, &namespace);
+    let constantable = is_constantable_function(func, symbol.id, &namespace);
     func.constantable = Some(constantable);
     func.reference_paths.clear();
 
-    symbol.kind = SymbolKind::Function(func);
     symbol_table::update(symbol);
 
     constantable

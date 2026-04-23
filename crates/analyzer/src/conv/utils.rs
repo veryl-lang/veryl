@@ -6,7 +6,7 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
-use crate::definition_table::{self, Definition};
+use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
     self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, Shape, ShapeRef,
     Signature, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind, VarPath, VarPathSelect,
@@ -1515,7 +1515,18 @@ pub fn eval_function_call(
                 x.is_const = true;
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
-            SymbolKind::ProtoFunction(_) => Err(ir_error!(token)),
+            SymbolKind::ProtoFunction(_) => {
+                if context.in_generic {
+                    let ret =
+                        function_call(context, value.expression_identifier.as_ref(), args, token)?;
+
+                    Ok(ir::Expression::Term(Box::new(ir::Factor::FunctionCall(
+                        ret,
+                    ))))
+                } else {
+                    Err(ir_error!(token))
+                }
+            }
             _ => {
                 let name = symbol.found.token.text.to_string();
                 let kind = symbol.found.kind.to_kind_name();
@@ -2630,10 +2641,24 @@ pub fn var_path_to_assign_destination(
 }
 
 fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> IrResult<FuncProto> {
+    fn conv_function(
+        context: &mut Context,
+        definition: DefinitionId,
+        path: &FuncPath,
+    ) -> IrResult<()> {
+        let definition = definition_table::get(definition).unwrap();
+        match &definition {
+            Definition::Function(x) => Conv::conv(context, (x, Some(path))),
+            Definition::ProtoFunction(x) => Conv::conv(context, (x, Some(path))),
+            _ => unreachable!(),
+        }
+    }
+
     if !context.func_paths.contains_key(path) {
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
         let (definition, is_global) = match &symbol.kind {
             SymbolKind::Function(x) => (x.definition.unwrap(), x.is_global()),
+            SymbolKind::ProtoFunction(x) => (x.definition.unwrap(), x.is_global()),
             SymbolKind::ModportFunctionMember(x) => {
                 let symbol = symbol_table::get(x.function).unwrap();
                 let SymbolKind::Function(x) = symbol.kind else {
@@ -2642,11 +2667,6 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
                 (x.definition.unwrap(), false)
             }
             _ => return Err(ir_error!(token)),
-        };
-
-        let definition = definition_table::get(definition).unwrap();
-        let Definition::Function(definition) = definition else {
-            unreachable!()
         };
 
         let array = if let Some((_, comptime)) = context.find_path(&path.path) {
@@ -2660,7 +2680,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             .map(|namespace| symbol.namespace.included(&namespace))
             .unwrap_or(false);
         if is_local_func {
-            let ret: IrResult<()> = Conv::conv(context, (&definition, Some(path)));
+            let ret = conv_function(context, definition, path);
             ret?;
         } else {
             let generic_arg_paths = if is_global {
@@ -2690,7 +2710,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
                 }
             }
 
-            let ret: IrResult<()> = Conv::conv(&mut local_context, (&definition, Some(path)));
+            let ret = conv_function(&mut local_context, definition, path);
 
             for path in &generic_arg_paths {
                 if let Some((var_id, _)) = local_context.var_paths.remove(path) {
