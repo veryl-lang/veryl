@@ -5,8 +5,11 @@ use crate::synthesizer_error::SynthesizerError;
 use std::mem;
 use veryl_analyzer::ir::Op;
 
-// sum  = a ^ b ^ cin
-// cout = a b + cin (a ^ b)
+// sum = a ^ b ^ cin,  cout = (a & b) | (cin & (a ^ b))
+//
+// Emitted as primitives (Xor2 / And2 / Or2) so worklist CSE can share the
+// inner ANDs across adjacent bits and Kogge-Stone prefix stages; postpass
+// then fuses any residual single-consumer `Or2(And2, And2)` into `Ao22`.
 fn full_adder(ctx: &mut ConvContext, a: NetId, b: NetId, cin: NetId) -> (NetId, NetId) {
     let a_xor_b = ctx.add_cell(CellKind::Xor2, vec![a, b]);
     let sum = ctx.add_cell(CellKind::Xor2, vec![a_xor_b, cin]);

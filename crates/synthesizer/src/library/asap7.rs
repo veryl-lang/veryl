@@ -102,6 +102,13 @@ impl CellLibrary for Asap7 {
                 leakage: 0.0937,
                 internal_energy: 0.0000443,
             },
+            // AO21x1: (A & B) | C.
+            CellKind::Ao21 => CellInfo {
+                area: 0.16200,
+                delay: 0.020,
+                leakage: 0.1500,
+                internal_energy: 0.0000575,
+            },
             // AOI21x1.
             CellKind::Aoi21 => CellInfo {
                 area: 0.11664,
@@ -109,12 +116,54 @@ impl CellLibrary for Asap7 {
                 leakage: 0.1270,
                 internal_energy: 0.0000507,
             },
+            // OA21x1: (A | B) & C.
+            CellKind::Oa21 => CellInfo {
+                area: 0.16200,
+                delay: 0.023,
+                leakage: 0.1520,
+                internal_energy: 0.0000590,
+            },
             // OAI21x1.
             CellKind::Oai21 => CellInfo {
                 area: 0.11664,
                 delay: 0.018,
                 leakage: 0.1401,
                 internal_energy: 0.0000514,
+            },
+            // AO31x1: (A & B & C) | D.
+            CellKind::Ao31 => CellInfo {
+                area: 0.18000,
+                delay: 0.022,
+                leakage: 0.1700,
+                internal_energy: 0.0000630,
+            },
+            // AOI31x1: !((A & B & C) | D).
+            CellKind::Aoi31 => CellInfo {
+                area: 0.13122,
+                delay: 0.015,
+                leakage: 0.1420,
+                internal_energy: 0.0000555,
+            },
+            // AO22x1: (A & B) | (C & D).
+            CellKind::Ao22 => CellInfo {
+                area: 0.21870,
+                delay: 0.017,
+                leakage: 0.2400,
+                internal_energy: 0.0000920,
+            },
+            // AOI22x1: !((A & B) | (C & D)).
+            CellKind::Aoi22 => CellInfo {
+                area: 0.14580,
+                delay: 0.014,
+                leakage: 0.1700,
+                internal_energy: 0.0000560,
+            },
+            // OAI22x1: !((A | B) & (C | D)).
+            CellKind::Oai22 => CellInfo {
+                area: 0.14580,
+                delay: 0.019,
+                leakage: 0.1780,
+                internal_energy: 0.0000570,
             },
             // Mux2 approximated by AOI22x1 (asap7 lacks a dedicated Mux2).
             CellKind::Mux2 => CellInfo {

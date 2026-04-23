@@ -101,6 +101,13 @@ impl CellLibrary for Gf180mcu {
                 leakage: 17.124,
                 internal_energy: 0.00785,
             },
+            // ao21_1: (A & B) | C.
+            CellKind::Ao21 => CellInfo {
+                area: 22.34,
+                delay: 0.942,
+                leakage: 20.420,
+                internal_energy: 0.00980,
+            },
             // aoi21_1.
             CellKind::Aoi21 => CellInfo {
                 area: 17.56,
@@ -108,12 +115,54 @@ impl CellLibrary for Gf180mcu {
                 leakage: 18.866,
                 internal_energy: 0.00822,
             },
+            // oa21_1: (A | B) & C.
+            CellKind::Oa21 => CellInfo {
+                area: 22.34,
+                delay: 0.995,
+                leakage: 20.780,
+                internal_energy: 0.01010,
+            },
             // oai21_1.
             CellKind::Oai21 => CellInfo {
                 area: 17.56,
                 delay: 0.712,
                 leakage: 19.503,
                 internal_energy: 0.00894,
+            },
+            // ao31_1: (A & B & C) | D.
+            CellKind::Ao31 => CellInfo {
+                area: 24.86,
+                delay: 1.050,
+                leakage: 22.700,
+                internal_energy: 0.01100,
+            },
+            // aoi31_1: !((A & B & C) | D).
+            CellKind::Aoi31 => CellInfo {
+                area: 20.87,
+                delay: 0.820,
+                leakage: 20.100,
+                internal_energy: 0.00960,
+            },
+            // ao22_1: (A & B) | (C & D).
+            CellKind::Ao22 => CellInfo {
+                area: 31.59,
+                delay: 1.032,
+                leakage: 34.250,
+                internal_energy: 0.01520,
+            },
+            // aoi22_1: !((A & B) | (C & D)).
+            CellKind::Aoi22 => CellInfo {
+                area: 23.34,
+                delay: 0.820,
+                leakage: 25.400,
+                internal_energy: 0.01080,
+            },
+            // oai22_1: !((A | B) & (C | D)).
+            CellKind::Oai22 => CellInfo {
+                area: 23.34,
+                delay: 0.845,
+                leakage: 25.900,
+                internal_energy: 0.01150,
             },
             // mux2_1.
             CellKind::Mux2 => CellInfo {

@@ -101,6 +101,13 @@ impl CellLibrary for IhpSg13g2 {
                 leakage: 0.0951,
                 internal_energy: 0.00490,
             },
+            // sg13g2_a21o_1: (A & B) | C.
+            CellKind::Ao21 => CellInfo {
+                area: 13.608,
+                delay: 0.510,
+                leakage: 0.1380,
+                internal_energy: 0.00480,
+            },
             // sg13g2_a21oi_1.
             CellKind::Aoi21 => CellInfo {
                 area: 9.072,
@@ -108,12 +115,54 @@ impl CellLibrary for IhpSg13g2 {
                 leakage: 0.1145,
                 internal_energy: 0.00372,
             },
+            // sg13g2_o21a_1: (A | B) & C.
+            CellKind::Oa21 => CellInfo {
+                area: 13.608,
+                delay: 0.520,
+                leakage: 0.1420,
+                internal_energy: 0.00495,
+            },
             // sg13g2_o21ai_1.
             CellKind::Oai21 => CellInfo {
                 area: 9.072,
                 delay: 0.476,
                 leakage: 0.1266,
                 internal_energy: 0.00474,
+            },
+            // sg13g2_a31o_1: (A & B & C) | D.
+            CellKind::Ao31 => CellInfo {
+                area: 15.876,
+                delay: 0.555,
+                leakage: 0.1590,
+                internal_energy: 0.00560,
+            },
+            // sg13g2_a31oi_1: !((A & B & C) | D).
+            CellKind::Aoi31 => CellInfo {
+                area: 12.096,
+                delay: 0.489,
+                leakage: 0.1310,
+                internal_energy: 0.00430,
+            },
+            // sg13g2_a22o_1: (A & B) | (C & D).
+            CellKind::Ao22 => CellInfo {
+                area: 16.329,
+                delay: 0.495,
+                leakage: 0.2100,
+                internal_energy: 0.00700,
+            },
+            // sg13g2_a22oi_1: !((A & B) | (C & D)).
+            CellKind::Aoi22 => CellInfo {
+                area: 12.700,
+                delay: 0.405,
+                leakage: 0.1720,
+                internal_energy: 0.00510,
+            },
+            // sg13g2_o22ai_1: !((A | B) & (C | D)).
+            CellKind::Oai22 => CellInfo {
+                area: 12.700,
+                delay: 0.435,
+                leakage: 0.1800,
+                internal_energy: 0.00540,
             },
             // sg13g2_mux2_1.
             CellKind::Mux2 => CellInfo {

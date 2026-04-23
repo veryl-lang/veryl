@@ -175,10 +175,25 @@ impl ConvContext {
             }
 
             let name = v.path.first();
-            let mut nets = Vec::with_capacity(width);
-            for bit in 0..width {
-                nets.push(self.alloc_net(Some((name, bit))));
-            }
+            // Params/Consts with a resolved numeric value tie straight to the
+            // CONST0/CONST1 rails — otherwise their nets stay undriven and
+            // every expression reading them emits runtime logic.
+            let const_bits = if matches!(v.kind, VarKind::Param | VarKind::Const) {
+                param_const_bits(v, scalar_width, element_count)
+            } else {
+                None
+            };
+            let nets = if let Some(bits) = const_bits {
+                bits.into_iter()
+                    .map(|b| if b { NET_CONST1 } else { NET_CONST0 })
+                    .collect()
+            } else {
+                let mut nets = Vec::with_capacity(width);
+                for bit in 0..width {
+                    nets.push(self.alloc_net(Some((name, bit))));
+                }
+                nets
+            };
 
             self.variables.insert(
                 v.id,
@@ -314,6 +329,11 @@ impl ConvContext {
                     });
                 }
                 for vid in assigned {
+                    // First block touching the var owns its FF bank;
+                    // later blocks writing disjoint bits share it.
+                    if self.ff_allocation.contains_key(&vid) {
+                        continue;
+                    }
                     let width = match self.variables.get(&vid) {
                         Some(s) => s.width,
                         None => continue,
@@ -327,8 +347,9 @@ impl ConvContext {
                             clock: clock_net,
                             clock_edge,
                             reset: reset_spec.clone(),
-                            // D is wired up after the FF body is synthesized.
-                            d: 0,
+                            // D = Q keeps bits no one writes on hold
+                            // (eliminate_dq_ffs later collapses them).
+                            d: q,
                             q,
                             reset_value: false,
                             clock_domain,
@@ -423,9 +444,18 @@ impl ConvContext {
                         Some(p) => p.ff_indices.clone(),
                         None => continue,
                     };
+                    let hold_nets = match self.variables.get(&vid) {
+                        Some(s) => s.nets.clone(),
+                        None => continue,
+                    };
+                    // Skip bits this block didn't touch (D still equals Q
+                    // from init_current_ff) so a sibling always_ff writing
+                    // disjoint bits of the same var isn't overwritten.
                     for (bit, ff_idx) in pre.iter().enumerate() {
                         let d = nets[bit];
-                        self.ffs[*ff_idx].d = d;
+                        if d != hold_nets[bit] {
+                            self.ffs[*ff_idx].d = d;
+                        }
                     }
                 }
                 Ok(())
@@ -645,16 +675,27 @@ impl ConvContext {
         // scanning the whole cell list every outer iteration. Drops outer
         // iteration count from ~1000 to a small handful for designs with
         // long alias chains (carry rings, Kogge-Stone prefix networks).
-        loop {
-            let before_cells = gate.cells.len();
-            let before_ffs = gate.ffs.len();
-            worklist_simplify(&mut gate);
-            eliminate_dq_ffs(&mut gate);
-            if gate.cells.len() == before_cells && gate.ffs.len() == before_ffs {
-                break;
-            }
-        }
+        converge_simplify(&mut gate);
         dead_cell_elimination(&mut gate);
+
+        // Opt-in AIG structural rewrite (see `crate::aig`). Off by default
+        // because it regresses on some designs; `VERYL_AIG_ROUNDTRIP=1`
+        // skips the rewrite for structural-equivalence sanity checks.
+        #[cfg(feature = "aig")]
+        {
+            use crate::aig::{convert, rewrite, techmap};
+            let roundtrip_only = std::env::var("VERYL_AIG_ROUNDTRIP").is_ok();
+            let mut aig = convert::aigify(&gate);
+            if roundtrip_only {
+                gate = convert::aig_to_cells(&aig, &gate);
+            } else {
+                aig = rewrite::rewrite(&aig);
+                gate = techmap::aig_to_cells_techmap(&aig, &gate);
+            }
+            converge_simplify(&mut gate);
+            dead_cell_elimination(&mut gate);
+        }
+
         // Technology-style rewrite: fuse 2-input primitives into sky130
         // compound cells when the upstream has exactly one live consumer.
         // Runs after DCE so the consumer counts are clean (no stale dead
@@ -663,6 +704,21 @@ impl ConvContext {
         complex_gate_replacement(&mut gate);
         dead_cell_elimination(&mut gate);
         Ok(gate)
+    }
+}
+
+/// Iterate `worklist_simplify` + `eliminate_dq_ffs` until both stabilise.
+/// Each simplify pass can surface new DQ-only FFs; eliminating an FF can
+/// expose fresh constant-propagation opportunities for the next simplify.
+fn converge_simplify(gate: &mut GateModule) {
+    loop {
+        let before_cells = gate.cells.len();
+        let before_ffs = gate.ffs.len();
+        worklist_simplify(gate);
+        eliminate_dq_ffs(gate);
+        if gate.cells.len() == before_cells && gate.ffs.len() == before_ffs {
+            break;
+        }
     }
 }
 
@@ -877,4 +933,37 @@ fn eval_constant_bits(expr: &air::Expression, width: usize) -> Option<Vec<bool>>
         return Some(bits);
     }
     None
+}
+
+/// Bit-pattern for a Param/Const variable whose analyzer value is a
+/// concrete numeric literal. Returns `None` for x/z, strings, or types —
+/// those fall back to allocating regular nets.
+fn param_const_bits(
+    v: &air::Variable,
+    scalar_width: usize,
+    element_count: usize,
+) -> Option<Vec<bool>> {
+    if v.value.is_empty() {
+        return None;
+    }
+    let total = scalar_width * element_count;
+    let mut bits = Vec::with_capacity(total);
+    // A single-entry `value` vec is the "one template applies to every
+    // element" shape the analyzer uses for uniform-init arrays.
+    let single = v.value.len() == 1;
+    for idx in 0..element_count {
+        let val = if single {
+            &v.value[0]
+        } else {
+            v.value.get(idx)?
+        };
+        if val.is_xz() {
+            return None;
+        }
+        let payload = val.payload();
+        for i in 0..scalar_width {
+            bits.push(payload.bit(i as u64));
+        }
+    }
+    Some(bits)
 }

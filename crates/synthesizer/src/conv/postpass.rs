@@ -628,6 +628,8 @@ fn try_complex_fuse(
             CellKind::Or3 => Some(CellKind::Nor3),
             CellKind::Nand3 => Some(CellKind::And3),
             CellKind::Nor3 => Some(CellKind::Or3),
+            // Not(Ao22) ≡ Aoi22 — inherit the 4-input operand list.
+            CellKind::Ao22 => Some(CellKind::Aoi22),
             _ => None,
         };
         return fused.map(|k| (k, up.inputs.clone()));
@@ -637,10 +639,21 @@ fn try_complex_fuse(
         match (outer, inner) {
             (CellKind::Nor2, CellKind::And2) => Some(CellKind::Aoi21),
             (CellKind::Nand2, CellKind::Or2) => Some(CellKind::Oai21),
+            // Non-inverted counterparts — fuse when a plain Or2 / And2
+            // sits on top of an And2 / Or2 single-consumer leg. Emits
+            // sky130 a21o / o21a (and equivalents) that save a cell vs
+            // the two-gate primitive form.
+            (CellKind::Or2, CellKind::And2) => Some(CellKind::Ao21),
+            (CellKind::And2, CellKind::Or2) => Some(CellKind::Oa21),
             (CellKind::And2, CellKind::And2) => Some(CellKind::And3),
             (CellKind::Or2, CellKind::Or2) => Some(CellKind::Or3),
             (CellKind::Nand2, CellKind::And2) => Some(CellKind::Nand3),
             (CellKind::Nor2, CellKind::Or2) => Some(CellKind::Nor3),
+            // 3-input AND feeding an Or → sky130 a31o (Ao31). Nor version
+            // gives Aoi31. Both save one cell over the Or2(And3, C) chain
+            // and match a common decoder-output shape.
+            (CellKind::Or2, CellKind::And3) => Some(CellKind::Ao31),
+            (CellKind::Nor2, CellKind::And3) => Some(CellKind::Aoi31),
             _ => None,
         }
     };
@@ -650,6 +663,43 @@ fn try_complex_fuse(
     ) {
         return None;
     }
+
+    // 2-pivot compound-cell fusions where both legs must be single-consumer
+    // cells (otherwise we'd duplicate their logic inside the compound). The
+    // outer kind selects which inner shape and which compound cell to emit:
+    //   Or2   with And2 legs → Ao22   ((A&B) | (C&D))
+    //   Nor2  with And2 legs → Aoi22  (!((A&B) | (C&D)))
+    //   Nand2 with Or2  legs → Oai22  (!((A|B) & (C|D)))
+    let two_pivot = match kind {
+        CellKind::Or2 => Some((CellKind::And2, CellKind::Ao22)),
+        CellKind::Nor2 => Some((CellKind::And2, CellKind::Aoi22)),
+        CellKind::Nand2 => Some((CellKind::Or2, CellKind::Oai22)),
+        _ => None,
+    };
+    if let Some((leg_kind, compound)) = two_pivot {
+        let lhs = inputs[0];
+        let rhs = inputs[1];
+        if consumer_count[lhs as usize] == 1
+            && consumer_count[rhs as usize] == 1
+            && let NetDriver::Cell(lhs_idx) = module.nets[lhs as usize].driver
+            && let NetDriver::Cell(rhs_idx) = module.nets[rhs as usize].driver
+        {
+            let lhs_cell = &module.cells[lhs_idx];
+            let rhs_cell = &module.cells[rhs_idx];
+            if lhs_cell.kind == leg_kind && rhs_cell.kind == leg_kind {
+                return Some((
+                    compound,
+                    vec![
+                        lhs_cell.inputs[0],
+                        lhs_cell.inputs[1],
+                        rhs_cell.inputs[0],
+                        rhs_cell.inputs[1],
+                    ],
+                ));
+            }
+        }
+    }
+
     for (pivot, other) in [(0usize, 1usize), (1, 0)] {
         let up_net = inputs[pivot];
         if consumer_count[up_net as usize] != 1 {
@@ -660,7 +710,13 @@ fn try_complex_fuse(
         };
         let up = &module.cells[up_idx];
         if let Some(new_kind) = rewrite(kind, up.kind) {
-            return Some((new_kind, vec![up.inputs[0], up.inputs[1], inputs[other]]));
+            // Flatten: inner cell's inputs come first, then the other
+            // operand of the outer cell. Works for 3-input compounds
+            // (up = And2 / Or2, arity 2+1=3) as well as 4-input Ao31/
+            // Aoi31 (up = And3, arity 3+1=4).
+            let mut new_inputs = up.inputs.clone();
+            new_inputs.push(inputs[other]);
+            return Some((new_kind, new_inputs));
         }
     }
 

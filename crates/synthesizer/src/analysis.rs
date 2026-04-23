@@ -323,7 +323,7 @@ impl TimingReport {
                     }
                 } else if is_last {
                     match &step.kind {
-                        StepKind::FfInput(_) => "(FF D, +setup)".to_string(),
+                        StepKind::FfInput(_) => "(FF D)".to_string(),
                         _ => "(output)".to_string(),
                     }
                 } else {
@@ -426,11 +426,14 @@ pub fn compute_timing_top_n(
         }
     }
 
-    // FF D pins pay an extra setup cost on top of their arrival; primary outputs don't.
+    // Report the longest combinational arrival at each endpoint. Matches
+    // the methodology ABC / other netlist-level STA tools use (FFs treated
+    // as IOs with arrival = 0, no setup added). Users wanting a cycle-time
+    // figure compose `critical_path_delay + ff_setup() + clk_to_q` outside.
     let mut endpoints: Vec<(f64, usize, Endpoint, NetId)> = Vec::new();
     for (i, ff) in module.ffs.iter().enumerate() {
         let d = ff.d as usize;
-        let t = arrival[d] + library.ff_setup();
+        let t = arrival[d];
         endpoints.push((t, depth[d], Endpoint::Ff(i), ff.d));
     }
     for port in &module.ports {

@@ -454,6 +454,51 @@ fn array_register_file_ff() {
 }
 
 #[test]
+fn disjoint_bit_writes_across_always_ff_blocks() {
+    // Two always_ff blocks write disjoint bits of the same vector. Each
+    // bit must retain the D cone from its owning block — previously the
+    // later block's hold-D silently overwrote the earlier block's real
+    // assignment (regression guard for a silent miscompile).
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            a:   input  logic,
+            b:   input  logic,
+            q:   output logic<2>,
+        ) {
+            var r: logic<2>;
+            always_ff (clk, rst) {
+                if_reset {
+                    r[0] = 0;
+                } else {
+                    r[0] = a;
+                }
+            }
+            always_ff (clk, rst) {
+                if_reset {
+                    r[1] = 0;
+                } else {
+                    r[1] = b;
+                }
+            }
+            always_comb {
+                q = r;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let ffs = &result.gate_ir.module.ffs;
+    assert_eq!(ffs.len(), 2, "two FFs expected (r[0] and r[1])");
+    // D == Q would mean the FF holds forever — i.e. the block's real
+    // assignment got overwritten.
+    for ff in ffs {
+        assert_ne!(ff.d, ff.q);
+    }
+}
+
+#[test]
 fn multidim_array_static_index() {
     let code = r#"
         module Top (
@@ -1258,7 +1303,9 @@ fn enum_state_machine() {
 }
 
 #[test]
-fn case_statement_decodes_to_mux() {
+fn case_statement_decodes_to_sop() {
+    // The case-fold pass should rewrite the Mux2 cascade as shared match
+    // signals OR'd per bit (no Mux2 cells survive).
     let code = r#"
         module Top (
             sel: input  logic<2>,
@@ -1286,9 +1333,20 @@ fn case_statement_decodes_to_mux() {
         .iter()
         .filter(|c| c.kind == CellKind::Mux2)
         .count();
-    // 3 non-default cases select across 4 bits through a Mux2 chain: each bit
-    // needs 3 Mux2 (one per non-default branch) = 12.
-    assert_eq!(mux_count, 12, "expected 12 Mux2 cells for 4-way case");
+    let and_count = gate
+        .module
+        .cells
+        .iter()
+        .filter(|c| c.kind == CellKind::And2)
+        .count();
+    assert_eq!(mux_count, 0, "case fold should eliminate Mux2 cascades");
+    // Per-arm match signals produce at least a few AND2s — exact count
+    // depends on worklist simplifications.
+    assert!(
+        and_count >= 3,
+        "expected AND-OR SOP (got {} and2)",
+        and_count
+    );
 }
 
 #[test]
@@ -1752,25 +1810,33 @@ fn boolean_distribution_factors_or_of_and() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let and2 = gate
-        .module
-        .cells
+    // Distribution rewrites `(x & a) | (x & b)` to `x & (a | b)`; the
+    // post-pass then fuses the final `And2(Or2, x)` into a single Oa21
+    // (= `(A | B) & C`). Either way the cell count is ≤ 2 and there are
+    // no Ao22 / Aoi22 survivors (both arms collapse).
+    let cells = &gate.module.cells;
+    let logic_cells = cells
         .iter()
-        .filter(|c| c.kind == CellKind::And2)
+        .filter(|c| !matches!(c.kind, CellKind::Buf))
         .count();
-    let or2 = gate
-        .module
-        .cells
+    assert!(
+        logic_cells <= 2,
+        "distributed + fused form should be ≤ 2 cells, got {}",
+        logic_cells
+    );
+    let ao_family_count = cells
         .iter()
-        .filter(|c| c.kind == CellKind::Or2)
+        .filter(|c| matches!(c.kind, CellKind::Ao22 | CellKind::Aoi22))
         .count();
-    assert_eq!(and2, 1, "distributed form has 1 And2");
-    assert_eq!(or2, 1, "inner arm becomes Or2(a, b)");
+    assert_eq!(
+        ao_family_count, 0,
+        "distribution keeps the factored form; no 2-pivot compound expected"
+    );
 }
 
 #[test]
 fn boolean_distribution_factors_and_of_or() {
-    // Dual: `(x | a) & (x | b)` → `x | (a & b)`.
+    // Dual: `(x | a) & (x | b)` → `x | (a & b)`, then fuses into Ao21.
     let code = r#"
         module Top (
             x: input  logic,
@@ -1783,20 +1849,21 @@ fn boolean_distribution_factors_and_of_or() {
     "#;
     let (ir, top) = analyze(code, "Top");
     let gate = build_gate_ir(&ir, top).expect("synthesize");
-    let and2 = gate
-        .module
-        .cells
+    let cells = &gate.module.cells;
+    let logic_cells = cells
         .iter()
-        .filter(|c| c.kind == CellKind::And2)
+        .filter(|c| !matches!(c.kind, CellKind::Buf))
         .count();
-    let or2 = gate
-        .module
-        .cells
+    assert!(
+        logic_cells <= 2,
+        "distributed + fused form should be ≤ 2 cells, got {}",
+        logic_cells
+    );
+    let compound_22 = cells
         .iter()
-        .filter(|c| c.kind == CellKind::Or2)
+        .filter(|c| matches!(c.kind, CellKind::Ao22 | CellKind::Aoi22 | CellKind::Oai22))
         .count();
-    assert_eq!(and2, 1);
-    assert_eq!(or2, 1);
+    assert_eq!(compound_22, 0);
 }
 
 #[test]

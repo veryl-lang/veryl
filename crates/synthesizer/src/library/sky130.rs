@@ -101,6 +101,13 @@ impl CellLibrary for Sky130 {
                 leakage: 0.14,
                 internal_energy: 0.0065,
             },
+            // sky130_fd_sc_hd__a21o_1: (A & B) | C.
+            CellKind::Ao21 => CellInfo {
+                area: 7.50,
+                delay: 0.08,
+                leakage: 0.20,
+                internal_energy: 0.0085,
+            },
             // sky130_fd_sc_hd__a21oi_1.
             CellKind::Aoi21 => CellInfo {
                 area: 5.00,
@@ -108,12 +115,54 @@ impl CellLibrary for Sky130 {
                 leakage: 0.15,
                 internal_energy: 0.0070,
             },
+            // sky130_fd_sc_hd__o21a_1: (A | B) & C.
+            CellKind::Oa21 => CellInfo {
+                area: 7.50,
+                delay: 0.10,
+                leakage: 0.19,
+                internal_energy: 0.0088,
+            },
             // sky130_fd_sc_hd__o21ai_0.
             CellKind::Oai21 => CellInfo {
                 area: 5.00,
                 delay: 0.04,
                 leakage: 0.14,
                 internal_energy: 0.0072,
+            },
+            // sky130_fd_sc_hd__a31o_1: (A & B & C) | D.
+            CellKind::Ao31 => CellInfo {
+                area: 8.75,
+                delay: 0.10,
+                leakage: 0.24,
+                internal_energy: 0.0095,
+            },
+            // sky130_fd_sc_hd__a31oi_1: !((A & B & C) | D).
+            CellKind::Aoi31 => CellInfo {
+                area: 6.25,
+                delay: 0.06,
+                leakage: 0.20,
+                internal_energy: 0.0082,
+            },
+            // sky130_fd_sc_hd__a22o_1: (A & B) | (C & D).
+            CellKind::Ao22 => CellInfo {
+                area: 11.25,
+                delay: 0.10,
+                leakage: 0.28,
+                internal_energy: 0.0090,
+            },
+            // sky130_fd_sc_hd__a22oi_1: !((A & B) | (C & D)).
+            CellKind::Aoi22 => CellInfo {
+                area: 7.50,
+                delay: 0.08,
+                leakage: 0.24,
+                internal_energy: 0.0082,
+            },
+            // sky130_fd_sc_hd__o22ai_1: !((A | B) & (C | D)).
+            CellKind::Oai22 => CellInfo {
+                area: 7.50,
+                delay: 0.08,
+                leakage: 0.22,
+                internal_energy: 0.0085,
             },
             // sky130_fd_sc_hd__mux2_1.
             CellKind::Mux2 => CellInfo {

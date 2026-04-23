@@ -19,6 +19,13 @@ veryl-analyzer = {version = "0.19.1", path = "../analyzer"}
 veryl-metadata = {version = "0.19.1", path = "../metadata"}
 veryl-parser   = {version = "0.19.1", path = "../parser"}
 
+[features]
+# Enables the experimental AIG-based structural rewrite + tech-map pass.
+# Off by default: the pass improves some designs (heliodor alu -34% area)
+# but regresses others and increases build time. Kept behind a flag for
+# offline experimentation.
+aig = []
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 miette = {workspace = true, features = ["fancy-no-syscall"]}
 

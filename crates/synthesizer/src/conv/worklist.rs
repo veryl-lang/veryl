@@ -24,10 +24,10 @@ pub(super) fn resolve_alias(module: &GateModule, mut net: NetId) -> NetId {
 /// Returns the canonical CSE key for a cell, or `None` for Buf cells (which
 /// we don't dedup). Commutative gates get sorted input pairs so that `a & b`
 /// and `b & a` hash the same; Mux keeps its (sel, d0, d1) order.
-fn cse_key(kind: CellKind, inputs: &[NetId]) -> Option<(CellKind, [NetId; 3])> {
+fn cse_key(kind: CellKind, inputs: &[NetId]) -> Option<(CellKind, [NetId; 4])> {
     match kind {
         CellKind::Buf => None,
-        CellKind::Not => Some((kind, [inputs[0], CSE_PAD, CSE_PAD])),
+        CellKind::Not => Some((kind, [inputs[0], CSE_PAD, CSE_PAD, CSE_PAD])),
         CellKind::And2
         | CellKind::Or2
         | CellKind::Nand2
@@ -36,21 +36,59 @@ fn cse_key(kind: CellKind, inputs: &[NetId]) -> Option<(CellKind, [NetId; 3])> {
         | CellKind::Xnor2 => {
             let (a, b) = (inputs[0], inputs[1]);
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            Some((kind, [lo, hi, CSE_PAD]))
+            Some((kind, [lo, hi, CSE_PAD, CSE_PAD]))
         }
         CellKind::And3 | CellKind::Or3 | CellKind::Nand3 | CellKind::Nor3 => {
             let mut s = [inputs[0], inputs[1], inputs[2]];
             s.sort();
-            Some((kind, s))
+            Some((kind, [s[0], s[1], s[2], CSE_PAD]))
         }
         // The first two inputs are the AND/OR leg (commutative); the third
-        // is the odd leg and keeps its position.
-        CellKind::Aoi21 | CellKind::Oai21 => {
+        // is the odd leg and keeps its position. Shared by inverted (Aoi21
+        // / Oai21) and non-inverted (Ao21 / Oa21) variants.
+        CellKind::Ao21 | CellKind::Aoi21 | CellKind::Oa21 | CellKind::Oai21 => {
             let (a, b) = (inputs[0], inputs[1]);
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            Some((kind, [lo, hi, inputs[2]]))
+            Some((kind, [lo, hi, inputs[2], CSE_PAD]))
         }
-        CellKind::Mux2 => Some((kind, [inputs[0], inputs[1], inputs[2]])),
+        // Two commutative AND pairs, and the pairs themselves commute:
+        //   (A&B) | (C&D) == (C&D) | (A&B) == (B&A) | (D&C) ...
+        // Canonicalize each pair internally, then order the pairs. Shared
+        // by Ao22 / Aoi22 (same fan-in shape, different polarity).
+        CellKind::Ao22 | CellKind::Aoi22 => {
+            let (a, b) = (inputs[0], inputs[1]);
+            let (c, d) = (inputs[2], inputs[3]);
+            let (a, b) = if a <= b { (a, b) } else { (b, a) };
+            let (c, d) = if c <= d { (c, d) } else { (d, c) };
+            let ((a1, b1), (c1, d1)) = if (a, b) <= (c, d) {
+                ((a, b), (c, d))
+            } else {
+                ((c, d), (a, b))
+            };
+            Some((kind, [a1, b1, c1, d1]))
+        }
+        // Oai22 uses two OR pairs — same commutativity properties.
+        CellKind::Oai22 => {
+            let (a, b) = (inputs[0], inputs[1]);
+            let (c, d) = (inputs[2], inputs[3]);
+            let (a, b) = if a <= b { (a, b) } else { (b, a) };
+            let (c, d) = if c <= d { (c, d) } else { (d, c) };
+            let ((a1, b1), (c1, d1)) = if (a, b) <= (c, d) {
+                ((a, b), (c, d))
+            } else {
+                ((c, d), (a, b))
+            };
+            Some((kind, [a1, b1, c1, d1]))
+        }
+        // Ao31 / Aoi31 = ((A & B & C) | D) [inverted for Aoi31]. The AND
+        // leg's three inputs are freely commutative; the odd leg keeps its
+        // slot. Sort the AND triple for a canonical key.
+        CellKind::Ao31 | CellKind::Aoi31 => {
+            let mut s = [inputs[0], inputs[1], inputs[2]];
+            s.sort();
+            Some((kind, [s[0], s[1], s[2], inputs[3]]))
+        }
+        CellKind::Mux2 => Some((kind, [inputs[0], inputs[1], inputs[2], CSE_PAD])),
     }
 }
 
@@ -141,9 +179,101 @@ fn simplify(kind: CellKind, iv: &[Option<bool>], nets: &[NetId]) -> Option<Simpl
         CellKind::Or3 => simpl_absorb_3(iv, nets, AbsorbParams::OR),
         CellKind::Nand3 => simpl_absorb_3(iv, nets, AbsorbParams::NAND),
         CellKind::Nor3 => simpl_absorb_3(iv, nets, AbsorbParams::NOR),
+        CellKind::Ao21 => simpl_ao_family(iv, nets, true),
         CellKind::Aoi21 => simpl_aoi_family(iv, nets, true),
+        CellKind::Oa21 => simpl_ao_family(iv, nets, false),
         CellKind::Oai21 => simpl_aoi_family(iv, nets, false),
+        CellKind::Ao31 => simpl_ao31(iv, nets, false),
+        CellKind::Aoi31 => simpl_ao31(iv, nets, true),
+        CellKind::Ao22 => simpl_ao22(iv, nets),
+        // Aoi22 / Oai22 share Ao22's structural shape — reuse its folder
+        // and invert (Aoi22) or De-Morgan-dualise (Oai22) the result.
+        CellKind::Aoi22 => simpl_ao22(iv, nets).map(invert_simpl),
+        CellKind::Oai22 => simpl_oai22(iv, nets),
     }
+}
+
+/// Flip a Simpl result so `Simpl::Const(v)` → `Const(!v)`, `Alias(n)` →
+/// `Invert(n)`, `Invert(n)` → `Alias(n)`. Used by Aoi22 which is just !Ao22.
+fn invert_simpl(s: Simpl) -> Simpl {
+    match s {
+        Simpl::Const(v) => Simpl::Const(!v),
+        Simpl::Alias(n) => Simpl::Invert(n),
+        Simpl::Invert(n) => Simpl::Alias(n),
+    }
+}
+
+/// Oai22 = !((A | B) & (C | D)). Dual of Ao22: either OR pair reaching 0
+/// forces output to 1; both pairs at 1 forces output to 0. A single-net
+/// alias is only possible when one pair is fully 0 (forced AND of two OR
+/// terms = AND of a single literal) — extremely rare; we leave the tree
+/// alone in that case.
+fn simpl_oai22(iv: &[Option<bool>], nets: &[NetId]) -> Option<Simpl> {
+    let ab_zero = iv[0] == Some(false) && iv[1] == Some(false);
+    let cd_zero = iv[2] == Some(false) && iv[3] == Some(false);
+    if ab_zero || cd_zero {
+        return Some(Simpl::Const(true));
+    }
+    let ab_one = iv[0] == Some(true)
+        || iv[1] == Some(true)
+        || nets[0] == NET_CONST1
+        || nets[1] == NET_CONST1;
+    let cd_one = iv[2] == Some(true)
+        || iv[3] == Some(true)
+        || nets[2] == NET_CONST1
+        || nets[3] == NET_CONST1;
+    if ab_one && cd_one {
+        return Some(Simpl::Const(false));
+    }
+    None
+}
+
+/// Ao22 = (A & B) | (C & D). Either AND pair reaching 1 forces output to 1;
+/// both pairs forced to 0 forces output to 0. If one pair is known 0 (e.g.
+/// A=0 or B=0), the output reduces to the other pair's AND.
+fn simpl_ao22(iv: &[Option<bool>], nets: &[NetId]) -> Option<Simpl> {
+    let ab_one = iv[0] == Some(true) && iv[1] == Some(true);
+    let cd_one = iv[2] == Some(true) && iv[3] == Some(true);
+    if ab_one || cd_one {
+        return Some(Simpl::Const(true));
+    }
+    let ab_zero = iv[0] == Some(false)
+        || iv[1] == Some(false)
+        || nets[0] == NET_CONST0
+        || nets[1] == NET_CONST0;
+    let cd_zero = iv[2] == Some(false)
+        || iv[3] == Some(false)
+        || nets[2] == NET_CONST0
+        || nets[3] == NET_CONST0;
+    if ab_zero && cd_zero {
+        return Some(Simpl::Const(false));
+    }
+    // Leaves AB: CD is zero so output = AB. But AB itself isn't a single net,
+    // so we can only alias when one AND leg already evaluates to a net alias
+    // of the other (e.g. A=1 ⇒ AB=B).
+    if ab_zero {
+        if iv[2] == Some(true) {
+            return Some(Simpl::Alias(nets[3]));
+        }
+        if iv[3] == Some(true) {
+            return Some(Simpl::Alias(nets[2]));
+        }
+        if nets[2] == nets[3] {
+            return Some(Simpl::Alias(nets[2]));
+        }
+    }
+    if cd_zero {
+        if iv[0] == Some(true) {
+            return Some(Simpl::Alias(nets[1]));
+        }
+        if iv[1] == Some(true) {
+            return Some(Simpl::Alias(nets[0]));
+        }
+        if nets[0] == nets[1] {
+            return Some(Simpl::Alias(nets[0]));
+        }
+    }
+    None
 }
 
 /// Describes a 2-/3-input absorbing gate: when a `dominant` input is seen
@@ -287,6 +417,58 @@ fn simpl_aoi_family(iv: &[Option<bool>], nets: &[NetId], is_aoi: bool) -> Option
     None
 }
 
+/// Ao31 (invert=false) = `(A & B & C) | D`; Aoi31 (invert=true) is its
+/// complement. Handles the constant-input cases: the odd leg forcing the
+/// outer OR, any AND-leg input falsifying the product, and all three
+/// AND-leg inputs being 1.
+fn simpl_ao31(iv: &[Option<bool>], nets: &[NetId], invert: bool) -> Option<Simpl> {
+    // iv[3] = D forces the output when D = 1.
+    if iv[3] == Some(true) {
+        return Some(Simpl::Const(!invert));
+    }
+    // Any AND-leg input = 0 kills the product; output reduces to D.
+    if iv[0] == Some(false) || iv[1] == Some(false) || iv[2] == Some(false) {
+        return Some(match iv[3] {
+            Some(b) => Simpl::Const(if invert { !b } else { b }),
+            None => {
+                if invert {
+                    Simpl::Invert(nets[3])
+                } else {
+                    Simpl::Alias(nets[3])
+                }
+            }
+        });
+    }
+    // All three AND inputs = 1: product = 1; output = 1 (or 0 inverted).
+    if iv[0] == Some(true) && iv[1] == Some(true) && iv[2] == Some(true) {
+        return Some(Simpl::Const(!invert));
+    }
+    None
+}
+
+/// Non-inverted AO-family: Ao21 (`is_ao=true`) = `(A & B) | C`; Oa21 =
+/// `(A | B) & C`. Mirror of `simpl_aoi_family` without the output
+/// inversion: when one leg neutralises the output becomes `C` (alias),
+/// and when C or both leg inputs saturate the outer op the output is a
+/// known constant.
+fn simpl_ao_family(iv: &[Option<bool>], nets: &[NetId], is_ao: bool) -> Option<Simpl> {
+    let short_circuit = is_ao; // value of C that dominates the outer op
+    if iv[2] == Some(short_circuit) {
+        return Some(Simpl::Const(short_circuit));
+    }
+    let leg_neutral = !short_circuit;
+    if iv[0] == Some(leg_neutral) || iv[1] == Some(leg_neutral) {
+        return Some(match iv[2] {
+            Some(b) => Simpl::Const(b),
+            None => Simpl::Alias(nets[2]),
+        });
+    }
+    if iv[0] == Some(short_circuit) && iv[1] == Some(short_circuit) {
+        return Some(Simpl::Const(short_circuit));
+    }
+    None
+}
+
 /// Combined single-sweep simplification: const-propagation, algebraic
 /// rewrites, and CSE. Cells are driven by a worklist — the first pass
 /// visits everything, subsequent iterations only revisit cells whose inputs
@@ -303,7 +485,7 @@ pub(super) fn worklist_simplify(module: &mut GateModule) {
         }
     }
 
-    let mut seen: fxhash::FxHashMap<(CellKind, [NetId; 3]), u32> = fxhash::FxHashMap::default();
+    let mut seen: fxhash::FxHashMap<(CellKind, [NetId; 4]), u32> = fxhash::FxHashMap::default();
 
     let mut in_wl: Vec<bool> = vec![true; n_cells];
     let mut wl: Vec<u32> = (0..n_cells as u32).collect();

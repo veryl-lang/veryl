@@ -1,0 +1,5 @@
+# External tool binaries / liberty files resolved at runtime by compare.sh.
+# Users point YOSYS=, SV2V=, LIBERTY= env vars at their install location, or
+# symlink the binaries in here. Anything in this dir is local and untracked.
+*
+!.gitignore

@@ -91,10 +91,24 @@ pub enum CellKind {
     Or3,
     Nand3,
     Nor3,
+    /// `(A & B) | C`.
+    Ao21,
     /// `!((A & B) | C)`.
     Aoi21,
+    /// `(A | B) & C`.
+    Oa21,
     /// `!((A | B) & C)`.
     Oai21,
+    /// `(A & B & C) | D`.
+    Ao31,
+    /// `!((A & B & C) | D)`.
+    Aoi31,
+    /// `(A & B) | (C & D)`.
+    Ao22,
+    /// `!((A & B) | (C & D))`.
+    Aoi22,
+    /// `!((A | B) & (C | D))`.
+    Oai22,
     /// inputs = [sel, d_when_sel_0, d_when_sel_1]
     Mux2,
 }
@@ -113,9 +127,16 @@ impl CellKind {
             | CellKind::Or3
             | CellKind::Nand3
             | CellKind::Nor3
+            | CellKind::Ao21
             | CellKind::Aoi21
+            | CellKind::Oa21
             | CellKind::Oai21
             | CellKind::Mux2 => 3,
+            CellKind::Ao31
+            | CellKind::Aoi31
+            | CellKind::Ao22
+            | CellKind::Aoi22
+            | CellKind::Oai22 => 4,
         }
     }
 
@@ -133,8 +154,15 @@ impl CellKind {
             CellKind::Or3 => "or3",
             CellKind::Nand3 => "nand3",
             CellKind::Nor3 => "nor3",
+            CellKind::Ao21 => "ao21",
             CellKind::Aoi21 => "aoi21",
+            CellKind::Oa21 => "oa21",
             CellKind::Oai21 => "oai21",
+            CellKind::Ao31 => "ao31",
+            CellKind::Aoi31 => "aoi31",
+            CellKind::Ao22 => "ao22",
+            CellKind::Aoi22 => "aoi22",
+            CellKind::Oai22 => "oai22",
             CellKind::Mux2 => "mux2",
         }
     }

@@ -1,3 +1,5 @@
+#[cfg(feature = "aig")]
+pub mod aig;
 pub mod analysis;
 pub mod conv;
 pub mod ir;

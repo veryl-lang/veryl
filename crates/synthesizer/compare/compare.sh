@@ -15,11 +15,23 @@
 # Usage:
 #   compare.sh -C <project-dir> \
 #              -p <pkg.sv,pkg.sv,...> \
-#              -m <veryl_top:sv_top:src.sv,...>
+#              -m <veryl_top:sv_top:src.sv,...> \
+#              [-o <csv-path>]
 #
 # veryl_top : module name as it appears in the .veryl source (bare identifier)
 # sv_top    : module name after SV emission (typically ${project}_${name})
 # src.sv    : emitted .sv file (relative to project-dir)
+# -o <csv>  : also emit one CSV row per module with a fuller feature set
+#             (cell-kind breakdown, FF count) for offline analysis. The file
+#             is created fresh on first invocation and appended thereafter —
+#             remove it manually before re-running a benchmark set.
+#
+# A 4th optional field may be appended to each -m entry when the .veryl
+# source does not sit next to its .sv (e.g. when the project builds into
+# `target/src/`):
+#   veryl_top:sv_top:src.sv:veryl.veryl
+# Same applies to the -p list: each pkg may be `pkg.sv` or `pkg.sv:pkg.veryl`.
+# When omitted, the .veryl path is derived by swapping the .sv extension.
 #
 # Example (heliodor, cwd = repo root):
 #   compare.sh -C testcases/heliodor \
@@ -45,12 +57,14 @@ project_dir=""
 pkg_csv=""
 mod_csv=""
 timing_paths=0
-while getopts "C:p:m:t:h" opt; do
+csv_out=""
+while getopts "C:p:m:t:o:h" opt; do
   case "$opt" in
     C) project_dir="$OPTARG" ;;
     p) pkg_csv="$OPTARG" ;;
     m) mod_csv="$OPTARG" ;;
     t) timing_paths="$OPTARG" ;;
+    o) csv_out="$OPTARG" ;;
     h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option" >&2; exit 1 ;;
   esac
@@ -87,10 +101,24 @@ ABCEOF
 IFS=',' read -r -a pkgs <<<"$pkg_csv"
 IFS=',' read -r -a mods <<<"$mod_csv"
 
-pkg_abs=()
+# Pkg entries may carry an explicit .veryl override (pkg.sv:pkg.veryl) when
+# the .veryl tree and the emitted .sv tree diverge. Stash both absolute paths.
+pkg_sv_abs=()
+pkg_veryl_abs=()
 for p in "${pkgs[@]}"; do
   [[ -z "$p" ]] && continue
-  pkg_abs+=("$project_abs/$p")
+  case "$p" in
+    *:*)
+      sv_rel="${p%%:*}"
+      vy_rel="${p#*:}"
+      pkg_sv_abs+=("$project_abs/$sv_rel")
+      pkg_veryl_abs+=("$project_abs/$vy_rel")
+      ;;
+    *)
+      pkg_sv_abs+=("$project_abs/$p")
+      pkg_veryl_abs+=("$project_abs/${p%.sv}.veryl")
+      ;;
+  esac
 done
 
 printf '%-28s %12s %12s %8s %12s %12s %8s\n' \
@@ -98,52 +126,125 @@ printf '%-28s %12s %12s %8s %12s %12s %8s\n' \
 printf '%-28s %12s %12s %8s %12s %12s %8s\n' \
   '------' '----------' '----------' '-------' '-----------' '-----------' '-------'
 
+if [[ -n "$csv_out" && ( ! -s "$csv_out" ) ]]; then
+  # Only write the header when the file is new/empty. Re-invocations that
+  # target the same CSV simply append — useful for std_bench.sh which runs
+  # compare.sh once per module.
+  echo 'module,veryl_area,yosys_area,a_ratio,veryl_delay,yosys_delay,d_ratio,veryl_time,yosys_time,ff_count,cells' \
+    > "$csv_out"
+fi
+
 for entry in "${mods[@]}"; do
   veryl_top="${entry%%:*}"
   rest="${entry#*:}"
   sv_top="${rest%%:*}"
-  src_rel="${rest#*:}"
+  rest2="${rest#*:}"
+  # Allow an optional 4th field specifying the .veryl source explicitly —
+  # needed when the emitted .sv lives under `target/src/` rather than next
+  # to the .veryl.
+  if [[ "$rest2" == *:* ]]; then
+    src_rel="${rest2%%:*}"
+    veryl_rel="${rest2#*:}"
+  else
+    src_rel="$rest2"
+    veryl_rel="${src_rel%.sv}.veryl"
+  fi
   src_abs="$project_abs/$src_rel"
+  veryl_src="$project_abs/$veryl_rel"
 
   # --- Our synthesizer -----------------------------------------------------
   # Pass explicit .veryl files for the pkgs and the top source. This skips
   # the full-project scan (which otherwise dominates wall time for small
-  # modules by parsing ~100 .veryl files of the project). We derive each
-  # .veryl path by swapping the .sv extension — assumes a source-target
-  # project layout where emitted .sv sits next to its .veryl origin.
-  veryl_pkgs=()
-  for p in "${pkg_abs[@]}"; do
-    veryl_pkgs+=("${p%.sv}.veryl")
-  done
-  veryl_src="${src_abs%.sv}.veryl"
-  veryl_log=$(cd "$project_abs" && "$VERYL" synth --quiet --top "$veryl_top" \
+  # modules by parsing ~100 .veryl files of the project).
+  veryl_pkgs=("${pkg_veryl_abs[@]}")
+  # --dump-area is added so the CSV path can record per-cell-kind counts.
+  # It is cheap — the breakdown is a side output of an already-computed report.
+  # Time the invocation so the CSV can carry per-module wall-clock figures.
+  veryl_t_start=$(date +%s.%N)
+  veryl_log=$(cd "$project_abs" && timeout 120 "$VERYL" synth --quiet --top "$veryl_top" \
+    --dump-area \
     "${veryl_pkgs[@]}" "$veryl_src" 2>&1 || true)
-  # New format: "area: 752.50 um²  (comb ...)" / "timing: 0.580 ns  6 gates  ..."
+  veryl_t_end=$(date +%s.%N)
+  veryl_time=$(awk -v s="$veryl_t_start" -v e="$veryl_t_end" 'BEGIN{printf "%.3f", e-s}')
+  # Summary lines are indented under a `summary:` header, e.g.
+  #   "  area:        267.50 um²  (comb ...)"
+  #   "  timing:       1.100 ns       7 levels  ..."
+  # so allow optional leading whitespace before the label.
   veryl_area=$(echo "$veryl_log" \
-    | sed -nE 's/^area:[[:space:]]+([0-9.]+).*/\1/p' | head -1)
+    | sed -nE 's/^[[:space:]]*area:[[:space:]]+([0-9.]+).*/\1/p' | head -1)
   veryl_delay=$(echo "$veryl_log" \
-    | sed -nE 's/^timing:[[:space:]]+([0-9.]+)[[:space:]]*ns.*/\1/p' | head -1)
+    | sed -nE 's/^[[:space:]]*timing:[[:space:]]+([0-9.]+)[[:space:]]*ns.*/\1/p' | head -1)
   veryl_area="${veryl_area:-NA}"
   veryl_delay="${veryl_delay:-NA}"
 
+  # Cell-kind breakdown: lines like `  and2   × 5  25.00` under "area:".
+  # The × and the count may or may not be whitespace-separated (`× 5` vs
+  # `×12`), so strip everything through the × plus trailing spaces and
+  # coerce the remainder to a number — awk takes the leading integer.
+  # FF is extracted separately since it goes into ff_count for convenience.
+  veryl_cells=$(echo "$veryl_log" | awk '
+    /^area:$/ {in_area=1; next}
+    /^timing:/ {in_area=0}
+    in_area && /^  [A-Za-z]/ {
+      name=$1
+      rest=$0
+      sub(/^[^×]*×[[:space:]]*/, "", rest)
+      count = rest + 0
+      if (name == "FF") next
+      printf "%s%s=%d", sep, name, count; sep=";"
+    }')
+  veryl_ff=$(echo "$veryl_log" | awk '
+    /^area:$/ {in_area=1; next}
+    /^timing:/ {in_area=0}
+    in_area && /^  FF/ {
+      rest=$0
+      sub(/^[^×]*×[[:space:]]*/, "", rest)
+      print (rest + 0); exit
+    }')
+  veryl_cells="${veryl_cells:-NA}"
+  veryl_ff="${veryl_ff:-0}"
+
   # --- Yosys + sky130 ---
   v2005="$WORK/${sv_top}.v"
-  if ! "$SV2V" --top "$sv_top" "${pkg_abs[@]}" "$src_abs" -w "$v2005" 2>"$WORK/${sv_top}.sv2v.err"; then
+  if ! "$SV2V" --top "$sv_top" "${pkg_sv_abs[@]}" "$src_abs" -w "$v2005" 2>"$WORK/${sv_top}.sv2v.err"; then
     printf '%-28s %12s %12s %8s %12s %12s %8s\n' \
       "$sv_top" "$veryl_area" 'sv2v_fail' '-' "$veryl_delay" '-' '-'
     continue
   fi
 
-  ylog=$("$YOSYS" -p "
+  # sv2v may rename parameterised top modules (e.g. `jellyvl_stream_ff` →
+  # `jellyvl_stream_ff_8BAAD`) when another site instantiates them with
+  # concrete generics. When that happens the `--top` filter produces an
+  # empty file — retry without `--top`, then scan the emitted SV for a
+  # module name that begins with the original `sv_top` to feed yosys.
+  yosys_top="$sv_top"
+  if [[ ! -s "$v2005" ]]; then
+    "$SV2V" "${pkg_sv_abs[@]}" "$src_abs" -w "$v2005" 2>"$WORK/${sv_top}.sv2v.err" || true
+    yosys_top=$(grep -oE "^module[[:space:]]+${sv_top}[A-Za-z0-9_]*" "$v2005" \
+                | head -1 | awk '{print $2}')
+    yosys_top="${yosys_top:-$sv_top}"
+  fi
+
+  yosys_t_start=$(date +%s.%N)
+  ylog=$(timeout 600 "$YOSYS" -p "
     read_verilog $v2005
-    hierarchy -top $sv_top
-    synth -top $sv_top
+    hierarchy -top $yosys_top
+    synth -top $yosys_top
     dfflibmap -liberty $LIBERTY
     abc -liberty $LIBERTY -script $abc_script
     stat -liberty $LIBERTY
   " 2>&1 || true)
+  yosys_t_end=$(date +%s.%N)
+  yosys_time=$(awk -v s="$yosys_t_start" -v e="$yosys_t_end" 'BEGIN{printf "%.3f", e-s}')
 
-  y_area=$(echo "$ylog" | awk '/Chip area/ {print $NF; exit}')
+  # yosys `stat` emits one "Chip area" per module when the design has
+  # sub-hierarchy, then a final "Chip area for top module" with the
+  # flattened total. Prefer that line; fall back to any "Chip area"
+  # line when only one is present (flat designs).
+  y_area=$(echo "$ylog" | awk '/Chip area for top module/ {print $NF}' | tail -1)
+  if [[ -z "$y_area" ]]; then
+    y_area=$(echo "$ylog" | awk '/Chip area/ {print $NF}' | tail -1)
+  fi
   y_delay=$(echo "$ylog" | grep 'ABC: WireLoad' | head -1 \
     | sed -E 's/.*Delay *= *([0-9.]+) *ps.*/\1/')
   y_area="${y_area:-NA}"
@@ -161,6 +262,15 @@ for entry in "${mods[@]}"; do
 
   printf '%-28s %12s %12s %8s %12s %12s %8s\n' \
     "$sv_top" "$veryl_area" "$y_area" "$a_ratio" "$veryl_delay" "$y_delay" "$d_ratio"
+
+  if [[ -n "$csv_out" ]]; then
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"%s"\n' \
+      "$sv_top" "$veryl_area" "$y_area" "$a_ratio" \
+      "$veryl_delay" "$y_delay" "$d_ratio" \
+      "$veryl_time" "$yosys_time" \
+      "$veryl_ff" "$veryl_cells" \
+      >> "$csv_out"
+  fi
 
   # --- Timing detail (-t N): show our top-N paths and yosys's single path
   # side-by-side so the endpoints and path structure can be compared.

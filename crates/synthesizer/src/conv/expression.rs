@@ -6,6 +6,7 @@ use veryl_analyzer::ir::{
 
 use crate::conv::ConvContext;
 use crate::conv::arith;
+use crate::conv::statement::{dst_slice_width, process_statements, write_to_dst};
 use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetId};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
@@ -34,14 +35,43 @@ fn expr_signed(expr: &Expression) -> bool {
     expr.comptime().r#type.signed
 }
 
-fn try_constant(expr: &Expression) -> Option<u64> {
+pub(crate) fn try_constant(expr: &Expression) -> Option<u64> {
     if let Expression::Term(factor) = expr
         && let Factor::Value(ct) = factor.as_ref()
     {
         let value = ct.get_value().ok()?;
         return value.to_u64();
     }
-    None
+    // Fallback for expressions the analyzer wraps (e.g. width casts or a
+    // concatenation that is compile-time known). `eval_value` goes through
+    // the full constant-folding path but only returns Some when the result
+    // actually is constant.
+    let mut eval_ctx = veryl_analyzer::Context::default();
+    expr.eval_value(&mut eval_ctx).and_then(|v| v.to_u64())
+}
+
+/// Like [`try_constant`] but returns the underlying bit-pattern when the
+/// value has `x`/`z` don't-care bits (treating them as 0). Useful when
+/// lowering a SystemVerilog `case` default that writes `'x` — the bits
+/// are free to be anything, and picking 0 keeps the output assignment
+/// deterministic without costing cells.
+pub(crate) fn try_constant_with_dontcare_zero(expr: &Expression) -> Option<u64> {
+    use veryl_analyzer::value::Value;
+    if let Some(v) = try_constant(expr) {
+        return Some(v);
+    }
+    let ct = match expr {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Value(ct) => ct,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let value = ct.get_value().ok()?;
+    match value {
+        Value::U64(v) => Some(v.payload & !v.mask_xz),
+        Value::BigUint(_) => None,
+    }
 }
 
 fn build_constant(value: u64, width: usize) -> Vec<NetId> {
@@ -111,6 +141,12 @@ fn synth_raw(
             synth_binary(ctx, x, *op, y, current, ctx_width, signed)
         }
         Expression::Ternary(cond, a, b, _comptime) => {
+            // Detect `(sel == c1) ? v1 : (sel == c2) ? v2 : ... : default`
+            // and fold to shared matches + per-bit OR before the generic
+            // Mux2 cascade. Hot for case-expressions and LUT decoders.
+            if let Some(out) = try_fold_case_ternary(ctx, expr, current, ctx_width)? {
+                return Ok(out);
+            }
             let sel = synthesize_expr(ctx, cond, current, 1)?[0];
             let true_nets = synthesize_expr(ctx, a, current, ctx_width)?;
             let false_nets = synthesize_expr(ctx, b, current, ctx_width)?;
@@ -668,7 +704,7 @@ fn synth_function_call(
         inner.insert(*arg_vid, expr_nets);
     }
 
-    crate::conv::statement::process_statements(ctx, &body.statements, &mut inner)?;
+    process_statements(ctx, &body.statements, &mut inner)?;
 
     for (path, dsts) in &call.outputs {
         let arg_vid = body.arg_map.get(path).ok_or_else(|| {
@@ -684,9 +720,9 @@ fn synth_function_call(
                 .unwrap_or_default()
         });
         for dst in dsts {
-            let slice_width = crate::conv::statement::dst_slice_width(ctx, dst)?;
+            let slice_width = dst_slice_width(ctx, dst)?;
             let src = resize(out_nets.clone(), slice_width, false);
-            crate::conv::statement::write_to_dst(ctx, dst, &src, current)?;
+            write_to_dst(ctx, dst, &src, current)?;
         }
     }
 
@@ -781,12 +817,166 @@ fn try_wildcard_pattern(expr: &Expression, width: usize) -> Option<Vec<Option<bo
     }
 }
 
+/// Append `match_sig · value` to `terms`, shortcutting the constant cases:
+/// `value == CONST0` contributes nothing, `value == CONST1` just passes the
+/// match signal through, anything else emits one And2 gate.
+pub(crate) fn push_gated_term(
+    ctx: &mut ConvContext,
+    terms: &mut Vec<NetId>,
+    match_sig: NetId,
+    value: NetId,
+) {
+    match value {
+        NET_CONST0 => {}
+        NET_CONST1 => terms.push(match_sig),
+        other => {
+            terms.push(ctx.add_cell(CellKind::And2, vec![match_sig, other]));
+        }
+    }
+}
+
+/// One bit of a case-like SOP emission: OR together `matches[i] & arm_bits[i]`
+/// across all arms, optionally gated-OR'd with `default_active & default_bit`.
+/// `default_active` (= `!any_match`) is lazily materialised on the first bit
+/// that actually needs it, so bit columns where every arm + default is CONST0
+/// pay no decoder cost.
+pub(crate) fn emit_sop_bit(
+    ctx: &mut ConvContext,
+    matches: &[NetId],
+    arm_bits: &[NetId],
+    default_bit: NetId,
+    default_active: &mut Option<NetId>,
+) -> NetId {
+    debug_assert_eq!(matches.len(), arm_bits.len());
+    let mut terms: Vec<NetId> = Vec::with_capacity(arm_bits.len() + 1);
+    for (i, &v) in arm_bits.iter().enumerate() {
+        push_gated_term(ctx, &mut terms, matches[i], v);
+    }
+    if default_bit != NET_CONST0 {
+        let da = *default_active.get_or_insert_with(|| {
+            let any = reduce_or(ctx, matches);
+            ctx.add_cell(CellKind::Not, vec![any])
+        });
+        push_gated_term(ctx, &mut terms, da, default_bit);
+    }
+    match terms.len() {
+        0 => NET_CONST0,
+        1 => terms[0],
+        _ => reduce_or(ctx, &terms),
+    }
+}
+
 pub(crate) fn reduce_and(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
     reduce(ctx, bits, CellKind::And2, NET_CONST1)
 }
 
 pub(crate) fn reduce_or(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
     reduce(ctx, bits, CellKind::Or2, NET_CONST0)
+}
+
+/// Two-level SOP minimization for small truth tables (sel_width ≤ 8).
+/// Returns cubes `(value, care_mask)` covering every `on` point and no
+/// `off` point; anything listed in neither is don't-care. Each ON seed
+/// greedily drops bits while staying off-free (Expresso-style), then a
+/// greedy set cover picks the prime implicants to emit.
+pub(crate) fn minimize_sop_cubes(on: &[u64], off: &[u64], sel_width: usize) -> Vec<(u64, u64)> {
+    if on.is_empty() {
+        return Vec::new();
+    }
+    let sel_mask: u64 = if sel_width >= 64 {
+        !0u64
+    } else {
+        (1u64 << sel_width) - 1
+    };
+    // Deduplicate ON minterms up-front so the cover step terminates cleanly.
+    let mut on_uniq: Vec<u64> = on.iter().map(|m| m & sel_mask).collect();
+    on_uniq.sort();
+    on_uniq.dedup();
+
+    let hits_off = |value: u64, mask: u64| -> bool {
+        let tgt = value & mask;
+        off.iter().any(|&o| (o & mask) == tgt)
+    };
+
+    // Expand each ON seed into a prime implicant.
+    let mut primes: Vec<(u64, u64)> = Vec::new();
+    for &seed in &on_uniq {
+        let mut value = seed;
+        let mut mask = sel_mask;
+        for bit in 0..sel_width {
+            let candidate_mask = mask & !(1u64 << bit);
+            if !hits_off(value, candidate_mask) {
+                mask = candidate_mask;
+                value &= candidate_mask;
+            }
+        }
+        if !primes.iter().any(|&(v, m)| m == mask && v == value) {
+            primes.push((value, mask));
+        }
+    }
+
+    // Greedy set cover: always pick the prime covering the most uncovered ONs.
+    let mut covered = vec![false; on_uniq.len()];
+    let mut chosen: Vec<(u64, u64)> = Vec::new();
+    while covered.iter().any(|&c| !c) {
+        let mut best: Option<(usize, usize)> = None;
+        for (pi, &(v, m)) in primes.iter().enumerate() {
+            let cnt = on_uniq
+                .iter()
+                .enumerate()
+                .filter(|&(i, &o)| !covered[i] && (o & m) == v)
+                .count();
+            match best {
+                None if cnt > 0 => best = Some((pi, cnt)),
+                Some((_, c)) if cnt > c => best = Some((pi, cnt)),
+                _ => {}
+            }
+        }
+        match best {
+            Some((pi, _)) => {
+                let (v, m) = primes[pi];
+                for (i, &o) in on_uniq.iter().enumerate() {
+                    if (o & m) == v {
+                        covered[i] = true;
+                    }
+                }
+                chosen.push((v, m));
+            }
+            None => break,
+        }
+    }
+    chosen
+}
+
+/// Emit a single cube as an AND of literals. `value` / `mask` encode the
+/// cube: mask bit i set → bit i is specified, value bit i gives its polarity.
+/// Uses `not_cache` to share inverter cells across cubes.
+pub(crate) fn emit_cube(
+    ctx: &mut ConvContext,
+    sel_nets: &[NetId],
+    value: u64,
+    mask: u64,
+    not_cache: &mut HashMap<NetId, NetId>,
+) -> NetId {
+    let mut lits: Vec<NetId> = Vec::new();
+    for (i, &net) in sel_nets.iter().enumerate() {
+        if (mask >> i) & 1 == 0 {
+            continue;
+        }
+        let lit = if (value >> i) & 1 == 1 {
+            net
+        } else {
+            *not_cache
+                .entry(net)
+                .or_insert_with(|| ctx.add_cell(CellKind::Not, vec![net]))
+        };
+        lits.push(lit);
+    }
+    if lits.is_empty() {
+        NET_CONST1
+    } else {
+        reduce_and(ctx, &lits)
+    }
 }
 
 pub(crate) fn reduce_xor(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
@@ -800,9 +990,189 @@ fn reduce(ctx: &mut ConvContext, bits: &[NetId], kind: CellKind, identity: NetId
     if bits.len() == 1 {
         return bits[0];
     }
-    let mut acc = bits[0];
-    for &b in &bits[1..] {
-        acc = ctx.add_cell(kind, vec![acc, b]);
+    // Balanced pairwise tree: depth O(log N) instead of O(N) chain.
+    // Cell count is the same (N-1) but critical path timing improves.
+    // Emission stays at 2-input shape so the post-pass can still fuse
+    // adjacent And2 pairs into Ao22 / Aoi22 / Oai22 compounds — directly
+    // emitting And3 here breaks that fusion window and regresses td4v_Rom.
+    let mut level: Vec<NetId> = bits.to_vec();
+    while level.len() > 1 {
+        let mut next: Vec<NetId> = Vec::with_capacity(level.len().div_ceil(2));
+        for pair in level.chunks(2) {
+            if pair.len() == 2 {
+                next.push(ctx.add_cell(kind, vec![pair[0], pair[1]]));
+            } else {
+                next.push(pair[0]);
+            }
+        }
+        level = next;
     }
-    acc
+    level[0]
+}
+
+/// Detect the nested-ternary form of a case expression:
+///   `(sel == c1) ? v1 : ((sel == c2) ? v2 : ... : default)`
+/// When every selector is the same expression, rewrite to per-bit OR of
+/// shared match signals. Arm values may be constants (bits selected by
+/// match) or wires (bits AND-gated by match). A constant-bit coverage
+/// heuristic gates the fold so wire-heavy chains fall back to the generic
+/// Mux2 cascade, which is cheaper per-bit when most arms are wires.
+pub(super) fn try_fold_case_ternary(
+    ctx: &mut ConvContext,
+    expr: &Expression,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+    out_width: usize,
+) -> Result<Option<Vec<NetId>>, SynthesizerError> {
+    const MIN_ARMS: usize = 3;
+
+    // Peel the ternary chain. Keep arm value expressions for later synthesis.
+    let mut arm_exprs: Vec<(u64, &Expression)> = Vec::new();
+    let mut sel_expr: Option<&Expression> = None;
+    let mut node = expr;
+    let default_expr = loop {
+        let Expression::Ternary(cond, a, b, _) = node else {
+            break node;
+        };
+        let Some((cond_sel, cond_const)) = extract_ternary_eq(cond) else {
+            return Ok(None);
+        };
+        match sel_expr {
+            None => sel_expr = Some(cond_sel),
+            Some(prev) => {
+                if !expressions_eq(prev, cond_sel) {
+                    return Ok(None);
+                }
+            }
+        }
+        arm_exprs.push((cond_const, a));
+        node = b;
+    };
+    let Some(sel_expr) = sel_expr else {
+        return Ok(None);
+    };
+    if arm_exprs.len() < MIN_ARMS {
+        return Ok(None);
+    }
+    let sel_width = sel_expr.comptime().r#type.total_width().unwrap_or(0);
+    if sel_width == 0 || sel_width > 32 {
+        return Ok(None);
+    }
+    for &(c, _) in &arm_exprs {
+        if sel_width < 64 && (c >> sel_width) != 0 {
+            return Ok(None);
+        }
+    }
+
+    // Cost guard: SOP beats a per-bit Mux2 cascade only when arm values are
+    // mostly constants (so most bit-slots contribute 0 cells). For wire-heavy
+    // chains each arm bit costs an extra And2 gate, which overall exceeds the
+    // cascade. Require ≥50% constant coverage over (arms + default) × bits.
+    let const_bits_for = |e: &Expression| -> usize {
+        if try_constant_with_dontcare_zero(e).is_some() {
+            out_width
+        } else {
+            0
+        }
+    };
+    let const_bits: usize = arm_exprs
+        .iter()
+        .map(|(_, e)| const_bits_for(e))
+        .sum::<usize>()
+        + const_bits_for(default_expr);
+    let total_bits = (arm_exprs.len() + 1) * out_width;
+    if 2 * const_bits < total_bits {
+        return Ok(None);
+    }
+
+    let sel_nets = synthesize_expr(ctx, sel_expr, current, sel_width)?;
+
+    // One match signal per arm.
+    let mut not_cache: HashMap<NetId, NetId> = HashMap::new();
+    let mut matches: Vec<NetId> = Vec::with_capacity(arm_exprs.len());
+    for &(c, _) in &arm_exprs {
+        let mut eq_bits = Vec::with_capacity(sel_width);
+        for (i, &net) in sel_nets.iter().enumerate().take(sel_width) {
+            let bit_one = (c >> i) & 1 == 1;
+            eq_bits.push(if bit_one {
+                net
+            } else {
+                *not_cache
+                    .entry(net)
+                    .or_insert_with(|| ctx.add_cell(CellKind::Not, vec![net]))
+            });
+        }
+        matches.push(reduce_and(ctx, &eq_bits));
+    }
+
+    // Synthesize arm values. Constants become bit arrays of CONST0/CONST1
+    // (so the per-bit loop below treats them identically to wire arms).
+    let mut arm_nets: Vec<Vec<NetId>> = Vec::with_capacity(arm_exprs.len());
+    for &(_, arm_expr) in &arm_exprs {
+        let nets = if let Some(c) = try_constant_with_dontcare_zero(arm_expr) {
+            build_constant(c & low_mask(out_width), out_width)
+        } else {
+            synthesize_expr(ctx, arm_expr, current, out_width)?
+        };
+        arm_nets.push(nets);
+    }
+    let default_nets = if let Some(c) = try_constant_with_dontcare_zero(default_expr) {
+        build_constant(c & low_mask(out_width), out_width)
+    } else {
+        synthesize_expr(ctx, default_expr, current, out_width)?
+    };
+
+    let mut default_active: Option<NetId> = None;
+    let mut out_nets = Vec::with_capacity(out_width);
+    let mut arm_bits: Vec<NetId> = Vec::with_capacity(arm_nets.len());
+    for bit in 0..out_width {
+        arm_bits.clear();
+        arm_bits.extend(arm_nets.iter().map(|an| an[bit]));
+        out_nets.push(emit_sop_bit(
+            ctx,
+            &matches,
+            &arm_bits,
+            default_nets[bit],
+            &mut default_active,
+        ));
+    }
+    Ok(Some(out_nets))
+}
+
+fn low_mask(width: usize) -> u64 {
+    if width >= 64 {
+        !0u64
+    } else {
+        (1u64 << width) - 1
+    }
+}
+
+fn extract_ternary_eq(expr: &Expression) -> Option<(&Expression, u64)> {
+    use veryl_analyzer::ir::Op;
+    let Expression::Binary(x, op, y, _) = expr else {
+        return None;
+    };
+    if !matches!(op, Op::Eq | Op::EqWildcard) {
+        return None;
+    }
+    if let Some(c) = try_constant(y) {
+        Some((x, c))
+    } else if let Some(c) = try_constant(x) {
+        Some((y, c))
+    } else {
+        None
+    }
+}
+
+fn expressions_eq(a: &Expression, b: &Expression) -> bool {
+    match (a, b) {
+        (Expression::Term(fa), Expression::Term(fb)) => match (fa.as_ref(), fb.as_ref()) {
+            (Factor::Variable(ia, idxa, sela, _), Factor::Variable(ib, idxb, selb, _)) => {
+                ia == ib
+                    && format!("{:?}", idxa) == format!("{:?}", idxb)
+                    && format!("{:?}", sela) == format!("{:?}", selb)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
