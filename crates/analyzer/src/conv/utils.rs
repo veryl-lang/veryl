@@ -2815,6 +2815,7 @@ pub fn check_compatibility(
 ) {
     if dst.is_positive
         && let Ok(value) = src.get_value()
+        && !(src.r#type.is_positive && value.is_xz())
         && (!value.is_positive() || value.is_semantically_not_positive())
     {
         context.insert_error(AnalyzerError::non_positive_value(
