@@ -5,8 +5,8 @@ use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
 use crate::ir::variable::{
-    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
-    write_native_value,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, create_variable_meta,
+    value_size, write_native_value,
 };
 use crate::ir::{
     Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement,
@@ -36,6 +36,9 @@ pub struct Module {
     pub required_comb_passes: usize,
     /// FF commit entries: (current_offset, value_size) pairs.
     pub ff_commit_entries: Vec<(usize, usize)>,
+    /// (offset, size) byte ranges of comb_values written by comb_statements,
+    /// merged to elide adjacent/overlapping entries.  See settle_comb.
+    pub comb_output_ranges: Vec<(usize, usize)>,
 }
 
 pub struct ProtoModule {
@@ -52,6 +55,8 @@ pub struct ProtoModule {
     pub comb_statements: ProtoStatements,
     /// Number of eval_comb passes needed for full convergence.
     pub required_comb_passes: usize,
+    /// See `Module::comb_output_ranges`.
+    pub comb_output_ranges: Vec<(usize, usize)>,
 }
 
 fn create_buffers(
@@ -188,6 +193,49 @@ fn create_variables_recursive(
     }
 }
 
+/// Map comb byte offset → value_size for every non-FF variable element in
+/// the module tree.  Used by `gather_comb_output_ranges` as a fallback when
+/// the statement itself does not carry a width (e.g. opaque CompiledBlocks
+/// from the shared JIT cache).
+fn build_comb_size_map(
+    top_variable_meta: &HashMap<VarId, VariableMeta>,
+    top_children: &[ModuleVariableMeta],
+    use_4state: bool,
+) -> HashMap<usize, usize> {
+    fn collect_from_meta(
+        variable_meta: &HashMap<VarId, VariableMeta>,
+        use_4state: bool,
+        map: &mut HashMap<usize, usize>,
+    ) {
+        for meta in variable_meta.values() {
+            for element in &meta.elements {
+                if !element.is_ff() {
+                    let vs = value_size(element.native_bytes, use_4state);
+                    map.insert(element.current_offset() as usize, vs);
+                }
+            }
+        }
+    }
+
+    fn collect_recursive(
+        module_meta: &ModuleVariableMeta,
+        use_4state: bool,
+        map: &mut HashMap<usize, usize>,
+    ) {
+        collect_from_meta(&module_meta.variable_meta, use_4state, map);
+        for child in &module_meta.children {
+            collect_recursive(child, use_4state, map);
+        }
+    }
+
+    let mut map: HashMap<usize, usize> = HashMap::default();
+    collect_from_meta(top_variable_meta, use_4state, &mut map);
+    for child in top_children {
+        collect_recursive(child, use_4state, &mut map);
+    }
+    map
+}
+
 /// Collect all FF commit entries (current_offset, value_size) from module metadata.
 fn collect_ff_commit_entries(
     module_meta: &ModuleVariableMeta,
@@ -270,6 +318,7 @@ impl ProtoModule {
             comb_statements,
             required_comb_passes: self.required_comb_passes,
             ff_commit_entries,
+            comb_output_ranges: self.comb_output_ranges.clone(),
         }
     }
 
@@ -644,48 +693,44 @@ pub(crate) fn analyze_dependency(
         return Ok(sorted);
     }
 
-    // Phase 2: Expand all CompiledBlocks and SequentialBlocks and retry.
+    // Phase 2: Expand CompiledBlocks and SequentialBlocks and retry.
+    // Rebuild the table with fresh sequential IDs so expanded sub-statements
+    // keep their parent's position; Phase 3's fallback sorts by ID and relies
+    // on that ordering for `let x = expr` vs `always_comb { x = expr; }` to
+    // produce equivalent schedules when the block participates in a cycle.
     let has_expandable = table.values().any(|x| {
         matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
             || matches!(x, ProtoStatement::SequentialBlock(_))
     });
 
     if has_expandable {
-        let mut next_id = table.keys().max().copied().unwrap_or(0) + 1;
-        let expandable_ids: Vec<usize> = table
-            .iter()
-            .filter_map(|(id, x)| {
-                if matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
-                    || matches!(x, ProtoStatement::SequentialBlock(_))
-                {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+        sorted_keys.sort();
 
-        for eid in expandable_ids {
-            match table.remove(&eid) {
-                Some(ProtoStatement::CompiledBlock(cb)) => {
-                    for stmt in cb.original_stmts {
-                        table.insert(next_id, stmt);
-                        next_id += 1;
+        let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
+        let mut new_id = 0usize;
+        for key in sorted_keys {
+            let stmt = table.remove(&key).unwrap();
+            match stmt {
+                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                    for sub in cb.original_stmts {
+                        new_table.insert(new_id, sub);
+                        new_id += 1;
                     }
                 }
-                Some(ProtoStatement::SequentialBlock(body)) => {
-                    for stmt in body {
-                        table.insert(next_id, stmt);
-                        next_id += 1;
+                ProtoStatement::SequentialBlock(body) => {
+                    for sub in body {
+                        new_table.insert(new_id, sub);
+                        new_id += 1;
                     }
                 }
                 other => {
-                    if let Some(s) = other {
-                        table.insert(eid, s);
-                    }
+                    new_table.insert(new_id, other);
+                    new_id += 1;
                 }
             }
         }
+        table = new_table;
 
         if let Ok(sorted) = try_topo_sort(&table) {
             return Ok(sorted);
@@ -1203,6 +1248,84 @@ impl Conv<&air::Module> for ProtoModule {
         // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
         let unified_sorted = reorder_by_level(unified_sorted);
         let required_comb_passes = compute_required_passes(&unified_sorted);
+
+        // Collect (offset, size) byte ranges written by comb_statements so
+        // settle_comb can snapshot only those bytes — avoiding O(comb_bytes)
+        // work per convergence check for modules with ff-opt-demoted memory
+        // arrays (e.g. testbench DRAM) that never change across comb
+        // iterations.
+        let comb_output_ranges = {
+            let use_4state = context.config.use_4state;
+            let comb_bytes = context.comb_total_bytes;
+            let size_map = build_comb_size_map(&variable_meta, &all_child_modules, use_4state);
+            // Fallback only when both the statement (no width) and size_map
+            // (offset not an element start) fail to resolve — rare.  Using
+            // max(value_size) auto-scales with the widest comb variable;
+            // 32 bytes (logic<128> 4-state) covers the trivial case of no
+            // comb variables at all.
+            let fallback_size = size_map.values().copied().max().unwrap_or(32);
+            let mut ranges: Vec<(usize, usize)> = Vec::new();
+            for stmt in &unified_sorted {
+                stmt.gather_comb_output_ranges(use_4state, &size_map, fallback_size, &mut ranges);
+            }
+            // Clip each range to comb_bytes: a mid-element offset combined
+            // with `fallback_size` can otherwise overshoot the buffer end.
+            ranges.retain(|(off, _)| *off < comb_bytes);
+            for (off, sz) in &mut ranges {
+                let end = (*off + *sz).min(comb_bytes);
+                *sz = end - *off;
+            }
+            ranges.sort_unstable();
+
+            let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+            for (off, sz) in ranges {
+                if let Some(last) = merged.last_mut()
+                    && off <= last.0 + last.1
+                {
+                    let end = (off + sz).max(last.0 + last.1);
+                    last.1 = end - last.0;
+                    continue;
+                }
+                merged.push((off, sz));
+            }
+            log::debug!(
+                "comb_output_ranges: {} merged ranges covering {} bytes",
+                merged.len(),
+                merged.iter().map(|(_, s)| s).sum::<usize>(),
+            );
+
+            // One-shot coverage check: every comb output that the DAG
+            // walker (`gather_variable_offsets`) sees must also be covered
+            // by our ranges.  Catches walker drift when new ProtoStatement
+            // variants or write paths are added.
+            #[cfg(debug_assertions)]
+            {
+                for stmt in &unified_sorted {
+                    let mut ins = Vec::new();
+                    let mut outs = Vec::new();
+                    stmt.gather_variable_offsets(&mut ins, &mut outs);
+                    for off in outs {
+                        if off.is_ff() {
+                            continue;
+                        }
+                        let raw = off.raw() as usize;
+                        if raw >= comb_bytes {
+                            continue;
+                        }
+                        let covered = merged.iter().any(|(o, s)| *o <= raw && raw < o + s);
+                        debug_assert!(
+                            covered,
+                            "comb_output_ranges missed offset {raw} \
+                             (seen by gather_variable_offsets but not by \
+                             gather_comb_output_ranges)"
+                        );
+                    }
+                }
+            }
+
+            merged
+        };
+
         let comb_statements = try_jit_no_cache(context, unified_sorted);
 
         // Event statements preserve source order (no topological sorting).
@@ -1230,6 +1353,7 @@ impl Conv<&air::Module> for ProtoModule {
             event_statements,
             comb_statements,
             required_comb_passes,
+            comb_output_ranges,
         })
     }
 }
