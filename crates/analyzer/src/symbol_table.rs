@@ -1257,7 +1257,10 @@ impl SymbolTable {
         self.symbol_table
             .values()
             .filter_map(|symbol| {
-                if matches!(symbol.kind, SymbolKind::Function(_)) {
+                if matches!(
+                    symbol.kind,
+                    SymbolKind::Function(_) | SymbolKind::ProtoFunction(_)
+                ) {
                     Some(symbol.clone())
                 } else {
                     None

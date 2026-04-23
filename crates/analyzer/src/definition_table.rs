@@ -2,7 +2,8 @@ use crate::HashMap;
 use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_grammar_trait::{
-    FunctionDeclaration, InterfaceDeclaration, ModuleDeclaration, ProtoModuleDeclaration,
+    FunctionDeclaration, InterfaceDeclaration, ModuleDeclaration, ProtoFunctionDeclaration,
+    ProtoModuleDeclaration,
 };
 use veryl_parser::veryl_token::TokenSource;
 
@@ -24,6 +25,7 @@ pub enum Definition {
     Module(ModuleDeclaration),
     Interface(InterfaceDeclaration),
     Function(FunctionDeclaration),
+    ProtoFunction(ProtoFunctionDeclaration),
     ProtoModule(ProtoModuleDeclaration),
 }
 
@@ -45,6 +47,13 @@ impl Definition {
                 }
             }
             Definition::Function(x) => {
+                if let TokenSource::File { path, .. } = x.function.function_token.token.source {
+                    Some(path)
+                } else {
+                    None
+                }
+            }
+            Definition::ProtoFunction(x) => {
                 if let TokenSource::File { path, .. } = x.function.function_token.token.source {
                     Some(path)
                 } else {

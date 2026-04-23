@@ -8657,6 +8657,26 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtPkg {
+        function func() -> u32;
+    }
+    package Pkg::<n: u32> for ProtPkg {
+        function func() -> u32 {
+            return n;
+        }
+    }
+    module ModuleA::<pkg: ProtPkg> {
+        const A: u32 = pkg::func();
+    }
+    module ModuleB {
+        inst u: ModuleA::<Pkg::<32>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
