@@ -6253,6 +6253,7 @@ dependencies = [
  "veryl-simulator",
  "veryl-sourcemap",
  "veryl-synthesizer",
+ "veryl-translator",
 ]
 
 [[package]]
@@ -6505,11 +6506,6 @@ dependencies = [
 name = "veryl-translator"
 version = "0.19.1"
 dependencies = [
- "clap",
- "console",
- "fern",
- "log",
- "miette",
  "sv-parser",
  "thiserror 2.0.18",
  "veryl-formatter",
