@@ -20,7 +20,7 @@ pub enum TestbenchStatement {
         high_time: u64,
         low_time: u64,
     },
-    /// rst.assert(clk, N)
+    /// rst.assert(N)
     ResetAssert {
         reset: Event,
         clock: Event,
