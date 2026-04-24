@@ -72,7 +72,7 @@ fn main() -> Result<ExitCode> {
         .into_diagnostic()?;
 
     let (mut metadata, dot_build_lock) = match opt.command {
-        Commands::New(_) | Commands::Init(_) | Commands::Translate(_) => {
+        Commands::New(_) | Commands::Init(_) => {
             // dummy metadata
             (Metadata::create_default("dummy").unwrap(), None)
         }
@@ -108,7 +108,6 @@ fn main() -> Result<ExitCode> {
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata)?,
         Commands::Test(x) => cmd_test::CmdTest::new(x).exec(&mut metadata)?,
         Commands::Synth(x) => cmd_synth::CmdSynth::new(x).exec(&mut metadata)?,
-        Commands::Translate(x) => cmd_translate::CmdTranslate::new(x).exec()?,
     };
 
     if let Some(dot_build_lock) = dot_build_lock {

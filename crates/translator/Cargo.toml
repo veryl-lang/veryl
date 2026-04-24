@@ -10,7 +10,16 @@ readme.workspace      = true
 description           = "SystemVerilog to Veryl translator"
 edition.workspace     = true
 
+[[bin]]
+name = "veryl-translate"
+path = "src/bin/veryl-translate.rs"
+
 [dependencies]
+clap            = {workspace = true}
+console         = {workspace = true}
+fern            = "0.7.0"
+log             = {workspace = true}
+miette          = {workspace = true}
 sv-parser       = "0.13"
 thiserror       = {workspace = true}
 veryl-formatter = {version = "0.19.1", path = "../formatter"}

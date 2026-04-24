@@ -52,4 +52,3 @@ veryl-simulator   = {version = "0.19.1", path = "../simulator"}
 veryl-synthesizer = {version = "0.19.1", path = "../synthesizer"}
 veryl-path        = {version = "0.19.1", path = "../path"}
 veryl-sourcemap   = {version = "0.19.1", path = "../sourcemap"}
-veryl-translator  = {version = "0.19.1", path = "../translator"}
