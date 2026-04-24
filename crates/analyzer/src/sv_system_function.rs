@@ -100,8 +100,13 @@ pub fn sv_system_functions() -> Vec<SvSystemFunction> {
         // Veryl native testbench system tasks
         SvSystemFunction::new(
             "$assert",
-            // condition, optional message
-            &[("condition", Direction::Input)],
+            // it has optional args but not supported
+            &[],
+        ),
+        SvSystemFunction::new(
+            "$assert_continue",
+            // it has optional args but not supported
+            &[],
         ),
         // Simulation time system functions
         SvSystemFunction::new("$time", &[]),

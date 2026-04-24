@@ -37,7 +37,9 @@ pub use statement::{
     AssignDestination, AssignStatement, ControlFlow, ForBound, ForRange, ForStatement,
     IfResetStatement, IfStatement, Statement, StatementBlock, TbMethod, TbMethodCall,
 };
-pub use system_function::{Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind};
+pub use system_function::{
+    AssertKind, Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind,
+};
 pub use utils::convert_cast;
 pub use variable::{
     VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, VarSelectOp, Variable,
