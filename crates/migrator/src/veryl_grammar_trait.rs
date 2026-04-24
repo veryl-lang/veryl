@@ -401,6 +401,38 @@ impl<'a> From<&'a StatementBlock> for Vec<&'a StatementBlockItem> {
     }
 }
 
+impl<'a> From<&'a StatementBlockGroup> for Vec<&'a StatementBlockItem> {
+    fn from(x: &'a StatementBlockGroup) -> Self {
+        let mut ret = Vec::new();
+        match &*x.statement_block_group_group {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                for x in &x.statement_block_group_group_list {
+                    let mut x: Vec<&'a StatementBlockItem> =
+                        x.statement_block_group.as_ref().into();
+                    ret.append(&mut x);
+                }
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                ret.push(x.statement_block_item.as_ref());
+            }
+        }
+        ret
+    }
+}
+
+impl<'a> From<&'a ModportDefaultList> for Vec<&'a Identifier> {
+    fn from(x: &'a ModportDefaultList) -> Self {
+        let mut ret = Vec::new();
+
+        ret.push(x.identifier.as_ref());
+        for x in &x.modport_default_list_list {
+            ret.push(x.identifier.as_ref());
+        }
+
+        ret
+    }
+}
+
 list_group_to_item!(Modport);
 list_group_to_item!(Enum);
 list_group_to_item!(StructUnion);
@@ -421,7 +453,6 @@ group_to_item!(Interface);
 group_to_item!(Generate);
 group_to_item!(Package);
 group_to_item!(Description);
-group_to_item!(StatementBlock);
 
 impl Expression {
     pub fn unwrap_factor(&self) -> Option<&Factor> {
@@ -444,6 +475,10 @@ impl Expression {
         }
 
         Some(exp.factor.as_ref())
+    }
+
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        self.if_expression.collect_factors()
     }
 
     pub fn unwrap_identifier(&self) -> Option<&ExpressionIdentifier> {
@@ -513,6 +548,221 @@ impl Expression {
             }
             _ => false,
         }
+    }
+}
+
+impl IfExpression {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = Vec::new();
+        for x in &self.if_expression_list {
+            ret.append(&mut x.expression.collect_factors());
+            ret.append(&mut x.expression0.collect_factors());
+        }
+        ret.append(&mut self.expression01.collect_factors());
+        ret
+    }
+}
+
+impl Expression01 {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.expression02.collect_factors();
+        for x in &self.expression01_list {
+            ret.append(&mut x.expression02.collect_factors());
+        }
+        ret
+    }
+}
+
+impl Expression02 {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        self.factor.collect_factors()
+    }
+}
+
+impl Factor {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = vec![self];
+        match self {
+            Factor::IdentifierFactor(x) => {
+                if let Some(ref x) = x.identifier_factor.identifier_factor_opt {
+                    match x.identifier_factor_opt_group.as_ref() {
+                        IdentifierFactorOptGroup::FunctionCall(x) => {
+                            if let Some(x) = &x.function_call.function_call_opt {
+                                for item in &Vec::from(x.argument_list.as_ref()) {
+                                    ret.append(&mut item.collect_factors());
+                                }
+                            }
+                        }
+                        IdentifierFactorOptGroup::StructConstructor(x) => {
+                            for x in
+                                &Vec::from(x.struct_constructor.struct_constructor_list.as_ref())
+                            {
+                                ret.append(&mut x.expression.collect_factors());
+                            }
+                            if let Some(x) = &x.struct_constructor.struct_constructor_opt {
+                                ret.append(&mut x.expression.collect_factors());
+                            }
+                        }
+                    }
+                }
+            }
+            Factor::LParenExpressionRParen(x) => {
+                ret.append(&mut x.expression.collect_factors());
+            }
+            Factor::LBraceConcatenationListRBrace(x) => {
+                for item in &Vec::from(x.concatenation_list.as_ref()) {
+                    ret.append(&mut item.collect_factors());
+                }
+            }
+            Factor::QuoteLBraceArrayLiteralListRBrace(x) => {
+                for item in &Vec::from(x.array_literal_list.as_ref()) {
+                    ret.append(&mut item.collect_factors());
+                }
+            }
+            Factor::CaseExpression(x) => ret.append(&mut x.case_expression.collect_factors()),
+            Factor::SwitchExpression(x) => ret.append(&mut x.switch_expression.collect_factors()),
+            Factor::InsideExpression(x) => ret.append(&mut x.inside_expression.collect_factors()),
+            Factor::OutsideExpression(x) => ret.append(&mut x.outside_expression.collect_factors()),
+            Factor::TypeExpression(x) => {
+                ret.append(&mut x.type_expression.expression.collect_factors());
+            }
+            Factor::FactorTypeFactor(x) => {
+                ret.append(&mut x.factor_type_factor.factor_type.collect_factors());
+            }
+            _ => {}
+        }
+
+        ret
+    }
+}
+
+impl ArgumentItem {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        if let Some(x) = &self.argument_item_opt {
+            x.expression.collect_factors()
+        } else {
+            self.argument_expression.expression.collect_factors()
+        }
+    }
+}
+
+impl ConcatenationItem {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.expression.collect_factors();
+        if let Some(x) = &self.concatenation_item_opt {
+            ret.append(&mut x.expression.collect_factors());
+        }
+        ret
+    }
+}
+
+impl ArrayLiteralItem {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        match self.array_literal_item_group.as_ref() {
+            ArrayLiteralItemGroup::ExpressionArrayLiteralItemOpt(x) => {
+                let mut ret = x.expression.collect_factors();
+                if let Some(x) = &x.array_literal_item_opt {
+                    ret.append(&mut x.expression.collect_factors());
+                }
+                ret
+            }
+            ArrayLiteralItemGroup::DefaulColonExpression(x) => x.expression.collect_factors(),
+        }
+    }
+}
+
+impl CaseExpression {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.expression.collect_factors();
+        ret.append(&mut self.case_condition.collect_factors());
+        ret.append(&mut self.expression0.collect_factors());
+        for x in &self.case_expression_list {
+            ret.append(&mut x.case_condition.collect_factors());
+            ret.append(&mut x.expression.collect_factors());
+        }
+        ret.append(&mut self.expression1.collect_factors());
+        ret
+    }
+}
+
+impl CaseCondition {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.range_item.collect_factors();
+        for x in &self.case_condition_list {
+            ret.append(&mut x.range_item.collect_factors());
+        }
+        ret
+    }
+}
+
+impl SwitchExpression {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.switch_condition.collect_factors();
+        ret.append(&mut self.expression.collect_factors());
+        for x in &self.switch_expression_list {
+            ret.append(&mut x.switch_condition.collect_factors());
+            ret.append(&mut x.expression.collect_factors());
+        }
+        ret.append(&mut self.expression0.collect_factors());
+        ret
+    }
+}
+
+impl SwitchCondition {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.expression.collect_factors();
+        for x in &self.switch_condition_list {
+            ret.append(&mut x.expression.collect_factors());
+        }
+        ret
+    }
+}
+
+impl InsideExpression {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.expression.collect_factors();
+        ret.append(&mut self.range_list.range_item.collect_factors());
+        for x in &self.range_list.range_list_list {
+            ret.append(&mut x.range_item.collect_factors());
+        }
+        ret
+    }
+}
+
+impl OutsideExpression {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.expression.collect_factors();
+        ret.append(&mut self.range_list.range_item.collect_factors());
+        for x in &self.range_list.range_list_list {
+            ret.append(&mut x.range_item.collect_factors());
+        }
+        ret
+    }
+}
+
+impl RangeItem {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        let mut ret = self.range.expression.collect_factors();
+        if let Some(x) = &self.range.range_opt {
+            ret.append(&mut x.expression.collect_factors());
+        }
+        ret
+    }
+}
+
+impl FactorType {
+    pub fn collect_factors(&self) -> Vec<&Factor> {
+        if let FactorTypeGroup::VariableTypeFactorTypeOpt(x) = self.factor_type_group.as_ref()
+            && let Some(x) = &x.factor_type_opt
+        {
+            let mut ret = x.width.expression.collect_factors();
+            for x in &x.width.width_list {
+                ret.append(&mut x.expression.collect_factors());
+            }
+            return ret;
+        }
+
+        vec![]
     }
 }
 
@@ -755,6 +1005,9 @@ impl PublicDescriptionItem {
                 x.alias_declaration.identifier.identifier_token.clone()
             }
             PublicDescriptionItem::ProtoDeclaration(x) => x.proto_declaration.identifier_token(),
+            PublicDescriptionItem::FunctionDeclaration(x) => {
+                x.function_declaration.identifier.identifier_token.clone()
+            }
         }
     }
 }
@@ -772,6 +1025,9 @@ impl DescriptionItem {
                     }
                     PublicDescriptionItem::PackageDeclaration(x) => {
                         x.package_declaration.package_declaration_opt.is_some()
+                    }
+                    PublicDescriptionItem::FunctionDeclaration(x) => {
+                        x.function_declaration.function_declaration_opt.is_some()
                     }
                     _ => false,
                 }

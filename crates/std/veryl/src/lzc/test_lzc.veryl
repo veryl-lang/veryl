@@ -10,7 +10,7 @@ module test_lzc_4 {
         result  = lzc(bits, true);
         $assert(result.all_zero);
 
-        for i: i32      in 0..4 {
+        for i in 0..4 {
             var exp: logic<2>;
 
             bits    = '0;
@@ -38,7 +38,7 @@ module test_lzc_8 {
         result  = lzc(bits, true);
         $assert(result.all_zero);
 
-        for i: i32      in 0..8 {
+        for i in 0..8 {
             var exp: logic<3>;
 
             bits    = '0;
@@ -66,7 +66,7 @@ module test_lzc_16 {
         result  = lzc(bits, true);
         $assert(result.all_zero);
 
-        for i: i32      in 0..16 {
+        for i in 0..16 {
             var exp: logic<4>;
 
             bits    = '0;
@@ -94,7 +94,7 @@ module test_lzc_32 {
         result  = lzc(bits, true);
         $assert(result.all_zero);
 
-        for i: i32      in 0..32 {
+        for i in 0..32 {
             var exp: logic<5>;
 
             bits    = '0;
@@ -122,7 +122,7 @@ module test_lzc_64 {
         result  = lzc(bits, true);
         $assert(result.all_zero);
 
-        for i: i32      in 0..64 {
+        for i in 0..64 {
             var exp: logic<6>;
 
             bits    = '0;
@@ -150,7 +150,7 @@ module test_lzc_128 {
         result  = lzc(bits, true);
         $assert(result.all_zero);
 
-        for i: i32      in 0..128 {
+        for i in 0..128 {
             var exp: logic<7>;
 
             bits    = '0;

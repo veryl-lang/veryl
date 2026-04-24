@@ -206,14 +206,14 @@ fn parse_error_help() {
 
     let code = r#"
     module ModuleA {
-        for i: u32 in 0..10 {
+        for i in 0..10 {
         }
     }
     "#;
 
     assert_eq!(
         &help_message(code),
-        "generate-for declaration doesn't need type specifier (e.g. 'for i in 0..10 {')"
+        "The first arm of generate-if declaration needs label (e.g. 'if x :label {')"
     );
 
     let code = r#"

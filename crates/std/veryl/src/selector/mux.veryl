@@ -21,13 +21,13 @@ pub function select_vector::<N: p32, T: type> (
     next_n = N;
     next_s = sel;
     next_d = data;
-    for _i: u32 in 0..DEPTH {
+    for _i in 0..DEPTH {
         current_n = next_n;
         current_s = next_s;
         current_d = next_d;
 
         next_n = (current_n / 2) + (current_n % 2);
-        for j: u32   in 0..next_n {
+        for j in 0..next_n {
             var select_even: logic;
 
             if (j + 1) == next_n && (current_n % 2) == 1 {
@@ -61,7 +61,7 @@ pub function select_onehot::<N: p32, T: type> (
     var next_d   : T  <N>;
 
     next_n = N;
-    for i: u32 in 0..N {
+    for i in 0..N {
         if sel[i] {
             next_d[i] = data[i];
         } else {
@@ -69,12 +69,12 @@ pub function select_onehot::<N: p32, T: type> (
         }
     }
 
-    for _i: u32 in 0..DEPTH {
+    for _i in 0..DEPTH {
         current_n = next_n;
         current_d = next_d;
 
         next_n = (current_n / 2) + (current_n % 2);
-        for j: u32 in 0..next_n {
+        for j in 0..next_n {
             if (j + 1) == next_n && (current_n % 2) == 1 {
                 next_d[j] = current_d[2 * j + 0];
             } else {

@@ -8572,8 +8572,6 @@ pub struct For {
 pub struct ForStatement {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
-    pub colon: Box<Colon>,
-    pub scalar_type: Box<ScalarType>,
     pub r#in: Box<In>,
     pub for_statement_opt: Option<ForStatementOpt>,
     pub range: Box<Range>,
@@ -30196,15 +30194,13 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 701:
     ///
-    /// `ForStatement: For Identifier Colon ScalarType In ForStatementOpt /* Option */ Range ForStatementOpt0 /* Option */ StatementBlock;`
+    /// `ForStatement: For Identifier In ForStatementOpt /* Option */ Range ForStatementOpt0 /* Option */ StatementBlock;`
     ///
     #[parol_runtime::function_name::named]
     fn for_statement(
         &mut self,
         _for: &ParseTreeType<'t>,
         _identifier: &ParseTreeType<'t>,
-        _colon: &ParseTreeType<'t>,
-        _scalar_type: &ParseTreeType<'t>,
         _in: &ParseTreeType<'t>,
         _for_statement_opt: &ParseTreeType<'t>,
         _range: &ParseTreeType<'t>,
@@ -30218,15 +30214,11 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
         let range = pop_item!(self, range, Range, context);
         let for_statement_opt = pop_item!(self, for_statement_opt, ForStatementOpt, context);
         let r#in = pop_item!(self, r#in, In, context);
-        let scalar_type = pop_item!(self, scalar_type, ScalarType, context);
-        let colon = pop_item!(self, colon, Colon, context);
         let identifier = pop_item!(self, identifier, Identifier, context);
         let r#for = pop_item!(self, r#for, For, context);
         let for_statement_built = ForStatement {
             r#for: Box::new(r#for),
             identifier: Box::new(identifier),
-            colon: Box::new(colon),
-            scalar_type: Box::new(scalar_type),
             r#in: Box::new(r#in),
             for_statement_opt,
             range: Box::new(range),
@@ -42103,8 +42095,6 @@ impl<'t> UserActionsTrait<'t> for VerylGrammarAuto<'t, '_> {
                 &children[4],
                 &children[5],
                 &children[6],
-                &children[7],
-                &children[8],
             ),
             702 => self.for_statement_opt0_0(&children[0], &children[1], &children[2]),
             703 => self.for_statement_opt0_1(),

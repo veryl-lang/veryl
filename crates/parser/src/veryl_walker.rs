@@ -1912,8 +1912,6 @@ pub trait VerylWalker {
         before!(self, for_statement, arg);
         self.r#for(&arg.r#for);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.scalar_type(&arg.scalar_type);
         self.r#in(&arg.r#in);
         if let Some(ref x) = arg.for_statement_opt {
             self.rev(&x.rev);

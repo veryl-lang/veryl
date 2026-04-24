@@ -29,7 +29,7 @@ module test_for_loop {
         rst.assert();
         clk.next(10);
         $assert(cnt == 32'd10);
-        for _i: u32 in 0..5 {
+        for _i in 0..5 {
             clk.next();
         }
         $assert(cnt == 32'd15);
@@ -54,7 +54,7 @@ module test_for_loop_step {
         rst.assert();
         clk.next(10);
         $assert(cnt == 32'd10);
-        for _i: u32 in 0..10 step += 2 {
+        for _i in 0..10 step += 2 {
             clk.next(2);
         }
         $assert(cnt == 32'd20);
@@ -79,7 +79,7 @@ module test_for_loop_rev {
         rst.assert();
         clk.next(10);
         $assert(cnt == 32'd10);
-        for _i: i32 in rev 0..5 {
+        for _i in rev 0..5 {
             clk.next();
         }
         $assert(cnt == 32'd15);

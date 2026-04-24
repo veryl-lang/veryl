@@ -3762,7 +3762,7 @@ impl VerylWalker for Emitter {
         self.r#for(&arg.r#for);
         self.space(1);
         self.str("(");
-        self.emit_scalar_type(&arg.scalar_type, false);
+        self.str("int");
         self.space(1);
         self.identifier(&arg.identifier);
         self.space(1);

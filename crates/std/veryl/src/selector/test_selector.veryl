@@ -28,15 +28,15 @@ module test_binary_mux {
     );
 
     initial {
-        for i: u32 in 0..16 {
+        for i in 0..16 {
             a[i] = (i + 1) as 4;
         }
 
-        for i: u32 in 0..16 {
+        for i in 0..16 {
             s            = i;
             u_clock.next(1);
 
-            for j: u32      in 0..16 {
+            for j in 0..16 {
                 let exp    : logic<4> = if j == i ? a[j] : 0;
                 $assert(c[j] == exp);
             }
@@ -76,15 +76,15 @@ module test_vector_mux {
     );
 
     initial {
-        for i: u32 in 0..16 {
+        for i in 0..16 {
             a[i] = (i + 1) as 4;
         }
 
-        for i: u32 in 0..16 {
+        for i in 0..16 {
             s            = 1 << i;
             u_clock.next(1);
 
-            for j: u32      in 0..16 {
+            for j in 0..16 {
                 let exp    : logic<4> = if j == i ? a[j] : 0;
                 $assert(c[j] == exp);
             }
@@ -124,15 +124,15 @@ module test_onehot_mux {
     );
 
     initial {
-        for i: u32 in 0..16 {
+        for i in 0..16 {
             a[i] = (i + 1) as 4;
         }
 
-        for i: u32 in 0..16 {
+        for i in 0..16 {
             s            = 1 << i;
             u_clock.next(1);
 
-            for j: u32      in 0..16 {
+            for j in 0..16 {
                 let exp    : logic<4> = if j == i ? a[j] : 0;
                 $assert(c[j] == exp);
             }

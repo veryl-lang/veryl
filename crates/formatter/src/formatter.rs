@@ -1298,9 +1298,6 @@ impl VerylWalker for Formatter {
         self.r#for(&arg.r#for);
         self.space(1);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        self.space(1);
-        self.scalar_type(&arg.scalar_type);
         self.space(1);
         self.r#in(&arg.r#in);
         self.space(1);

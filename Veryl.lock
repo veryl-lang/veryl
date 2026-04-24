@@ -7,36 +7,36 @@ name = "veryl_sample"
 dependencies = []
 
 [projects.source]
-uuid = "7a8f66ee-ce45-56a4-aa67-647def541086"
+uuid = "3c6069e9-2557-58f6-a7d1-da2c7c16ba18"
 url = "https://github.com/veryl-lang/sample"
 path = ""
 project = "veryl_sample"
-version = "0.13.0"
-revision = "8799cfb19e50f60c6103dda46fe98c1c712a5f8b"
+version = "0.16.0"
+revision = "df08333919cdec117aaa699ec97c5c9a2dee69b8"
 
 [[projects]]
 name = "veryl_sample2"
 dependencies = []
 
 [projects.source]
-uuid = "2d548dd9-6181-5cf7-9542-b60a737f6f72"
+uuid = "a195d367-357d-5599-a36a-92b46eaa9cb6"
 url = "https://github.com/veryl-lang/sample"
 path = ""
 project = "veryl_sample"
-version = "0.14.0"
-revision = "bfe86a4a232752413b8d0e91f61f47c11a2db927"
+version = "0.17.0"
+revision = "2f547db8a5d7c6273bf84ebbe540e315e84fe47f"
 
 [[projects]]
 name = "veryl_sample3"
 dependencies = []
 
 [projects.source]
-uuid = "b7032300-fe14-5c75-9e08-640d3dc74db5"
+uuid = "f0f62926-e7a5-58c5-ba76-959930cdf4ce"
 url = "https://github.com/veryl-lang/sample"
 path = ""
 project = "veryl_sample"
-version = "0.15.0"
-revision = "7b4076a1203f89a2b08feee758c8557e208afb31"
+version = "0.18.0"
+revision = "52fc06237c5b70d42d67ea0910874ba111a6ef98"
 
 [[projects]]
 name = "veryl_sample4"

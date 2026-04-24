@@ -6381,7 +6381,7 @@ fn readonly_cache_fill() {
         always_ff (clk, rst) {
             if_reset {
                 state = 0; fill_count = 0; valid = 0;
-                for i: i32 in 0..8 { data[i] = 0; }
+                for i in 0..8 { data[i] = 0; }
             } else {
                 case state {
                     2'd0: { if miss { fill_count = 0; state = 2'd1; } }
@@ -6411,7 +6411,7 @@ fn readonly_cache_fill() {
         var tc: logic<8>; var stored: logic<32>;
         always_ff (clk, rst) {
             if_reset { tc = 0; ren = 0; stored = 0;
-                for i: i32 in 0..8 { mem[i] = {24'd0, i[7:0]} + 32'd10; }
+                for i in 0..8 { mem[i] = {24'd0, i[7:0]} + 32'd10; }
             } else {
                 ren = 0; if stall { ren = 1; }
                 if !stall { tc = tc + 8'd1; }
@@ -6512,8 +6512,8 @@ fn readonly_cache_fill_with_tags() {
         always_ff (clk, rst) {
             if_reset {
                 state = 0; fill_count = 0; fill_index = 0; fill_tag = 0; valid = 0;
-                for i: i32 in 0..16 { tags[i] = 0; }
-                for i: i32 in 0..128 { data[i] = 0; }
+                for i in 0..16 { tags[i] = 0; }
+                for i in 0..128 { data[i] = 0; }
             } else {
                 case state {
                     2'd0: { if miss { fill_index = index; fill_tag = tag; fill_count = 0; state = 2'd1; } }
@@ -6546,7 +6546,7 @@ fn readonly_cache_fill_with_tags() {
         var tc: logic<8>; var r1: logic<64>; var r2: logic<64>;
         always_ff (clk, rst) {
             if_reset { tc = 0; ren = 0; addr = 0; r1 = 0; r2 = 0;
-                for i: i32 in 0..256 {
+                for i in 0..256 {
                     if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
                     else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
                     else { mem[i] = 0; }
@@ -6618,8 +6618,8 @@ fn readonly_cache_fill_3level() {
         always_ff (clk, rst) {
             if_reset {
                 state = State::IDLE; fill_count = 0; fill_index = 0; fill_tag = 0; valid = 0;
-                for i: i32 in 0..16 { tags[i] = 0; }
-                for i: i32 in 0..128 { data[i] = 0; }
+                for i in 0..16 { tags[i] = 0; }
+                for i in 0..128 { data[i] = 0; }
             } else {
                 case state {
                     State::IDLE: { if miss { fill_index = index; fill_tag = tag; fill_count = 0; state = State::FILL; } }
@@ -6655,7 +6655,7 @@ fn readonly_cache_fill_3level() {
         var tc: logic<8>; var r1_val: logic<64>; var r2_val: logic<64>;
         always_ff (clk, rst) {
             if_reset { tc = 0; ren = 0; addr = 0; r1_val = 0; r2_val = 0;
-                for i: i32 in 0..256 {
+                for i in 0..256 {
                     if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
                     else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
                     else { mem[i] = 0; }
@@ -6885,8 +6885,8 @@ fn cache_halfword_select_with_stall() {
         always_ff (clk, rst) {
             if_reset {
                 filling = 0; fill_count = 0; fill_index = 0;
-                for i: i32 in 0..16 { valid[i] = 0; }
-                for i: i32 in 0..256 { data[i] = 0; }
+                for i in 0..16 { valid[i] = 0; }
+                for i in 0..256 { data[i] = 0; }
             } else if filling {
                 data[fill_data_idx] = i_mem_rdata;
                 if fill_count == 4'd15 {
@@ -7125,7 +7125,7 @@ fn dcache_write_through_hierarchy() {
         always_ff (clk, rst) {
             if_reset {
                 valid = 1'b0;
-                for i: i32 in 0..16 { data[i] = 64'd0; }
+                for i in 0..16 { data[i] = 64'd0; }
             } else if i_wen {
                 data[data_idx] = i_wdata;
                 valid = 1'b1;
@@ -7255,11 +7255,11 @@ fn nonff_dynamic_array_deep_hierarchy() {
                 fill_count = 3'd0;
                 fill_index = 4'd0;
                 fill_tag   = '0;
-                for i: i32 in 0..16 {
+                for i in 0..16 {
                     valid[i] = 1'b0;
                     tags[i]  = 54'd0;
                 }
-                for i: i32 in 0..128 {
+                for i in 0..128 {
                     data[i] = 64'd0;
                 }
             } else {
@@ -7543,7 +7543,7 @@ fn dcache_write_through_pattern() {
         always_ff (clk, rst) {
             if_reset {
                 valid = 1'b0;
-                for i: i32 in 0..8 { data[i] = 64'd0; }
+                for i in 0..8 { data[i] = 64'd0; }
             } else {
                 // Fill: write all entries on first write
                 if i_wen && !valid {
@@ -7641,7 +7641,7 @@ fn dynamic_array_two_read_ports() {
 
         always_ff (clk, rst) {
             if_reset {
-                for i: i32 in 0..32 { regs[i] = 64'd0; }
+                for i in 0..32 { regs[i] = 64'd0; }
             } else if i_wen {
                 regs[i_wd_addr] = i_wd_data;
             }
@@ -7774,7 +7774,7 @@ fn dynamic_array_three_level_hierarchy() {
 
         always_ff {
             if_reset {
-                for i: i32 in 0..32 { regs[i] = 64'd0; }
+                for i in 0..32 { regs[i] = 64'd0; }
             } else if i_wen {
                 regs[i_wd_addr] = i_wd_data;
             }
@@ -10716,7 +10716,7 @@ fn find_max_with_self_reference_in_comb() {
         always_comb {
             best_id  = 3'd0;
             best_pri = 3'd0;
-            for i: i32 in 1..8 {
+            for i in 1..8 {
                 if vec[i] && prio[i] >: best_pri {
                     best_id  = i[2:0];
                     best_pri = prio[i];
@@ -10727,12 +10727,12 @@ fn find_max_with_self_reference_in_comb() {
         always_ff (clk, rst) {
             if_reset {
                 vec = 8'd0;
-                for i: i32 in 0..8 {
+                for i in 0..8 {
                     prio[i] = 3'd0;
                 }
                 prio[3] = 3'd5;
             } else {
-                for i: i32 in 1..8 {
+                for i in 1..8 {
                     if i_set[i] && !vec[i] {
                         vec[i] = 1'b1;
                     }
@@ -10827,7 +10827,7 @@ fn dispatch_binary_pattern_via_function() {
     ) {
         var tmp: DATA_TYPE<ENTRIES>;
         always_comb {
-            for i: u32 in 0..ENTRIES {
+            for i in 0..ENTRIES {
                 tmp[i] = 0 as DATA_TYPE;
             }
             tmp[sel] = data;
@@ -10979,7 +10979,7 @@ fn for_break_in_comb() {
             a[2] = a2;
             a[3] = a3;
             sum = 0;
-            for i: u32 in 0..4 {
+            for i in 0..4 {
                 sum += a[i];
             }
         }
@@ -11019,7 +11019,7 @@ fn for_break_in_comb() {
             a[2] = a2;
             a[3] = a3;
             idx = 0;
-            for i: u32 in 0..4 {
+            for i in 0..4 {
                 if a[i] != 0 {
                     idx = i as 8;
                     break;
@@ -11082,7 +11082,7 @@ fn for_break_after_assign_in_comb() {
     ) {
         always_comb {
             sum = 0;
-            for i: u32 in 0..4 {
+            for i in 0..4 {
                 sum += i as 8;
                 if (i as 8) == limit {
                     break;
@@ -11134,7 +11134,7 @@ fn for_break_in_dynamic_range_function() {
         ) -> u32 {
             var s: u32;
             s = 0;
-            for i: u32 in 0..n {
+            for i in 0..n {
                 if i == limit {
                     break;
                 }
@@ -11200,15 +11200,15 @@ fn dynamic_for_range_in_function() {
             var m: i32;
             var n: i32;
 
-            for i: u32 in 0..8 {
+            for i in 0..8 {
                 out[i] = 0 as T;
             }
 
             m = 8;
-            for i: u32 in beg_outer..end_outer {
+            for i in beg_outer..end_outer {
                 n = m;
                 m = n / 2;
-                for j: u32 in 0..m {
+                for j in 0..m {
                     out[4 * i + j] = (4 * i + j) as T;
                 }
             }
@@ -11279,11 +11279,11 @@ fn dynamic_for_range_in_unrolled_static_for() {
 
             next_n = 8;
             next_d = i_data;
-            for _i: u32 in 0..DEPTH {
+            for _i in 0..DEPTH {
                 current_n = next_n;
                 current_d = next_d;
                 next_n = current_n / 2;
-                for j: u32 in 0..next_n {
+                for j in 0..next_n {
                     next_d[j] = (current_d[2 * j + 0] + current_d[2 * j + 1]) as 4;
                 }
             }
@@ -11356,7 +11356,7 @@ fn for_static_in_always_ff_reset() {
 
         always_ff (clk, rst) {
             if_reset {
-                for i: i32 in 0..4 {
+                for i in 0..4 {
                     data[i] = (i + 10) as 8;
                 }
             }
@@ -11390,11 +11390,11 @@ fn for_static_step_and_rev() {
     ) {
         always_comb {
             sum_step = 0;
-            for i: u32 in 0..10 step += 3 {
+            for i in 0..10 step += 3 {
                 sum_step += i;
             }
             sum_rev = 0;
-            for i: i32 in rev 0..4 {
+            for i in rev 0..4 {
                 sum_rev = sum_rev * 10 + i as 32;
             }
         }
@@ -11592,7 +11592,7 @@ fn wide_bit_reverse() {
         reversed: output logic<128>,
     ) {
         always_comb {
-            for i: u32 in 0..128 {
+            for i in 0..128 {
                 reversed[i] = bits[128 - i - 1];
             }
         }

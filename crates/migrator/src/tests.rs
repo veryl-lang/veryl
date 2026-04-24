@@ -11,11 +11,11 @@ fn migrate(code: &str, exp: &str) {
 }
 
 #[test]
-fn migrate_statement_block() {
+fn migrate_for_statement_type_specifier() {
     let code = r#"
     module A {
         always_comb {
-            {
+            for i: u32 in 0..10 {
             }
         }
     }"#;
@@ -23,7 +23,28 @@ fn migrate_statement_block() {
     let exp = r#"
     module A {
         always_comb {
-            block {
+            for i      in 0..10 {
+            }
+        }
+    }"#;
+
+    migrate(code, exp);
+}
+
+#[test]
+fn migrate_for_statement_signed_type() {
+    let code = r#"
+    module A {
+        always_comb {
+            for i: i32 in rev 0..10 {
+            }
+        }
+    }"#;
+
+    let exp = r#"
+    module A {
+        always_comb {
+            for i      in rev 0..10 {
             }
         }
     }"#;

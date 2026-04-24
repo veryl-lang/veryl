@@ -32,29 +32,29 @@ module veryl_testcase_Module07;
         end
 
         // for statement
-        for (int unsigned i = 0; i < 10; i++) begin
+        for (int i = 0; i < 10; i++) begin
             a  = i;
             aa = i + 1;
         end
 
         // for statement with closed range
-        for (int unsigned i = 0; i <= 10; i++) begin
+        for (int i = 0; i <= 10; i++) begin
             a  = i;
             aa = i + 1;
         end
 
         // for statement with custom step
-        for (int unsigned i = 0; i < 10; i += 2) begin
+        for (int i = 0; i < 10; i += 2) begin
             a  = i;
             aa = i + 1;
         end
-        for (int unsigned i = 0; i < 10; i *= 2) begin
+        for (int i = 0; i < 10; i *= 2) begin
             a  = i;
             aa = i + 1;
         end
 
         // for statement with break statement
-        for (int unsigned i = 0; i < 10; i++) begin
+        for (int i = 0; i < 10; i++) begin
             a  = i;
             aa = i + 1;
             if (i == 0) begin
@@ -62,8 +62,8 @@ module veryl_testcase_Module07;
             end
         end
 
-        for (int unsigned i = 0; i < 10; i++) begin
-            for (int unsigned j = 0; j < 10; j++) begin
+        for (int i = 0; i < 10; i++) begin
+            for (int j = 0; j < 10; j++) begin
                 a  = i;
                 aa = i + j;
                 if (i == 0 && j == 0) begin

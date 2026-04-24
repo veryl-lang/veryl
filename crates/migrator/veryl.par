@@ -109,7 +109,9 @@ AssignTerm            : <INITIAL, Generic                                       
 AsTerm                : <INITIAL, Generic                                             >'as'                                                                                  : Token; // Keyword: Statement
 BindTerm              : <INITIAL, Generic                                             >'bind'                                                                                : Token; // Keyword: Statement
 BitTerm               : <INITIAL, Generic                                             >'bit'                                                                                 : Token; // Keyword: Type
-BoolTerm              : <INITIAL, Generic                                             >'bool'                                                                                : Token; // Keyword: Type
+BlockTerm             : <INITIAL, Generic                                             >'block'                                                                               : Token; // Keyword: Statement
+BBoolTerm             : <INITIAL, Generic                                             >'bbool'                                                                               : Token; // Keyword: Type
+LBoolTerm             : <INITIAL, Generic                                             >'lbool'                                                                               : Token; // Keyword: Type
 CaseTerm              : <INITIAL, Generic                                             >'case'                                                                                : Token; // Keyword: Conditional
 ClockTerm             : <INITIAL, Generic                                             >'clock'                                                                               : Token; // Keyword: Type
 ClockPosedgeTerm      : <INITIAL, Generic                                             >'clock_posedge'                                                                       : Token; // Keyword: Type
@@ -127,6 +129,7 @@ FalseTerm             : <INITIAL, Generic                                       
 FinalTerm             : <INITIAL, Generic                                             >'final'                                                                               : Token; // Keyword: Statement
 ForTerm               : <INITIAL, Generic                                             >'for'                                                                                 : Token; // Keyword: Repeat
 FunctionTerm          : <INITIAL, Generic                                             >'function'                                                                            : Token; // Keyword: Structure
+GenTerm               : <INITIAL, Generic                                             >'gen'                                                                                 : Token; // Keyword: Statement
 I8Term                : <INITIAL, Generic                                             >'i8'                                                                                  : Token; // Keyword: Type
 I16Term               : <INITIAL, Generic                                             >'i16'                                                                                 : Token; // Keyword: Type
 I32Term               : <INITIAL, Generic                                             >'i32'                                                                                 : Token; // Keyword: Type
@@ -172,6 +175,10 @@ SwitchTerm            : <INITIAL, Generic                                       
 TriTerm               : <INITIAL, Generic                                             >'tri'                                                                                 : Token; // Keyword: Type
 TrueTerm              : <INITIAL, Generic                                             >'true'                                                                                : Token; // Keyword: Literal
 TypeTerm              : <INITIAL, Generic                                             >'type'                                                                                : Token; // Keyword: Statement
+P8Term                : <INITIAL, Generic                                             >'p8'                                                                                  : Token; // Keyword: Type
+P16Term               : <INITIAL, Generic                                             >'p16'                                                                                 : Token; // Keyword: Type
+P32Term               : <INITIAL, Generic                                             >'p32'                                                                                 : Token; // Keyword: Type
+P64Term               : <INITIAL, Generic                                             >'p64'                                                                                 : Token; // Keyword: Type
 U8Term                : <INITIAL, Generic                                             >'u8'                                                                                  : Token; // Keyword: Type
 U16Term               : <INITIAL, Generic                                             >'u16'                                                                                 : Token; // Keyword: Type
 U32Term               : <INITIAL, Generic                                             >'u32'                                                                                 : Token; // Keyword: Type
@@ -252,7 +259,9 @@ AsToken            : AsTerm            : Token Comments;
 AssignToken        : AssignTerm        : Token Comments;
 BindToken          : BindTerm          : Token Comments;
 BitToken           : BitTerm           : Token Comments;
-BoolToken          : BoolTerm          : Token Comments;
+BlockToken         : BlockTerm         : Token Comments;
+BBoolToken         : BBoolTerm         : Token Comments;
+LBoolToken         : LBoolTerm         : Token Comments;
 CaseToken          : CaseTerm          : Token Comments;
 ClockToken         : ClockTerm         : Token Comments;
 ClockPosedgeToken  : ClockPosedgeTerm  : Token Comments;
@@ -270,6 +279,7 @@ FalseToken         : FalseTerm         : Token Comments;
 FinalToken         : FinalTerm         : Token Comments;
 ForToken           : ForTerm           : Token Comments;
 FunctionToken      : FunctionTerm      : Token Comments;
+GenToken           : GenTerm           : Token Comments;
 I8Token            : I8Term            : Token Comments;
 I16Token           : I16Term           : Token Comments;
 I32Token           : I32Term           : Token Comments;
@@ -315,6 +325,10 @@ SwitchToken        : SwitchTerm        : Token Comments;
 TriToken           : TriTerm           : Token Comments;
 TrueToken          : TrueTerm          : Token Comments;
 TypeToken          : TypeTerm          : Token Comments;
+P8Token            : P8Term            : Token Comments;
+P16Token           : P16Term           : Token Comments;
+P32Token           : P32Term           : Token Comments;
+P64Token           : P64Term           : Token Comments;
 U8Token            : U8Term            : Token Comments;
 U16Token           : U16Term           : Token Comments;
 U32Token           : U32Term           : Token Comments;
@@ -401,7 +415,9 @@ As            : AsToken            : VerylToken;
 Assign        : AssignToken        : VerylToken;
 Bind          : BindToken          : VerylToken;
 Bit           : BitToken           : VerylToken;
-Bool          : BoolToken          : VerylToken;
+Block         : BlockToken         : VerylToken;
+BBool         : BBoolToken         : VerylToken;
+LBool         : LBoolToken         : VerylToken;
 Break         : BreakToken         : VerylToken;
 Case          : CaseToken          : VerylToken;
 Clock         : ClockToken         : VerylToken;
@@ -420,6 +436,7 @@ False         : FalseToken         : VerylToken;
 Final         : FinalToken         : VerylToken;
 For           : ForToken           : VerylToken;
 Function      : FunctionToken      : VerylToken;
+Gen           : GenToken           : VerylToken;
 I8            : I8Token            : VerylToken;
 I16           : I16Token           : VerylToken;
 I32           : I32Token           : VerylToken;
@@ -464,6 +481,10 @@ Switch        : SwitchToken        : VerylToken;
 Tri           : TriToken           : VerylToken;
 True          : TrueToken          : VerylToken;
 Type          : TypeToken          : VerylToken;
+P8            : P8Token            : VerylToken;
+P16           : P16Token           : VerylToken;
+P32           : P32Token           : VerylToken;
+P64           : P64Token           : VerylToken;
 U8            : U8Token            : VerylToken;
 U16           : U16Token           : VerylToken;
 U32           : U32Token           : VerylToken;
@@ -600,7 +621,7 @@ RangeOperator: DotDot
 // ScalarType / ArrayType / CastingType
 // ----------------------------------------------------------------------------
 
-FixedType: U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | Bool | Strin;
+FixedType: P8 | P16 | P32 | P64 | U8 | U16 | U32 | U64 | I8 | I16| I32 | I64 | F32 | F64 | BBool | LBool | Strin;
 
 VariableType: Clock
             | ClockPosedge
@@ -627,13 +648,18 @@ CastingType: U8
            | U16
            | U32
            | U64
+           | P8
+           | P16
+           | P32
+           | P64
            | I8
            | I16
            | I32
            | I64
            | F32
            | F64
-           | Bool
+           | BBool
+           | LBool
            | Clock
            | ClockPosedge
            | ClockNegedge
@@ -659,9 +685,15 @@ ClockDomain: Quote Identifier;
 
 StatementBlock: LBrace { StatementBlockGroup } RBrace;
 
-StatementBlockGroup: { Attribute } ( LBrace { StatementBlockGroup } RBrace | StatementBlockItem );
+StatementBlockGroup: { Attribute } ( Block LBrace { StatementBlockGroup } RBrace | StatementBlockItem );
 
-StatementBlockItem: VarDeclaration | LetStatement | ConstDeclaration | Statement;
+StatementBlockItem: VarDeclaration
+                  | LetStatement
+                  | ConstDeclaration
+                  | GenDeclaration
+                  | Statement
+                  | ConcatenationAssignment
+                  ;
 
 Statement: IdentifierStatement
          | IfStatement
@@ -676,6 +708,8 @@ Statement: IdentifierStatement
 LetStatement: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Semicolon;
 
 IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolon;
+
+ConcatenationAssignment: LBrace AssignConcatenationList RBrace Equ Expression Semicolon;
 
 Assignment: ( Equ | AssignmentOperator | DiamondOperator ) Expression;
 
@@ -723,6 +757,8 @@ VarDeclaration: Var Identifier Colon [ ClockDomain ] ArrayType Semicolon;
 
 ConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Equ Expression Semicolon;
 
+GenDeclaration: Gen Identifier Colon ( GenericProtoBound | Type ) Equ Expression Semicolon;
+
 TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
 
 AlwaysFfDeclaration: AlwaysFf [ AlwaysFfEventList ] StatementBlock;
@@ -756,8 +792,10 @@ ModportItem: Identifier Colon Direction;
 
 ModportDefault: Input
               | Output
-              | Same LParen Identifier RParen
-              | Converse LParen Identifier RParen;
+              | Same LParen ModportDefaultList RParen
+              | Converse LParen ModportDefaultList RParen;
+
+ModportDefaultList: Identifier { Comma Identifier } [ Comma ];
 
 EnumDeclaration: Enum Identifier [ Colon ScalarType ] LBrace EnumList RBrace;
 
@@ -925,6 +963,7 @@ GenerateItem: LetDeclaration
             | InstDeclaration
             | BindDeclaration
             | ConstDeclaration
+            | GenDeclaration
             | AlwaysFfDeclaration
             | AlwaysCombDeclaration
             | AssignDeclaration
@@ -953,6 +992,7 @@ PackageDeclaration: Package Identifier [ WithGenericParameter ] [ For ScopedIden
 PackageGroup: { Attribute } ( LBrace { PackageGroup } RBrace | PackageItem );
 
 PackageItem: ConstDeclaration
+           | GenDeclaration
            | TypeDefDeclaration
            | EnumDeclaration
            | StructUnionDeclaration
@@ -1044,6 +1084,7 @@ PublicDescriptionItem: ModuleDeclaration
                      | PackageDeclaration
                      | AliasDeclaration
                      | ProtoDeclaration
+                     | FunctionDeclaration
                      ;
 
 // ----------------------------------------------------------------------------

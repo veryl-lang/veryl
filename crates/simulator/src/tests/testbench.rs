@@ -333,7 +333,7 @@ fn tb_readonly_cache_fill() {
         var tc: logic<8>; var r1_val: logic<64>; var r2_val: logic<64>;
         always_ff (clk, rst) {
             if_reset { tc = 0; ren = 0; addr = 0; r1_val = 0; r2_val = 0;
-                for i: i32 in 0..256 {
+                for i in 0..256 {
                     if i == 0 { mem[i] = 64'h0000_0000_0000_AAAA; }
                     else if i == 1 { mem[i] = 64'h0000_0000_0000_BBBB; }
                     else { mem[i] = 0; }
@@ -400,8 +400,8 @@ fn tb_readonly_cache_fill() {
         always_ff (clk, rst) {
             if_reset {
                 state = 0; fill_count = 0; fill_index = 0; fill_tag = 0; valid = 0;
-                for i: i32 in 0..16 { tags[i] = 0; }
-                for i: i32 in 0..128 { data[i] = 0; }
+                for i in 0..16 { tags[i] = 0; }
+                for i in 0..128 { data[i] = 0; }
             } else {
                 case state {
                     2'd0: { if miss { fill_index = index; fill_tag = tag; fill_count = 0; state = 2'd1; } }

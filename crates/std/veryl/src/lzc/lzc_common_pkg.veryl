@@ -41,7 +41,7 @@ pub package lzc_common_pkg {
         var ret_any_one: result::<4>        ;
         var ret        : result::<16>       ;
 
-        for i: u32 in 0..4 {
+        for i in 0..4 {
             ret4[i]    = lzc4(bits[i step 4]);
             any_one[i] = !ret4[i].all_zero;
         }
@@ -61,7 +61,7 @@ pub package lzc_common_pkg {
         var ret_any_one: result::<4>        ;
         var ret        : result::<32>       ;
 
-        for i: u32 in 0..4 {
+        for i in 0..4 {
             ret8[i]    = lzc8(bits[i step 8]);
             any_one[i] = !ret8[i].all_zero;
         }
@@ -81,7 +81,7 @@ pub package lzc_common_pkg {
         var ret_any_one: result::<8>        ;
         var ret        : result::<64>       ;
 
-        for i: u32 in 0..8 {
+        for i in 0..8 {
             ret8[i]    = lzc8(bits[i step 8]);
             any_one[i] = !ret8[i].all_zero;
         }

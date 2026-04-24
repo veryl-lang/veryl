@@ -5,7 +5,7 @@ pub function dispatch_binary::<N: p32, T: type> (
 ) -> T<N> {
     var result: T<N>;
 
-    for i: u32 in 0..N {
+    for i in 0..N {
         result[i] = default_data;
     }
     result[sel] = data;
@@ -20,7 +20,7 @@ pub function dispatch_vector::<N: p32, T: type> (
 ) -> T<N> {
     var result: T<N>;
 
-    for i: u32 in 0..N {
+    for i in 0..N {
         if sel[i] {
             result[i] = data;
         } else {
