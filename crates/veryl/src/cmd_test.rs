@@ -149,11 +149,12 @@ impl CmdTest {
             metadata.test.simulator
         };
 
-        let config = Config {
+        let mut config = Config {
             use_jit: !self.opt.disable_jit,
             disable_ff_opt: self.opt.disable_ff_opt,
             ..Config::default()
         };
+        config.apply_env();
         let mut proto_cache = ProtoModuleCache::default();
 
         let mut success = 0;

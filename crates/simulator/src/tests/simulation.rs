@@ -11645,3 +11645,116 @@ fn wide_bit_reverse() {
         );
     }
 }
+
+/// Regression test for duplicate ProtoStatement → false SCC in the
+/// child→parent comb/post_comb promotion path.
+///
+/// Structure: a child drives a parent signal; the parent's always_comb
+/// reads it in a self-referential pattern (local `let`, re-read in the
+/// next expression).  When that parent stmt would also need to run
+/// post-events to see fresh child outputs, it must be *moved* into
+/// `all_post_comb_fns`, not duplicated alongside `all_comb_statements`.
+/// A duplicate would write and read `e` from two ProtoStatements,
+/// forming a 2-stmt SCC in `unified`.
+#[test]
+fn scc_zero_after_comb_post_comb_dedup() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<8>,
+    ) {
+        var cnt: logic<8>;
+        inst c: Child (
+            clk,
+            rst,
+            cnt_o: cnt,
+        );
+        always_comb {
+            let e: logic<8> = cnt + 1;
+            o = e * 2 + e;
+        }
+    }
+
+    module Child (
+        clk:   input  clock,
+        rst:   input  reset,
+        cnt_o: output logic<8>,
+    ) {
+        var s: logic<8>;
+        always_ff {
+            if_reset {
+                s = 0;
+            } else {
+                s = s + 1;
+            }
+        }
+        assign cnt_o = s;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.nontrivial_comb_scc, 0,
+            "expected SCC=0 (config: jit={}, 4st={})",
+            config.use_jit, config.use_4state,
+        );
+    }
+}
+
+/// Regression test for duplicate ProtoStatement → false SCC in the
+/// merged-JIT path of `InstDeclaration::conv`.
+///
+/// When a child module's comb+event JIT merges successfully, originals
+/// must live only inside the pushed CompiledBlock's `original_stmts`
+/// (which `analyze_dependency` Phase 2 expands on demand).  Returning a
+/// parallel copy outside the CB would put both views into the parent's
+/// `unified` list, and any self-referential always_comb inside the child
+/// would form a cross-stmt SCC between the CB and its originals.
+#[test]
+fn merged_jit_dup_scc_regression() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<8>,
+    ) {
+        inst c: Child (
+            clk,
+            rst,
+            o,
+        );
+    }
+
+    module Child (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<8>,
+    ) {
+        var s: logic<8>;
+
+        always_ff {
+            if_reset {
+                s = 0;
+            } else {
+                s = s + 1;
+            }
+        }
+
+        always_comb {
+            let e: logic<8> = s + 1;
+            o = e * 2 + e;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.nontrivial_comb_scc, 0,
+            "expected SCC=0 (config: jit={}, 4st={})",
+            config.use_jit, config.use_4state,
+        );
+    }
+}

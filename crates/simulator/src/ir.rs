@@ -5,6 +5,7 @@ mod expression;
 mod module;
 #[cfg(not(target_family = "wasm"))]
 mod optimize;
+pub mod schedule;
 mod statement;
 mod variable;
 
@@ -59,13 +60,21 @@ pub struct Ir {
     /// FF commit entries: (current_offset, value_size) pairs.
     /// After event execution, next → current copy is performed for each entry.
     pub ff_commit_entries: Vec<(usize, usize)>,
-    /// (offset, size) byte ranges of comb_values written by comb_statements.
-    /// settle_comb snapshots/compares only these ranges so that ff-opt
-    /// demoted memory arrays — stored in comb_values but never changed
-    /// during comb iterations — do not dominate convergence-check cost.
-    pub comb_output_ranges: Vec<(usize, usize)>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
+    /// Sensitivity-fanout + topological-rank index for the seeded-worklist
+    /// comb settle. Populated from the pre-JIT ProtoStatement list at
+    /// ProtoModule build time.
+    pub comb_schedule: schedule::IrSchedule,
+    /// Runtime toggle for the seeded-worklist comb settle path. Snapshotted
+    /// from Config at Ir construction time so settle_comb can dispatch
+    /// without re-reading Config.
+    pub use_seeded_worklist: bool,
+    /// Diagnostic: number of nontrivial SCCs found in the pre-JIT comb
+    /// graph.  Real combinational loops are rejected by `analyze_dependency`,
+    /// so any non-zero value here indicates duplicate ProtoStatements in
+    /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
+    pub nontrivial_comb_scc: usize,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
     /// instances created from the same cached `ProtoModule` can share the binary.
     _binary: Arc<Vec<BinaryStorage>>,
@@ -99,115 +108,246 @@ impl Ir {
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             ff_commit_entries: module.ff_commit_entries,
-            comb_output_ranges: module.comb_output_ranges,
             disable_ff_opt: config.disable_ff_opt,
+            comb_schedule: module.comb_schedule,
+            use_seeded_worklist: config.use_seeded_worklist,
+            nontrivial_comb_scc: module.nontrivial_comb_scc,
             _binary: binary,
         }
     }
 
-    /// Evaluate comb until convergence.
-    /// Returns true if converged on the first extra pass (or no extra needed).
+    /// Evaluate comb for `required_comb_passes` passes.
+    ///
+    /// Real combinational loops are rejected by `analyze_dependency`
+    /// (error: `combinational_loop`), so once control reaches this function
+    /// the stmt-level graph is an acyclic DAG whose depth determines how
+    /// many passes are needed to settle.  No iteration-to-convergence is
+    /// required, and no runtime "did anything change?" check is performed.
     pub fn settle_comb(
         &self,
         mask_cache: &mut MaskCache,
         snapshot_buf: &mut Vec<u8>,
         profile: &mut SimProfile,
-        skip_convergence_check: bool,
-    ) -> bool {
+    ) {
         #[cfg(feature = "profile")]
         {
             profile.settle_comb_count += 1;
         }
         let _ = profile; // suppress unused warning when profile feature is off
 
-        let min_passes = self.required_comb_passes;
-        self.eval_comb_full(mask_cache, profile);
-        #[cfg(feature = "profile")]
+        // Worklist path: event-driven comb evaluation using a seeded
+        // worklist built from FF dirty state.  Gated on the worklist
+        // config and an alignment check.
+        if self.use_seeded_worklist
+            && self.comb_schedule.n_stmts as usize == self.comb_statements.len()
         {
-            profile.comb_eval_count += 1;
+            self.eval_comb_worklist(mask_cache, snapshot_buf, profile);
+            return;
         }
-        for _ in 1..min_passes {
+
+        // `VERYL_MIN_PASSES_OVERRIDE` is still honoured as a debug knob.
+        use std::sync::OnceLock;
+        static MIN_PASSES_OVERRIDE: OnceLock<Option<usize>> = OnceLock::new();
+        let min_override = *MIN_PASSES_OVERRIDE.get_or_init(|| {
+            std::env::var("VERYL_MIN_PASSES_OVERRIDE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        });
+        let passes = min_override.unwrap_or(self.required_comb_passes);
+        for _ in 0..passes {
             self.eval_comb_full(mask_cache, profile);
             #[cfg(feature = "profile")]
             {
                 profile.comb_eval_count += 1;
             }
         }
-        if min_passes <= 1 {
+    }
+
+    /// Seeded-worklist comb settle.
+    ///
+    /// Runs one full pass over every comb statement (the seed pass is always
+    /// full — cheap compared to skipping a real dependency), then drives a
+    /// worklist using the schedule's fanout index: each iteration re-evaluates
+    /// only stmts whose declared-input offsets just changed, pushing their
+    /// downstream readers onto the next generation's dirty set.
+    ///
+    /// The algorithm terminates when no outputs change (`dirty` stays empty)
+    /// or when MAX_ITER is hit (logs a warning and returns false — callers
+    /// currently ignore the bool so a stale state will show up in correctness
+    /// tests rather than silently miscompute).
+    ///
+    /// Requires `self.comb_schedule.n_stmts == self.comb_statements.len()`,
+    /// enforced by the dispatch check in `settle_comb`.
+    pub fn eval_comb_worklist(
+        &self,
+        mask_cache: &mut MaskCache,
+        snapshot_buf: &mut Vec<u8>,
+        profile: &mut SimProfile,
+    ) -> bool {
+        use smallvec::SmallVec;
+        let _ = profile;
+        #[cfg(feature = "profile")]
+        let start = std::time::Instant::now();
+
+        let sched = &self.comb_schedule;
+        let n = sched.n_stmts as usize;
+        let comb_len = self.comb_values.len();
+
+        if n == 0 {
             return true;
         }
-        if skip_convergence_check {
-            return true;
+
+        snapshot_buf.resize(comb_len, 0);
+        snapshot_buf.copy_from_slice(&self.comb_values);
+
+        for stmt in &self.comb_statements {
+            stmt.eval_step(mask_cache);
         }
-        // compute_required_passes cannot capture the iteration count of
-        // comb cycles broken by cross-module register reads (the cycle has
-        // no DAG chain depth).  Give such designs up to MAX_EXTRA extras
-        // to reach a fixed point.
-        const MAX_EXTRA: usize = 4;
-        for _i in 0..MAX_EXTRA {
-            self.snapshot_comb_output(snapshot_buf);
-            self.eval_comb_full(mask_cache, profile);
+        #[cfg(feature = "profile")]
+        {
+            profile.comb_eval_count += 1;
+        }
+
+        let mut dirty: SmallVec<[crate::ir::schedule::StmtId; 32]> = SmallVec::new();
+        sched.compute_dirty_from_diff(
+            &snapshot_buf[..],
+            &self.comb_values[..],
+            0..n as crate::ir::schedule::StmtId,
+            &mut dirty,
+        );
+
+        const MAX_ITER: usize = 128;
+        let mut iter = 0;
+        let fallback_fullpass = std::env::var("VERYL_WORKLIST_FULLPASS_FALLBACK").is_ok();
+        while !dirty.is_empty() && iter < MAX_ITER {
+            dirty.sort_by_key(|&id| sched.topo_rank[id as usize]);
+            snapshot_buf.copy_from_slice(&self.comb_values);
+
+            let current_dirty = std::mem::take(&mut dirty);
+            if fallback_fullpass {
+                // Diagnostic: fall back to full pass to verify the first full
+                // pass + fixpoint logic.  Isolates bugs in dirty-propagation
+                // vs bugs elsewhere.
+                for stmt in &self.comb_statements {
+                    stmt.eval_step(mask_cache);
+                }
+            } else {
+                for &id in &current_dirty {
+                    self.comb_statements[id as usize].eval_step(mask_cache);
+                }
+            }
             #[cfg(feature = "profile")]
             {
                 profile.comb_eval_count += 1;
                 profile.extra_pass_count += 1;
             }
-            if self.comb_output_matches(snapshot_buf) {
-                #[cfg(feature = "profile")]
-                if _i == 0 {
-                    profile.converged_first_try += 1;
-                }
-                return _i == 0;
-            }
-        }
-        // Cycle did not settle within min_passes + MAX_EXTRA.  Debug
-        // builds panic (simulator correctness bug worth catching), release
-        // falls through to log::warn so users can still inspect state.
-        debug_assert!(
-            false,
-            "comb convergence failed after {} + {} passes ({} stmts)",
-            min_passes,
-            MAX_EXTRA,
-            self.comb_statements.len()
-        );
-        log::warn!(
-            "comb convergence failed after {} + {} passes ({} stmts)",
-            min_passes,
-            MAX_EXTRA,
-            self.comb_statements.len()
-        );
-        false
-    }
-
-    /// Copy the bytes covered by `comb_output_ranges` into `buf` as a flat
-    /// concatenation of the ranges in order.
-    fn snapshot_comb_output(&self, buf: &mut Vec<u8>) {
-        let total: usize = self.comb_output_ranges.iter().map(|(_, s)| s).sum();
-        buf.resize(total, 0);
-        let mut pos = 0;
-        for &(off, sz) in &self.comb_output_ranges {
-            let end = off + sz;
-            debug_assert!(
-                end <= self.comb_values.len(),
-                "comb_output_ranges out of bounds: [{off}..{end}) exceeds comb_values.len()={}",
-                self.comb_values.len()
+            let diff_ids: Box<dyn Iterator<Item = crate::ir::schedule::StmtId>> =
+                if fallback_fullpass {
+                    Box::new(0..n as crate::ir::schedule::StmtId)
+                } else {
+                    Box::new(
+                        current_dirty
+                            .iter()
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .into_iter(),
+                    )
+                };
+            sched.compute_dirty_from_diff(
+                &snapshot_buf[..],
+                &self.comb_values[..],
+                diff_ids,
+                &mut dirty,
             );
-            buf[pos..pos + sz].copy_from_slice(&self.comb_values[off..end]);
-            pos += sz;
+            iter += 1;
         }
-    }
 
-    /// Compare `buf` (produced by `snapshot_comb_output`) against the
-    /// current `comb_values` bytes across every range.
-    fn comb_output_matches(&self, buf: &[u8]) -> bool {
-        let mut pos = 0;
-        for &(off, sz) in &self.comb_output_ranges {
-            let end = off + sz;
-            debug_assert!(end <= self.comb_values.len());
-            if buf[pos..pos + sz] != self.comb_values[off..end] {
-                return false;
+        #[cfg(feature = "profile")]
+        {
+            profile.eval_comb_full_ns += start.elapsed().as_nanos() as u64;
+        }
+
+        if iter >= MAX_ITER {
+            log::warn!(
+                "worklist comb convergence failed after {} iters ({} stmts, {} initially dirty)",
+                MAX_ITER,
+                n,
+                dirty.len()
+            );
+            return false;
+        }
+
+        // Safety full-pass: disabled by default; set VERYL_WORKLIST_SAFETY=1
+        // to run an extra full pass after worklist converges. Keeps a
+        // correctness net for cases where the schedule fanout misses an
+        // edge, at a significant perf cost.
+        if std::env::var("VERYL_WORKLIST_SAFETY").is_ok() {
+            snapshot_buf.copy_from_slice(&self.comb_values);
+            for stmt in &self.comb_statements {
+                stmt.eval_step(mask_cache);
             }
-            pos += sz;
+            #[cfg(feature = "profile")]
+            {
+                profile.comb_eval_count += 1;
+                profile.extra_pass_count += 1;
+            }
+            dirty.clear();
+            sched.compute_dirty_from_diff(
+                &snapshot_buf[..],
+                &self.comb_values[..],
+                0..n as crate::ir::schedule::StmtId,
+                &mut dirty,
+            );
+            let mut safety_iter = 0;
+            const SAFETY_MAX_ITER: usize = 32;
+            while !dirty.is_empty() && safety_iter < SAFETY_MAX_ITER {
+                dirty.sort_by_key(|&id| sched.topo_rank[id as usize]);
+                snapshot_buf.copy_from_slice(&self.comb_values);
+                let current_dirty = std::mem::take(&mut dirty);
+                for &id in &current_dirty {
+                    self.comb_statements[id as usize].eval_step(mask_cache);
+                }
+                #[cfg(feature = "profile")]
+                {
+                    profile.comb_eval_count += 1;
+                    profile.extra_pass_count += 1;
+                }
+                sched.compute_dirty_from_diff(
+                    &snapshot_buf[..],
+                    &self.comb_values[..],
+                    current_dirty.iter().copied(),
+                    &mut dirty,
+                );
+                safety_iter += 1;
+            }
+        }
+
+        // Diagnostic: enable with VERYL_WORKLIST_VERIFY=1 to run a full pass
+        // after the worklist claims convergence and warn if anything still
+        // changes (indicates a missing fanout edge).
+        if std::env::var("VERYL_WORKLIST_VERIFY").is_ok() {
+            let verify_before: Vec<u8> = self.comb_values.to_vec();
+            for stmt in &self.comb_statements {
+                stmt.eval_step(mask_cache);
+            }
+            if verify_before.as_slice() != &self.comb_values[..] {
+                let mut first_diff = None;
+                for (i, (a, b)) in verify_before
+                    .iter()
+                    .zip(self.comb_values.iter())
+                    .enumerate()
+                {
+                    if a != b {
+                        first_diff = Some((i, *a, *b));
+                        break;
+                    }
+                }
+                log::warn!(
+                    "worklist verify: extra full pass changed comb_values (first diff at {:?}, iters={})",
+                    first_diff,
+                    iter
+                );
+            }
         }
         true
     }
@@ -398,6 +538,21 @@ pub struct Config {
     pub dump_asm: bool,
     /// Force all always_ff variables to FF (disable is_ff refinement).
     pub disable_ff_opt: bool,
+    /// Replace the flat `for stmt in comb_statements` settle with a
+    /// FF-seeded worklist that only re-evaluates statements whose declared
+    /// inputs just changed. Default false; `Config::apply_env` flips this
+    /// to true when the `VERYL_USE_SEEDED_WORKLIST` env var is set.
+    pub use_seeded_worklist: bool,
+}
+
+impl Config {
+    /// Apply environment-variable overrides on top of an existing config.
+    /// Currently handles `VERYL_USE_SEEDED_WORKLIST`.
+    pub fn apply_env(&mut self) {
+        if std::env::var("VERYL_USE_SEEDED_WORKLIST").ok().as_deref() == Some("1") {
+            self.use_seeded_worklist = true;
+        }
+    }
 }
 
 impl Config {

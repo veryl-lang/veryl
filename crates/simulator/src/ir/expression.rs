@@ -17,9 +17,7 @@ use cranelift::prelude::types::{I32, I64, I128};
 #[cfg(not(target_family = "wasm"))]
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::ir as air;
-use veryl_analyzer::value::MaskCache;
-#[cfg(not(target_family = "wasm"))]
-use veryl_analyzer::value::ValueU64;
+use veryl_analyzer::value::{MaskCache, ValueU64};
 
 /// Build an I128 constant from a u128 value.
 /// Since `iconst` only accepts Imm64, we build I128 via `iconcat(lo, hi)`.
@@ -791,6 +789,67 @@ impl ProtoExpression {
                         base_offset.raw() + *stride * (*num_elements as isize - 1),
                     );
                     inputs.push(last_offset);
+                }
+            }
+        }
+    }
+
+    /// Same as `gather_variable_offsets` but fully expands DynamicVariable
+    /// reads to every element offset. Used by the seeded-worklist schedule
+    /// so diff-based dirty propagation can see writes to any element. Not
+    /// used by `analyze_dependency` (which keeps the O(N²)-avoiding
+    /// base+last encoding).
+    pub fn gather_variable_offsets_expanded(&self, inputs: &mut Vec<VarOffset>) {
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select,
+                ..
+            } => {
+                inputs.push(*var_offset);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                }
+            }
+            ProtoExpression::Value { .. } => (),
+            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(inputs),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.gather_variable_offsets_expanded(inputs);
+                y.gather_variable_offsets_expanded(inputs);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.gather_variable_offsets_expanded(inputs);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.gather_variable_offsets_expanded(inputs);
+                true_expr.gather_variable_offsets_expanded(inputs);
+                false_expr.gather_variable_offsets_expanded(inputs);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_variable_offsets_expanded(inputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                }
+                for i in 0..*num_elements {
+                    let off = VarOffset::new(
+                        base_offset.is_ff(),
+                        base_offset.raw() + *stride * (i as isize),
+                    );
+                    inputs.push(off);
                 }
             }
         }
@@ -4251,6 +4310,58 @@ impl Conv<&air::Expression> for ProtoExpression {
                             expr_context,
                         });
                     }
+                }
+
+                // Algebraic identity folding: 0 && X = 0, 1 || X = 1, etc.
+                // This eliminates dependency edges on X that would
+                // otherwise feed into comb-loop analysis, e.g. a gated-off
+                // expression `1'b0 && live_signal && ...` still carries a
+                // dep on `live_signal` without this simplification.
+                // Applies only to pure-logic ops over U64 values; preserves
+                // widths and signedness.
+                fn is_zero_u64(e: &ProtoExpression) -> bool {
+                    matches!(
+                        e,
+                        ProtoExpression::Value { value: Value::U64(v), .. }
+                            if v.payload == 0 && v.mask_xz == 0
+                    )
+                }
+                fn is_nonzero_u64(e: &ProtoExpression) -> bool {
+                    if let ProtoExpression::Value {
+                        value: Value::U64(v),
+                        ..
+                    } = e
+                    {
+                        v.mask_xz == 0 && v.payload != 0
+                    } else {
+                        false
+                    }
+                }
+                let zero_result = |w: usize, ec: ExpressionContext| -> ProtoExpression {
+                    ProtoExpression::Value {
+                        value: Value::U64(ValueU64::new(0, w, ec.signed)),
+                        width: w,
+                        expr_context: ec,
+                    }
+                };
+                let one_result = |w: usize, ec: ExpressionContext| -> ProtoExpression {
+                    ProtoExpression::Value {
+                        value: Value::U64(ValueU64::new(1, w, ec.signed)),
+                        width: w,
+                        expr_context: ec,
+                    }
+                };
+                match op {
+                    Op::LogicAnd if is_zero_u64(&x) || is_zero_u64(&y) => {
+                        return Ok(zero_result(width, expr_context));
+                    }
+                    Op::LogicOr if is_nonzero_u64(&x) || is_nonzero_u64(&y) => {
+                        return Ok(one_result(width, expr_context));
+                    }
+                    Op::BitAnd if is_zero_u64(&x) || is_zero_u64(&y) => {
+                        return Ok(zero_result(width, expr_context));
+                    }
+                    _ => {}
                 }
 
                 Ok(ProtoExpression::Binary {

@@ -185,9 +185,6 @@ pub struct ProtoDeclaration {
     /// Post-comb functions: child comb-only JIT functions for pre-event eval.
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
-    /// Full internal comb statements (before merge optimization removed them).
-    /// Present only when merged comb+event functions are used.
-    pub full_internal_comb: Option<Vec<ProtoStatement>>,
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
@@ -209,7 +206,6 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements,
                     post_comb_fns: vec![],
                     child_modules: vec![],
-                    full_internal_comb: None,
                 })
             }
             air::Declaration::Ff(x) => {
@@ -237,7 +233,6 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements: vec![],
                     post_comb_fns: vec![],
                     child_modules: vec![],
-                    full_internal_comb: None,
                 })
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
@@ -268,7 +263,6 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements: vec![],
                     post_comb_fns: vec![],
                     child_modules: vec![],
-                    full_internal_comb: None,
                 })
             }
             air::Declaration::Final(x) => {
@@ -284,7 +278,6 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements: vec![],
                     post_comb_fns: vec![],
                     child_modules: vec![],
-                    full_internal_comb: None,
                 })
             }
             air::Declaration::Unsupported(token) => {
@@ -295,7 +288,6 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 comb_statements: vec![],
                 post_comb_fns: vec![],
                 child_modules: vec![],
-                full_internal_comb: None,
             }),
         }
     }
@@ -403,8 +395,20 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // JIT cache: reuse compiled code across instances of the same module type.
         // ff_start and comb_start are already byte offsets.
+        //
+        // `has_merged_jit` is set when this child's merged comb+event JIT
+        // succeeds; the post-loop logic that promotes parent comb stmts
+        // reading post_comb-written offsets uses it to skip the gating
+        // that only applies when the parent isn't in a merged-JIT path.
+        //
+        // The pre-merge originals are preserved inside the pushed CB's
+        // `original_stmts` field, and `analyze_dependency` Phase 2 expands
+        // CBs from there when fine-grained ordering is needed.  Avoiding
+        // a parallel copy outside the CB is what keeps the parent's
+        // `unified` list free of duplicate ProtoStatements (which would
+        // otherwise show up as false 2-stmt SCCs).
         #[allow(unused_mut)]
-        let mut full_internal_comb: Option<Vec<ProtoStatement>> = None;
+        let mut has_merged_jit: bool = false;
         #[cfg(not(target_family = "wasm"))]
         if context.config.use_jit {
             let ff_start_bytes = ff_start;
@@ -456,38 +460,36 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     }
                 }
 
-                full_internal_comb = if !cache_entry.merged_funcs.is_empty() {
+                has_merged_jit = !cache_entry.merged_funcs.is_empty();
+                if has_merged_jit {
+                    // Consume originals: the merged-event CBs already cover
+                    // them, and the comb-only CB below (or the interpreted
+                    // fallback) handles post_comb execution.  Originals are
+                    // preserved inside each CB's `original_stmts` for
+                    // Phase 2 expansion in analyze_dependency.
                     let full = std::mem::take(&mut all_comb_statements);
-                    Some(full)
-                } else {
-                    None
-                };
 
-                if !cache_entry.merged_funcs.is_empty() {
                     // Re-add own assign statements whose dst is NOT
-                    // already handled by the merged JIT (full_internal_comb).
-                    if let Some(ref full) = full_internal_comb {
-                        let mut full_outputs = HashSet::default();
-                        for s in full {
-                            let mut outs = vec![];
-                            let mut ins = vec![];
-                            s.gather_variable_offsets(&mut ins, &mut outs);
-                            for off in outs {
-                                full_outputs.insert(off.raw());
-                            }
-                        }
-                        for s in &own_new_assigns {
-                            if let ProtoStatement::Assign(a) = s
-                                && !full_outputs.contains(&a.dst.raw())
-                            {
-                                all_post_comb_fns.push(s.clone());
-                            }
+                    // already handled by the merged JIT.
+                    let mut full_outputs = HashSet::default();
+                    for s in &full {
+                        let mut outs = vec![];
+                        let mut ins = vec![];
+                        s.gather_variable_offsets(&mut ins, &mut outs);
+                        for off in outs {
+                            full_outputs.insert(off.raw());
                         }
                     }
-                    // Internal comb already cleared above.
-                    // Add comb-only JIT function to post_comb_fns so child comb
-                    // is evaluated before events fire (without going through
-                    // analyze_dependency on the parent level).
+                    for s in &own_new_assigns {
+                        if let ProtoStatement::Assign(a) = s
+                            && !full_outputs.contains(&a.dst.raw())
+                        {
+                            all_post_comb_fns.push(s.clone());
+                        }
+                    }
+
+                    // Add comb-only JIT function to post_comb_fns so child
+                    // comb is evaluated before events fire.
                     if let Some(cached) = &cache_entry.comb_func {
                         let adjusted_deps: Vec<_> = cached
                             .stmt_deps
@@ -506,10 +508,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                 original_stmts: adjust_stmts(&cached.original_stmts),
                             },
                         ));
-                    } else if let Some(ref full) = full_internal_comb {
-                        // comb_func was None (not all statements JIT-compilable).
-                        // Re-add interpreted comb statements to post_comb_fns.
-                        all_post_comb_fns.extend(full.iter().cloned());
+                    } else {
+                        // comb_func is None (not all statements JIT-compilable).
+                        // Use the consumed originals as interpreted post_comb fns.
+                        all_post_comb_fns.extend(full);
                     }
                 } else if let Some(cached) = &cache_entry.comb_func {
                     let adjusted_deps: Vec<_> = cached
@@ -752,46 +754,49 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     }
                 }
 
-                // If any merged functions were compiled, save full internal comb
-                // and clear it from comb_statements. Port connections are added
-                // after this block so they remain in comb_statements.
-                // The full comb is needed by get()/dump() for correctness.
-                full_internal_comb = if !merged_funcs.is_empty() {
+                // If any merged functions were compiled, clear originals
+                // from comb_statements (merged event CBs already execute
+                // them) and push a comb-only CB into post_comb_fns.  The
+                // originals are preserved inside each CB's `original_stmts`
+                // for `analyze_dependency` Phase 2 expansion.
+                has_merged_jit = !merged_funcs.is_empty();
+                if has_merged_jit {
                     let full = std::mem::take(&mut all_comb_statements);
+
                     // Re-add own assign statements whose dst is NOT
-                    // already in the full internal comb (merged JIT handles those).
-                    {
-                        let mut full_outputs = HashSet::default();
-                        for s in &full {
-                            let mut outs = vec![];
-                            let mut ins = vec![];
-                            s.gather_variable_offsets(&mut ins, &mut outs);
-                            for off in outs {
-                                full_outputs.insert(off.raw());
-                            }
-                        }
-                        for s in &own_new_assigns {
-                            if let ProtoStatement::Assign(a) = s
-                                && !full_outputs.contains(&a.dst.raw())
-                            {
-                                all_post_comb_fns.push(s.clone());
-                            }
+                    // already in `full` (merged JIT handles those).
+                    let mut full_outputs = HashSet::default();
+                    for s in &full {
+                        let mut outs = vec![];
+                        let mut ins = vec![];
+                        s.gather_variable_offsets(&mut ins, &mut outs);
+                        for off in outs {
+                            full_outputs.insert(off.raw());
                         }
                     }
-                    // When merged comb+event is used, add the comb-only function
-                    // to post_comb_fns so child comb is evaluated before events fire.
+                    for s in &own_new_assigns {
+                        if let ProtoStatement::Assign(a) = s
+                            && !full_outputs.contains(&a.dst.raw())
+                        {
+                            all_post_comb_fns.push(s.clone());
+                        }
+                    }
+
+                    // When merged comb+event is used, add the comb-only
+                    // function to post_comb_fns so child comb is evaluated
+                    // before events fire.
                     if let Some(ref cf) = comb_func {
                         // Preserve original_stmts so the parent module can
                         // expand this CB into individual statements for
-                        // fine-grained dependency analysis in the unified comb list.
+                        // fine-grained dependency analysis.
                         let original_stmts = if full.len() == 1 {
                             if let ProtoStatement::CompiledBlock(cb) = &full[0] {
                                 cb.original_stmts.clone()
                             } else {
-                                full.clone()
+                                full
                             }
                         } else {
-                            full.clone()
+                            full
                         };
                         all_post_comb_fns.push(ProtoStatement::CompiledBlock(
                             CompiledBlockStatement {
@@ -807,14 +812,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         ));
                     } else {
                         // comb_func is None (some statements can't be JIT-compiled).
-                        // Add all comb statements as interpreted to post_comb_fns
-                        // so they still execute after merged event JIT functions.
-                        all_post_comb_fns.extend(full.iter().cloned());
+                        // Use the consumed originals as interpreted post_comb fns.
+                        all_post_comb_fns.extend(full);
                     }
-                    Some(full)
-                } else {
-                    None
-                };
+                }
 
                 context.jit_cache.insert(
                     component_key,
@@ -834,7 +835,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // multi-hop propagation (child output → var → parent output) works.
         // Without this, the intermediate assign (var → parent output) only
         // runs in eval_comb (before events) and misses the new values.
-        if !all_post_comb_fns.is_empty() && full_internal_comb.is_none() {
+        if !all_post_comb_fns.is_empty() && !has_merged_jit {
             let mut post_comb_written: HashSet<isize> = HashSet::default();
             // Track output offsets already in all_post_comb_fns to avoid duplicates.
             let mut already_added: HashSet<isize> = HashSet::default();
@@ -866,28 +867,35 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     }
                 }
             }
-            // Add comb statements that read from post_comb-written offsets.
-            for s in &all_comb_statements {
+            // Move comb statements that read from post_comb-written offsets
+            // into post_comb_fns. They are removed from all_comb_statements to
+            // avoid double-execution per settle_comb pass, which also caused
+            // false 2-stmt SCCs (same write-set appearing twice in unified).
+            let mut moved: Vec<ProtoStatement> = Vec::new();
+            all_comb_statements.retain(|s| {
                 let mut ins = vec![];
                 let mut outs = vec![];
                 s.gather_variable_offsets(&mut ins, &mut outs);
                 if outs.iter().all(|off| already_added.contains(&off.raw())) {
-                    continue;
+                    return true;
                 }
                 let reads_post_comb = ins.iter().any(|off| post_comb_written.contains(&off.raw()));
-                if reads_post_comb {
-                    for off in &outs {
-                        already_added.insert(off.raw());
-                    }
-                    if let ProtoStatement::CompiledBlock(cb) = s
-                        && !cb.original_stmts.is_empty()
-                    {
-                        all_post_comb_fns.extend(cb.original_stmts.iter().cloned());
-                        continue;
-                    }
-                    all_post_comb_fns.push(s.clone());
+                if !reads_post_comb {
+                    return true;
                 }
-            }
+                for off in &outs {
+                    already_added.insert(off.raw());
+                }
+                if let ProtoStatement::CompiledBlock(cb) = s
+                    && !cb.original_stmts.is_empty()
+                {
+                    moved.extend(cb.original_stmts.iter().cloned());
+                } else {
+                    moved.push(s.clone());
+                }
+                false
+            });
+            all_post_comb_fns.extend(moved);
         }
 
         // Input ports: parent expr → child port var
@@ -949,8 +957,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // When merged functions exist, also add output port connections to
         // post_comb_fns so that child comb values (computed by post_comb)
         // propagate to parent variables before events fire.
-        let needs_post_comb_propagation =
-            full_internal_comb.is_some() || !all_post_comb_fns.is_empty();
+        let needs_post_comb_propagation = has_merged_jit || !all_post_comb_fns.is_empty();
         for output in &src.outputs {
             if let Some(parent_dst) = output.dst.first() {
                 let child_meta = child_variable_meta.get(&output.id).unwrap();
@@ -1116,7 +1123,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             comb_statements: all_comb_statements,
             post_comb_fns: all_post_comb_fns,
             child_modules: vec![child_module_meta],
-            full_internal_comb,
         })
     }
 }
