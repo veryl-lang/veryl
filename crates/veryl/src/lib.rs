@@ -12,6 +12,7 @@ pub mod cmd_metadata;
 pub mod cmd_migrate;
 pub mod cmd_new;
 pub mod cmd_publish;
+pub mod cmd_synth;
 pub mod cmd_test;
 pub mod cmd_translate;
 pub mod cmd_update;
@@ -78,6 +79,7 @@ pub enum Commands {
     Metadata(OptMetadata),
     Dump(OptDump),
     Test(OptTest),
+    Synth(OptSynth),
     Translate(OptTranslate),
 }
 
@@ -308,4 +310,41 @@ pub struct OptDump {
     /// output IR
     #[arg(long)]
     pub ir: bool,
+}
+
+/// Synthesize to a simple gate-level netlist and report area / critical path.
+///
+/// Design-parameter knobs (`clock_freq`, `activity`) and the default `top` /
+/// `timing_paths` live in the `[synth]` section of `Veryl.toml`. CLI
+/// `--top` and `--timing-paths` override the toml setting when supplied.
+#[derive(Args)]
+pub struct OptSynth {
+    /// Target files
+    pub files: Vec<PathBuf>,
+
+    /// Top module name (overrides `synth.top` in Veryl.toml; otherwise
+    /// inferred from the first user module)
+    #[arg(long)]
+    pub top: Option<String>,
+
+    /// Number of worst-delay endpoints to report when dumping timing
+    /// (overrides `synth.timing_paths` in Veryl.toml)
+    #[arg(long)]
+    pub timing_paths: Option<usize>,
+
+    /// Dump the gate-level IR (netlist of gates and flip-flops)
+    #[arg(long)]
+    pub dump_ir: bool,
+
+    /// Dump the critical path trace
+    #[arg(long)]
+    pub dump_timing: bool,
+
+    /// Dump the per-cell-kind area breakdown
+    #[arg(long)]
+    pub dump_area: bool,
+
+    /// Dump the power estimate (leakage + dynamic breakdown)
+    #[arg(long)]
+    pub dump_power: bool,
 }

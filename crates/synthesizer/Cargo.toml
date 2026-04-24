@@ -1,0 +1,33 @@
+[package]
+name                  = "veryl-synthesizer"
+version               = "0.19.1"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition.workspace     = true
+
+[dependencies]
+fxhash         = {workspace = true}
+indent         = {workspace = true}
+log            = {workspace = true}
+thiserror      = {workspace = true}
+veryl-analyzer = {version = "0.19.1", path = "../analyzer"}
+veryl-metadata = {version = "0.19.1", path = "../metadata"}
+veryl-parser   = {version = "0.19.1", path = "../parser"}
+
+[features]
+# Enables the experimental AIG-based structural rewrite + tech-map pass.
+# Off by default: the pass improves some designs (heliodor alu -34% area)
+# but regresses others and increases build time. Kept behind a flag for
+# offline experimentation.
+aig = []
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+miette = {workspace = true, features = ["fancy-no-syscall"]}
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+miette = {workspace = true, features = ["fancy"]}

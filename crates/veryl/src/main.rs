@@ -107,6 +107,7 @@ fn main() -> Result<ExitCode> {
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata)?,
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata)?,
         Commands::Test(x) => cmd_test::CmdTest::new(x).exec(&mut metadata)?,
+        Commands::Synth(x) => cmd_synth::CmdSynth::new(x).exec(&mut metadata)?,
         Commands::Translate(x) => cmd_translate::CmdTranslate::new(x).exec()?,
     };
 

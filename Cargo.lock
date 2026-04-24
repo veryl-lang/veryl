@@ -6252,6 +6252,7 @@ dependencies = [
  "veryl-path",
  "veryl-simulator",
  "veryl-sourcemap",
+ "veryl-synthesizer",
  "veryl-translator",
 ]
 
@@ -6465,6 +6466,20 @@ dependencies = [
  "rust-embed",
  "thiserror 2.0.18",
  "veryl-path",
+]
+
+[[package]]
+name = "veryl-synthesizer"
+version = "0.19.1"
+dependencies = [
+ "fxhash",
+ "indent",
+ "log",
+ "miette",
+ "thiserror 2.0.18",
+ "veryl-analyzer",
+ "veryl-metadata",
+ "veryl-parser",
 ]
 
 [[package]]
