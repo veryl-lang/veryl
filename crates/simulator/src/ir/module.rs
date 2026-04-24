@@ -4,9 +4,10 @@ use crate::HashSet;
 use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
+use crate::ir::schedule::IrSchedule;
 use crate::ir::variable::{
-    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, create_variable_meta,
-    value_size, write_native_value,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
+    write_native_value,
 };
 use crate::ir::{
     Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement,
@@ -36,9 +37,16 @@ pub struct Module {
     pub required_comb_passes: usize,
     /// FF commit entries: (current_offset, value_size) pairs.
     pub ff_commit_entries: Vec<(usize, usize)>,
-    /// (offset, size) byte ranges of comb_values written by comb_statements,
-    /// merged to elide adjacent/overlapping entries.  See settle_comb.
-    pub comb_output_ranges: Vec<(usize, usize)>,
+    /// Sensitivity-fanout + topological-rank index for the seeded-worklist
+    /// scheduler. Populated from the topologically-sorted comb list;
+    /// `eval_comb_worklist` uses it when `Config::use_seeded_worklist` is on.
+    pub comb_schedule: IrSchedule,
+    /// Diagnostic: number of non-trivial strongly-connected components in
+    /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
+    /// loops are rejected up-front by `analyze_dependency`, so any non-zero
+    /// value here is a duplication artifact in the simulator IR assembly.
+    /// Exposed for regression tests.
+    pub nontrivial_comb_scc: usize,
 }
 
 pub struct ProtoModule {
@@ -55,8 +63,10 @@ pub struct ProtoModule {
     pub comb_statements: ProtoStatements,
     /// Number of eval_comb passes needed for full convergence.
     pub required_comb_passes: usize,
-    /// See `Module::comb_output_ranges`.
-    pub comb_output_ranges: Vec<(usize, usize)>,
+    /// See `Module::comb_schedule`.
+    pub comb_schedule: IrSchedule,
+    /// See `Module::nontrivial_comb_scc`.
+    pub nontrivial_comb_scc: usize,
 }
 
 fn create_buffers(
@@ -193,49 +203,6 @@ fn create_variables_recursive(
     }
 }
 
-/// Map comb byte offset → value_size for every non-FF variable element in
-/// the module tree.  Used by `gather_comb_output_ranges` as a fallback when
-/// the statement itself does not carry a width (e.g. opaque CompiledBlocks
-/// from the shared JIT cache).
-fn build_comb_size_map(
-    top_variable_meta: &HashMap<VarId, VariableMeta>,
-    top_children: &[ModuleVariableMeta],
-    use_4state: bool,
-) -> HashMap<usize, usize> {
-    fn collect_from_meta(
-        variable_meta: &HashMap<VarId, VariableMeta>,
-        use_4state: bool,
-        map: &mut HashMap<usize, usize>,
-    ) {
-        for meta in variable_meta.values() {
-            for element in &meta.elements {
-                if !element.is_ff() {
-                    let vs = value_size(element.native_bytes, use_4state);
-                    map.insert(element.current_offset() as usize, vs);
-                }
-            }
-        }
-    }
-
-    fn collect_recursive(
-        module_meta: &ModuleVariableMeta,
-        use_4state: bool,
-        map: &mut HashMap<usize, usize>,
-    ) {
-        collect_from_meta(&module_meta.variable_meta, use_4state, map);
-        for child in &module_meta.children {
-            collect_recursive(child, use_4state, map);
-        }
-    }
-
-    let mut map: HashMap<usize, usize> = HashMap::default();
-    collect_from_meta(top_variable_meta, use_4state, &mut map);
-    for child in top_children {
-        collect_recursive(child, use_4state, &mut map);
-    }
-    map
-}
-
 /// Collect all FF commit entries (current_offset, value_size) from module metadata.
 fn collect_ff_commit_entries(
     module_meta: &ModuleVariableMeta,
@@ -318,7 +285,8 @@ impl ProtoModule {
             comb_statements,
             required_comb_passes: self.required_comb_passes,
             ff_commit_entries,
-            comb_output_ranges: self.comb_output_ranges.clone(),
+            comb_schedule: self.comb_schedule.clone(),
+            nontrivial_comb_scc: self.nontrivial_comb_scc,
         }
     }
 
@@ -418,8 +386,132 @@ fn validate_meta_offsets(
 
 /// Maximum number of statements per JIT function.
 /// Keeps regalloc2 cost manageable (O(N^2) in SSA variable count).
+/// Sized large enough to fuse a typical design's comb body into a single
+/// JIT function — shrinking num_chunks reduces per-step enum-match
+/// dispatch overhead in `eval_comb_full` proportionally.
+/// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
+const JIT_CHUNK_SIZE_DEFAULT: usize = 8192;
+
+fn jit_chunk_size() -> usize {
+    std::env::var("VERYL_JIT_CHUNK_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(JIT_CHUNK_SIZE_DEFAULT)
+}
+
+/// Build an IrSchedule whose stmt ids align 1:1 with the post-JIT
+/// `comb_statements` slice. Mirrors the chunking logic of
+/// `try_jit_no_cache` so each post-JIT Statement index maps to a
+/// contiguous [start..end) range of pre-JIT ProtoStatements, and
+/// aggregates gather_variable_offsets across that range.
 #[cfg(not(target_family = "wasm"))]
-const JIT_CHUNK_SIZE: usize = 256;
+fn build_aligned_schedule(
+    pre_jit_stmts: &[ProtoStatement],
+    use_jit: bool,
+    meta: &ModuleVariableMeta,
+    use_4state: bool,
+) -> IrSchedule {
+    use smallvec::SmallVec;
+    let mut per_stmt_inputs: Vec<SmallVec<[VarOffset; 4]>> = Vec::new();
+    let mut per_stmt_outputs: Vec<SmallVec<[VarOffset; 4]>> = Vec::new();
+
+    let emit_chunk = |chunk: &[ProtoStatement],
+                      per_in: &mut Vec<SmallVec<[VarOffset; 4]>>,
+                      per_out: &mut Vec<SmallVec<[VarOffset; 4]>>| {
+        let mut ins_all: Vec<VarOffset> = Vec::new();
+        let mut outs_all: Vec<VarOffset> = Vec::new();
+        for s in chunk {
+            s.gather_variable_offsets_expanded(&mut ins_all, &mut outs_all);
+        }
+        let mut ins: SmallVec<[VarOffset; 4]> = SmallVec::new();
+        for off in ins_all {
+            if !ins.contains(&off) {
+                ins.push(off);
+            }
+        }
+        let mut outs: SmallVec<[VarOffset; 4]> = SmallVec::new();
+        for off in outs_all {
+            if !outs.contains(&off) {
+                outs.push(off);
+            }
+        }
+        per_in.push(ins);
+        per_out.push(outs);
+    };
+
+    if !use_jit {
+        // JIT-off: try_jit_no_cache returns a single Interpreted block
+        // holding all pre-JIT stmts — one aligned slot covers everything.
+        emit_chunk(pre_jit_stmts, &mut per_stmt_inputs, &mut per_stmt_outputs);
+    } else {
+        // Mirror try_jit_no_cache: contiguous groups of same can_build_binary,
+        // jittable groups further split by JIT_CHUNK_SIZE.
+        let mut current_jittable: Option<bool> = None;
+        let mut group_start: usize = 0;
+
+        let flush = |group_start: usize,
+                     group_end: usize,
+                     was_jittable: bool,
+                     per_in: &mut Vec<SmallVec<[VarOffset; 4]>>,
+                     per_out: &mut Vec<SmallVec<[VarOffset; 4]>>| {
+            let group = &pre_jit_stmts[group_start..group_end];
+            let chunk_size = jit_chunk_size();
+            if was_jittable && group.len() > chunk_size {
+                for chunk in group.chunks(chunk_size) {
+                    emit_chunk(chunk, per_in, per_out);
+                }
+            } else {
+                emit_chunk(group, per_in, per_out);
+            }
+        };
+
+        for (i, stmt) in pre_jit_stmts.iter().enumerate() {
+            let jittable = stmt.can_build_binary();
+            match current_jittable {
+                None => {
+                    current_jittable = Some(jittable);
+                    group_start = i;
+                }
+                Some(prev) if prev == jittable => {}
+                Some(prev) => {
+                    flush(
+                        group_start,
+                        i,
+                        prev,
+                        &mut per_stmt_inputs,
+                        &mut per_stmt_outputs,
+                    );
+                    current_jittable = Some(jittable);
+                    group_start = i;
+                }
+            }
+        }
+        if let Some(prev) = current_jittable
+            && group_start < pre_jit_stmts.len()
+        {
+            flush(
+                group_start,
+                pre_jit_stmts.len(),
+                prev,
+                &mut per_stmt_inputs,
+                &mut per_stmt_outputs,
+            );
+        }
+    }
+
+    let n = per_stmt_inputs.len();
+    let mut sched = IrSchedule {
+        n_stmts: n as u32,
+        stmt_inputs: per_stmt_inputs,
+        stmt_outputs: per_stmt_outputs,
+        output_to_readers: crate::HashMap::default(),
+        topo_rank: (0..n as crate::ir::schedule::StmtId).collect(),
+        offset_sizes: crate::HashMap::default(),
+    };
+    sched.rebuild_fanout();
+    sched.attach_offset_sizes(meta, use_4state);
+    sched
+}
 
 #[cfg(not(target_family = "wasm"))]
 fn try_jit_group(
@@ -428,13 +520,13 @@ fn try_jit_group(
     group: Vec<ProtoStatement>,
 ) {
     // Split large groups into chunks to avoid regalloc2 O(N^2) scaling
-    if group.len() <= JIT_CHUNK_SIZE {
+    if group.len() <= jit_chunk_size() {
         match cranelift::build_binary(context, group.clone()) {
             Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
             None => blocks.push(ProtoStatementBlock::Interpreted(group)),
         }
     } else {
-        for chunk in group.chunks(JIT_CHUNK_SIZE) {
+        for chunk in group.chunks(jit_chunk_size()) {
             let chunk = chunk.to_vec();
             match cranelift::build_binary(context, chunk.clone()) {
                 Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
@@ -518,13 +610,13 @@ fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoS
                 let group = std::mem::take(&mut current_group);
                 if was_jittable {
                     // Use no_cache build for unified comb safety
-                    if group.len() <= JIT_CHUNK_SIZE {
+                    if group.len() <= jit_chunk_size() {
                         match cranelift::build_binary_no_cache(context, group.clone()) {
                             Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
                             None => blocks.push(ProtoStatementBlock::Interpreted(group)),
                         }
                     } else {
-                        for chunk in group.chunks(JIT_CHUNK_SIZE) {
+                        for chunk in group.chunks(jit_chunk_size()) {
                             let chunk = chunk.to_vec();
                             match cranelift::build_binary_no_cache(context, chunk.clone()) {
                                 Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
@@ -543,13 +635,13 @@ fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoS
 
     if let Some(was_jittable) = current_jittable {
         if was_jittable {
-            if current_group.len() <= JIT_CHUNK_SIZE {
+            if current_group.len() <= jit_chunk_size() {
                 match cranelift::build_binary_no_cache(context, current_group.clone()) {
                     Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
                     None => blocks.push(ProtoStatementBlock::Interpreted(current_group)),
                 }
             } else {
-                for chunk in current_group.chunks(JIT_CHUNK_SIZE) {
+                for chunk in current_group.chunks(jit_chunk_size()) {
                     let chunk = chunk.to_vec();
                     match cranelift::build_binary_no_cache(context, chunk.clone()) {
                         Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
@@ -924,10 +1016,591 @@ pub(crate) fn analyze_dependency(
 /// Since backward edges always point from higher positions to lower
 /// positions, they form a DAG. A single reverse scan computes the
 /// longest chain in O(N) time.
+/// Bit range for a partial comb assignment. `None` = full-width write/read.
+/// Pair is (high_bit_inclusive, low_bit_inclusive) matching Veryl's
+/// `Assign.select` convention. Overlap: two ranges overlap if their
+/// bit intervals intersect.
+type BitRange = Option<(usize, usize)>;
+
+fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
+    match (a, b) {
+        (None, _) | (_, None) => true,
+        (Some((a_hi, a_lo)), Some((b_hi, b_lo))) => a_lo <= b_hi && b_lo <= a_hi,
+    }
+}
+
+/// Collect (offset, bit_range) outputs for bit-aware SCC analysis.
+/// Only captures writes that are precisely bit-ranged (via Assign.select);
+/// everything else falls back to full-width (None).
+fn gather_bit_aware_outputs(stmt: &ProtoStatement, out: &mut Vec<(VarOffset, BitRange)>) {
+    match stmt {
+        ProtoStatement::Assign(x) => out.push((x.dst, x.select)),
+        ProtoStatement::AssignDynamic(x) => {
+            out.push((x.dst_base, None));
+            if x.dst_num_elements > 1 {
+                let last = VarOffset::new(
+                    x.dst_base.is_ff(),
+                    x.dst_base.raw() + x.dst_stride * (x.dst_num_elements as isize - 1),
+                );
+                out.push((last, None));
+            }
+        }
+        ProtoStatement::If(x) => {
+            for s in &x.true_side {
+                gather_bit_aware_outputs(s, out);
+            }
+            for s in &x.false_side {
+                gather_bit_aware_outputs(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                gather_bit_aware_outputs(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                gather_bit_aware_outputs(s, out);
+            }
+        }
+        ProtoStatement::CompiledBlock(x) => {
+            if !x.original_stmts.is_empty() {
+                for s in &x.original_stmts {
+                    gather_bit_aware_outputs(s, out);
+                }
+            } else {
+                for &off in &x.output_offsets {
+                    if !off.is_ff() {
+                        out.push((VarOffset::Comb(off.raw()), None));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Diagnostic: compute strongly-connected components of the stmt-level
+/// dataflow graph (stmt A → stmt B when A writes a variable B reads).
+/// Returns (num_nontrivial_sccs, max_scc_size, total_stmts_in_sccs).
+/// Enabled by VERYL_SCC_DIAG=1.
+///
+/// When VERYL_SCC_NARROW=1, uses the conservative base+last array
+/// dependency encoding so that cycles formed only by array-element
+/// overlap are filtered out — what remains is scalar comb cycles
+/// that would be flagged by a logic synthesis tool.
+///
+/// When VERYL_SCC_BITAWARE=1, treats partial-width writes (via
+/// Assign.select bit ranges) as independent edges: a write to x[7:4]
+/// does not create an edge to readers of x[3:0].  This eliminates
+/// SCCs formed only by bit-lane overlap in the VarOffset-level IR.
+fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
+    use daggy::petgraph::Graph;
+    use daggy::petgraph::algo::tarjan_scc;
+
+    let n = sorted.len();
+    if n == 0 {
+        return (0, 0, 0);
+    }
+
+    // Gather per-stmt I/O. Expanded by default (captures per-element
+    // array deps); narrow mode uses base+last (what synthesis tools see).
+    let narrow = std::env::var("VERYL_SCC_NARROW").is_ok();
+    let bitaware = std::env::var("VERYL_SCC_BITAWARE").is_ok();
+    let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut stmt_output_bits: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
+    for s in sorted {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        if narrow {
+            s.gather_variable_offsets(&mut ins, &mut outs);
+        } else {
+            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+        }
+        stmt_inputs.push(ins);
+        stmt_outputs.push(outs);
+        if bitaware {
+            let mut bit_outs = vec![];
+            gather_bit_aware_outputs(s, &mut bit_outs);
+            stmt_output_bits.push(bit_outs);
+        } else {
+            stmt_output_bits.push(vec![]);
+        }
+    }
+
+    // var → list of (writer stmt index, bit range for bit-aware mode).
+    // In non-bitaware mode, bit_range is always None and overlap is trivial.
+    let mut writers: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+    if bitaware {
+        for (i, outs) in stmt_output_bits.iter().enumerate() {
+            for &(off, br) in outs {
+                if off.is_ff() {
+                    continue;
+                }
+                writers.entry(off).or_default().push((i, br));
+            }
+        }
+    } else {
+        for (i, outs) in stmt_outputs.iter().enumerate() {
+            for &off in outs {
+                if off.is_ff() {
+                    continue;
+                }
+                writers.entry(off).or_default().push((i, None));
+            }
+        }
+    }
+
+    let mut graph: Graph<usize, ()> = Graph::new();
+    let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
+    let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
+    // For bit-aware mode, we need to know the reader's bit range for this
+    // offset. Currently ProtoExpression::Variable reads don't expose
+    // per-field select in gather_variable_offsets, so we conservatively
+    // treat reader ranges as None (= full width).  This still filters
+    // out false cycles that arise from multiple writers on non-overlapping
+    // bit slices, which is the common IR artifact.
+    for (reader, ins) in stmt_inputs.iter().enumerate() {
+        for &off in ins {
+            if off.is_ff() {
+                continue;
+            }
+            if let Some(ws) = writers.get(&off) {
+                for &(w, wbr) in ws {
+                    if w == reader {
+                        continue;
+                    }
+                    if bitaware && !ranges_overlap(wbr, None) {
+                        // Reader range is None (full-width) so this should
+                        // never trigger, but kept for structural clarity.
+                        continue;
+                    }
+                    if edge_set.insert((w, reader)) {
+                        graph.add_edge(nodes[w], nodes[reader], ());
+                    }
+                }
+            }
+        }
+    }
+
+    let sccs = tarjan_scc(&graph);
+    let mut nontrivial = 0usize;
+    let mut max_size = 0usize;
+    let mut total = 0usize;
+    let mut size_hist: Vec<usize> = Vec::new();
+    for scc in &sccs {
+        if scc.len() > 1 {
+            nontrivial += 1;
+            total += scc.len();
+            if scc.len() > max_size {
+                max_size = scc.len();
+            }
+            size_hist.push(scc.len());
+        }
+    }
+    size_hist.sort_unstable();
+    size_hist.reverse();
+    if nontrivial > 0 && std::env::var("VERYL_SCC_DIAG").is_ok() {
+        let top: Vec<String> = size_hist.iter().take(10).map(|s| s.to_string()).collect();
+        log::info!(
+            "SCC stats: {} nontrivial SCCs, max={}, total_stmts_in_SCCs={}, top sizes=[{}]",
+            nontrivial,
+            max_size,
+            total,
+            top.join(", ")
+        );
+        // Position ranges of the largest SCCs to verify contiguity.
+        let mut sccs_sorted = sccs.clone();
+        sccs_sorted.sort_by_key(|scc| std::cmp::Reverse(scc.len()));
+        for (i, scc) in sccs_sorted.iter().take(5).enumerate() {
+            if scc.len() <= 1 {
+                break;
+            }
+            let mut positions: Vec<usize> = scc.iter().map(|&idx| idx.index()).collect();
+            positions.sort_unstable();
+            let min_pos = positions[0];
+            let max_pos = positions[positions.len() - 1];
+            let range_span = max_pos - min_pos + 1;
+            let density = scc.len() as f64 / range_span as f64;
+            log::info!(
+                "  SCC[{}]: size={}, position range=[{}..{}], span={}, density={:.2}",
+                i,
+                scc.len(),
+                min_pos,
+                max_pos,
+                range_span,
+                density
+            );
+        }
+
+        // Count unique comb-output offsets written by the SCC stmts.
+        // This tells us how narrow a snapshot/compare scope for
+        // SCC-only convergence would be.
+        let mut all_scc_outs: HashSet<VarOffset> = HashSet::default();
+        for scc in &sccs {
+            if scc.len() > 1 {
+                for node in scc {
+                    let idx = node.index();
+                    for &off in &stmt_outputs[idx] {
+                        if !off.is_ff() {
+                            all_scc_outs.insert(off);
+                        }
+                    }
+                }
+            }
+        }
+        log::info!(
+            "SCC comb outputs: {} unique offsets ({} stmts in SCCs)",
+            all_scc_outs.len(),
+            total
+        );
+
+        // Kind histogram + in/out offset histogram for the largest SCC.
+        let largest = sccs_sorted.first().filter(|s| s.len() > 1);
+        if let Some(scc) = largest {
+            let mut kind_hist: HashMap<&'static str, usize> = HashMap::default();
+            let mut out_counts: HashMap<VarOffset, usize> = HashMap::default();
+            let mut in_counts: HashMap<VarOffset, usize> = HashMap::default();
+            let mut source_hist: HashMap<String, usize> = HashMap::default();
+            let mut line_samples: Vec<(String, u32)> = Vec::new();
+            for node in scc {
+                let idx = node.index();
+                if let ProtoStatement::Assign(x) = &sorted[idx] {
+                    let src = x.token.beg.source.to_string();
+                    let line = x.token.beg.line;
+                    *source_hist.entry(src.clone()).or_insert(0) += 1;
+                    line_samples.push((src, line));
+                }
+            }
+            let mut sources: Vec<_> = source_hist.into_iter().collect();
+            sources.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+            let src_str: Vec<String> = sources
+                .iter()
+                .take(15)
+                .map(|(s, c)| format!("{}={}", s, c))
+                .collect();
+            log::info!("SCC[0] source file distribution: {}", src_str.join(", "));
+            line_samples.sort();
+            let uniq: Vec<String> = line_samples
+                .iter()
+                .take(10)
+                .map(|(s, l)| format!("{}:{}", s, l))
+                .collect();
+            log::info!("SCC[0] first 10 (src:line): {:?}", uniq);
+
+            for node in scc {
+                let idx = node.index();
+                let kind = match &sorted[idx] {
+                    ProtoStatement::Assign(_) => "Assign",
+                    ProtoStatement::AssignDynamic(_) => "AssignDynamic",
+                    ProtoStatement::If(_) => "If",
+                    ProtoStatement::For(_) => "For",
+                    ProtoStatement::Break => "Break",
+                    ProtoStatement::SystemFunctionCall(_) => "SystemFunctionCall",
+                    ProtoStatement::CompiledBlock(_) => "CompiledBlock",
+                    ProtoStatement::SequentialBlock(_) => "SequentialBlock",
+                    ProtoStatement::TbMethodCall { .. } => "TbMethodCall",
+                };
+                *kind_hist.entry(kind).or_insert(0) += 1;
+                for &off in &stmt_outputs[idx] {
+                    if !off.is_ff() {
+                        *out_counts.entry(off).or_insert(0) += 1;
+                    }
+                }
+                for &off in &stmt_inputs[idx] {
+                    if !off.is_ff() {
+                        *in_counts.entry(off).or_insert(0) += 1;
+                    }
+                }
+            }
+            let mut kinds: Vec<_> = kind_hist.into_iter().collect();
+            kinds.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+            let kstr: Vec<String> = kinds.iter().map(|(k, c)| format!("{}={}", k, c)).collect();
+            log::info!("SCC[0] kind histogram: {}", kstr.join(", "));
+
+            // Find offsets that are BOTH written and read many times within
+            // the SCC — these are the "pivots" forming the cycles.
+            let mut pivots: Vec<(VarOffset, usize, usize)> = out_counts
+                .iter()
+                .filter_map(|(&off, &wc)| in_counts.get(&off).map(|&rc| (off, wc, rc)))
+                .collect();
+            pivots.sort_by_key(|(_, wc, rc)| std::cmp::Reverse(wc * rc));
+            log::info!("SCC[0] top pivots (offset, writers, readers):");
+            for (off, wc, rc) in pivots.iter().take(10) {
+                // Collect the bit ranges of writers to this offset within the SCC.
+                let mut bit_writers: Vec<BitRange> = Vec::new();
+                for node in scc {
+                    let idx = node.index();
+                    let mut outs: Vec<(VarOffset, BitRange)> = Vec::new();
+                    gather_bit_aware_outputs(&sorted[idx], &mut outs);
+                    for (w_off, br) in &outs {
+                        if w_off == off {
+                            bit_writers.push(*br);
+                        }
+                    }
+                }
+                let full_count = bit_writers.iter().filter(|b| b.is_none()).count();
+                let partial_count = bit_writers.len() - full_count;
+                let ranges: Vec<String> = bit_writers
+                    .iter()
+                    .filter_map(|b| b.map(|(hi, lo)| format!("[{}:{}]", hi, lo)))
+                    .take(8)
+                    .collect();
+                log::info!(
+                    "    {:?}: {} writers ({} full, {} partial), {} readers; partial ranges: {:?}",
+                    off,
+                    wc,
+                    full_count,
+                    partial_count,
+                    rc,
+                    ranges
+                );
+            }
+        }
+    }
+    (nontrivial, max_size, total)
+}
+
+/// Build a map from comb VarOffset → human-readable variable path.
+/// Walks ModuleVariableMeta recursively and records the offset of each
+/// VariableElement's `current` slot together with the module hierarchy
+/// prefix.
+fn build_offset_path_map(meta: &ModuleVariableMeta) -> HashMap<VarOffset, String> {
+    let mut map = HashMap::default();
+    fn walk(meta: &ModuleVariableMeta, prefix: &str, out: &mut HashMap<VarOffset, String>) {
+        let name = meta.name.to_string();
+        let mod_prefix = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{}.{}", prefix, name)
+        };
+        for var_meta in meta.variable_meta.values() {
+            let var_name = var_meta
+                .path
+                .0
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(".");
+            for (i, element) in var_meta.elements.iter().enumerate() {
+                let display = if var_meta.elements.len() > 1 {
+                    format!("{}.{}[{}]", mod_prefix, var_name, i)
+                } else {
+                    format!("{}.{}", mod_prefix, var_name)
+                };
+                out.insert(element.current, display);
+            }
+        }
+        for child in &meta.children {
+            walk(child, &mod_prefix, out);
+        }
+    }
+    walk(meta, "", &mut map);
+    map
+}
+
+/// Diagnostic: trace a concrete cycle in the largest SCC of the comb
+/// dataflow graph and print it as a sequence of variable names.
+/// Helps pinpoint the exact combinational loop in source.
+fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
+    use daggy::petgraph::Graph;
+    use daggy::petgraph::algo::tarjan_scc;
+
+    let n = sorted.len();
+    if n == 0 {
+        return;
+    }
+
+    let path_map = build_offset_path_map(meta);
+
+    // Build stmt-level dataflow graph (same as compute_scc_stats).
+    let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    for s in sorted {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        stmt_inputs.push(ins);
+        stmt_outputs.push(outs);
+    }
+
+    let mut writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    for (i, outs) in stmt_outputs.iter().enumerate() {
+        for &off in outs {
+            if off.is_ff() {
+                continue;
+            }
+            writers.entry(off).or_default().push(i);
+        }
+    }
+
+    // adj[reader] = list of writer-stmt indices whose outputs the reader reads.
+    // (Edge direction in trace: reader ← writer, but for cycle finding we
+    // walk writer → reader.)
+    let mut adj: Vec<Vec<(usize, VarOffset)>> = vec![vec![]; n];
+    let mut graph: Graph<usize, ()> = Graph::new();
+    let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
+    let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
+    for (reader, ins) in stmt_inputs.iter().enumerate() {
+        for &off in ins {
+            if off.is_ff() {
+                continue;
+            }
+            if let Some(ws) = writers.get(&off) {
+                for &w in ws {
+                    if w != reader && edge_set.insert((w, reader)) {
+                        graph.add_edge(nodes[w], nodes[reader], ());
+                        adj[w].push((reader, off));
+                    }
+                }
+            }
+        }
+    }
+
+    let sccs = tarjan_scc(&graph);
+    let mut sccs_sorted = sccs.clone();
+    sccs_sorted.sort_by_key(|s| std::cmp::Reverse(s.len()));
+
+    for (scc_idx, scc) in sccs_sorted.iter().enumerate() {
+        if scc.len() <= 1 {
+            break;
+        }
+        let member_set: HashSet<usize> = scc.iter().map(|n| n.index()).collect();
+
+        // Find a concrete cycle: BFS from the first member, through
+        // edges confined to the SCC, find shortest path back to start.
+        let start = scc[0].index();
+        let mut parent: HashMap<usize, (usize, VarOffset)> = HashMap::default();
+        let mut queue: std::collections::VecDeque<usize> = Default::default();
+        queue.push_back(start);
+        let mut found_back_to_start = None;
+        while let Some(u) = queue.pop_front() {
+            for &(v, off) in &adj[u] {
+                if !member_set.contains(&v) {
+                    continue;
+                }
+                if v == start {
+                    // Found cycle: start → ... → u → (off) → start
+                    found_back_to_start = Some((u, off));
+                    break;
+                }
+                if let std::collections::hash_map::Entry::Vacant(e) = parent.entry(v) {
+                    e.insert((u, off));
+                    queue.push_back(v);
+                }
+            }
+            if found_back_to_start.is_some() {
+                break;
+            }
+        }
+
+        log::info!("SCC[{}] cycle trace (size={}):", scc_idx, scc.len());
+        if let Some((last, last_off)) = found_back_to_start {
+            // Rebuild path from start → last.
+            let mut path: Vec<(usize, VarOffset)> = vec![(last, last_off)];
+            let mut cur = last;
+            while cur != start {
+                if let Some(&(p, off)) = parent.get(&cur) {
+                    path.push((p, off));
+                    cur = p;
+                } else {
+                    break;
+                }
+            }
+            path.reverse();
+            let describe_offset = |off: VarOffset| -> String {
+                path_map
+                    .get(&off)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{:?}", off))
+            };
+            let describe_stmt = |idx: usize| -> String {
+                let (tok_beg, kind) = match &sorted[idx] {
+                    ProtoStatement::Assign(x) => (Some(x.token.beg), "Assign"),
+                    _ => (
+                        None,
+                        match &sorted[idx] {
+                            ProtoStatement::If(_) => "If",
+                            ProtoStatement::AssignDynamic(_) => "AssignDynamic",
+                            ProtoStatement::For(_) => "For",
+                            ProtoStatement::SequentialBlock(_) => "SeqBlock",
+                            ProtoStatement::CompiledBlock(_) => "CompiledBlock",
+                            ProtoStatement::SystemFunctionCall(_) => "SysFn",
+                            ProtoStatement::TbMethodCall { .. } => "TbCall",
+                            ProtoStatement::Break => "Break",
+                            _ => "?",
+                        },
+                    ),
+                };
+                if let Some(tok) = tok_beg {
+                    let src = tok.source.to_string();
+                    let file = src.rsplit('/').next().unwrap_or(&src);
+                    format!("[{}] {}:{}", kind, file, tok.line)
+                } else {
+                    format!("[{}] #{}", kind, idx)
+                }
+            };
+            log::info!("  start at stmt {} ({})", start, describe_stmt(start));
+            for (stmt_idx, via_off) in &path {
+                log::info!(
+                    "    ── writes {} ──→ stmt {} ({})",
+                    describe_offset(*via_off),
+                    stmt_idx,
+                    describe_stmt(*stmt_idx)
+                );
+            }
+            log::info!(
+                "    ── writes {} ──→ back to start",
+                describe_offset(last_off)
+            );
+        } else {
+            log::info!("  (no cycle found from start; graph error?)");
+        }
+
+        // Also list the top pivot variables by name.
+        let mut out_counts: HashMap<VarOffset, usize> = HashMap::default();
+        let mut in_counts: HashMap<VarOffset, usize> = HashMap::default();
+        for &idx in &member_set {
+            for &off in &stmt_outputs[idx] {
+                if !off.is_ff() {
+                    *out_counts.entry(off).or_insert(0) += 1;
+                }
+            }
+            for &off in &stmt_inputs[idx] {
+                if !off.is_ff() {
+                    *in_counts.entry(off).or_insert(0) += 1;
+                }
+            }
+        }
+        let mut pivots: Vec<(VarOffset, usize, usize)> = out_counts
+            .iter()
+            .filter_map(|(&off, &wc)| in_counts.get(&off).map(|&rc| (off, wc, rc)))
+            .collect();
+        pivots.sort_by_key(|(_, wc, rc)| std::cmp::Reverse(wc * rc));
+        log::info!("  top pivot variables (by writers × readers):");
+        for (off, wc, rc) in pivots.iter().take(10) {
+            let name = path_map
+                .get(off)
+                .cloned()
+                .unwrap_or_else(|| format!("{:?}", off));
+            log::info!("    {}: {} writers, {} readers", name, wc, rc);
+        }
+
+        if scc_idx >= 3 {
+            break; // Print at most a few SCCs.
+        }
+    }
+}
+
 fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
     let n = sorted.len();
     if n == 0 {
         return 1;
+    }
+
+    if std::env::var("VERYL_SCC_DIAG").is_ok() {
+        compute_scc_stats(sorted);
     }
 
     // For each comb variable, record the position of its last writer.
@@ -973,7 +1646,155 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
             max_delay
         );
     }
+    // SCC iteration depth is computed only as a diagnostic — `passes`
+    // returned above uses DAG depth alone.  Counting backward edges into
+    // the pass total would penalise every `settle_comb` call on designs
+    // with false SCCs (e.g. multi-driver array writes the IR can't
+    // disambiguate), and the regression is severe for large-memory
+    // designs where each extra full pass walks every comb byte.
+    if std::env::var("VERYL_SCC_DIAG").is_ok() {
+        let scc_depth = compute_scc_iteration_depth(sorted);
+        log::info!("  (diagnostic) SCC iteration depth: {}", scc_depth);
+    }
     passes
+}
+
+/// Compute the max backward-edge chain depth inside any non-trivial SCC
+/// of the comb dataflow graph. Returns 0 if no non-trivial SCCs exist.
+///
+/// Intuition: within an SCC, some edges must run "backward" in any topo
+/// order (that's what makes it an SCC). The longest chain of such
+/// backward edges is how many extra full passes the design needs to
+/// settle the cycle.
+fn compute_scc_iteration_depth(sorted: &[ProtoStatement]) -> usize {
+    use daggy::petgraph::Graph;
+    use daggy::petgraph::algo::tarjan_scc;
+
+    let n = sorted.len();
+    if n == 0 {
+        return 0;
+    }
+
+    let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    for s in sorted {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+        stmt_inputs.push(ins);
+        stmt_outputs.push(outs);
+    }
+
+    // Build stmt-level DAG edges (comb writer → comb reader) and find
+    // SCCs.
+    let mut writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    for (i, outs) in stmt_outputs.iter().enumerate() {
+        for &off in outs {
+            if !off.is_ff() {
+                writers.entry(off).or_default().push(i);
+            }
+        }
+    }
+
+    let mut graph: Graph<usize, ()> = Graph::new();
+    let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
+    let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
+    for (reader, ins) in stmt_inputs.iter().enumerate() {
+        for &off in ins {
+            if off.is_ff() {
+                continue;
+            }
+            if let Some(ws) = writers.get(&off) {
+                for &w in ws {
+                    if w != reader && edge_set.insert((w, reader)) {
+                        graph.add_edge(nodes[w], nodes[reader], ());
+                    }
+                }
+            }
+        }
+    }
+
+    let sccs = tarjan_scc(&graph);
+    let mut max_depth = 0usize;
+
+    for scc in &sccs {
+        if scc.len() <= 1 {
+            continue;
+        }
+        // SCC members and their original positions.
+        let member_positions: Vec<usize> = scc.iter().map(|&idx| idx.index()).collect();
+        let mut member_set: HashSet<usize> = HashSet::default();
+        for &p in &member_positions {
+            member_set.insert(p);
+        }
+
+        // Within the SCC subgraph (restricted to members and their
+        // edges), compute backward-chain depth using the same algorithm
+        // as the DAG case. Use original sorted position as the topo
+        // order — this is a topo order of the whole graph but may
+        // include many "backward" edges inside the SCC (which is
+        // expected; that's what iteration resolves).
+        let mut sorted_positions = member_positions.clone();
+        sorted_positions.sort_unstable();
+
+        // Build a writer map restricted to SCC members.
+        let mut scc_writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+        for &p in &sorted_positions {
+            for &off in &stmt_outputs[p] {
+                if !off.is_ff() {
+                    scc_writers.entry(off).or_default().push(p);
+                }
+            }
+        }
+
+        // Map original position → internal order (0, 1, 2, ...).
+        let mut pos_to_ord: HashMap<usize, usize> = HashMap::default();
+        for (ord, &p) in sorted_positions.iter().enumerate() {
+            pos_to_ord.insert(p, ord);
+        }
+
+        let scc_n = sorted_positions.len();
+        let mut delay = vec![0usize; scc_n];
+        // Reverse scan by internal order.
+        for ord in (0..scc_n).rev() {
+            let p = sorted_positions[ord];
+            let output_set: HashSet<VarOffset> = stmt_outputs[p].iter().cloned().collect();
+            for key in &stmt_inputs[p] {
+                if output_set.contains(key) {
+                    continue;
+                }
+                if let Some(ws) = scc_writers.get(key) {
+                    // A backward edge exists if any writer's internal
+                    // order is strictly greater than this stmt's order.
+                    for &wp in ws {
+                        if wp == p {
+                            continue;
+                        }
+                        if !member_set.contains(&wp) {
+                            continue;
+                        }
+                        if let Some(&wo) = pos_to_ord.get(&wp)
+                            && wo > ord
+                        {
+                            delay[ord] = delay[ord].max(delay[wo] + 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add 1 for the safety of propagation through the cycle head:
+        // the reverse-scan counts "backward edges along longest path"
+        // but the cycle head needs one extra iteration for its own
+        // stale-input read to settle.  Empirically matches heliodor
+        // (measured K_runtime = 4, algo without margin returns 3).
+        let scc_max = delay.iter().copied().max().unwrap_or(0) + 1;
+        if scc_max > max_depth {
+            max_depth = scc_max;
+        }
+    }
+
+    max_depth
 }
 
 /// Compute dependency levels for sorted ProtoStatements and reorder within
@@ -1213,8 +2034,6 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
-        // Collect full internal comb for sub-modules that use merged comb+event
-        let mut full_comb_extra: Vec<ProtoStatement> = vec![];
 
         for decl in &src.declarations {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -1225,9 +2044,6 @@ impl Conv<&air::Module> for ProtoModule {
                     .and_modify(|v| v.append(&mut stmts))
                     .or_insert(stmts);
             }
-            if let Some(full_comb) = proto_decl.full_internal_comb {
-                full_comb_extra.extend(full_comb);
-            }
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
@@ -1235,13 +2051,15 @@ impl Conv<&air::Module> for ProtoModule {
 
         context.scope_contexts.pop();
 
-        // Build unified comb list: all sources combined.
-        // CBs are kept atomic — analyze_dependency expands them in Phase 2 if needed.
-        // This preserves correct internal ordering for self-referencing comb within CBs.
+        // Build unified comb list: execution-side only.
+        // Merged-JIT children contribute their comb-only CB via `post_comb_fns`;
+        // the originals are preserved inside each CB's `original_stmts` and
+        // expanded on demand by `analyze_dependency` Phase 2 when fine-grained
+        // ordering is needed.  This eliminates the false SCC artifact from
+        // keeping both CB and its originals in the parent's `unified` list.
         let unified: Vec<ProtoStatement> = all_comb_statements
             .into_iter()
             .chain(all_post_comb_fns)
-            .chain(full_comb_extra)
             .collect();
 
         let unified_sorted = analyze_dependency(unified)?;
@@ -1249,83 +2067,28 @@ impl Conv<&air::Module> for ProtoModule {
         let unified_sorted = reorder_by_level(unified_sorted);
         let required_comb_passes = compute_required_passes(&unified_sorted);
 
-        // Collect (offset, size) byte ranges written by comb_statements so
-        // settle_comb can snapshot only those bytes — avoiding O(comb_bytes)
-        // work per convergence check for modules with ff-opt-demoted memory
-        // arrays (e.g. testbench DRAM) that never change across comb
-        // iterations.
-        let comb_output_ranges = {
-            let use_4state = context.config.use_4state;
-            let comb_bytes = context.comb_total_bytes;
-            let size_map = build_comb_size_map(&variable_meta, &all_child_modules, use_4state);
-            // Fallback only when both the statement (no width) and size_map
-            // (offset not an element start) fail to resolve — rare.  Using
-            // max(value_size) auto-scales with the widest comb variable;
-            // 32 bytes (logic<128> 4-state) covers the trivial case of no
-            // comb variables at all.
-            let fallback_size = size_map.values().copied().max().unwrap_or(32);
-            let mut ranges: Vec<(usize, usize)> = Vec::new();
-            for stmt in &unified_sorted {
-                stmt.gather_comb_output_ranges(use_4state, &size_map, fallback_size, &mut ranges);
-            }
-            // Clip each range to comb_bytes: a mid-element offset combined
-            // with `fallback_size` can otherwise overshoot the buffer end.
-            ranges.retain(|(off, _)| *off < comb_bytes);
-            for (off, sz) in &mut ranges {
-                let end = (*off + *sz).min(comb_bytes);
-                *sz = end - *off;
-            }
-            ranges.sort_unstable();
+        // Invariant: `analyze_dependency` rejects real combinational loops
+        // via `combinational_loop` error, so reaching this point means the
+        // stmt-level graph is a well-formed DAG.  Any remaining non-trivial
+        // SCC in the expanded dataflow view indicates duplicate
+        // ProtoStatements in the simulator IR assembly.  We assert SCC == 0
+        // in debug builds so any future regression that reintroduces this
+        // class of bug surfaces immediately, and expose the count on
+        // `Module`/`Ir` for test-local assertion.
+        let nontrivial_comb_scc = compute_scc_stats(&unified_sorted).0;
+        debug_assert_eq!(
+            nontrivial_comb_scc, 0,
+            "ProtoModule {:?}: {} nontrivial SCC(s) in unified_sorted. \
+             analyze_dependency would have rejected a real combinational loop, \
+             so this indicates duplicate ProtoStatements in the simulator IR.",
+            src.name, nontrivial_comb_scc,
+        );
 
-            let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
-            for (off, sz) in ranges {
-                if let Some(last) = merged.last_mut()
-                    && off <= last.0 + last.1
-                {
-                    let end = (off + sz).max(last.0 + last.1);
-                    last.1 = end - last.0;
-                    continue;
-                }
-                merged.push((off, sz));
-            }
-            log::debug!(
-                "comb_output_ranges: {} merged ranges covering {} bytes",
-                merged.len(),
-                merged.iter().map(|(_, s)| s).sum::<usize>(),
-            );
-
-            // One-shot coverage check: every comb output that the DAG
-            // walker (`gather_variable_offsets`) sees must also be covered
-            // by our ranges.  Catches walker drift when new ProtoStatement
-            // variants or write paths are added.
-            #[cfg(debug_assertions)]
-            {
-                for stmt in &unified_sorted {
-                    let mut ins = Vec::new();
-                    let mut outs = Vec::new();
-                    stmt.gather_variable_offsets(&mut ins, &mut outs);
-                    for off in outs {
-                        if off.is_ff() {
-                            continue;
-                        }
-                        let raw = off.raw() as usize;
-                        if raw >= comb_bytes {
-                            continue;
-                        }
-                        let covered = merged.iter().any(|(o, s)| *o <= raw && raw < o + s);
-                        debug_assert!(
-                            covered,
-                            "comb_output_ranges missed offset {raw} \
-                             (seen by gather_variable_offsets but not by \
-                             gather_comb_output_ranges)"
-                        );
-                    }
-                }
-            }
-
-            merged
-        };
-
+        // Snapshot unified_sorted before JIT consumes it: the worklist
+        // schedule (built below) needs to walk the pre-JIT ProtoStatement
+        // list because JIT CompiledBlocks don't expose stmt-level I/O to
+        // `gather_variable_offsets`.
+        let pre_jit_stmts = unified_sorted.clone();
         let comb_statements = try_jit_no_cache(context, unified_sorted);
 
         // Event statements preserve source order (no topological sorting).
@@ -1343,6 +2106,30 @@ impl Conv<&air::Module> for ProtoModule {
             children: all_child_modules,
         };
 
+        if std::env::var("VERYL_SCC_TRACE").is_ok() {
+            trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
+        }
+
+        // Build an IrSchedule whose stmt ids align with the post-JIT
+        // comb_statements.  Only build it when the worklist is actually
+        // enabled — the build walks `gather_variable_offsets_expanded`,
+        // which emits per-element offsets for DynamicVariable/AssignDynamic,
+        // and for designs with large memory arrays (multi-MB DRAMs) this
+        // costs seconds per ProtoModule even when the worklist is disabled.
+        #[cfg(not(target_family = "wasm"))]
+        let comb_schedule = if context.config.use_seeded_worklist {
+            build_aligned_schedule(
+                &pre_jit_stmts,
+                context.config.use_jit,
+                &module_variable_meta,
+                context.config.use_4state,
+            )
+        } else {
+            IrSchedule::empty()
+        };
+        #[cfg(target_family = "wasm")]
+        let comb_schedule = IrSchedule::empty();
+
         Ok(ProtoModule {
             name: src.name,
             ports: src.ports.clone(),
@@ -1353,7 +2140,8 @@ impl Conv<&air::Module> for ProtoModule {
             event_statements,
             comb_statements,
             required_comb_passes,
-            comb_output_ranges,
+            comb_schedule,
+            nontrivial_comb_scc,
         })
     }
 }

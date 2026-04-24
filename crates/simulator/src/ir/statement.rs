@@ -1,5 +1,4 @@
 use crate::FuncPtr;
-use crate::HashMap;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift::Context as CraneliftContext;
@@ -1279,93 +1278,108 @@ impl ProtoStatement {
         }
     }
 
-    /// Emit (byte_offset, byte_size) ranges for every comb write this
-    /// statement performs, recursing into nested bodies.
-    ///
-    /// Differs from [`Self::gather_variable_offsets`] on dynamic array
-    /// writes: this walk emits the full array span instead of the
-    /// `(base, last)` dependency hint, so the caller can take an
-    /// exhaustive snapshot for convergence checking.  FF outputs are
-    /// skipped (they commit in the event phase, not during comb iteration).
-    ///
-    /// `size_map` resolves element sizes when the statement itself does
-    /// not carry a width (e.g. opaque CompiledBlocks); `fallback_size` is
-    /// the per-module upper bound used when neither source knows.
-    pub fn gather_comb_output_ranges(
+    /// Same as `gather_variable_offsets` but fully expands dynamic reads
+    /// and writes to every element offset. Used by the seeded-worklist
+    /// schedule (`IrSchedule`) to capture per-element dependencies so
+    /// diff-based dirty propagation can see writes to any element.
+    /// `analyze_dependency` keeps using the base+last encoding.
+    pub fn gather_variable_offsets_expanded(
         &self,
-        use_4state: bool,
-        size_map: &HashMap<usize, usize>,
-        fallback_size: usize,
-        out: &mut Vec<(usize, usize)>,
+        inputs: &mut Vec<VarOffset>,
+        outputs: &mut Vec<VarOffset>,
     ) {
-        fn push_scalar(
-            off: VarOffset,
-            size_hint: Option<usize>,
-            size_map: &HashMap<usize, usize>,
-            fallback_size: usize,
-            out: &mut Vec<(usize, usize)>,
-        ) {
-            if off.is_ff() {
-                return;
-            }
-            let raw = off.raw() as usize;
-            let sz = size_hint
-                .or_else(|| size_map.get(&raw).copied())
-                .unwrap_or(fallback_size);
-            out.push((raw, sz));
-        }
-
         match self {
             ProtoStatement::Assign(x) => {
-                let nb = crate::ir::variable::native_bytes(x.dst_width);
-                let vs = crate::ir::variable::value_size(nb, use_4state);
-                push_scalar(x.dst, Some(vs), size_map, fallback_size, out);
+                x.expr.gather_variable_offsets_expanded(inputs);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                }
+                outputs.push(x.dst);
             }
             ProtoStatement::AssignDynamic(x) => {
-                if x.dst_base.is_ff() {
-                    return;
+                x.dst_index_expr.gather_variable_offsets_expanded(inputs);
+                x.expr.gather_variable_offsets_expanded(inputs);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
                 }
-                // Any element in [0, dst_num_elements) may be the target at
-                // runtime, so cover the full `stride * N` span (safe even
-                // when stride > element value_size).
-                let base = x.dst_base.raw() as usize;
-                let span = x.dst_stride as usize * x.dst_num_elements;
-                out.push((base, span));
+                for i in 0..x.dst_num_elements {
+                    let off = VarOffset::new(
+                        x.dst_base.is_ff(),
+                        x.dst_base.raw() + x.dst_stride * (i as isize),
+                    );
+                    outputs.push(off);
+                }
             }
             ProtoStatement::If(x) => {
+                if let Some(cond) = &x.cond {
+                    cond.gather_variable_offsets_expanded(inputs);
+                }
                 for s in &x.true_side {
-                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                    s.gather_variable_offsets_expanded(inputs, outputs);
                 }
                 for s in &x.false_side {
-                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                    s.gather_variable_offsets_expanded(inputs, outputs);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.gather_variable_offsets_expanded(inputs);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                    condition.gather_variable_offsets_expanded(inputs);
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(x) => {
+                // Prefer walking the original statements so AssignDynamic /
+                // DynamicVariable expansions are applied; fall back to the
+                // cached base+last input_offsets / output_offsets if the
+                // originals weren't retained.
+                if !x.original_stmts.is_empty() {
+                    for s in &x.original_stmts {
+                        s.gather_variable_offsets_expanded(inputs, outputs);
+                    }
+                } else if !x.stmt_deps.is_empty() {
+                    for (ins, outs) in &x.stmt_deps {
+                        for &off in ins {
+                            inputs.push(off);
+                        }
+                        for &off in outs {
+                            outputs.push(off);
+                        }
+                    }
+                } else {
+                    for &off in &x.input_offsets {
+                        inputs.push(off);
+                    }
+                    for &off in &x.output_offsets {
+                        outputs.push(off);
+                    }
                 }
             }
             ProtoStatement::For(x) => {
                 for s in &x.body {
-                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                    s.gather_variable_offsets_expanded(inputs, outputs);
                 }
             }
             ProtoStatement::SequentialBlock(body) => {
+                // No "internal" filter here: a `SequentialBlock` that writes
+                // to an array it also reads would silently drop its outside
+                // read dependency under the intersection filter, hiding the
+                // cross-block fanout needed by the seeded worklist.  For
+                // schedule fanout purposes extra local-temp entries are
+                // harmless (they just have no external readers), so we keep
+                // the full input/output sets.
                 for s in body {
-                    s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
+                    s.gather_variable_offsets_expanded(inputs, outputs);
                 }
             }
-            ProtoStatement::CompiledBlock(x) => {
-                if !x.original_stmts.is_empty() {
-                    for s in &x.original_stmts {
-                        s.gather_comb_output_ranges(use_4state, size_map, fallback_size, out);
-                    }
-                } else {
-                    for &off in &x.output_offsets {
-                        if !off.is_ff() {
-                            push_scalar(off, None, size_map, fallback_size, out);
-                        }
-                    }
-                }
-            }
-            ProtoStatement::SystemFunctionCall(_)
-            | ProtoStatement::TbMethodCall { .. }
-            | ProtoStatement::Break => {}
+            ProtoStatement::TbMethodCall { .. } => {}
+            ProtoStatement::Break => {}
         }
     }
 

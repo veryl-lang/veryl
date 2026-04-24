@@ -26,13 +26,16 @@ pub struct Opt {
 
 impl From<Opt> for Config {
     fn from(value: Opt) -> Self {
-        Self {
+        let mut ret = Self {
             use_jit: value.use_jit,
             use_4state: value.use_4state,
             dump_cranelift: value.dump_cranelift,
             dump_asm: value.dump_asm,
             disable_ff_opt: value.disable_ff_opt,
-        }
+            ..Default::default()
+        };
+        ret.apply_env();
+        ret
     }
 }
 

@@ -24,10 +24,6 @@ pub struct SimProfile {
 #[derive(Default, Debug)]
 pub struct SimProfile;
 
-/// Number of consecutive first-try convergences needed before skipping
-/// the convergence check loop in settle_comb.
-const CONVERGENCE_WARMUP: u32 = 100;
-
 pub struct Simulator {
     pub ir: Ir,
     pub time: u64,
@@ -35,12 +31,10 @@ pub struct Simulator {
     dump_vars: Vec<DumpVar>,
     pub mask_cache: MaskCache,
     comb_dirty: bool,
+    /// Scratch buffer used only by the worklist (`eval_comb_worklist`)
+    /// evaluation path; the default settle_comb path does not touch it.
     comb_snapshot_buf: Vec<u8>,
     pub profile: SimProfile,
-    /// When true, settle_comb skips the convergence check loop.
-    convergence_verified: bool,
-    /// Remaining warmup iterations before convergence can be trusted.
-    convergence_warmup: u32,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
 }
@@ -48,8 +42,6 @@ pub struct Simulator {
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let comb_snapshot_buf = vec![0u8; ir.comb_values.len()];
-        let needs_convergence_check = ir.required_comb_passes > 1;
-        let disable_ff_opt = ir.disable_ff_opt;
         let mut ret = Self {
             ir,
             time: 0,
@@ -59,14 +51,6 @@ impl Simulator {
             comb_dirty: true,
             comb_snapshot_buf,
             profile: Default::default(),
-            convergence_verified: false,
-            // When disable_ff_opt is set, always perform full convergence
-            // checks to help detect comb evaluation inconsistencies.
-            convergence_warmup: if needs_convergence_check && !disable_ff_opt {
-                CONVERGENCE_WARMUP
-            } else {
-                0
-            },
             last_event: None,
             last_event_stmts: std::ptr::null(),
         };
@@ -79,24 +63,11 @@ impl Simulator {
     }
 
     fn do_settle_comb(&mut self) {
-        let skip = self.convergence_verified;
-        let converged_first = self.ir.settle_comb(
+        self.ir.settle_comb(
             &mut self.mask_cache,
             &mut self.comb_snapshot_buf,
             &mut self.profile,
-            skip,
         );
-        if !skip && self.convergence_warmup > 0 {
-            if converged_first {
-                self.convergence_warmup -= 1;
-                if self.convergence_warmup == 0 {
-                    self.convergence_verified = true;
-                }
-            } else {
-                // Reset warmup if convergence failed on first try
-                self.convergence_warmup = CONVERGENCE_WARMUP;
-            }
-        }
     }
 
     pub fn set(&mut self, port: &str, value: Value) {
