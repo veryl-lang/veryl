@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use veryl_parser::resource_table::TokenId;
-use veryl_parser::veryl_token::{Token, VerylToken};
+use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Location {
     pub line: u32,
     pub column: u32,
     pub length: u32,
+    pub source: TokenSource,
     pub duplicated: Option<usize>,
 }
 
@@ -16,6 +17,7 @@ impl From<&Token> for Location {
             line: x.line,
             column: x.column,
             length: x.length,
+            source: x.source,
             duplicated: None,
         }
     }
@@ -27,6 +29,7 @@ impl From<Token> for Location {
             line: x.line,
             column: x.column,
             length: x.length,
+            source: x.source,
             duplicated: None,
         }
     }

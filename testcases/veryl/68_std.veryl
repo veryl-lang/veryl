@@ -36,7 +36,32 @@ module Module68B (
     );
 }
 
-module Module68C::<AXI4_PKG: $std::axi4_prototype, AXI4_LITE_PKG: $std::axi4_lite_prototype, AXI4_STREAM_PKG: $std::axi4_stream_prototype> (
+module Module68C #(
+    param KIND: selector_kind = selector_kind::ONEHOT,
+    param N   : u32           = 2                    ,
+    param T   : type          = logic                ,
+) (
+    i_select: input  logic<calc_select_width(N, KIND)>,
+    i_d     : input  T    <N>                         ,
+    o_d     : output T                                ,
+) {
+    import $std::selector_pkg::*;
+    assign o_d = $std::select::<KIND, N, T>(i_select, i_d);
+}
+
+module Module68D #(
+    param KIND: selector_kind = selector_kind::ONEHOT,
+    param N   : u32           = 2                    ,
+) (
+    i_select: input  logic<calc_select_width(N, KIND)>,
+    i_d     : input  logic<N>                         ,
+    o_d     : output logic                            ,
+) {
+    import $std::selector_pkg::*;
+    assign o_d = $std::select::<KIND, N, lbool>(i_select, i_d);
+}
+
+module Module68E::<AXI4_PKG: $std::axi4_prototype, AXI4_LITE_PKG: $std::axi4_lite_prototype, AXI4_STREAM_PKG: $std::axi4_stream_prototype> (
     axi4_if       : modport $std::axi4_if::<AXI4_PKG>::slave                 ,
     axi4_lite_if  : modport $std::axi4_lite_if::<AXI4_LITE_PKG>::slave       ,
     axi4_stream_if: modport $std::axi4_stream_if::<AXI4_STREAM_PKG>::receiver,
@@ -50,7 +75,7 @@ alias package axi_pkg = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>;
 alias package axi_lite_pkg = $std::axi4_lite_pkg::<axi_pkg::ADDRESS_WIDTH, axi_pkg::DATA_WIDTH_BYTES, axi_pkg::ID_LENGTH>;
 alias package axi_stream_pkg = $std::axi4_stream_pkg::<axi_pkg::DATA_WIDTH_BYTES, 2, axi_pkg::ID_LENGTH, 5>;
 
-module Module68D {
+module Module68F {
     inst axi4_if                   : $std::axi4_if::<axi_pkg>;
     inst axi4_lite_if              : $std::axi4_lite_if::<axi_lite_pkg>;
     inst axi4_stream_if            : $std::axi4_stream_if::<axi_stream_pkg>;
@@ -61,7 +86,7 @@ module Module68D {
     assign axi4_lite_if.awid = 0;
     assign axi4_lite_if.arid = 0;
 
-    inst u: Module68C::<axi_pkg, axi_lite_pkg, axi_stream_pkg> (
+    inst u: Module68E::<axi_pkg, axi_lite_pkg, axi_stream_pkg> (
         axi4_if       : axi4_if       ,
         axi4_lite_if  : axi4_lite_if  ,
         axi4_stream_if: axi4_stream_if,
