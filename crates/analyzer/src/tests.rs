@@ -9453,10 +9453,10 @@ fn tb_component_outside_test() {
     #[test(test_mod)]
     module test_mod {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             clk.next(10);
             $finish();
         }
@@ -9465,6 +9465,71 @@ fn tb_component_outside_test() {
 
     let errors = analyze_with_ir(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn missing_tb_port() {
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen;
+
+        initial {
+            rst.assert();
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MissingTbPort { .. }))
+    );
+}
+
+#[test]
+fn unknown_tb_port() {
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk: clk, foo: clk);
+
+        initial {
+            rst.assert();
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnknownTbPort { .. }))
+    );
+
+    let code = r#"
+    #[test(test_mod)]
+    module test_mod {
+        inst clk: $tb::clock_gen(foo: 0);
+
+        initial {
+            clk.next(1);
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnknownTbPort { .. }))
+    );
 }
 
 #[test]

@@ -64,6 +64,7 @@ pub struct Context {
     pub mask_cache: MaskCache,
     pub tb_reset_cycles: HashMap<StrId, Expression>,
     pub tb_clock_period: HashMap<StrId, Expression>,
+    pub tb_reset_clock: HashMap<StrId, StrId>,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,

@@ -15,7 +15,7 @@ module Counter3 (
 #[test(test_reset_explicit_duration)]
 module test_reset_explicit_duration {
     inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen;
+    inst rst: $tb::reset_gen(clk);
 
     var cnt: logic<32>;
 
@@ -26,7 +26,7 @@ module test_reset_explicit_duration {
     );
 
     initial {
-        rst.assert(clk, 5);
+        rst.assert(5);
         clk.next  (10);
         $assert   (cnt == 32'd10);
         $finish   ();
@@ -36,7 +36,7 @@ module test_reset_explicit_duration {
 #[test(test_reset_cycles_param)]
 module test_reset_cycles_param {
     inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen #(cycles: 5);
+    inst rst: $tb::reset_gen #(cycles: 5) (clk);
 
     var cnt: logic<32>;
 
@@ -47,7 +47,7 @@ module test_reset_cycles_param {
     );
 
     initial {
-        rst.assert(clk);
+        rst.assert();
         clk.next  (10);
         $assert   (cnt == 32'd10);
         $finish   ();

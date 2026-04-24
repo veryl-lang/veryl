@@ -1322,6 +1322,61 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 }
             }
 
+            let mut connected_clk: Option<StrId> = None;
+            if let Some(ref opt2) = value.component_instantiation.component_instantiation_opt2
+                && let Some(ref port_opt) = opt2.inst_port.inst_port_opt
+            {
+                let items: Vec<_> = port_opt.inst_port_list.as_ref().into();
+                for item in items {
+                    let port_name = item.identifier.identifier_token.token.text;
+                    let port_name_str =
+                        resource_table::get_str_value(port_name).unwrap_or_default();
+                    let port_token: TokenRange = item.identifier.as_ref().into();
+                    match (&tb_prop.kind, port_name_str.as_str()) {
+                        (TbComponentKind::ResetGen, "clk") => {
+                            let signal_name = if let Some(ref x) = item.inst_port_item_opt {
+                                let dst: Vec<VarPathSelect> =
+                                    Conv::conv(context, x.expression.as_ref())?;
+                                dst.first().and_then(|p| p.0.0.first().copied())
+                            } else {
+                                Some(port_name)
+                            };
+                            if let Some(name) = signal_name {
+                                connected_clk = Some(name);
+                            }
+                        }
+                        _ => {
+                            let type_name = match tb_prop.kind {
+                                TbComponentKind::ClockGen => "$tb::clock_gen",
+                                TbComponentKind::ResetGen => "$tb::reset_gen",
+                            };
+                            context.insert_error(AnalyzerError::unknown_tb_port(
+                                type_name,
+                                &port_name_str,
+                                &port_token,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if matches!(tb_prop.kind, TbComponentKind::ResetGen) {
+                if let Some(clk) = connected_clk {
+                    context.tb_reset_clock.insert(inst_name, clk);
+                } else {
+                    let type_name: TokenRange = value
+                        .component_instantiation
+                        .scoped_identifier
+                        .as_ref()
+                        .into();
+                    context.insert_error(AnalyzerError::missing_tb_port(
+                        "$tb::reset_gen",
+                        "clk",
+                        &type_name,
+                    ));
+                }
+            }
+
             return Ok(ir::Declaration::Null);
         }
 

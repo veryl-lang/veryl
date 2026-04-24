@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+missing_tb_port (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#missing_tb_port)
+
+  × $tb component "$tb::reset_gen" requires "clk" port, but it is not connected
+   ╭─[../../testcases/error/missing_tb_port.veryl:4:15]
+ 3 │     inst clk: $tb::clock_gen;
+ 4 │     inst rst: $tb::reset_gen;
+   ·               ───────┬──────
+   ·                      ╰── Error location
+ 5 │ 
+   ╰────
+  help: add "clk" port connection

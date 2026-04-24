@@ -127,7 +127,7 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
             symbol_table,
             &reset_ns,
             "assert",
-            &[("clk", Direction::Input), ("count", Direction::Input)],
+            &[("count", Direction::Input)],
         );
     }
 

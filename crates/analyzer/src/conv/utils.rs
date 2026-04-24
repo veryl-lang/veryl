@@ -2970,20 +2970,17 @@ pub fn tb_method_call(
             TbMethod::ClockNext { count, period }
         }
         (TbComponentKind::ResetGen, "assert") => {
-            let (clock, duration) = if let Some(ir::Arguments::Positional(ref positional)) = args
+            let clock = context
+                .tb_reset_clock
+                .get(&inst_name)
+                .copied()
+                .ok_or_else(|| ir_error!(token))?;
+            let duration = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && let Some(arg) = positional.first()
-                && let ir::Expression::Term(factor) = &arg.0
-                && let ir::Factor::Variable(var_id, _, _, _) = factor.as_ref()
-                && let Some(var) = context.variables.get(var_id)
-                && let Some(clock_name) = var.path.0.first().copied()
             {
-                let duration = positional
-                    .get(1)
-                    .map(|a| a.0.clone())
-                    .or_else(|| context.tb_reset_cycles.get(&inst_name).cloned());
-                (clock_name, duration)
+                Some(arg.0.clone())
             } else {
-                return Err(ir_error!(token));
+                context.tb_reset_cycles.get(&inst_name).cloned()
             };
             TbMethod::ResetAssert { clock, duration }
         }

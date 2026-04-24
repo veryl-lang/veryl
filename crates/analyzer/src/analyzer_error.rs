@@ -610,6 +610,40 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(missing_tb_port),
+        help("add \"{port}\" port connection"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("$tb component \"{name}\" requires \"{port}\" port, but it is not connected")]
+    MissingTbPort {
+        name: String,
+        port: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(unknown_tb_port),
+        help("remove \"{port}\" connection"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("$tb component \"{name}\" has no \"{port}\" port")]
+    UnknownTbPort {
+        name: String,
+        port: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_type_declaration),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1642,6 +1676,8 @@ impl AnalyzerError {
             AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
+            AnalyzerError::MissingTbPort { token_source, .. } => *token_source,
+            AnalyzerError::UnknownTbPort { token_source, .. } => *token_source,
             AnalyzerError::InvalidTest { token_source, .. } => *token_source,
             AnalyzerError::InvalidTypeDeclaration { token_source, .. } => *token_source,
             AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
@@ -2036,6 +2072,24 @@ impl AnalyzerError {
     }
     pub fn invalid_tb_usage(token: &TokenRange) -> Self {
         AnalyzerError::InvalidTbUsage {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn missing_tb_port(name: &str, port: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MissingTbPort {
+            name: name.into(),
+            port: port.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn unknown_tb_port(name: &str, port: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnknownTbPort {
+            name: name.into(),
+            port: port.into(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

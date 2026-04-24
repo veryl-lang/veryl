@@ -1,0 +1,10 @@
+#[test(missing_tb_port)]
+module missing_tb_port {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen;
+
+    initial {
+        rst.assert();
+        $finish();
+    }
+}

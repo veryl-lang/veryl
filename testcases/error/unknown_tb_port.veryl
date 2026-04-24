@@ -1,0 +1,9 @@
+#[test(unknown_tb_port)]
+module unknown_tb_port {
+    inst clk: $tb::clock_gen(foo: 0);
+
+    initial {
+        clk.next(1);
+        $finish();
+    }
+}

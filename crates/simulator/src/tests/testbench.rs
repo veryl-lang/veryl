@@ -207,10 +207,10 @@ fn tb_clock_reset_analyze() {
     #[test(test_counter)]
     module test_counter {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             clk.next(10);
             clk.next();
             $finish();
@@ -253,7 +253,7 @@ fn tb_integration_counter() {
     #[test(test_counter)]
     module test_counter {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var cnt: logic<32>;
 
@@ -264,7 +264,7 @@ fn tb_integration_counter() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             clk.next(10);
             $finish();
         }
@@ -359,12 +359,12 @@ fn tb_readonly_cache_fill() {
     #[test(test_cache)]
     module test_cache {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
         var r1: logic<64>; var r2: logic<64>;
         var stall: logic;
         inst h: Harness (clk: clk, rst: rst, o_r1: r1, o_r2: r2, o_stall: stall);
         initial {
-            rst.assert(clk);
+            rst.assert();
             clk.next(20);
             $assert(r2 == 64'h0000_0000_0000_BBBB, "r2 wrong");
             $finish();
@@ -483,7 +483,7 @@ fn tb_function_inline() {
     #[test(test_inline)]
     module test_inline {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var cnt: logic<32>;
 
@@ -498,7 +498,7 @@ fn tb_function_inline() {
         }
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             step_n(5);
             step_n(5);
             $finish();
@@ -552,7 +552,7 @@ fn tb_initial_assign_comb() {
     #[test(test_comb_assign)]
     module test_comb_assign {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var input_val: logic<8>;
         var output_doubled: logic<8>;
@@ -565,7 +565,7 @@ fn tb_initial_assign_comb() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             input_val = 21;
             clk.next(1);
             $assert(output_doubled == 42, "comb assign failed");
@@ -611,7 +611,7 @@ fn tb_initial_assign_ff() {
     #[test(test_ff_assign)]
     module test_ff_assign {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var input_val: logic<8>;
         var output_sum: logic<8>;
@@ -624,7 +624,7 @@ fn tb_initial_assign_ff() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             input_val = 10;
             clk.next(3);
             $assert(output_sum == 30, "ff assign failed");
@@ -669,7 +669,7 @@ fn tb_initial_assign_multiple() {
     #[test(test_multi_assign)]
     module test_multi_assign {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var in_a: logic<8>;
         var in_b: logic<8>;
@@ -684,7 +684,7 @@ fn tb_initial_assign_multiple() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             in_a = 20;
             in_b = 22;
             clk.next(1);
@@ -1080,7 +1080,7 @@ fn testbench_vcd_comb_only_clock_reset() {
     #[test(test_comb)]
     module test_comb {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var b: logic<8>;
 
@@ -1092,7 +1092,7 @@ fn testbench_vcd_comb_only_clock_reset() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             clk.next(3);
             $finish();
         }
@@ -1174,7 +1174,7 @@ fn testbench_vcd_comb_only_clock_reset() {
             }
         }
 
-        // rst.assert(clk) = 3 cycles (default duration) + clk.next(3) = 3 cycles
+        // rst.assert() = 3 cycles (default duration) + clk.next(3) = 3 cycles
         // Each cycle: posedge(1) + negedge(0) = 2 transitions
         // Total clock transitions >= 12
         assert!(
@@ -1238,9 +1238,9 @@ fn tb_dual_clock() {
     #[test(test_dual_clock)]
     module test_dual_clock {
         inst clk_a: $tb::clock_gen;
-        inst rst_a: $tb::reset_gen;
+        inst rst_a: $tb::reset_gen(clk: clk_a);
         inst clk_b: $tb::clock_gen;
-        inst rst_b: $tb::reset_gen;
+        inst rst_b: $tb::reset_gen(clk: clk_b);
 
         var cnt_a: logic<32>;
         var cnt_b: logic<32>;
@@ -1250,8 +1250,8 @@ fn tb_dual_clock() {
         );
 
         initial {
-            rst_a.assert(clk_a);
-            rst_b.assert(clk_b);
+            rst_a.assert();
+            rst_b.assert();
             clk_a.next(10);
             $assert(cnt_a == 32'd10);
             $assert(cnt_b == 32'd0);
@@ -1311,7 +1311,7 @@ fn tb_const_function_with_if() {
     #[test(test_const_if)]
     module test_const_if {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var i_val: logic<4>;
         var o_val: logic<4>;
@@ -1321,7 +1321,7 @@ fn tb_const_function_with_if() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             i_val = 4'd9;
             clk.next(1);
             $assert(o_val == 4'd9, "const if eval failed");
@@ -1407,11 +1407,11 @@ fn tb_2d_packed_select() {
     #[test(test_2d)]
     module test_2d {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
         var o_val: logic<3>;
         inst dut: Test2dPacked(clk, rst, o_val);
         initial {
-            rst.assert(clk);
+            rst.assert();
             clk.next(1);
             $assert(o_val == 3'b101, "h[0] should be 101");
             $finish();
@@ -1453,7 +1453,7 @@ fn tb_multi_inst_distinct_params() {
     #[test(test_multi_inst)]
     module test_multi_inst {
         inst clk: $tb::clock_gen;
-        inst rst: $tb::reset_gen;
+        inst rst: $tb::reset_gen(clk);
 
         var i_32: logic<32>;
         var o_32: logic<32>;
@@ -1476,7 +1476,7 @@ fn tb_multi_inst_distinct_params() {
         );
 
         initial {
-            rst.assert(clk);
+            rst.assert();
             i_32 = 'hFFFFFFFF;
             i_5 = 'b11111;
             clk.next(1);

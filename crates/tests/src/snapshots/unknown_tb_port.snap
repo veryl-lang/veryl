@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unknown_tb_port (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unknown_tb_port)
+
+  × $tb component "$tb::clock_gen" has no "foo" port
+   ╭─[../../testcases/error/unknown_tb_port.veryl:3:30]
+ 2 │ module unknown_tb_port {
+ 3 │     inst clk: $tb::clock_gen(foo: 0);
+   ·                              ─┬─
+   ·                               ╰── Error location
+ 4 │ 
+   ╰────
+  help: remove "foo" connection
