@@ -192,9 +192,12 @@ impl FunctionCall {
             var.set_value(&[], value, None);
         }
 
+        let disable_const_opt = context.disalbe_const_opt;
+        context.disalbe_const_opt = true;
         for x in &func.statements {
             x.eval_value(context);
         }
+        context.disalbe_const_opt = disable_const_opt;
 
         // TODO get outputs
 
