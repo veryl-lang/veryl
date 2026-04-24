@@ -16,7 +16,8 @@ pub use expression::{Expression, ProtoExpression};
 pub use module::{Module, ProtoModule};
 pub use statement::{
     CompiledBlockStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, RuntimeForBound,
-    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, parse_hex_content,
+    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
+    parse_hex_content,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,

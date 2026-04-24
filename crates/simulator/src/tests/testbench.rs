@@ -1504,3 +1504,82 @@ fn tb_multi_inst_distinct_params() {
         );
     }
 }
+
+#[test]
+fn tb_assert_continue_reports_all_failures() {
+    let code = r#"
+    #[test(test_ac)]
+    module test_ac {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        initial {
+            rst.assert();
+            clk.next(1);
+            $assert_continue(0 == 1, "first fail");
+            $assert_continue(2 == 3, "second fail: got %d want %d", 2, 3);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_ac");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        match result.unwrap() {
+            TestResult::Fail(msg) => {
+                assert!(
+                    msg.contains("first fail") && msg.contains("second fail: got 2 want 3"),
+                    "unexpected failure message: {msg} (jit={}, 4state={})",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+            TestResult::Pass => panic!(
+                "$assert_continue failures should cause Fail (jit={}, 4state={})",
+                config.use_jit, config.use_4state,
+            ),
+        }
+    }
+}
+
+#[test]
+fn tb_assert_fatal_stops_execution() {
+    let code = r#"
+    #[test(test_af)]
+    module test_af {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        initial {
+            rst.assert();
+            clk.next(1);
+            $assert(1 == 0, "fatal: expected %d got %d", 1, 0);
+            $assert_continue(0 == 0, "should never reach here");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_af");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        match result.unwrap() {
+            TestResult::Fail(msg) => {
+                assert_eq!(msg, "fatal: expected 1 got 0");
+            }
+            TestResult::Pass => panic!(
+                "fatal $assert should cause Fail (jit={}, 4state={})",
+                config.use_jit, config.use_4state,
+            ),
+        }
+    }
+}

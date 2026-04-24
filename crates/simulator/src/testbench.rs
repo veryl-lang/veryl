@@ -1,12 +1,13 @@
 use crate::HashMap;
+use crate::assert_buffer;
 use crate::ir::{
     Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement, SystemFunctionCall,
-    TbMethodKind, Value, VarId, VarPath, write_native_value,
+    TbMethodKind, Value, VarId, VarPath, format_assert_message, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::wave_dumper::WaveDumper;
-use veryl_analyzer::ir::ControlFlow;
+use veryl_analyzer::ir::{AssertKind, ControlFlow};
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
@@ -28,10 +29,12 @@ pub enum TestbenchStatement {
         high_time: u64,
         low_time: u64,
     },
-    /// $assert(cond, msg)
+    /// $assert / $assert_continue
     Assert {
+        kind: AssertKind,
         condition: Expression,
-        message: Option<String>,
+        format_str: String,
+        args: Vec<Expression>,
     },
     /// if-else (may contain next inside)
     If {
@@ -268,12 +271,17 @@ fn convert_stmt(
                 }
             }
         },
-        Statement::SystemFunctionCall(SystemFunctionCall::Assert { condition, message }) => {
-            TestbenchStatement::Assert {
-                condition: condition.clone(),
-                message: message.clone(),
-            }
-        }
+        Statement::SystemFunctionCall(SystemFunctionCall::Assert {
+            kind,
+            condition,
+            format_str,
+            args,
+        }) => TestbenchStatement::Assert {
+            kind: *kind,
+            condition: condition.clone(),
+            format_str: format_str.clone(),
+            args: args.clone(),
+        },
         Statement::SystemFunctionCall(SystemFunctionCall::Finish) => TestbenchStatement::Finish,
         Statement::If(if_stmt) => {
             let then_block = convert_stmts(
@@ -335,7 +343,13 @@ fn convert_stmts(
 }
 
 pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
-    exec(sim, stmts).into()
+    assert_buffer::reset();
+    let result: TestResult = exec(sim, stmts).into();
+    match (result, assert_buffer::take_failure()) {
+        (TestResult::Fail(msg), _) => TestResult::Fail(msg),
+        (TestResult::Pass, Some(msg)) => TestResult::Fail(msg),
+        (TestResult::Pass, None) => TestResult::Pass,
+    }
 }
 
 /// Run a native testbench from a simulator IR.
@@ -420,6 +434,9 @@ fn exec(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> ExecResult {
         if result.should_stop() {
             return result;
         }
+        if assert_buffer::has_fatal() {
+            return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
+        }
     }
     ExecResult::Continue
 }
@@ -499,15 +516,22 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             }
             ExecResult::Continue
         }
-        TestbenchStatement::Assert { condition, message } => {
+        TestbenchStatement::Assert {
+            kind,
+            condition,
+            format_str,
+            args,
+        } => {
             sim.ensure_comb_updated();
             let val = condition.eval(&mut sim.mask_cache);
             if val.payload_u64() == 0 {
-                let msg = message.as_deref().unwrap_or("assertion failed").to_string();
-                ExecResult::Fail(msg)
-            } else {
-                ExecResult::Continue
+                let msg = format_assert_message(format_str, args, &mut sim.mask_cache);
+                match kind {
+                    AssertKind::Fatal => assert_buffer::record_fatal(msg),
+                    AssertKind::Continue => assert_buffer::record_continue(msg),
+                }
             }
+            ExecResult::Continue
         }
         TestbenchStatement::If {
             condition,

@@ -47,6 +47,21 @@ pub struct SystemFunctionCall {
     pub comptime: Comptime,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssertKind {
+    Fatal,
+    Continue,
+}
+
+impl AssertKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AssertKind::Fatal => "$assert",
+            AssertKind::Continue => "$assert_continue",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum SystemFunctionKind {
     Bits(Input),
@@ -56,7 +71,11 @@ pub enum SystemFunctionKind {
     Readmemh(Input, Output),
     Display(Vec<Input>),
     Write(Vec<Input>),
-    Assert(Input, Option<Input>),
+    Assert {
+        kind: AssertKind,
+        cond: Input,
+        args: Vec<Input>,
+    },
     Finish,
     Signed(Input),
     Unsigned(Input),
@@ -234,18 +253,28 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
-            "$assert" => {
-                if args.is_empty() || args.len() > 2 {
+            "$assert" | "$assert_continue" => {
+                if args.is_empty() {
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        &name.to_string(),
+                        1,
+                        0,
+                        &token,
+                    ));
                     return Err(ir_error!(token));
                 }
-                let arg0 = create_input(context, name, None, args.remove(0));
-                let arg1 = if !args.is_empty() {
-                    Some(create_input(context, name, None, args.remove(0)))
+                let kind = if name.to_string() == "$assert_continue" {
+                    AssertKind::Continue
                 } else {
-                    None
+                    AssertKind::Fatal
                 };
+                let cond = create_input(context, name, None, args.remove(0));
+                let args: Vec<Input> = args
+                    .into_iter()
+                    .map(|arg| create_input(context, name, None, arg))
+                    .collect();
                 Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Assert(arg0, arg1),
+                    kind: SystemFunctionKind::Assert { kind, cond, args },
                     comptime,
                 })
             }
@@ -334,7 +363,7 @@ impl SystemFunctionCall {
             SystemFunctionKind::Readmemh(_, _) => None,
             SystemFunctionKind::Display(_) => None,
             SystemFunctionKind::Write(_) => None,
-            SystemFunctionKind::Assert(_, _) => None,
+            SystemFunctionKind::Assert { .. } => None,
             SystemFunctionKind::Finish => None,
             SystemFunctionKind::Signed(x) | SystemFunctionKind::Unsigned(x) => {
                 x.0.eval_value(context)
@@ -358,7 +387,7 @@ impl SystemFunctionCall {
             SystemFunctionKind::Readmemh(_, _) => self.comptime.clone(),
             SystemFunctionKind::Display(_) => self.comptime.clone(),
             SystemFunctionKind::Write(_) => self.comptime.clone(),
-            SystemFunctionKind::Assert(_, _) => self.comptime.clone(),
+            SystemFunctionKind::Assert { .. } => self.comptime.clone(),
             SystemFunctionKind::Finish => self.comptime.clone(),
             SystemFunctionKind::Signed(_) | SystemFunctionKind::Unsigned(_) => {
                 let mut ret = self.comptime.clone();
@@ -400,11 +429,13 @@ impl fmt::Display for SystemFunctionCall {
                 let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
                 format!("$write({})", args_str.join(", ")).fmt(f)
             }
-            SystemFunctionKind::Assert(cond, msg) => {
-                if let Some(msg) = msg {
-                    format!("$assert({cond}, {msg})").fmt(f)
+            SystemFunctionKind::Assert { kind, cond, args } => {
+                let name = kind.as_str();
+                if args.is_empty() {
+                    format!("{name}({cond})").fmt(f)
                 } else {
-                    format!("$assert({cond})").fmt(f)
+                    let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
+                    format!("{name}({cond}, {})", args_str.join(", ")).fmt(f)
                 }
             }
             SystemFunctionKind::Finish => "$finish()".fmt(f),
@@ -443,10 +474,10 @@ impl SystemFunctionCall {
                     process_input(arg, context, table);
                 }
             }
-            SystemFunctionKind::Assert(cond, msg) => {
+            SystemFunctionKind::Assert { cond, args, .. } => {
                 process_input(cond, context, table);
-                if let Some(m) = msg {
-                    process_input(m, context, table);
+                for arg in args {
+                    process_input(arg, context, table);
                 }
             }
             SystemFunctionKind::Finish => {}

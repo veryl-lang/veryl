@@ -23,8 +23,10 @@ use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::conv::utils::eval_array_literal;
 use veryl_analyzer::ir as air;
+use veryl_analyzer::ir::{
+    AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
+};
 use veryl_analyzer::ir::{ControlFlow, FunctionCall};
-use veryl_analyzer::ir::{SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant};
 #[cfg(not(target_family = "wasm"))]
 use veryl_analyzer::value::ValueU64;
 use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue};
@@ -98,8 +100,10 @@ pub enum SystemFunctionCall {
         width: usize,
     },
     Assert {
+        kind: AssertKind,
         condition: Expression,
-        message: Option<String>,
+        format_str: String,
+        args: Vec<Expression>,
     },
     Finish,
 }
@@ -337,6 +341,26 @@ impl Statement {
     }
 }
 
+pub fn format_assert_message(
+    format_str: &str,
+    args: &[Expression],
+    mask_cache: &mut MaskCache,
+) -> String {
+    if format_str.is_empty() && args.is_empty() {
+        return "assertion failed".to_string();
+    }
+    if format_str.is_empty() {
+        let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
+        let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
+        return parts.join(" ");
+    }
+    if args.is_empty() {
+        return format_str.to_string();
+    }
+    let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
+    format_display_string(format_str, &values)
+}
+
 fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
     let mut result = String::new();
     let mut chars = format_str.chars().peekable();
@@ -448,11 +472,19 @@ impl SystemFunctionCall {
                     }
                 }
             }
-            SystemFunctionCall::Assert { condition, message } => {
+            SystemFunctionCall::Assert {
+                kind,
+                condition,
+                format_str,
+                args,
+            } => {
                 let val = condition.eval(mask_cache);
                 if val.payload_u64() == 0 {
-                    let msg = message.as_deref().unwrap_or("assertion failed");
-                    panic!("$assert failed: {msg}");
+                    let msg = format_assert_message(format_str, args, mask_cache);
+                    match kind {
+                        AssertKind::Fatal => crate::assert_buffer::record_fatal(msg),
+                        AssertKind::Continue => crate::assert_buffer::record_continue(msg),
+                    }
                 }
             }
             SystemFunctionCall::Finish => {
@@ -495,8 +527,10 @@ pub enum ProtoSystemFunctionCall {
         width: usize,
     },
     Assert {
+        kind: AssertKind,
         condition: ProtoExpression,
-        message: Option<String>,
+        format_str: String,
+        args: Vec<ProtoExpression>,
     },
     Finish,
 }
@@ -1076,8 +1110,13 @@ impl ProtoStatement {
                         }
                     }
                 }
-                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
                     condition.adjust_offsets(ff_delta, comb_delta);
+                    for arg in args {
+                        arg.adjust_offsets(ff_delta, comb_delta);
+                    }
                 }
                 ProtoSystemFunctionCall::Finish => {}
             },
@@ -1212,8 +1251,13 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } => {}
-                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
                     condition.gather_variable_offsets(inputs);
+                    for arg in args {
+                        arg.gather_variable_offsets(inputs);
+                    }
                 }
                 ProtoSystemFunctionCall::Finish => {}
             },
@@ -1551,7 +1595,12 @@ impl ProtoStatement {
                             width: *width,
                         })
                     }
-                    ProtoSystemFunctionCall::Assert { condition, message } => {
+                    ProtoSystemFunctionCall::Assert {
+                        kind,
+                        condition,
+                        format_str,
+                        args,
+                    } => {
                         let condition = condition.apply_values_ptr(
                             ff_values_ptr,
                             ff_len,
@@ -1559,9 +1608,23 @@ impl ProtoStatement {
                             comb_len,
                             use_4state,
                         );
+                        let args: Vec<_> = args
+                            .iter()
+                            .map(|e| {
+                                e.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            })
+                            .collect();
                         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
+                            kind: *kind,
                             condition,
-                            message: message.clone(),
+                            format_str: format_str.clone(),
+                            args,
                         })
                     }
                     ProtoSystemFunctionCall::Write { format_str, args } => {
@@ -2809,11 +2872,16 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         },
                     )]
                 }
-                SystemFunctionKind::Assert(cond_input, msg_input) => {
-                    let condition: ProtoExpression = Conv::conv(context, &cond_input.0)?;
-                    let message = msg_input.as_ref().and_then(|m| extract_string_value(&m.0));
+                SystemFunctionKind::Assert { kind, cond, args } => {
+                    let condition: ProtoExpression = Conv::conv(context, &cond.0)?;
+                    let (format_str, exprs) = extract_display_args(context, args).unwrap();
                     vec![ProtoStatement::SystemFunctionCall(
-                        ProtoSystemFunctionCall::Assert { condition, message },
+                        ProtoSystemFunctionCall::Assert {
+                            kind: *kind,
+                            condition,
+                            format_str,
+                            args: exprs,
+                        },
                     )]
                 }
                 SystemFunctionKind::Finish => {

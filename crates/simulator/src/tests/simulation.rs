@@ -2944,7 +2944,6 @@ fn assert_pass() {
 }
 
 #[test]
-#[should_panic(expected = "$assert failed")]
 fn assert_fail() {
     let code = r#"
     module Top (
@@ -2958,7 +2957,11 @@ fn assert_fail() {
     let config = Config::default();
     let ir = analyze(code, &config);
     let mut sim = Simulator::new(ir, None);
+    crate::assert_buffer::reset();
     sim.step(&Event::Initial);
+    assert!(crate::assert_buffer::has_fatal());
+    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert_eq!(msg, "assertion failed");
 }
 
 #[test]
@@ -2977,6 +2980,51 @@ fn assert_with_message_pass() {
         let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Initial);
     }
+}
+
+#[test]
+fn assert_with_format_fail() {
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            let a: logic<8> = 8'd5;
+            let b: logic<8> = 8'd9;
+            $assert(a == b, "mismatch: a=%d b=%d", a, b);
+        }
+    }
+    "#;
+    let config = Config::default();
+    let ir = analyze(code, &config);
+    let mut sim = Simulator::new(ir, None);
+    crate::assert_buffer::reset();
+    sim.step(&Event::Initial);
+    assert!(crate::assert_buffer::has_fatal());
+    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert_eq!(msg, "mismatch: a=5 b=9");
+}
+
+#[test]
+fn assert_continue_accumulates_failures() {
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            $assert_continue(0 == 1, "first");
+            $assert_continue(2 == 3, "second");
+        }
+    }
+    "#;
+    let config = Config::default();
+    let ir = analyze(code, &config);
+    let mut sim = Simulator::new(ir, None);
+    crate::assert_buffer::reset();
+    sim.step(&Event::Initial);
+    assert!(!crate::assert_buffer::has_fatal());
+    let msg = crate::assert_buffer::take_failure().unwrap();
+    assert_eq!(msg, "first\nsecond");
 }
 
 #[test]
