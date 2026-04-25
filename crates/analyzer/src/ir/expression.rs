@@ -415,7 +415,8 @@ impl Expression {
             }
 
             // const optimization
-            if comptime.is_const
+            if !context.disalbe_const_opt
+                && comptime.is_const
                 && let Some(value) = value
                 && !value.is_xz()
             {

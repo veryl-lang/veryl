@@ -926,7 +926,7 @@ fn function() {
   var var3(PkgB.PkgA.func_a.return): bit<32> = 32'h00000008;
   const var4(A): bit<32> = 32'h00000008;
   func var0(PkgB.func_b) -> var1 {
-    var1 = 32'h00000008;
+    var1 = var2();
   }
   func var2(PkgB.PkgA.func_a) -> var3 {
     var3 = 32'sh00000008;
@@ -1049,6 +1049,36 @@ fn function() {
   comb {
     var4 = var5(c: var3, a: var1, b: var2);
   }
+}
+"#;
+
+    check_ir(code, exp);
+
+    let code = r#"
+    module ModuleA {
+        function f(a: input u32) -> u32 {
+            var b: u32;
+            b = $clog2(a);
+            return b;
+        }
+        const A: u32 = f(1);
+        const B: u32 = f(2);
+        const C: u32 = f(3);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  var var1(f.return): bit<32> = 32'h00000002;
+  input var2(f.a): bit<32> = 32'sh00000003;
+  var var3(f.b): bit<32> = 32'h00000002;
+  const var4(A): bit<32> = 32'h00000000;
+  const var5(B): bit<32> = 32'h00000001;
+  const var6(C): bit<32> = 32'h00000002;
+  func var0(f) -> var1 {
+    var3 = $clog2(var2);
+    var1 = var3;
+  }
+
 }
 "#;
 
@@ -2033,7 +2063,7 @@ module ModuleB {
   var var3(Pkg.func_a::<__Pkg__1 B>.return): bit<32> = 32'h00000001;
   const var4(A): bit<32> = 32'h00000001;
   func var0(Pkg.func_b::<1>) -> var1 {
-    var1 = 32'h00000001;
+    var1 = var2();
   }
   func var2(Pkg.func_a::<__Pkg__1 B>) -> var3 {
     var3 = 32'sh00000001;

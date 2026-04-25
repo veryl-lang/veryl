@@ -1142,11 +1142,15 @@ fn conv_function(
         }
 
         let body = if let Some(block) = statement_block {
-            let statements: ir::StatementBlock = Conv::conv(c, block)?;
+            let disable_const_opt = c.disalbe_const_opt;
+            c.disalbe_const_opt = true;
+            let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
+            c.disalbe_const_opt = disable_const_opt;
+
             vec![ir::FunctionBody {
                 ret: ret_id,
                 arg_map,
-                statements: statements.0,
+                statements: statements?.0,
             }]
         } else {
             vec![]

@@ -54,6 +54,7 @@ pub struct Context {
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
+    pub disalbe_const_opt: bool,
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
@@ -82,6 +83,7 @@ impl Context {
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
+        self.disalbe_const_opt = tgt.disalbe_const_opt;
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
         self.config = tgt.config.clone();
