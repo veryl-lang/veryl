@@ -61,6 +61,13 @@ pub struct Ir {
     /// FF commit entries: (current_offset, value_size) pairs.
     /// After event execution, next → current copy is performed for each entry.
     pub ff_commit_entries: Vec<(usize, usize)>,
+    /// Runs of consecutive FFs sharing the specialized size with
+    /// stride = 2 * size, as `(start_current_offset, count)`.  The
+    /// compile-time stride lets LLVM auto-vectorize the inner loop.
+    pub ff_commit_u32_runs: Vec<(u32, u32)>,
+    pub ff_commit_u64_runs: Vec<(u32, u32)>,
+    /// Entries that don't fit u32/u64 specialization (rare: size 1, 2, 16, 32, etc.).
+    pub ff_commit_other: Vec<(usize, usize)>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
     /// Sensitivity-fanout + topological-rank index for the seeded-worklist
@@ -76,6 +83,10 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// Runtime feature detection: if true, ff_commit uses an AVX2 shuffle
+    /// fast path; otherwise a scalar fallback (which LLVM auto-vectorizes
+    /// for the base SSE2 target).
+    pub ff_commit_use_avx2: bool,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
     /// instances created from the same cached `ProtoModule` can share the binary.
     _binary: Arc<Vec<BinaryStorage>>,
@@ -97,6 +108,37 @@ impl Ir {
         config: &Config,
         token: TokenRange,
     ) -> Ir {
+        let mut ff_commit_u32_runs: Vec<(u32, u32)> = Vec::new();
+        let mut ff_commit_u64_runs: Vec<(u32, u32)> = Vec::new();
+        let mut ff_commit_other: Vec<(usize, usize)> = Vec::new();
+        {
+            let entries = &module.ff_commit_entries;
+            let mut i = 0;
+            while i < entries.len() {
+                let (off, sz) = entries[i];
+                if sz != 4 && sz != 8 {
+                    ff_commit_other.push((off, sz));
+                    i += 1;
+                    continue;
+                }
+                let stride = sz * 2;
+                let mut j = i + 1;
+                while j < entries.len() {
+                    let (off_j, sz_j) = entries[j];
+                    if sz_j != sz || off_j != off + stride * (j - i) {
+                        break;
+                    }
+                    j += 1;
+                }
+                let count = (j - i) as u32;
+                if sz == 4 {
+                    ff_commit_u32_runs.push((off as u32, count));
+                } else {
+                    ff_commit_u64_runs.push((off as u32, count));
+                }
+                i = j;
+            }
+        }
         Ir {
             name: module.name,
             token,
@@ -109,6 +151,10 @@ impl Ir {
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             ff_commit_entries: module.ff_commit_entries,
+            ff_commit_u32_runs,
+            ff_commit_u64_runs,
+            ff_commit_other,
+            ff_commit_use_avx2: detect_avx2(),
             disable_ff_opt: config.disable_ff_opt,
             comb_schedule: module.comb_schedule,
             use_seeded_worklist: config.use_seeded_worklist,
@@ -443,6 +489,15 @@ impl Ir {
 // NOTE: Ir is intentionally NOT Sync. Sharing &Ir across threads would allow
 // concurrent mutation of ff_values/comb_values via interior raw pointers.
 unsafe impl Send for Ir {}
+
+#[cfg(target_arch = "x86_64")]
+fn detect_avx2() -> bool {
+    std::is_x86_feature_detected!("avx2")
+}
+#[cfg(not(target_arch = "x86_64"))]
+fn detect_avx2() -> bool {
+    false
+}
 
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
     for x in &ir.components {
