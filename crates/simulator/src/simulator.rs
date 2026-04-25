@@ -235,7 +235,13 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let ff_start = std::time::Instant::now();
 
-        Self::ff_commit(&mut self.ir.ff_values, &self.ir.ff_commit_entries);
+        Self::ff_commit_specialized(
+            &mut self.ir.ff_values,
+            &self.ir.ff_commit_u32_runs,
+            &self.ir.ff_commit_u64_runs,
+            &self.ir.ff_commit_other,
+            self.ir.ff_commit_use_avx2,
+        );
 
         #[cfg(feature = "profile")]
         {
@@ -248,22 +254,107 @@ impl Simulator {
     }
 
     /// Commit FF updates: copy next → current for all FF variables.
-    /// Constant-size copies allow LLVM to inline as MOV instructions.
+    /// Dispatches to a vpermd/vpermq AVX2 shuffle on x86_64 when the
+    /// CPU supports it, falling back to a scalar loop otherwise.
     #[inline(always)]
-    fn ff_commit(ff_values: &mut [u8], entries: &[(usize, usize)]) {
+    fn ff_commit_specialized(
+        ff_values: &mut [u8],
+        u32_runs: &[(u32, u32)],
+        u64_runs: &[(u32, u32)],
+        other: &[(usize, usize)],
+        use_avx2: bool,
+    ) {
         let ptr = ff_values.as_mut_ptr();
-        for &(current_offset, value_size) in entries {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if use_avx2 {
+                unsafe { Self::ff_commit_runs_avx2(ptr, u32_runs, u64_runs) };
+            } else {
+                Self::ff_commit_runs_scalar(ptr, u32_runs, u64_runs);
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let _ = use_avx2;
+            Self::ff_commit_runs_scalar(ptr, u32_runs, u64_runs);
+        }
+        for &(current_offset, value_size) in other {
             unsafe {
                 let dst = ptr.add(current_offset);
                 let src = ptr.add(current_offset + value_size);
-                match value_size {
-                    1 => std::ptr::copy_nonoverlapping(src, dst, 1),
-                    2 => std::ptr::copy_nonoverlapping(src, dst, 2),
-                    4 => std::ptr::copy_nonoverlapping(src, dst, 4),
-                    8 => std::ptr::copy_nonoverlapping(src, dst, 8),
-                    16 => std::ptr::copy_nonoverlapping(src, dst, 16),
-                    32 => std::ptr::copy_nonoverlapping(src, dst, 32),
-                    n => std::ptr::copy_nonoverlapping(src, dst, n),
+                std::ptr::copy_nonoverlapping(src, dst, value_size);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn ff_commit_runs_avx2(ptr: *mut u8, u32_runs: &[(u32, u32)], u64_runs: &[(u32, u32)]) {
+        unsafe {
+            use std::arch::x86_64::*;
+            // u32: 4 entries per 32-byte chunk.  [c0|n0|c1|n1|c2|n2|c3|n3]
+            // vpermd mask [1,1,3,3,5,5,7,7] → [n0|n0|n1|n1|n2|n2|n3|n3].
+            let mask = _mm256_setr_epi32(1, 1, 3, 3, 5, 5, 7, 7);
+            for &(start, count) in u32_runs {
+                let base = ptr.add(start as usize);
+                let count = count as usize;
+                let chunks = count / 4;
+                for i in 0..chunks {
+                    let p = base.add(i * 32) as *mut __m256i;
+                    let v = _mm256_loadu_si256(p);
+                    let shuffled = _mm256_permutevar8x32_epi32(v, mask);
+                    _mm256_storeu_si256(p, shuffled);
+                }
+                for i in (chunks * 4)..count {
+                    let dst = base.add(i * 8) as *mut u32;
+                    let src = base.add(i * 8 + 4) as *const u32;
+                    let s = std::ptr::read_unaligned(src);
+                    std::ptr::write_unaligned(dst, s);
+                }
+            }
+            // u64: 2 entries per 32-byte chunk.  [c0|n0|c1|n1] (4 u64 lanes)
+            // vpermq imm8 [1,1,3,3] → [n0|n0|n1|n1].
+            for &(start, count) in u64_runs {
+                let base = ptr.add(start as usize);
+                let count = count as usize;
+                let chunks = count / 2;
+                for i in 0..chunks {
+                    let p = base.add(i * 32) as *mut __m256i;
+                    let v = _mm256_loadu_si256(p);
+                    let shuffled = _mm256_permute4x64_epi64::<0b11_11_01_01>(v);
+                    _mm256_storeu_si256(p, shuffled);
+                }
+                for i in (chunks * 2)..count {
+                    let dst = base.add(i * 16) as *mut u64;
+                    let src = base.add(i * 16 + 8) as *const u64;
+                    let s = std::ptr::read_unaligned(src);
+                    std::ptr::write_unaligned(dst, s);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn ff_commit_runs_scalar(ptr: *mut u8, u32_runs: &[(u32, u32)], u64_runs: &[(u32, u32)]) {
+        for &(start, count) in u32_runs {
+            unsafe {
+                let base = ptr.add(start as usize);
+                for i in 0..count as usize {
+                    let dst = base.add(i * 8) as *mut u32;
+                    let src = base.add(i * 8 + 4) as *const u32;
+                    let s = std::ptr::read_unaligned(src);
+                    std::ptr::write_unaligned(dst, s);
+                }
+            }
+        }
+        for &(start, count) in u64_runs {
+            unsafe {
+                let base = ptr.add(start as usize);
+                for i in 0..count as usize {
+                    let dst = base.add(i * 16) as *mut u64;
+                    let src = base.add(i * 16 + 8) as *const u64;
+                    let s = std::ptr::read_unaligned(src);
+                    std::ptr::write_unaligned(dst, s);
                 }
             }
         }
