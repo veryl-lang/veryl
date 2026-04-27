@@ -85,7 +85,7 @@ module veryl_testcase_Module25E #(
     always_comb o_c = veryl_sample4___foo_func_1__WIDTH(i_a, i_b);
 
     function automatic int unsigned veryl_sample4_foo_func_2() ;
-        return  2;
+        return 2;
     endfunction
     function automatic logic [WIDTH-1:0] veryl_sample4___foo_func_1__WIDTH(
         input var logic [WIDTH-1:0] a,

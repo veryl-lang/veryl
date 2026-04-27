@@ -36,7 +36,236 @@ module veryl_testcase_Module68B (
     );
 endmodule
 
-module veryl_testcase___Module68C____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5 (
+module veryl_testcase_Module68C
+    import __std_selector_pkg::*;
+#(
+    parameter selector_kind KIND = __std_selector_pkg::selector_kind_ONEHOT,
+    parameter int unsigned  N    = 2                                       ,
+    parameter type          T    = logic                               
+) (
+    input  var logic [calc_select_width(N, KIND)-1:0] i_select,
+    input  var T     [N-1:0]                          i_d     ,
+    output var T                                      o_d 
+);
+
+    always_comb o_d = __std___select__KIND__N__T(i_select, i_d);
+
+    function automatic T __std___select_binary__N__T(
+        input var logic [__std_selector_pkg::calc_binary_select_width(N)-1:0] sel ,
+        input var T     [N-1:0]                                               data
+    ) ;
+        return data[sel];
+    endfunction
+    function automatic T __std___select_vector__N__T(
+        input var logic [N-1:0] sel ,
+        input var T     [N-1:0] data
+    ) ;
+        localparam int unsigned DEPTH = $clog2(N);
+        int unsigned         current_n;
+        logic        [N-1:0] current_s;
+        T            [N-1:0] current_d;
+        int unsigned         next_n   ;
+        logic        [N-1:0] next_s   ;
+        T            [N-1:0] next_d   ;
+
+        next_n = N;
+        next_s = sel;
+        next_d = data;
+        for (int _i = 0; _i < DEPTH; _i++) begin
+            current_n = next_n;
+            current_s = next_s;
+            current_d = next_d;
+
+            next_n = (current_n / 2) + (current_n % 2);
+            for (int j = 0; j < next_n; j++) begin
+                logic select_even;
+
+                if ((j + 1) == next_n && (current_n % 2) == 1) begin
+                    select_even = 1'b1;
+                end else begin
+                    select_even = current_s[2 * j + 0];
+                end
+
+                if (select_even) begin
+                    next_s[j] = current_s[2 * j + 0];
+                    next_d[j] = current_d[2 * j + 0];
+                end else begin
+                    next_s[j] = current_s[2 * j + 1];
+                    next_d[j] = current_d[2 * j + 1];
+                end
+            end
+        end
+
+        return next_d[0];
+    endfunction
+    function automatic T __std___select_onehot__N__T(
+        input var logic [N-1:0] sel ,
+        input var T     [N-1:0] data
+    ) ;
+        localparam int unsigned DEPTH = $clog2(N);
+        int unsigned         current_n;
+        T            [N-1:0] current_d;
+        int unsigned         next_n   ;
+        T            [N-1:0] next_d   ;
+
+        next_n = N;
+        for (int i = 0; i < N; i++) begin
+            if (sel[i]) begin
+                next_d[i] = data[i];
+            end else begin
+                next_d[i] = T'(0);
+            end
+        end
+
+        for (int _i = 0; _i < DEPTH; _i++) begin
+            current_n = next_n;
+            current_d = next_d;
+
+            next_n = (current_n / 2) + (current_n % 2);
+            for (int j = 0; j < next_n; j++) begin
+                if ((j + 1) == next_n && (current_n % 2) == 1) begin
+                    next_d[j] = current_d[2 * j + 0];
+                end else begin
+                    next_d[j] = T'((current_d[2 * j + 0] | current_d[2 * j + 1]));
+                end
+            end
+        end
+
+        return next_d[0];
+    endfunction
+    function automatic T __std___select__KIND__N__T(
+        input var logic [__std_selector_pkg::calc_select_width(N, KIND)-1:0] sel ,
+        input var T     [N-1:0]                                              data
+    ) ;
+        localparam int unsigned BINARY_SEL_WIDTH = __std_selector_pkg::calc_binary_select_width(N);
+
+        if (N == 1) begin
+            return data[0];
+        end else if (KIND == __std_selector_pkg::selector_kind_BINARY) begin
+            return __std___select_binary__N__T(BINARY_SEL_WIDTH'(sel), data);
+        end else if (KIND == __std_selector_pkg::selector_kind_VECTOR) begin
+            return __std___select_vector__N__T(N'(sel), data);
+        end else begin
+            return __std___select_onehot__N__T(N'(sel), data);
+        end
+    endfunction
+endmodule
+
+module veryl_testcase_Module68D
+    import __std_selector_pkg::*;
+#(
+    parameter selector_kind KIND = __std_selector_pkg::selector_kind_ONEHOT,
+    parameter int unsigned  N    = 2                                   
+) (
+    input  var logic [calc_select_width(N, KIND)-1:0] i_select,
+    input  var logic [N-1:0]                          i_d     ,
+    output var logic                                  o_d 
+);
+
+    always_comb o_d = __std___select__KIND__N__lbool(i_select, i_d);
+
+    function automatic logic __std___select_binary__N__lbool(
+        input var logic [__std_selector_pkg::calc_binary_select_width(N)-1:0] sel ,
+        input var logic [N-1:0]                                               data
+    ) ;
+        return data[sel];
+    endfunction
+    function automatic logic __std___select_vector__N__lbool(
+        input var logic [N-1:0] sel ,
+        input var logic [N-1:0] data
+    ) ;
+        localparam int unsigned DEPTH = $clog2(N);
+        int unsigned         current_n;
+        logic        [N-1:0] current_s;
+        logic        [N-1:0] current_d;
+        int unsigned         next_n   ;
+        logic        [N-1:0] next_s   ;
+        logic        [N-1:0] next_d   ;
+
+        next_n = N;
+        next_s = sel;
+        next_d = data;
+        for (int _i = 0; _i < DEPTH; _i++) begin
+            current_n = next_n;
+            current_s = next_s;
+            current_d = next_d;
+
+            next_n = (current_n / 2) + (current_n % 2);
+            for (int j = 0; j < next_n; j++) begin
+                logic select_even;
+
+                if ((j + 1) == next_n && (current_n % 2) == 1) begin
+                    select_even = 1'b1;
+                end else begin
+                    select_even = current_s[2 * j + 0];
+                end
+
+                if (select_even) begin
+                    next_s[j] = current_s[2 * j + 0];
+                    next_d[j] = current_d[2 * j + 0];
+                end else begin
+                    next_s[j] = current_s[2 * j + 1];
+                    next_d[j] = current_d[2 * j + 1];
+                end
+            end
+        end
+
+        return next_d[0];
+    endfunction
+    function automatic logic __std___select_onehot__N__lbool(
+        input var logic [N-1:0] sel ,
+        input var logic [N-1:0] data
+    ) ;
+        localparam int unsigned DEPTH = $clog2(N);
+        int unsigned         current_n;
+        logic        [N-1:0] current_d;
+        int unsigned         next_n   ;
+        logic        [N-1:0] next_d   ;
+
+        next_n = N;
+        for (int i = 0; i < N; i++) begin
+            if (sel[i]) begin
+                next_d[i] = data[i];
+            end else begin
+                next_d[i] = logic'(0);
+            end
+        end
+
+        for (int _i = 0; _i < DEPTH; _i++) begin
+            current_n = next_n;
+            current_d = next_d;
+
+            next_n = (current_n / 2) + (current_n % 2);
+            for (int j = 0; j < next_n; j++) begin
+                if ((j + 1) == next_n && (current_n % 2) == 1) begin
+                    next_d[j] = current_d[2 * j + 0];
+                end else begin
+                    next_d[j] = logic'((current_d[2 * j + 0] | current_d[2 * j + 1]));
+                end
+            end
+        end
+
+        return next_d[0];
+    endfunction
+    function automatic logic __std___select__KIND__N__lbool(
+        input var logic [__std_selector_pkg::calc_select_width(N, KIND)-1:0] sel ,
+        input var logic [N-1:0]                                              data
+    ) ;
+        localparam int unsigned BINARY_SEL_WIDTH = __std_selector_pkg::calc_binary_select_width(N);
+
+        if (N == 1) begin
+            return data[0];
+        end else if (KIND == __std_selector_pkg::selector_kind_BINARY) begin
+            return __std___select_binary__N__lbool(BINARY_SEL_WIDTH'(sel), data);
+        end else if (KIND == __std_selector_pkg::selector_kind_VECTOR) begin
+            return __std___select_vector__N__lbool(N'(sel), data);
+        end else begin
+            return __std___select_onehot__N__lbool(N'(sel), data);
+        end
+    endfunction
+endmodule
+
+module veryl_testcase___Module68E____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5 (
     __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8.slave                                                                                                                                                            axi4_if       ,
     __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH.slave axi4_lite_if  ,
     __std___axi4_stream_if____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5.receiver                                             axi4_stream_if
@@ -76,7 +305,7 @@ endmodule
 
 
 
-module veryl_testcase_Module68D;
+module veryl_testcase_Module68F;
     __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8                                                                                                                                                            axi4_if          ();
     __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH axi4_lite_if     ();
     __std___axi4_stream_if____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5                                                axi4_stream_if   ();
@@ -140,7 +369,7 @@ module veryl_testcase_Module68D;
     always_comb axi4_lite_if.awid = 0;
     always_comb axi4_lite_if.arid = 0;
 
-    veryl_testcase___Module68C____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5 u (
+    veryl_testcase___Module68E____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5 u (
         .axi4_if        (axi4_if       ),
         .axi4_lite_if   (axi4_lite_if  ),
         .axi4_stream_if (axi4_stream_if)

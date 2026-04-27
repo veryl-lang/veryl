@@ -2211,19 +2211,28 @@ impl Emitter {
     }
 
     fn get_generic_maps(&self, symbol: &Symbol) -> Vec<GenericMap> {
-        let parent_id = if let Some(maps) = self.generic_map.last() {
-            maps.last().and_then(|x| x.id)
-        } else {
-            None
-        };
+        let mut associated_components = vec![];
+        if symbol.is_global_function()
+            && let Some(bound_namespace) = self.bound_namespace.as_ref()
+            && let Some(bound_symbol) = bound_namespace.get_symbol()
+        {
+            // Generic instance of global function is associated with
+            // caller (bound) namespace.
+            associated_components.push(bound_symbol.id);
+        }
+        if let Some(maps) = self.generic_map.last()
+            && let Some(map) = maps.last()
+            && let Some(id) = map.id
+        {
+            associated_components.push(id);
+        }
 
         // The given symbol is a top level symbol or
         // the parent symbol is a non generic object.
-        if parent_id.is_none() {
+        if associated_components.is_empty() {
             return symbol.generic_maps();
         }
 
-        let parent_id = parent_id.unwrap();
         symbol
             .generic_maps()
             .into_iter()
@@ -2235,17 +2244,7 @@ impl Emitter {
                     };
 
                     let affiliation_symbol = inst.affiliation_symbol.unwrap();
-                    if affiliation_symbol == parent_id {
-                        true
-                    } else if let Some(parent_symbol) = symbol_table::get(parent_id)
-                        && let SymbolKind::GenericInstance(inst) = parent_symbol.kind
-                    {
-                        // The generic map is associated with generic component.
-                        // This means that it is also associated with generic instances generated from the component.
-                        inst.base_symbol().id == affiliation_symbol
-                    } else {
-                        false
-                    }
+                    associated_components.contains(&affiliation_symbol)
                 } else {
                     true
                 }

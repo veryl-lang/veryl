@@ -393,43 +393,7 @@ impl ReferenceTable {
             id: None,
             map: target.generic_table(&instance_path.arguments),
         });
-
-        let target_namespace = &target.inner_namespace();
-        let mut referecnes = target.generic_references();
-        for path in &mut referecnes {
-            // check recursive reference
-            if path.paths[0].base.text == target.token.text {
-                continue;
-            }
-
-            path.apply_map(generic_maps);
-            path.unalias();
-            path.append_namespace_path(namespace, &target.namespace);
-
-            if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))
-            {
-                let ith = path.len() - 1;
-                if target.is_global_function() {
-                    Self::insert_generic_instance(
-                        path,
-                        ith,
-                        namespace,
-                        &path_symbol.found,
-                        &mut generic_maps.clone(),
-                        None,
-                    );
-                } else {
-                    Self::insert_generic_instance(
-                        path,
-                        ith,
-                        target_namespace,
-                        &path_symbol.found,
-                        &mut generic_maps.clone(),
-                        Some(&symbol),
-                    );
-                }
-            }
-        }
+        Self::insert_subordinate_generic_instances(namespace, target, &symbol, generic_maps);
     }
 
     fn create_generic_instance(
@@ -461,6 +425,62 @@ impl ReferenceTable {
         }
     }
 
+    fn insert_subordinate_generic_instances(
+        namespace: &Namespace,
+        target: &Symbol,
+        inst_symbol: &Symbol,
+        generic_maps: &[GenericMap],
+    ) {
+        let is_global_func = target.is_global_function();
+        let mut subordinate_paths = if !is_global_func {
+            target.generic_references()
+        } else if let Some(paths) = symbol_table::get_reference_functions(target.id) {
+            paths
+        } else {
+            return;
+        };
+
+        if subordinate_paths.is_empty() {
+            return;
+        }
+
+        let target_namespace = &target.inner_namespace();
+        for path in &mut subordinate_paths {
+            // check recursive reference
+            if path.paths[0].base.text == target.token.text {
+                continue;
+            }
+
+            path.apply_map(generic_maps);
+            path.unalias();
+            path.append_namespace_path(namespace, &target.namespace);
+
+            if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))
+            {
+                let ith = path.len() - 1;
+                if is_global_func {
+                    Self::insert_generic_instance(
+                        path,
+                        ith,
+                        namespace,
+                        &path_symbol.found,
+                        &mut generic_maps.to_vec(),
+                        None,
+                    );
+                } else {
+                    Self::insert_generic_instance(
+                        path,
+                        ith,
+                        target_namespace,
+                        &path_symbol.found,
+                        &mut generic_maps.to_vec(),
+                        Some(inst_symbol),
+                    );
+                }
+            }
+        }
+    }
+
     fn add_generic_reference(
         symbol: &Symbol,
         namespace: &Namespace,
@@ -479,7 +499,11 @@ impl ReferenceTable {
         let mut namespace = namespace.clone();
         namespace.strip_anonymous_path();
 
-        let Some(mut target) = get_parent_generic_component(&namespace) else {
+        let mut target = if let Some(target) = get_parent_generic_component(&namespace)
+            && !target.is_global_function()
+        {
+            target
+        } else {
             return;
         };
         let path = path.slice(ith);
