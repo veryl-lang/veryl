@@ -1,0 +1,32 @@
+pub package utils {
+    function clog2_clipped (
+        x  : input u32,
+        min: input u32,
+    ) -> u32 {
+        var result: u32;
+        result = $clog2(x);
+        return if result >: min ? result : min;
+    }
+}
+
+#[test(test_utils_clog2_clipped)]
+module test_utils_clog2_clipped {
+    const A: u32 = utils::clog2_clipped(1, 1);
+    const B: u32 = utils::clog2_clipped(2, 1);
+    const C: u32 = utils::clog2_clipped(3, 1);
+    const D: u32 = utils::clog2_clipped(4, 1);
+    const E: u32 = utils::clog2_clipped(5, 1);
+    const F: u32 = utils::clog2_clipped(6, 1);
+    const G: u32 = utils::clog2_clipped(7, 1);
+
+    initial {
+        $assert(A == 1);
+        $assert(B == 1);
+        $assert(C == 2);
+        $assert(D == 2);
+        $assert(E == 3);
+        $assert(G == 3);
+        $assert(G == 3);
+        $finish();
+    }
+}
