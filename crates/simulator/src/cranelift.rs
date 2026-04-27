@@ -159,6 +159,21 @@ pub fn build_binary_no_cache(
     build_binary_inner(context, proto, HashSet::default(), true)
 }
 
+/// Recursively check whether the chunk contains any `CompiledBlock`
+/// (interpreted helper) statement.
+fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
+    stmts.iter().any(|s| match s {
+        ProtoStatement::CompiledBlock(_) => true,
+        ProtoStatement::SequentialBlock(body) => proto_contains_compiled_block(body),
+        ProtoStatement::If(if_stmt) => {
+            proto_contains_compiled_block(&if_stmt.true_side)
+                || proto_contains_compiled_block(&if_stmt.false_side)
+        }
+        ProtoStatement::For(for_stmt) => proto_contains_compiled_block(&for_stmt.body),
+        _ => false,
+    })
+}
+
 fn build_binary_inner(
     context: &mut ConvContext,
     proto: Vec<ProtoStatement>,
@@ -172,10 +187,19 @@ fn build_binary_inner(
     if !config.dump_cranelift {
         settings_builder.set("enable_verifier", "false").unwrap();
     }
-    // Disable alias analysis for unified comb (no_cache path) to avoid
-    // incorrect cross-block load CSE that conflicts with the simulator's
-    // own comb evaluation semantics.
-    if disable_load_cache {
+    // `disable_load_cache` is only required when the chunk contains an
+    // interpreted CompiledBlock — those helpers can mutate comb storage
+    // between cached loads, breaking the IR-level load CSE in
+    // `expression.rs::build_binary`.  Fully-JIT chunks are safe, so the
+    // cache (and Cranelift's alias analysis) can stay on.
+    let chunk_has_compiled_block = proto_contains_compiled_block(&proto);
+    let force_disable_load_cache = std::env::var("VERYL_FORCE_DISABLE_LOAD_CACHE")
+        .ok()
+        .as_deref()
+        == Some("1");
+    let effective_disable_load_cache =
+        disable_load_cache && (chunk_has_compiled_block || force_disable_load_cache);
+    if effective_disable_load_cache {
         settings_builder
             .set("enable_alias_analysis", "false")
             .unwrap();
@@ -220,7 +244,7 @@ fn build_binary_inner(
         store_elim_enabled: true,
         helper_sigs: HashMap::default(),
         call_conv,
-        disable_load_cache,
+        disable_load_cache: effective_disable_load_cache,
     };
 
     let len = proto.len();

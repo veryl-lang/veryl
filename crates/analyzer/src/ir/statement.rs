@@ -465,13 +465,11 @@ impl AssignDestination {
 
             let mut errors = vec![];
             if let Some((beg, end)) = range {
-                // `insert_assign` / `check_refered` both bail out on arrays
-                // over `array_limit`; iterating beg..=end just to hit that
-                // guard is pure waste when the index is non-const.
-                let array_size = end.saturating_sub(beg).saturating_add(1);
-                let skip_large_array = !is_index_const
-                    && variable.r#type.total_array().unwrap_or(0) > assign_table.array_limit
-                    && array_size > assign_table.array_limit;
+                // `insert_assign` / `check_refered` bail out on arrays over
+                // `array_limit`; iterating beg..=end just to hit that guard
+                // is wasted work for any whole-array assignment.
+                let skip_large_array =
+                    variable.r#type.total_array().unwrap_or(0) > assign_table.array_limit;
 
                 if !skip_large_array {
                     for i in beg..=end {
