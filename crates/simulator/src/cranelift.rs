@@ -127,26 +127,8 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     builder.ins().stack_addr(I64, slot, 0)
 }
 
-/// Build a JIT function with store elimination for internal comb variables.
-/// Offsets in `store_elim` will skip memory stores (values forwarded via load_cache).
-pub fn build_binary_with_store_elim(
-    context: &mut ConvContext,
-    proto: Vec<ProtoStatement>,
-    store_elim: HashSet<VarOffset>,
-) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, store_elim, false)
-}
-
 pub fn build_binary(context: &mut ConvContext, proto: Vec<ProtoStatement>) -> Option<FuncPtr> {
     build_binary_inner(context, proto, HashSet::default(), false)
-}
-
-pub fn build_binary_with_store_elim_and_no_cache(
-    context: &mut ConvContext,
-    proto: Vec<ProtoStatement>,
-    store_elim: HashSet<VarOffset>,
-) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, store_elim, true)
 }
 
 /// Build a JIT function with load_cache disabled.

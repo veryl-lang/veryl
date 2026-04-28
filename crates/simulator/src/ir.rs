@@ -3,8 +3,6 @@ mod declaration;
 mod event;
 mod expression;
 mod module;
-#[cfg(not(target_family = "wasm"))]
-mod optimize;
 pub mod schedule;
 mod statement;
 #[cfg(not(target_family = "wasm"))]
