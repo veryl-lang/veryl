@@ -1,25 +1,26 @@
-// DSE: drop earlier same-dst full-width ProtoStatement::Assign stores
-// within unified_sorted whose value is overwritten before any
-// intervening read of dst (last-write-wins under SystemVerilog
-// sequential semantics).
+// Dead-store elimination on full-width ProtoStatement::Assign stores.
+// Drops an earlier write to dst when a later write to the same dst
+// occurs without any intervening read of dst — under SystemVerilog
+// sequential (last-write-wins) semantics the earlier value is
+// unobservable.
 
 use super::ProtoStatement;
+use crate::ir::variable::VarOffset;
 
-/// Aggressive DCE: drop a same-dst earlier ProtoStatement::Assign even
-/// when other stmts intervene, as long as no intervening stmt READS
-/// dst.  Provably equivalent to sequential semantics: the second
-/// store's value would overwrite the first, and no intervening stmt
-/// could observe the first's value.
+/// Drop an earlier ProtoStatement::Assign whose dst is overwritten by a
+/// later same-dst full-width Assign with no intervening read of dst.
 ///
-/// Applied per sibling sequence; recursive into nested structures with
-/// state reset at boundaries.
+/// Applied per sibling sequence; recurses into nested structures with
+/// pending state cleared at each boundary.
 pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let mut out: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
     let mut alive: Vec<bool> = Vec::with_capacity(stmts.len());
-    // dst.raw() -> index into out (still pending: can be overwritten by
-    // a later same-dst write iff no intervening read of dst).
-    let mut pending: std::collections::HashMap<isize, usize> =
-        std::collections::HashMap::new();
+    // Key must be the full VarOffset (FF/Comb tag + offset), not just
+    // the raw offset, because Ff(N) and Comb(N) are distinct storage
+    // locations that can share a raw offset within their respective
+    // regions (e.g. when force_all_ff promotes a variable that already
+    // has a comb intermediate at the same raw offset).
+    let mut pending: std::collections::HashMap<VarOffset, usize> = std::collections::HashMap::new();
 
     for s in stmts {
         let s = match s {
@@ -48,25 +49,23 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             other => other,
         };
 
-        // Gather inputs/outputs of this stmt to update pending.
         let mut ins = Vec::new();
         let mut outs = Vec::new();
         s.gather_variable_offsets(&mut ins, &mut outs);
 
-        // Any read of a pending dst forces that pending to commit (live).
+        // A read of a pending dst commits it (the earlier write is live).
         for r in &ins {
-            pending.remove(&r.raw());
+            pending.remove(r);
         }
 
-        // For ProtoStatement::Assign with full-width write: if an earlier
-        // pending write to same dst exists, the earlier is dead.  Replace
-        // its alive flag with false; record this stmt as the new pending.
+        // Full-width Assign: if there is a pending earlier write to the
+        // same dst, mark it dead and replace pending with this one.
         if let ProtoStatement::Assign(a) = &s
             && a.select.is_none()
             && a.dynamic_select.is_none()
             && a.rhs_select.is_none()
         {
-            let dst = a.dst.raw();
+            let dst = a.dst;
             if let Some(&prev_idx) = pending.get(&dst) {
                 alive[prev_idx] = false;
             }
@@ -76,12 +75,11 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             continue;
         }
 
-        // Any other stmt with outputs (Assign with select, AssignDynamic,
-        // For with body that writes, etc.): conservatively commit those
-        // dsts as live and remove from pending (since partial writes may
-        // overlap).
+        // Partial writes (Assign with select, AssignDynamic, For body
+        // writes, etc.) may overlap an earlier full-width write, so the
+        // earlier write must be kept alive.
         for o in &outs {
-            pending.remove(&o.raw());
+            pending.remove(o);
         }
 
         out.push(s);
