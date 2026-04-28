@@ -58,6 +58,45 @@ pub fn native_bytes(width: usize) -> usize {
     }
 }
 
+/// Comb-only packed-storage native width (1-8 -> 1, 9-16 -> 2, 17-32 -> 4,
+/// 33-64 -> 8, 65-128 -> 16, >128 -> 8-byte aligned).  Reduces the working
+/// set for narrow comb signals; FF storage stays at the unpacked sizing so
+/// ff_swap / ff_commit SIMD layouts are unaffected.
+#[inline]
+pub fn native_bytes_packed(width: usize) -> usize {
+    if width <= 8 {
+        1
+    } else if width <= 16 {
+        2
+    } else if width <= 32 {
+        4
+    } else if width <= 64 {
+        8
+    } else if width <= 128 {
+        16
+    } else {
+        width.div_ceil(64) * 8
+    }
+}
+
+/// Storage-context native width selector.  `is_ff = true` -> always
+/// `native_bytes(width)`.  `is_ff = false` and `VERYL_NATIVE_U8_COMB=1` ->
+/// `native_bytes_packed(width)`; otherwise the same as `native_bytes(width)`.
+/// All callers that compute a storage byte width for a variable load/store
+/// must use this; op-level intermediate widths keep using `native_bytes`.
+#[inline]
+pub fn native_bytes_for(width: usize, is_ff: bool) -> usize {
+    use std::sync::OnceLock;
+    static COMB_PACKED: OnceLock<bool> = OnceLock::new();
+    let comb_packed = *COMB_PACKED
+        .get_or_init(|| std::env::var("VERYL_NATIVE_U8_COMB").ok().as_deref() == Some("1"));
+    if !is_ff && comb_packed {
+        native_bytes_packed(width)
+    } else {
+        native_bytes(width)
+    }
+}
+
 /// Returns the byte size of a single value slot (payload + optional mask_xz).
 pub fn value_size(native_bytes: usize, use_4state: bool) -> usize {
     if use_4state {
@@ -69,12 +108,15 @@ pub fn value_size(native_bytes: usize, use_4state: bool) -> usize {
 
 /// Read a native-width payload from a byte buffer pointer.
 #[inline(always)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn read_payload(ptr: *const u8, nb: usize) -> u64 {
     unsafe {
         match nb {
+            1 => ptr.read_unaligned() as u64,
+            2 => (ptr as *const u16).read_unaligned() as u64,
             4 => (ptr as *const u32).read_unaligned() as u64,
             8 => (ptr as *const u64).read_unaligned(),
-            _ => unreachable!("read_payload called with nb={}, expected 4 or 8", nb),
+            _ => unreachable!("read_payload called with nb={}, expected 1, 2, 4 or 8", nb),
         }
     }
 }
@@ -87,12 +129,15 @@ pub fn read_payload_128(ptr: *const u8) -> u128 {
 
 /// Write a native-width payload to a byte buffer pointer.
 #[inline(always)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn write_payload(ptr: *mut u8, nb: usize, val: u64) {
     unsafe {
         match nb {
+            1 => ptr.write_unaligned(val as u8),
+            2 => (ptr as *mut u16).write_unaligned(val as u16),
             4 => (ptr as *mut u32).write_unaligned(val as u32),
             8 => (ptr as *mut u64).write_unaligned(val),
-            _ => unreachable!("write_payload called with nb={}, expected 4 or 8", nb),
+            _ => unreachable!("write_payload called with nb={}, expected 1, 2, 4 or 8", nb),
         }
     }
 }
@@ -314,8 +359,6 @@ pub fn create_variable_meta(
             continue;
         }
         let width = v.r#type.total_width()?;
-        let nb = native_bytes(width);
-        let vs = value_size(nb, use_4state);
 
         // Analyzer collapses all-same initial arrays down to a single
         // template value (eval_variable), so derive the real array length
@@ -328,6 +371,17 @@ pub fn create_variable_meta(
         // uniform stride in a single buffer; mixed placement is invalid.
         let any_ff = (0..total_array).any(|i| ff_table.is_ff(v.id, i));
         let force_ff = any_ff && total_array > 1;
+
+        // Per-Variable storage destination is uniform: arrays via force_ff,
+        // scalars via the single is_ff query.  This drives the storage-side
+        // native width selection (comb-only packed under VERYL_NATIVE_U8_COMB).
+        let is_ff_var = if total_array > 1 {
+            force_ff
+        } else {
+            ff_table.is_ff(v.id, 0)
+        };
+        let nb = native_bytes_for(width, is_ff_var);
+        let vs = value_size(nb, use_4state);
 
         // `v.value.len() < total_array` means the analyzer supplied only
         // the template entry — replicate it across all elements.

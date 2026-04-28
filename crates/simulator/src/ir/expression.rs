@@ -3,7 +3,11 @@ use crate::cranelift::{
     Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
 };
 use crate::ir::context::{Context as ConvContext, Conv};
-use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes, read_native_value};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::variable::native_bytes as calc_native_bytes;
+use crate::ir::variable::{
+    VarOffset, native_bytes_for as calc_native_bytes_for, read_native_value,
+};
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 #[cfg(not(target_family = "wasm"))]
@@ -1168,15 +1172,15 @@ impl ProtoExpression {
         }
     }
 
-    /// Phase H: sound predicate for "build_binary's payload has at most
-    /// `target_width` significant bits".  Stricter than `effective_bits()`
+    /// Sound predicate for "build_binary's payload has at most
+    /// `target_width` significant bits".  Stricter than `effective_bits()`,
     /// which is unsound for Add/Sub/Mul/Shl due to carry-out / overflow.
     ///
     /// The writer-side `band_const(payload, gen_mask_for_width(dst_width))`
     /// in ProtoAssignStatement::build_binary's narrow-store arm can be
     /// elided when this returns true.
     ///
-    /// Conservative: returns false unless we can prove the bound from the
+    /// Conservative: returns false unless the bound is provable from the
     /// expression structure (Variable read with appropriate width, masked
     /// shift/select, comparison/reduction yielding 0/1, BitAnd/BitOr/...
     /// over already-clean operands, masked Concatenation, ternary of
@@ -1306,7 +1310,7 @@ impl ProtoExpression {
                             None => std::cmp::max(*var_full_width, *width),
                         }
                     };
-                    let nb = calc_native_bytes(read_width);
+                    let nb = calc_native_bytes_for(read_width, var_offset.is_ff());
                     let _vs = if use_4state { nb * 2 } else { nb };
                     let value = if var_offset.is_ff() {
                         #[cfg(debug_assertions)]
@@ -1467,7 +1471,7 @@ impl ProtoExpression {
                     width,
                     expr_context,
                 } => {
-                    let nb = calc_native_bytes(*width);
+                    let nb = calc_native_bytes_for(*width, base_offset.is_ff());
                     let _vs = if use_4state { nb * 2 } else { nb };
                     let base_ptr = if base_offset.is_ff() {
                         #[cfg(debug_assertions)]
@@ -1544,7 +1548,7 @@ impl ProtoExpression {
             } => {
                 // Wide path: >128-bit variable → return memory pointer
                 if is_wide_ptr(*var_full_width) {
-                    let nb = calc_native_bytes(*var_full_width);
+                    let nb = calc_native_bytes_for(*var_full_width, var_offset.is_ff());
                     let base_addr = if var_offset.is_ff() {
                         context.ff_values
                     } else {
@@ -1578,7 +1582,7 @@ impl ProtoExpression {
                         None => std::cmp::max(*var_full_width, *width),
                     }
                 };
-                let nb = calc_native_bytes(read_width);
+                let nb = calc_native_bytes_for(read_width, var_offset.is_ff());
                 let offset = var_offset.raw() as i32;
                 let cache_key = *var_offset;
                 let wide = read_width > 64;
@@ -1610,13 +1614,11 @@ impl ProtoExpression {
                         (cached_payload, cached_mask_xz)
                     };
 
-                    // Phase G' trunc dedup: cached payload comes from
-                    // ProtoAssignStatement::build_binary's `fwd` value,
-                    // which is already band_const'd to dst_width when
-                    // dst_width < 64.  Fresh-load path (else branch
-                    // below) uses uextend.i64 from a load.i32, which
-                    // also leaves upper 32 bits = 0.  So the I32 mask
-                    // here is redundant.
+                    // No I32 mask: cached payload is the `fwd` value from
+                    // ProtoAssignStatement::build_binary, which is already
+                    // band_const'd to dst_width when dst_width < 64.  The
+                    // fresh-load path below uses uextend from a 32-bit
+                    // load, which also leaves upper 32 bits = 0.
                     (p, m)
                 } else {
                     let load_mem_flag = MemFlags::trusted();
@@ -1627,30 +1629,44 @@ impl ProtoExpression {
                         context.comb_values
                     };
 
-                    let payload = if nb == 16 {
-                        builder.ins().load(I128, load_mem_flag, base_addr, offset)
-                    } else if nb == 4 {
-                        let v = builder.ins().load(I32, load_mem_flag, base_addr, offset);
-                        builder.ins().uextend(I64, v)
-                    } else {
-                        builder.ins().load(I64, load_mem_flag, base_addr, offset)
+                    // Use Cranelift's fused load-and-zero-extend opcodes
+                    // (uload8/uload16/uload32) so a width-1 read lowers to
+                    // a single x86 movzbq instead of load.i8 + uextend.i64
+                    // generating two movzbq instructions (the second is a
+                    // redundant register-to-register zero-extend).
+                    let payload = match nb {
+                        16 => builder.ins().load(I128, load_mem_flag, base_addr, offset),
+                        8 => builder.ins().load(I64, load_mem_flag, base_addr, offset),
+                        4 => builder.ins().uload32(load_mem_flag, base_addr, offset),
+                        2 => builder.ins().uload16(I64, load_mem_flag, base_addr, offset),
+                        1 => builder.ins().uload8(I64, load_mem_flag, base_addr, offset),
+                        _ => unreachable!("variable load: nb={nb}"),
                     };
                     let mask_xz = if context.use_4state {
                         let mask_xz_offset = offset + nb as i32;
-                        let mask_xz = if nb == 16 {
-                            builder
-                                .ins()
-                                .load(I128, load_mem_flag, base_addr, mask_xz_offset)
-                        } else if nb == 4 {
-                            let v =
+                        let mask_xz = match nb {
+                            16 => {
                                 builder
                                     .ins()
-                                    .load(I32, load_mem_flag, base_addr, mask_xz_offset);
-                            builder.ins().uextend(I64, v)
-                        } else {
-                            builder
+                                    .load(I128, load_mem_flag, base_addr, mask_xz_offset)
+                            }
+                            8 => builder
                                 .ins()
-                                .load(I64, load_mem_flag, base_addr, mask_xz_offset)
+                                .load(I64, load_mem_flag, base_addr, mask_xz_offset),
+                            4 => builder
+                                .ins()
+                                .uload32(load_mem_flag, base_addr, mask_xz_offset),
+                            2 => {
+                                builder
+                                    .ins()
+                                    .uload16(I64, load_mem_flag, base_addr, mask_xz_offset)
+                            }
+                            1 => {
+                                builder
+                                    .ins()
+                                    .uload8(I64, load_mem_flag, base_addr, mask_xz_offset)
+                            }
+                            _ => unreachable!("variable mask_xz load: nb={nb}"),
                         };
                         Some(mask_xz)
                     } else {
@@ -2198,8 +2214,8 @@ impl ProtoExpression {
                     Op::BitXor => builder.ins().bxor(x_payload, y_payload),
                     Op::BitXnor => builder.ins().bxor_not(x_payload, y_payload),
                     Op::Eq => {
-                        // Phase J: (x == 1) for 1-bit clean x is just x;
-                        //          (x == 0) for 1-bit clean x is x ^ 1.
+                        // (x == 1) for 1-bit clean x is just x;
+                        // (x == 0) for 1-bit clean x is x ^ 1.
                         // Skip when 4-state mask handling kicks in (the
                         // post-loop is_xz path needs the icmp result).
                         if !needs_wide
@@ -2219,8 +2235,7 @@ impl ProtoExpression {
                                 builder.ins().bxor_imm(x_payload, 1)
                             }
                         } else {
-                            let ret =
-                                builder.ins().icmp(IntCC::Equal, x_payload, y_payload);
+                            let ret = builder.ins().icmp(IntCC::Equal, x_payload, y_payload);
                             builder.ins().uextend(I64, ret)
                         }
                     }
@@ -2242,9 +2257,7 @@ impl ProtoExpression {
                                 builder.ins().bxor_imm(x_payload, 1)
                             }
                         } else {
-                            let ret = builder
-                                .ins()
-                                .icmp(IntCC::NotEqual, x_payload, y_payload);
+                            let ret = builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload);
                             builder.ins().uextend(I64, ret)
                         }
                     }
@@ -2361,11 +2374,10 @@ impl ProtoExpression {
                         builder.block_params(exit_block)[0]
                     }
                     Op::LogicAnd | Op::LogicOr => {
-                        // Phase K: fast path when both operands are already
-                        // 0/1 (1-bit clean) and not 4-state. Skip the
-                        // icmp+icmp+band(i8,i8)+uextend chain (~7 inst) and
-                        // emit a direct band/bor on I64 (1 inst). The result
-                        // is itself 1-bit clean so chains compose efficiently.
+                        // Fast path when both operands are already 0/1
+                        // (1-bit clean) and not 4-state: emit a direct
+                        // band/bor on I64 instead of icmp+icmp+band+uextend.
+                        // The result is itself 1-bit clean so chains compose.
                         if !needs_wide
                             && x_mask_xz.is_none()
                             && y_mask_xz.is_none()
@@ -3016,7 +3028,7 @@ impl ProtoExpression {
                     return None;
                 }
 
-                let nb = calc_native_bytes(*width);
+                let nb = calc_native_bytes_for(*width, base_offset.is_ff());
                 let wide = *width > 64;
                 let (idx_payload, _idx_mask_xz) = index_expr.build_binary(context, builder)?;
 
@@ -3045,24 +3057,20 @@ impl ProtoExpression {
 
                 let load_mem_flag = MemFlags::trusted();
 
-                let mut payload = if nb == 16 {
-                    builder.ins().load(I128, load_mem_flag, addr, 0)
-                } else if nb == 4 {
-                    let v = builder.ins().load(I32, load_mem_flag, addr, 0);
-                    builder.ins().uextend(I64, v)
-                } else {
-                    builder.ins().load(I64, load_mem_flag, addr, 0)
-                };
-                let mut mask_xz = if context.use_4state {
-                    let mask_xz = if nb == 16 {
-                        builder.ins().load(I128, load_mem_flag, addr, nb as i32)
-                    } else if nb == 4 {
-                        let v = builder.ins().load(I32, load_mem_flag, addr, nb as i32);
-                        builder.ins().uextend(I64, v)
-                    } else {
-                        builder.ins().load(I64, load_mem_flag, addr, nb as i32)
+                let load_native_to_i64 =
+                    |builder: &mut FunctionBuilder, addr: cranelift::prelude::Value, off: i32| {
+                        match nb {
+                            16 => builder.ins().load(I128, load_mem_flag, addr, off),
+                            8 => builder.ins().load(I64, load_mem_flag, addr, off),
+                            4 => builder.ins().uload32(load_mem_flag, addr, off),
+                            2 => builder.ins().uload16(I64, load_mem_flag, addr, off),
+                            1 => builder.ins().uload8(I64, load_mem_flag, addr, off),
+                            _ => unreachable!("DynamicVariable load: nb={nb}"),
+                        }
                     };
-                    Some(mask_xz)
+                let mut payload = load_native_to_i64(builder, addr, 0);
+                let mut mask_xz = if context.use_4state {
+                    Some(load_native_to_i64(builder, addr, nb as i32))
                 } else {
                     None
                 };

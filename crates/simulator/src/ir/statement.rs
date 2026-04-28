@@ -12,7 +12,7 @@ use crate::ir::expression::{
     band_const, build_dynamic_select_shift, gen_mask_for_width, gen_mask_range_128, iconst_128,
 };
 use crate::ir::variable::{
-    VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
+    VarOffset, native_bytes_for as calc_native_bytes_for, read_native_value, write_native_value,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -574,7 +574,7 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes(self.dst_width);
+        let nb = calc_native_bytes_for(self.dst_width, self.dst_base.is_ff());
         let nb_i32 = nb as i32;
 
         if let Some((beg, end)) = self.rhs_select {
@@ -616,9 +616,37 @@ impl ProtoAssignDynamicStatement {
         let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
+        // Helpers covering the nb ∈ {1, 2, 4, 8} storage widths.
+        // Use uload8/uload16/uload32 (fused load-and-zero-extend) for narrow
+        // widths so each load lowers to one x86 movzbq instead of two.
+        let load_native_to_i64 =
+            |builder: &mut FunctionBuilder, addr: cranelift::prelude::Value, off: i32| match nb {
+                1 => builder.ins().uload8(I64, load_mem_flag, addr, off),
+                2 => builder.ins().uload16(I64, load_mem_flag, addr, off),
+                4 => builder.ins().uload32(load_mem_flag, addr, off),
+                _ => builder.ins().load(I64, load_mem_flag, addr, off),
+            };
+        let store_i64_to_native =
+            |builder: &mut FunctionBuilder,
+             v: cranelift::prelude::Value,
+             addr: cranelift::prelude::Value,
+             off: i32| match nb {
+                1 => {
+                    builder.ins().istore8(store_mem_flag, v, addr, off);
+                }
+                2 => {
+                    builder.ins().istore16(store_mem_flag, v, addr, off);
+                }
+                4 => {
+                    builder.ins().istore32(store_mem_flag, v, addr, off);
+                }
+                _ => {
+                    builder.ins().store(store_mem_flag, v, addr, off);
+                }
+            };
+
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
-            let load_type = if nb == 4 { I32 } else { I64 };
 
             let payload = builder.ins().ishl(payload, shift);
 
@@ -627,68 +655,31 @@ impl ProtoAssignDynamicStatement {
             let dyn_mask = builder.ins().ishl(mask_val, shift);
             let not_mask = builder.ins().bnot(dyn_mask);
 
-            let org = builder.ins().load(load_type, load_mem_flag, addr, 0);
-            let org = if nb == 4 {
-                builder.ins().uextend(I64, org)
-            } else {
-                org
-            };
+            let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band(org, not_mask);
             let result = builder.ins().bor(payload, org);
-            if nb == 4 {
-                builder.ins().istore32(store_mem_flag, result, addr, 0);
-            } else {
-                builder.ins().store(store_mem_flag, result, addr, 0);
-            }
+            store_i64_to_native(builder, result, addr, 0);
             if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
-                let org = builder.ins().load(load_type, load_mem_flag, addr, nb_i32);
-                let org = if nb == 4 {
-                    builder.ins().uextend(I64, org)
-                } else {
-                    org
-                };
+                let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band(org, not_mask);
                 let result = builder.ins().bor(mask_xz, org);
-                if nb == 4 {
-                    builder.ins().istore32(store_mem_flag, result, addr, nb_i32);
-                } else {
-                    builder.ins().store(store_mem_flag, result, addr, nb_i32);
-                }
+                store_i64_to_native(builder, result, addr, nb_i32);
             }
         } else if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
-            let load_type = if nb == 4 { I32 } else { I64 };
 
             let payload = builder.ins().ishl_imm(payload, end as i64);
-            let org = builder.ins().load(load_type, load_mem_flag, addr, 0);
-            let org = if nb == 4 {
-                builder.ins().uextend(I64, org)
-            } else {
-                org
-            };
+            let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band_imm(org, !mask as i64);
             let result = builder.ins().bor(payload, org);
-            if nb == 4 {
-                builder.ins().istore32(store_mem_flag, result, addr, 0);
-            } else {
-                builder.ins().store(store_mem_flag, result, addr, 0);
-            }
+            store_i64_to_native(builder, result, addr, 0);
             if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
-                let org = builder.ins().load(load_type, load_mem_flag, addr, nb_i32);
-                let org = if nb == 4 {
-                    builder.ins().uextend(I64, org)
-                } else {
-                    org
-                };
+                let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band_imm(org, !mask as i64);
                 let result = builder.ins().bor(mask_xz, org);
-                if nb == 4 {
-                    builder.ins().istore32(store_mem_flag, result, addr, nb_i32);
-                } else {
-                    builder.ins().store(store_mem_flag, result, addr, nb_i32);
-                }
+                store_i64_to_native(builder, result, addr, nb_i32);
             }
         } else {
             match self.dst_width {
@@ -726,19 +717,39 @@ impl ProtoAssignDynamicStatement {
                     }
                     let mask = (1u64 << self.dst_width) - 1;
                     let payload = builder.ins().band_imm(payload, mask as i64);
-                    if nb == 4 {
-                        builder.ins().istore32(store_mem_flag, payload, addr, 0);
-                    } else {
-                        builder.ins().store(store_mem_flag, payload, addr, 0);
+                    match nb {
+                        1 => {
+                            builder.ins().istore8(store_mem_flag, payload, addr, 0);
+                        }
+                        2 => {
+                            builder.ins().istore16(store_mem_flag, payload, addr, 0);
+                        }
+                        4 => {
+                            builder.ins().istore32(store_mem_flag, payload, addr, 0);
+                        }
+                        _ => {
+                            builder.ins().store(store_mem_flag, payload, addr, 0);
+                        }
                     }
                     if let Some(mask_xz) = mask_xz {
                         let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
-                        if nb == 4 {
-                            builder
-                                .ins()
-                                .istore32(store_mem_flag, mask_xz, addr, nb_i32);
-                        } else {
-                            builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
+                        match nb {
+                            1 => {
+                                builder.ins().istore8(store_mem_flag, mask_xz, addr, nb_i32);
+                            }
+                            2 => {
+                                builder
+                                    .ins()
+                                    .istore16(store_mem_flag, mask_xz, addr, nb_i32);
+                            }
+                            4 => {
+                                builder
+                                    .ins()
+                                    .istore32(store_mem_flag, mask_xz, addr, nb_i32);
+                            }
+                            _ => {
+                                builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
+                            }
                         }
                     }
                 }
@@ -973,10 +984,9 @@ impl ProtoForStatement {
         nb: usize,
     ) -> cranelift::prelude::Value {
         if nb <= 4 {
-            let v = builder
+            builder
                 .ins()
-                .load(I32, MemFlags::trusted(), base_addr, offset);
-            builder.ins().uextend(I64, v)
+                .uload32(MemFlags::trusted(), base_addr, offset)
         } else if nb <= 8 {
             builder
                 .ins()
@@ -1499,7 +1509,7 @@ impl ProtoStatement {
                     use_4state,
                 )),
                 ProtoStatement::AssignDynamic(x) => {
-                    let nb = calc_native_bytes(x.dst_width);
+                    let nb = calc_native_bytes_for(x.dst_width, x.dst_base.is_ff());
                     let dst_base_ptr = if x.dst_base.is_ff() {
                         ff_values_ptr.offset(x.dst_base.raw())
                     } else {
@@ -1576,7 +1586,11 @@ impl ProtoStatement {
                         elements,
                         width,
                     } => {
-                        let nb = calc_native_bytes(*width);
+                        // All elements in a Readmemh come from a single
+                        // VariableMeta (uniform is_ff per array), so it's safe
+                        // to derive nb from the first element.
+                        let is_ff = elements.first().is_some_and(|e| e.current.is_ff());
+                        let nb = calc_native_bytes_for(*width, is_ff);
                         let resolved: Vec<_> = elements
                             .iter()
                             .map(|elem| {
@@ -2041,7 +2055,7 @@ impl ProtoAssignStatement {
         use_4state: bool,
     ) -> AssignStatement {
         unsafe {
-            let nb = calc_native_bytes(self.dst_width);
+            let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
             let _vs = if use_4state { nb * 2 } else { nb };
             let dst = if self.dst.is_ff() {
                 #[cfg(debug_assertions)]
@@ -2118,7 +2132,7 @@ impl ProtoAssignStatement {
         let wide = self.dst_width > 64;
 
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes(self.dst_width);
+        let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
         let nb_i32 = nb as i32;
 
         // Widen expression result to I128 for a 128-bit destination,
@@ -2165,6 +2179,33 @@ impl ProtoAssignStatement {
         let dst_offset = self.dst.raw() as i32;
         let cache_key = self.dst;
 
+        // Helpers covering nb ∈ {1, 2, 4, 8, 16} for the
+        // dynamic_select / select / fallback paths below.  Use the fused
+        // uload8/16/32 ops so narrow loads lower to a single movzbq.
+        let load_native_to_native =
+            |builder: &mut FunctionBuilder, off: i32| match nb {
+                1 => builder.ins().uload8(I64, load_mem_flag, base_addr, off),
+                2 => builder.ins().uload16(I64, load_mem_flag, base_addr, off),
+                4 => builder.ins().uload32(load_mem_flag, base_addr, off),
+                8 => builder.ins().load(I64, load_mem_flag, base_addr, off),
+                _ => builder.ins().load(I128, load_mem_flag, base_addr, off),
+            };
+        let store_native_to_native =
+            |builder: &mut FunctionBuilder, v: cranelift::prelude::Value, off: i32| match nb {
+                1 => {
+                    builder.ins().istore8(store_mem_flag, v, base_addr, off);
+                }
+                2 => {
+                    builder.ins().istore16(store_mem_flag, v, base_addr, off);
+                }
+                4 => {
+                    builder.ins().istore32(store_mem_flag, v, base_addr, off);
+                }
+                _ => {
+                    builder.ins().store(store_mem_flag, v, base_addr, off);
+                }
+            };
+
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
@@ -2180,39 +2221,14 @@ impl ProtoAssignStatement {
             let dyn_mask = builder.ins().ishl(mask_val, shift);
             let not_mask = builder.ins().bnot(dyn_mask);
 
-            let load_type = if nb == 16 {
-                I128
-            } else if nb == 4 {
-                I32
-            } else {
-                I64
-            };
-
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
                 && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
             {
                 (cached_p, cached_m)
             } else {
-                let p = builder
-                    .ins()
-                    .load(load_type, load_mem_flag, base_addr, dst_offset);
-                let p = if nb == 4 {
-                    builder.ins().uextend(I64, p)
-                } else {
-                    p
-                };
+                let p = load_native_to_native(builder, dst_offset);
                 let m = if context.use_4state {
-                    let m = builder.ins().load(
-                        load_type,
-                        load_mem_flag,
-                        base_addr,
-                        dst_offset + nb_i32,
-                    );
-                    Some(if nb == 4 {
-                        builder.ins().uextend(I64, m)
-                    } else {
-                        m
-                    })
+                    Some(load_native_to_native(builder, dst_offset + nb_i32))
                 } else {
                     None
                 };
@@ -2221,15 +2237,7 @@ impl ProtoAssignStatement {
 
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            if nb == 4 {
-                builder
-                    .ins()
-                    .istore32(store_mem_flag, result, base_addr, dst_offset);
-            } else {
-                builder
-                    .ins()
-                    .store(store_mem_flag, result, base_addr, dst_offset);
-            }
+            store_native_to_native(builder, result, dst_offset);
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
@@ -2237,18 +2245,7 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                if nb == 4 {
-                    builder.ins().istore32(
-                        store_mem_flag,
-                        result_m,
-                        base_addr,
-                        dst_offset + nb_i32,
-                    );
-                } else {
-                    builder
-                        .ins()
-                        .store(store_mem_flag, result_m, base_addr, dst_offset + nb_i32);
-                }
+                store_native_to_native(builder, result_m, dst_offset + nb_i32);
                 Some(result_m)
             } else {
                 None
@@ -2274,40 +2271,15 @@ impl ProtoAssignStatement {
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
 
-            let load_type = if nb == 16 {
-                I128
-            } else if nb == 4 {
-                I32
-            } else {
-                I64
-            };
-
             // Use cached value if available, otherwise load from memory
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
                 && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
             {
                 (cached_p, cached_m)
             } else {
-                let p = builder
-                    .ins()
-                    .load(load_type, load_mem_flag, base_addr, dst_offset);
-                let p = if nb == 4 {
-                    builder.ins().uextend(I64, p)
-                } else {
-                    p
-                };
+                let p = load_native_to_native(builder, dst_offset);
                 let m = if context.use_4state {
-                    let m = builder.ins().load(
-                        load_type,
-                        load_mem_flag,
-                        base_addr,
-                        dst_offset + nb_i32,
-                    );
-                    Some(if nb == 4 {
-                        builder.ins().uextend(I64, m)
-                    } else {
-                        m
-                    })
+                    Some(load_native_to_native(builder, dst_offset + nb_i32))
                 } else {
                     None
                 };
@@ -2323,15 +2295,7 @@ impl ProtoAssignStatement {
             };
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            if nb == 4 {
-                builder
-                    .ins()
-                    .istore32(store_mem_flag, result, base_addr, dst_offset);
-            } else {
-                builder
-                    .ins()
-                    .store(store_mem_flag, result, base_addr, dst_offset);
-            }
+            store_native_to_native(builder, result, dst_offset);
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
@@ -2339,18 +2303,7 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                if nb == 4 {
-                    builder.ins().istore32(
-                        store_mem_flag,
-                        result_m,
-                        base_addr,
-                        dst_offset + nb_i32,
-                    );
-                } else {
-                    builder
-                        .ins()
-                        .store(store_mem_flag, result_m, base_addr, dst_offset + nb_i32);
-                }
+                store_native_to_native(builder, result_m, dst_offset + nb_i32);
                 Some(result_m)
             } else {
                 None
@@ -2485,16 +2438,7 @@ impl ProtoAssignStatement {
                         } else {
                             band_const(builder, payload, mask, wide)
                         };
-                        // Store using the appropriate native width
-                        if nb == 4 {
-                            builder
-                                .ins()
-                                .istore32(store_mem_flag, payload, base_addr, dst_offset);
-                        } else {
-                            builder
-                                .ins()
-                                .store(store_mem_flag, payload, base_addr, dst_offset);
-                        }
+                        store_native_to_native(builder, payload, dst_offset);
                         if let Some(mask_xz) = mask_xz {
                             let mask = gen_mask_for_width(self.dst_width);
                             let mask_xz = if phase_h_skip {
@@ -2502,21 +2446,7 @@ impl ProtoAssignStatement {
                             } else {
                                 band_const(builder, mask_xz, mask, wide)
                             };
-                            if nb == 4 {
-                                builder.ins().istore32(
-                                    store_mem_flag,
-                                    mask_xz,
-                                    base_addr,
-                                    dst_offset + nb_i32,
-                                );
-                            } else {
-                                builder.ins().store(
-                                    store_mem_flag,
-                                    mask_xz,
-                                    base_addr,
-                                    dst_offset + nb_i32,
-                                );
-                            }
+                            store_native_to_native(builder, mask_xz, dst_offset + nb_i32);
                         }
                     }
                 }
@@ -2560,7 +2490,7 @@ impl ProtoAssignStatement {
 
         let expr_width = self.expr.width();
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes(self.dst_width);
+        let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
         let n_words = nb / 8;
         let flags = MemFlags::trusted();
 
@@ -3217,7 +3147,7 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
             ProtoStatement::Assign(a) if a.dst.is_ff() => {
                 // FF layout: [current][next] contiguously, each calc_native_bytes wide.
                 // next_offset = current_offset + native_bytes.
-                let nb = calc_native_bytes(a.dst_width) as isize;
+                let nb = calc_native_bytes_for(a.dst_width, true) as isize;
                 let next_offset = a.dst_ff_current_offset + nb;
                 extras.push(ProtoStatement::Assign(ProtoAssignStatement {
                     dst: VarOffset::Ff(next_offset),
@@ -3226,7 +3156,7 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
             }
             ProtoStatement::AssignDynamic(a) if a.dst_base.is_ff() => {
                 // For dynamic index FF: base_next = base_current + native_bytes
-                let nb = calc_native_bytes(a.dst_width) as isize;
+                let nb = calc_native_bytes_for(a.dst_width, true) as isize;
                 let next_base = a.dst_ff_current_base_offset + nb;
                 extras.push(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
                     dst_base: VarOffset::Ff(next_base),
