@@ -7,6 +7,8 @@ mod module;
 mod optimize;
 pub mod schedule;
 mod statement;
+#[cfg(not(target_family = "wasm"))]
+mod dup_assign_dce;
 mod variable;
 
 pub use context::{Context, Conv};
@@ -607,6 +609,12 @@ impl Config {
     pub fn apply_env(&mut self) {
         if std::env::var("VERYL_USE_SEEDED_WORKLIST").ok().as_deref() == Some("1") {
             self.use_seeded_worklist = true;
+        }
+        if std::env::var("VERYL_DUMP_ASM").ok().as_deref() == Some("1") {
+            self.dump_asm = true;
+        }
+        if std::env::var("VERYL_DUMP_CRANELIFT").ok().as_deref() == Some("1") {
+            self.dump_cranelift = true;
         }
     }
 }

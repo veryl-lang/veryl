@@ -2379,6 +2379,28 @@ impl ProtoAssignStatement {
                 && !context.disable_load_cache
                 && context.store_elim_offsets.contains(&cache_key);
 
+            // Phase H/I: writer-side mask is redundant when the post-
+            // rhs_select payload is provably narrow-clean.
+            //
+            // Phase H: rhs_select absent — RHS expr clean to dst_width
+            // (Variable read with width <= dst_width, comparison/reduction
+            // yielding 0/1, BitAnd/Or/Xor over clean operands, masked
+            // Concatenation, ternary with clean branches).
+            //
+            // Phase I: rhs_select present — the rhs_select block above
+            // already band_const'd payload to select_width.  If
+            // select_width <= dst_width, fwd mask is redundant.
+            let post_rhs_clean_bits = if let Some((beg, end)) = self.rhs_select {
+                Some(beg - end + 1)
+            } else if self.expr.is_clean_to_width(self.dst_width) {
+                Some(self.dst_width)
+            } else {
+                None
+            };
+            let phase_h_skip = post_rhs_clean_bits
+                .map(|w| w <= self.dst_width)
+                .unwrap_or(false);
+
             if !skip_store {
                 let needs_trunc = known_bits > self.dst_width;
 
@@ -2454,9 +2476,15 @@ impl ProtoAssignStatement {
                         }
                         // Always mask: effective_bits() reports declared
                         // width and misses carry-out from Add and friends.
+                        // Phase H elides this mask when the RHS is
+                        // provably clean (see is_clean_to_width).
                         let _ = needs_trunc;
                         let mask = gen_mask_for_width(self.dst_width);
-                        let payload = band_const(builder, payload, mask, wide);
+                        let payload = if phase_h_skip {
+                            payload
+                        } else {
+                            band_const(builder, payload, mask, wide)
+                        };
                         // Store using the appropriate native width
                         if nb == 4 {
                             builder
@@ -2469,7 +2497,11 @@ impl ProtoAssignStatement {
                         }
                         if let Some(mask_xz) = mask_xz {
                             let mask = gen_mask_for_width(self.dst_width);
-                            let mask_xz = band_const(builder, mask_xz, mask, wide);
+                            let mask_xz = if phase_h_skip {
+                                mask_xz
+                            } else {
+                                band_const(builder, mask_xz, mask, wide)
+                            };
                             if nb == 4 {
                                 builder.ins().istore32(
                                     store_mem_flag,
@@ -2491,13 +2523,14 @@ impl ProtoAssignStatement {
             }
 
             // Forward value to load cache. Mask to dst_width to match load+uextend.
-            let fwd_p = if self.dst_width < 64 {
+            // Phase H: same elision as the storage mask above.
+            let fwd_p = if self.dst_width < 64 && !phase_h_skip {
                 let m = gen_mask_for_width(self.dst_width);
                 band_const(builder, payload, m, false)
             } else {
                 payload
             };
-            let fwd_m = if self.dst_width < 64 {
+            let fwd_m = if self.dst_width < 64 && !phase_h_skip {
                 mask_xz.map(|v| {
                     let m = gen_mask_for_width(self.dst_width);
                     band_const(builder, v, m, false)

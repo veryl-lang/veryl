@@ -2084,6 +2084,9 @@ impl Conv<&air::Module> for ProtoModule {
             src.name, nontrivial_comb_scc,
         );
 
+        #[cfg(not(target_family = "wasm"))]
+        let unified_sorted = super::dup_assign_dce::dce_aggressive(unified_sorted);
+
         // Snapshot unified_sorted before JIT consumes it: the worklist
         // schedule (built below) needs to walk the pre-JIT ProtoStatement
         // list because JIT CompiledBlocks don't expose stmt-level I/O to
