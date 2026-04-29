@@ -220,21 +220,6 @@ impl Statement {
         )
     }
 
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            Statement::Assign(_) => "Assign",
-            Statement::AssignDynamic(_) => "AssignDynamic",
-            Statement::If(_) => "If",
-            Statement::For(_) => "For",
-            Statement::Binary(_, _, _) => "Binary",
-            Statement::BinaryBatch(_, _) => "BinaryBatch",
-            Statement::SequentialBlock(_) => "SequentialBlock",
-            Statement::SystemFunctionCall(_) => "SystemFunctionCall",
-            Statement::Break => "Break",
-            Statement::TbMethodCall { .. } => "TbMethodCall",
-        }
-    }
-
     pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
         match self {
             Statement::Assign(x) => {
@@ -626,24 +611,23 @@ impl ProtoAssignDynamicStatement {
                 4 => builder.ins().uload32(load_mem_flag, addr, off),
                 _ => builder.ins().load(I64, load_mem_flag, addr, off),
             };
-        let store_i64_to_native =
-            |builder: &mut FunctionBuilder,
-             v: cranelift::prelude::Value,
-             addr: cranelift::prelude::Value,
-             off: i32| match nb {
-                1 => {
-                    builder.ins().istore8(store_mem_flag, v, addr, off);
-                }
-                2 => {
-                    builder.ins().istore16(store_mem_flag, v, addr, off);
-                }
-                4 => {
-                    builder.ins().istore32(store_mem_flag, v, addr, off);
-                }
-                _ => {
-                    builder.ins().store(store_mem_flag, v, addr, off);
-                }
-            };
+        let store_i64_to_native = |builder: &mut FunctionBuilder,
+                                   v: cranelift::prelude::Value,
+                                   addr: cranelift::prelude::Value,
+                                   off: i32| match nb {
+            1 => {
+                builder.ins().istore8(store_mem_flag, v, addr, off);
+            }
+            2 => {
+                builder.ins().istore16(store_mem_flag, v, addr, off);
+            }
+            4 => {
+                builder.ins().istore32(store_mem_flag, v, addr, off);
+            }
+            _ => {
+                builder.ins().store(store_mem_flag, v, addr, off);
+            }
+        };
 
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
@@ -2182,14 +2166,13 @@ impl ProtoAssignStatement {
         // Helpers covering nb ∈ {1, 2, 4, 8, 16} for the
         // dynamic_select / select / fallback paths below.  Use the fused
         // uload8/16/32 ops so narrow loads lower to a single movzbq.
-        let load_native_to_native =
-            |builder: &mut FunctionBuilder, off: i32| match nb {
-                1 => builder.ins().uload8(I64, load_mem_flag, base_addr, off),
-                2 => builder.ins().uload16(I64, load_mem_flag, base_addr, off),
-                4 => builder.ins().uload32(load_mem_flag, base_addr, off),
-                8 => builder.ins().load(I64, load_mem_flag, base_addr, off),
-                _ => builder.ins().load(I128, load_mem_flag, base_addr, off),
-            };
+        let load_native_to_native = |builder: &mut FunctionBuilder, off: i32| match nb {
+            1 => builder.ins().uload8(I64, load_mem_flag, base_addr, off),
+            2 => builder.ins().uload16(I64, load_mem_flag, base_addr, off),
+            4 => builder.ins().uload32(load_mem_flag, base_addr, off),
+            8 => builder.ins().load(I64, load_mem_flag, base_addr, off),
+            _ => builder.ins().load(I128, load_mem_flag, base_addr, off),
+        };
         let store_native_to_native =
             |builder: &mut FunctionBuilder, v: cranelift::prelude::Value, off: i32| match nb {
                 1 => {
@@ -2332,17 +2315,13 @@ impl ProtoAssignStatement {
                 && !context.disable_load_cache
                 && context.store_elim_offsets.contains(&cache_key);
 
-            // Phase H/I: writer-side mask is redundant when the post-
-            // rhs_select payload is provably narrow-clean.
-            //
-            // Phase H: rhs_select absent — RHS expr clean to dst_width
-            // (Variable read with width <= dst_width, comparison/reduction
-            // yielding 0/1, BitAnd/Or/Xor over clean operands, masked
-            // Concatenation, ternary with clean branches).
-            //
-            // Phase I: rhs_select present — the rhs_select block above
-            // already band_const'd payload to select_width.  If
-            // select_width <= dst_width, fwd mask is redundant.
+            // Writer-side mask is redundant when the post-rhs_select
+            // payload is provably narrow-clean.  Two cases:
+            //   - rhs_select absent: RHS expr is clean to dst_width
+            //     (see ProtoExpression::is_clean_to_width).
+            //   - rhs_select present: the rhs_select block above has
+            //     already band_const'd payload to select_width, so the
+            //     fwd mask is redundant when select_width <= dst_width.
             let post_rhs_clean_bits = if let Some((beg, end)) = self.rhs_select {
                 Some(beg - end + 1)
             } else if self.expr.is_clean_to_width(self.dst_width) {
@@ -2350,7 +2329,7 @@ impl ProtoAssignStatement {
             } else {
                 None
             };
-            let phase_h_skip = post_rhs_clean_bits
+            let skip_writer_mask = post_rhs_clean_bits
                 .map(|w| w <= self.dst_width)
                 .unwrap_or(false);
 
@@ -2427,13 +2406,13 @@ impl ProtoAssignStatement {
                         if self.dst_width > 128 {
                             return None;
                         }
-                        // Always mask: effective_bits() reports declared
-                        // width and misses carry-out from Add and friends.
-                        // Phase H elides this mask when the RHS is
-                        // provably clean (see is_clean_to_width).
+                        // Mask is needed in general: effective_bits() reports
+                        // declared width and misses carry-out from Add and
+                        // friends.  Skip only when is_clean_to_width proves
+                        // the RHS is already narrow.
                         let _ = needs_trunc;
                         let mask = gen_mask_for_width(self.dst_width);
-                        let payload = if phase_h_skip {
+                        let payload = if skip_writer_mask {
                             payload
                         } else {
                             band_const(builder, payload, mask, wide)
@@ -2441,7 +2420,7 @@ impl ProtoAssignStatement {
                         store_native_to_native(builder, payload, dst_offset);
                         if let Some(mask_xz) = mask_xz {
                             let mask = gen_mask_for_width(self.dst_width);
-                            let mask_xz = if phase_h_skip {
+                            let mask_xz = if skip_writer_mask {
                                 mask_xz
                             } else {
                                 band_const(builder, mask_xz, mask, wide)
@@ -2452,15 +2431,15 @@ impl ProtoAssignStatement {
                 }
             }
 
-            // Forward value to load cache. Mask to dst_width to match load+uextend.
-            // Phase H: same elision as the storage mask above.
-            let fwd_p = if self.dst_width < 64 && !phase_h_skip {
+            // Forward value to load cache.  Mask to dst_width to match
+            // load+uextend, with the same elision as the storage mask above.
+            let fwd_p = if self.dst_width < 64 && !skip_writer_mask {
                 let m = gen_mask_for_width(self.dst_width);
                 band_const(builder, payload, m, false)
             } else {
                 payload
             };
-            let fwd_m = if self.dst_width < 64 && !phase_h_skip {
+            let fwd_m = if self.dst_width < 64 && !skip_writer_mask {
                 mask_xz.map(|v| {
                     let m = gen_mask_for_width(self.dst_width);
                     band_const(builder, v, m, false)
