@@ -64,6 +64,7 @@ impl Declaration {
         match self {
             Declaration::Ff(x) => x.gather_ff(context, table, decl),
             Declaration::Comb(x) => x.gather_ff_comb(context, table, decl),
+            Declaration::Inst(x) => x.gather_ff(context, table, decl),
             _ => {}
         }
     }
@@ -241,6 +242,17 @@ impl InstDeclaration {
             for dst in &x.connects {
                 dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
             }
+        }
+    }
+
+    /// Register the variables read by each instance input expression so
+    /// downstream analyses (e.g. comb-to-FF hoist reach) can see that
+    /// those reads happen in a comb context (effectively a continuous-
+    /// assign of the expression to the child port).  Tagged
+    /// `from_ff=false` so the `is_ff` classifier ignores them.
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for input in &self.inputs {
+            input.expr.gather_ff(context, table, decl, None, false);
         }
     }
 }

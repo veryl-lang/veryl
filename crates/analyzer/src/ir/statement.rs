@@ -284,6 +284,11 @@ impl Statement {
         match self {
             Statement::Assign(x) => x.gather_ff_comb_assign(context, table, decl),
             Statement::If(x) => {
+                // Record the condition expression's reads so analyses
+                // that distinguish comb vs ff context (e.g. comb-to-FF
+                // hoist eligibility) see them.  `from_ff=false` keeps
+                // these out of `is_ff` classification.
+                x.cond.gather_ff(context, table, decl, None, false);
                 for s in &x.true_side {
                     s.gather_ff_comb_assign(context, table, decl);
                 }

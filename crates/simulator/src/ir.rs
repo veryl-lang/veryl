@@ -1,10 +1,10 @@
 mod context;
 mod declaration;
+#[cfg(not(target_family = "wasm"))]
+mod dup_assign_dce;
 mod event;
 mod expression;
 mod module;
-#[cfg(not(target_family = "wasm"))]
-mod optimize;
 pub mod schedule;
 mod statement;
 mod variable;
@@ -248,7 +248,7 @@ impl Ir {
         snapshot_buf.copy_from_slice(&self.comb_values);
 
         for stmt in &self.comb_statements {
-            stmt.eval_step(mask_cache);
+            dispatch_stmt_fast(stmt, mask_cache);
         }
         #[cfg(feature = "profile")]
         {
@@ -276,11 +276,11 @@ impl Ir {
                 // pass + fixpoint logic.  Isolates bugs in dirty-propagation
                 // vs bugs elsewhere.
                 for stmt in &self.comb_statements {
-                    stmt.eval_step(mask_cache);
+                    dispatch_stmt_fast(stmt, mask_cache);
                 }
             } else {
                 for &id in &current_dirty {
-                    self.comb_statements[id as usize].eval_step(mask_cache);
+                    dispatch_stmt_fast(&self.comb_statements[id as usize], mask_cache);
                 }
             }
             #[cfg(feature = "profile")]
@@ -331,7 +331,7 @@ impl Ir {
         if std::env::var("VERYL_WORKLIST_SAFETY").is_ok() {
             snapshot_buf.copy_from_slice(&self.comb_values);
             for stmt in &self.comb_statements {
-                stmt.eval_step(mask_cache);
+                dispatch_stmt_fast(stmt, mask_cache);
             }
             #[cfg(feature = "profile")]
             {
@@ -352,7 +352,7 @@ impl Ir {
                 snapshot_buf.copy_from_slice(&self.comb_values);
                 let current_dirty = std::mem::take(&mut dirty);
                 for &id in &current_dirty {
-                    self.comb_statements[id as usize].eval_step(mask_cache);
+                    dispatch_stmt_fast(&self.comb_statements[id as usize], mask_cache);
                 }
                 #[cfg(feature = "profile")]
                 {
@@ -375,7 +375,7 @@ impl Ir {
         if std::env::var("VERYL_WORKLIST_VERIFY").is_ok() {
             let verify_before: Vec<u8> = self.comb_values.to_vec();
             for stmt in &self.comb_statements {
-                stmt.eval_step(mask_cache);
+                dispatch_stmt_fast(stmt, mask_cache);
             }
             if verify_before.as_slice() != &self.comb_values[..] {
                 let mut first_diff = None;
@@ -407,7 +407,7 @@ impl Ir {
         let start = std::time::Instant::now();
 
         for x in &self.comb_statements {
-            x.eval_step(mask_cache);
+            dispatch_stmt_fast(x, mask_cache);
         }
 
         #[cfg(feature = "profile")]
@@ -480,6 +480,31 @@ impl Ir {
             }
         }
         (comb_jit, comb_interp, event_jit, event_interp)
+    }
+}
+
+/// Inline-friendly dispatch for the per-cycle hot loop.  Handles the
+/// common JIT cases (Binary / BinaryBatch) with a direct indirect call
+/// and falls back to `Statement::eval_step` for the interpreter path.
+///
+/// Inlining at the call site removes the (otherwise non-inlined)
+/// `Statement::eval_step` function-call frame plus the 10-arm match
+/// jump it performs.
+#[inline(always)]
+pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
+    match s {
+        Statement::Binary(func, ff, comb) => unsafe {
+            func(*ff, *comb);
+        },
+        Statement::BinaryBatch(func, args) => unsafe {
+            let f = *func;
+            for &(ff, comb) in args {
+                f(ff, comb);
+            }
+        },
+        _ => {
+            s.eval_step(mask_cache);
+        }
     }
 }
 
@@ -607,6 +632,12 @@ impl Config {
     pub fn apply_env(&mut self) {
         if std::env::var("VERYL_USE_SEEDED_WORKLIST").ok().as_deref() == Some("1") {
             self.use_seeded_worklist = true;
+        }
+        if std::env::var("VERYL_DUMP_ASM").ok().as_deref() == Some("1") {
+            self.dump_asm = true;
+        }
+        if std::env::var("VERYL_DUMP_CRANELIFT").ok().as_deref() == Some("1") {
+            self.dump_cranelift = true;
         }
     }
 }

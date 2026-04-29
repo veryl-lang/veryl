@@ -40,10 +40,6 @@ pub struct JitCacheEntry {
     pub ref_comb_start_bytes: isize,
     pub event_funcs: HashMap<Event, JitCachedFunc>,
     pub comb_func: Option<JitCachedFunc>,
-    /// Merged comb+event functions (per event).
-    /// When present, the event function includes comb computation,
-    /// allowing load CSE across the comb-to-event boundary.
-    pub merged_funcs: HashMap<Event, JitCachedFunc>,
 }
 
 #[derive(Default)]

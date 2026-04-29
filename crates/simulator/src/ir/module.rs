@@ -1960,6 +1960,92 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         .collect()
 }
 
+/// Cond-hoist transform.  See call site for rationale.  Walks `stmts`, and for
+/// every top-level `If` whose cond is jittable but whose body contains a
+/// non-jittable stmt (e.g. `$display`/`$write`), allocates a comb byte and
+/// rewrites to `[Assign(temp = cond), If(temp, body)]`.  The Assign joins the
+/// JIT chunk; the If stays interpreted but its cond is now a single byte load.
+#[cfg(not(target_family = "wasm"))]
+fn cond_hoist_transform(stmts: &mut Vec<ProtoStatement>, context: &mut Context) {
+    use crate::ir::expression::ExpressionContext;
+    use crate::ir::expression::ProtoExpression as PE;
+    use crate::ir::native_bytes;
+    use crate::ir::statement::{ProtoAssignStatement, ProtoIfStatement};
+    use veryl_parser::token_range::TokenRange;
+    let verbose = std::env::var("VERYL_COND_HOIST_VERBOSE").ok().as_deref() == Some("1");
+    let mut hoisted = 0usize;
+    let mut skipped_cond_nonjit = 0usize;
+    let mut skipped_body_jit = 0usize;
+    let original = std::mem::take(stmts);
+    let mut result: Vec<ProtoStatement> = Vec::with_capacity(original.len() * 2);
+    for stmt in original {
+        match stmt {
+            ProtoStatement::If(if_stmt) => {
+                let body_jit = if_stmt.true_side.iter().all(|s| s.can_build_binary())
+                    && if_stmt.false_side.iter().all(|s| s.can_build_binary());
+                let cond_jit = match &if_stmt.cond {
+                    Some(c) => c.can_build_binary(),
+                    None => false,
+                };
+                if !cond_jit {
+                    skipped_cond_nonjit += 1;
+                    result.push(ProtoStatement::If(if_stmt));
+                    continue;
+                }
+                if body_jit {
+                    skipped_body_jit += 1;
+                    result.push(ProtoStatement::If(if_stmt));
+                    continue;
+                }
+                // Hoist: allocate a comb temp and split into Assign + If.
+                let cond_expr = if_stmt.cond.clone().unwrap();
+                let nb = native_bytes(1);
+                let temp_offset = context.comb_total_bytes as isize;
+                context.comb_total_bytes += nb;
+                let temp_off = VarOffset::Comb(temp_offset);
+                let ctx = ExpressionContext {
+                    width: 1,
+                    signed: false,
+                };
+                let assign = ProtoStatement::Assign(ProtoAssignStatement {
+                    dst: temp_off,
+                    dst_width: 1,
+                    select: None,
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: cond_expr,
+                    dst_ff_current_offset: 0,
+                    token: TokenRange::default(),
+                });
+                let new_cond = PE::Variable {
+                    var_offset: temp_off,
+                    select: None,
+                    dynamic_select: None,
+                    width: 1,
+                    var_full_width: 1,
+                    expr_context: ctx,
+                };
+                let new_if = ProtoStatement::If(ProtoIfStatement {
+                    cond: Some(new_cond),
+                    true_side: if_stmt.true_side,
+                    false_side: if_stmt.false_side,
+                });
+                result.push(assign);
+                result.push(new_if);
+                hoisted += 1;
+            }
+            other => result.push(other),
+        }
+    }
+    *stmts = result;
+    if verbose && hoisted > 0 {
+        eprintln!(
+            "[CondHoist] hoisted={hoisted} skipped_cond_nonjit={skipped_cond_nonjit} \
+             skipped_body_jit={skipped_body_jit}"
+        );
+    }
+}
+
 /// Merge consecutive Binary statements with the same function pointer into BinaryBatch.
 fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
     let mut result: Vec<Statement> = Vec::with_capacity(stmts.len());
@@ -2010,6 +2096,33 @@ impl Conv<&air::Module> for ProtoModule {
             ff_table.force_all_ff();
         }
 
+        // Comb-to-FF hoist: clone declarations and mutate them — move
+        // comb-side `let` writes into the consuming FF block, rebuild
+        // the FfTable on the hoisted form so all downstream simulator
+        // processing runs against the hoisted IR.
+        let mut hoisted_declarations = src.declarations.clone();
+        {
+            let plans = veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(
+                &hoisted_declarations,
+                &ff_table,
+                &src.variables,
+            );
+            veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(
+                &mut hoisted_declarations,
+                &plans,
+                &src.variables,
+            );
+            ff_table = air::FfTable::default();
+            for (i, x) in hoisted_declarations.iter().enumerate() {
+                x.gather_ff(&mut analyzer_context, &mut ff_table, i);
+            }
+            ff_table.update_is_ff();
+            if context.config.disable_ff_opt {
+                ff_table.force_all_ff();
+            }
+        }
+        let declarations: &[air::Declaration] = &hoisted_declarations;
+
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
         let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
@@ -2035,7 +2148,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
 
-        for decl in &src.declarations {
+        for decl in declarations {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
             for (event, mut stmts) in proto_decl.event_statements {
@@ -2084,12 +2197,35 @@ impl Conv<&air::Module> for ProtoModule {
             src.name, nontrivial_comb_scc,
         );
 
+        #[cfg(not(target_family = "wasm"))]
+        let unified_sorted = super::dup_assign_dce::dce_aggressive(unified_sorted);
+
         // Snapshot unified_sorted before JIT consumes it: the worklist
         // schedule (built below) needs to walk the pre-JIT ProtoStatement
         // list because JIT CompiledBlocks don't expose stmt-level I/O to
         // `gather_variable_offsets`.
         let pre_jit_stmts = unified_sorted.clone();
         let comb_statements = try_jit_no_cache(context, unified_sorted);
+
+        // Cond-hoist transform (disable with VERYL_COND_HOIST_DISABLE=1):
+        // For each top-level `if cond { body }` whose body contains a
+        // non-jittable stmt (e.g. `$display`/`$write`) but whose cond is
+        // jittable, allocate a 1-bit comb temp and rewrite to
+        //     temp = cond ? 1 : 0     (joins the JIT chunk)
+        //     if temp != 0 { body }   (interp with a cheap byte-load cond)
+        // so the per-cycle cond evaluation runs in JIT instead of through
+        // the interpreter (Expression::eval + Op::eval_value_binary +
+        // read_native_value etc).
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let cond_hoist_disabled =
+                std::env::var("VERYL_COND_HOIST_DISABLE").ok().as_deref() == Some("1");
+            if !cond_hoist_disabled {
+                for (_event, stmts) in all_event_statements.iter_mut() {
+                    cond_hoist_transform(stmts, context);
+                }
+            }
+        }
 
         // Event statements preserve source order (no topological sorting).
         // NBA semantics: reads come from current, writes go to next, then

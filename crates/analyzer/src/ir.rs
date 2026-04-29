@@ -1,4 +1,5 @@
 mod assign_table;
+pub mod comb_to_ff_hoist;
 mod comptime;
 mod declaration;
 mod expression;

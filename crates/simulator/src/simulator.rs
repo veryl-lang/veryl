@@ -1,6 +1,6 @@
 use crate::ir::{
-    Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, read_native_value,
-    write_native_value,
+    Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
+    read_native_value, write_native_value,
 };
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::str::FromStr;
@@ -223,7 +223,7 @@ impl Simulator {
             // SAFETY: event_statements is never mutated after Ir construction.
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             for x in statements {
-                x.eval_step(&mut self.mask_cache);
+                dispatch_stmt_fast(x, &mut self.mask_cache);
             }
         }
 
