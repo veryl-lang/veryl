@@ -309,6 +309,32 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             child_ff_table.force_all_ff();
         }
 
+        // Comb-to-FF hoist: clone child declarations and mutate them —
+        // move comb-side `let` writes into the consuming FF block, then
+        // rebuild the FfTable on the hoisted form.
+        let mut hoisted_child_decls = child_module.declarations.clone();
+        {
+            let plans = veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(
+                &hoisted_child_decls,
+                &child_ff_table,
+                &child_module.variables,
+            );
+            veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(
+                &mut hoisted_child_decls,
+                &plans,
+                &child_module.variables,
+            );
+            child_ff_table = air::FfTable::default();
+            for (i, x) in hoisted_child_decls.iter().enumerate() {
+                x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
+            }
+            child_ff_table.update_is_ff();
+            if context.config.disable_ff_opt {
+                child_ff_table.force_all_ff();
+            }
+        }
+        let child_decls: &[air::Declaration] = &hoisted_child_decls;
+
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
         let (child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
@@ -334,7 +360,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
 
-        for decl in &child_module.declarations {
+        for decl in child_decls {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
             for (event, mut stmts) in proto_decl.event_statements {
@@ -698,7 +724,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     });
 
                     all_comb_statements.push(stmt);
-                    let _ = dst_var; // dst_var no longer used after merged-JIT removal
                 }
             }
         }

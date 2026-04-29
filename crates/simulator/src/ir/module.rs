@@ -2010,6 +2010,33 @@ impl Conv<&air::Module> for ProtoModule {
             ff_table.force_all_ff();
         }
 
+        // Comb-to-FF hoist: clone declarations and mutate them — move
+        // comb-side `let` writes into the consuming FF block, rebuild
+        // the FfTable on the hoisted form so all downstream simulator
+        // processing runs against the hoisted IR.
+        let mut hoisted_declarations = src.declarations.clone();
+        {
+            let plans = veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(
+                &hoisted_declarations,
+                &ff_table,
+                &src.variables,
+            );
+            veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(
+                &mut hoisted_declarations,
+                &plans,
+                &src.variables,
+            );
+            ff_table = air::FfTable::default();
+            for (i, x) in hoisted_declarations.iter().enumerate() {
+                x.gather_ff(&mut analyzer_context, &mut ff_table, i);
+            }
+            ff_table.update_is_ff();
+            if context.config.disable_ff_opt {
+                ff_table.force_all_ff();
+            }
+        }
+        let declarations: &[air::Declaration] = &hoisted_declarations;
+
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
         let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
@@ -2035,7 +2062,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
 
-        for decl in &src.declarations {
+        for decl in declarations {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
             for (event, mut stmts) in proto_decl.event_statements {
