@@ -337,7 +337,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
-        let (child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
+        let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
             &child_ff_table,
             context.config.use_4state,
@@ -349,9 +349,123 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;
 
+        // Alias child input/output port storage to the parent slot it's
+        // wired to, eliminating the inter-module copy at settle_comb.
+        let alias_enabled = std::env::var("VERYL_DISABLE_PORT_ALIAS").ok().as_deref() != Some("1");
+        let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
+        if alias_enabled {
+            for input in &src.inputs {
+                let air::Expression::Term(factor) = &input.expr else {
+                    continue;
+                };
+                let air::Factor::Variable(parent_id, idx, sel, _) = factor.as_ref() else {
+                    continue;
+                };
+                if !idx.0.is_empty() || !sel.is_empty() {
+                    continue;
+                }
+                // Reading parent storage directly during an event would
+                // race the parent's own NBA commit; reject when the
+                // parent has any always_ff writer.
+                let parent_scope = context.scope();
+                let parent_has_ff_writer = parent_scope
+                    .ff_table
+                    .table
+                    .iter()
+                    .any(|((vid, _), entry)| *vid == *parent_id && entry.assigned.is_some());
+                if parent_has_ff_writer {
+                    continue;
+                }
+                let parent_meta = match parent_scope.variable_meta.get(parent_id) {
+                    Some(m) => m.clone(),
+                    None => continue,
+                };
+                let child_meta = match child_variable_meta.get(&input.id) {
+                    Some(m) => m,
+                    None => continue,
+                };
+                if parent_meta.elements.len() != child_meta.elements.len()
+                    || parent_meta.width != child_meta.width
+                    || parent_meta.native_bytes != child_meta.native_bytes
+                {
+                    continue;
+                }
+                let entry = child_variable_meta.get_mut(&input.id).unwrap();
+                for (i, parent_elem) in parent_meta.elements.iter().enumerate() {
+                    entry.elements[i].current = parent_elem.current;
+                    entry.elements[i].next_offset = parent_elem.next_offset;
+                }
+                // Drop initial_values so fill_buffers_recursive doesn't
+                // overwrite parent storage with the child port's default.
+                entry.initial_values.clear();
+                aliased_input_ids.insert(input.id);
+            }
+        }
+
+        // Output ports are aliased comb→comb only.  An FF on either side
+        // has a separate next-slot write that would not reach the comb
+        // slot the alias targets.
+        let mut aliased_output_ids: HashSet<air::VarId> = HashSet::default();
+        let mut already_aliased_parent_ids: HashSet<air::VarId> = HashSet::default();
+        if alias_enabled {
+            for output in &src.outputs {
+                let Some(parent_dst) = output.dst.first() else {
+                    continue;
+                };
+                if !parent_dst.index.0.is_empty() || !parent_dst.select.is_empty() {
+                    continue;
+                }
+                let child_output_is_ff = child_ff_table
+                    .table
+                    .iter()
+                    .any(|((vid, _), entry)| *vid == output.id && entry.assigned.is_some());
+                if child_output_is_ff {
+                    continue;
+                }
+                let parent_scope = context.scope();
+                let parent_has_ff_writer = parent_scope
+                    .ff_table
+                    .table
+                    .iter()
+                    .any(|((vid, _), entry)| *vid == parent_dst.id && entry.assigned.is_some());
+                if parent_has_ff_writer {
+                    continue;
+                }
+                let parent_meta = match parent_scope.variable_meta.get(&parent_dst.id) {
+                    Some(m) => m.clone(),
+                    None => continue,
+                };
+                if parent_meta.elements.iter().any(|e| e.is_ff()) {
+                    continue;
+                }
+                let child_meta = match child_variable_meta.get(&output.id) {
+                    Some(m) => m,
+                    None => continue,
+                };
+                if parent_meta.elements.len() != child_meta.elements.len()
+                    || parent_meta.width != child_meta.width
+                    || parent_meta.native_bytes != child_meta.native_bytes
+                {
+                    continue;
+                }
+                if already_aliased_parent_ids.contains(&parent_dst.id) {
+                    continue;
+                }
+                let entry = child_variable_meta.get_mut(&output.id).unwrap();
+                for (i, parent_elem) in parent_meta.elements.iter().enumerate() {
+                    entry.elements[i].current = parent_elem.current;
+                    entry.elements[i].next_offset = parent_elem.next_offset;
+                }
+                entry.initial_values.clear();
+                aliased_output_ids.insert(output.id);
+                already_aliased_parent_ids.insert(parent_dst.id);
+            }
+        }
+
         let child_scope = ScopeContext {
             variable_meta: child_variable_meta.clone(),
             analyzer_context: child_analyzer_context,
+            ff_table: child_ff_table.clone(),
         };
         context.scope_contexts.push(child_scope);
 
@@ -391,7 +505,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             let comb_start_bytes = comb_start;
             let component_key: *const air::Component = Arc::as_ptr(&src.component);
 
-            if let Some(cache_entry) = context.jit_cache.get(&component_key) {
+            // When input-port aliasing is on, the compiled chunk bakes
+            // parent-specific offsets, so the cache (keyed only by the
+            // child component) cannot be shared across instances.
+            let cache_lookup = if alias_enabled {
+                None
+            } else {
+                context.jit_cache.get(&component_key)
+            };
+            if let Some(cache_entry) = cache_lookup {
                 // Cache hit: replace internal logic with CompiledBlocks using delta
                 let ff_delta = ff_start_bytes - cache_entry.ref_ff_start_bytes;
                 let comb_delta = comb_start_bytes - cache_entry.ref_comb_start_bytes;
@@ -548,20 +670,25 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     None
                 };
 
-                context.jit_cache.insert(
-                    component_key,
-                    JitCacheEntry {
-                        ref_ff_start_bytes: ff_start_bytes,
-                        ref_comb_start_bytes: comb_start_bytes,
-                        event_funcs,
-                        comb_func,
-                    },
-                );
+                if !alias_enabled {
+                    context.jit_cache.insert(
+                        component_key,
+                        JitCacheEntry {
+                            ref_ff_start_bytes: ff_start_bytes,
+                            ref_comb_start_bytes: comb_start_bytes,
+                            event_funcs,
+                            comb_func,
+                        },
+                    );
+                }
             }
         }
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {
+            if aliased_input_ids.contains(&input.id) {
+                continue;
+            }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
             // Array port with a simple variable expression: expand per-element
@@ -617,6 +744,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // Output ports: child port var → parent dst
         for output in &src.outputs {
+            if aliased_output_ids.contains(&output.id) {
+                continue;
+            }
             if let Some(parent_dst) = output.dst.first() {
                 let child_meta = child_variable_meta.get(&output.id).unwrap();
 
