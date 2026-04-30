@@ -14,6 +14,7 @@ use veryl_analyzer::ir as air;
 pub struct ScopeContext {
     pub variable_meta: HashMap<VarId, VariableMeta>,
     pub analyzer_context: veryl_analyzer::conv::Context,
+    pub ff_table: air::FfTable,
 }
 
 /// A cached JIT-compiled function for a group of statements, along with
