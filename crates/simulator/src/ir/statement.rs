@@ -2640,6 +2640,16 @@ impl ProtoIfStatement {
         builder: &mut FunctionBuilder,
         is_last: bool,
     ) -> Option<()> {
+        // Cranelift's egraph does not synthesize jump tables itself, so
+        // recognize Eq-const chains here and emit `br_table` directly.
+        if std::env::var("VERYL_SWITCH_LOWER_DISABLE").ok().as_deref() != Some("1")
+            && let Some(chain) = collect_eq_chain(self)
+            && chain.arms.len() >= 4
+            && let Some(()) = emit_switch_via_br_table(&chain, context, builder, is_last)
+        {
+            return Some(());
+        }
+
         let true_block = builder.create_block();
         let false_block = builder.create_block();
         let final_block = builder.create_block();
@@ -2696,6 +2706,207 @@ impl ProtoIfStatement {
 
         Some(())
     }
+}
+
+// ---------- Switch lowering helpers (br_table emission) ----------
+
+#[cfg(not(target_family = "wasm"))]
+struct EqChainArm<'a> {
+    value: u64,
+    body: &'a [ProtoStatement],
+}
+
+#[cfg(not(target_family = "wasm"))]
+struct EqChain<'a> {
+    selector: &'a ProtoExpression,
+    arms: Vec<EqChainArm<'a>>,
+    default: &'a [ProtoStatement],
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn extract_eq_const(cond: &ProtoExpression) -> Option<(&ProtoExpression, u64)> {
+    let (x, op, y) = match cond {
+        ProtoExpression::Binary { x, op, y, .. } => (x.as_ref(), *op, y.as_ref()),
+        _ => return None,
+    };
+    if !matches!(
+        op,
+        veryl_analyzer::ir::Op::Eq | veryl_analyzer::ir::Op::EqWildcard
+    ) {
+        return None;
+    }
+    fn try_extract<'b>(
+        val_side: &'b ProtoExpression,
+        var_side: &'b ProtoExpression,
+    ) -> Option<(&'b ProtoExpression, u64)> {
+        match val_side {
+            ProtoExpression::Value { value, .. } => {
+                // xz constants would match any value under wildcard
+                // semantics and cannot be encoded as a table index.
+                if value.is_xz() {
+                    None
+                } else {
+                    value.to_u64().map(|v| (var_side, v))
+                }
+            }
+            _ => None,
+        }
+    }
+    if let Some(r) = try_extract(y, x) {
+        return Some(r);
+    }
+    try_extract(x, y)
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn same_var_read(a: &ProtoExpression, b: &ProtoExpression) -> bool {
+    match (a, b) {
+        (
+            ProtoExpression::Variable {
+                var_offset: oa,
+                select: sa,
+                dynamic_select: dsa,
+                ..
+            },
+            ProtoExpression::Variable {
+                var_offset: ob,
+                select: sb,
+                dynamic_select: dsb,
+                ..
+            },
+        ) => oa == ob && sa == sb && dsa.is_none() && dsb.is_none(),
+        _ => false,
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn collect_eq_chain(start: &ProtoIfStatement) -> Option<EqChain<'_>> {
+    let mut arms: Vec<EqChainArm<'_>> = Vec::new();
+    let mut selector: Option<&ProtoExpression> = None;
+    let mut current = start;
+    loop {
+        let cond = current.cond.as_ref()?;
+        let (var_expr, const_val) = match extract_eq_const(cond) {
+            Some(p) => p,
+            None => break,
+        };
+        // Dynamic-indexed reads cannot share a single hoisted dispatch
+        // value across arms, so they break the chain.
+        if let ProtoExpression::Variable {
+            dynamic_select: Some(_),
+            ..
+        } = var_expr
+        {
+            break;
+        }
+        if let Some(sel) = selector {
+            if !same_var_read(sel, var_expr) {
+                break;
+            }
+        } else {
+            selector = Some(var_expr);
+        }
+        arms.push(EqChainArm {
+            value: const_val,
+            body: &current.true_side,
+        });
+        if current.false_side.len() == 1
+            && let ProtoStatement::If(next) = &current.false_side[0]
+        {
+            current = next;
+            continue;
+        }
+        break;
+    }
+    if arms.len() < 2 {
+        return None;
+    }
+    Some(EqChain {
+        selector: selector?,
+        arms,
+        default: &current.false_side[..],
+    })
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn emit_switch_via_br_table(
+    chain: &EqChain,
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    is_last: bool,
+) -> Option<()> {
+    use cranelift::codegen::ir::JumpTableData;
+
+    // Cap table size to bound emission cost / i-cache footprint.
+    const SWITCH_LOWER_LIMIT: u64 = 256;
+    let max = chain.arms.iter().map(|a| a.value).max()?;
+    if max >= SWITCH_LOWER_LIMIT {
+        return None;
+    }
+
+    // Strip mask_xz so xz bits don't perturb the table index.
+    let (sel_payload, sel_mask_xz) = chain.selector.build_binary(context, builder)?;
+    let sel_clean = if let Some(mask) = sel_mask_xz {
+        builder.ins().band_not(sel_payload, mask)
+    } else {
+        sel_payload
+    };
+
+    let arm_blocks: Vec<_> = chain.arms.iter().map(|_| builder.create_block()).collect();
+    let default_block = builder.create_block();
+    let final_block = builder.create_block();
+
+    let table_size = (max as usize) + 1;
+    let mut entries: Vec<_> = (0..table_size)
+        .map(|_| builder.func.dfg.block_call(default_block, &[]))
+        .collect();
+    for (i, arm) in chain.arms.iter().enumerate() {
+        // Later arm wins on duplicate value, matching nested-If fall-through.
+        entries[arm.value as usize] = builder.func.dfg.block_call(arm_blocks[i], &[]);
+    }
+    let default_call = builder.func.dfg.block_call(default_block, &[]);
+    let jt_data = JumpTableData::new(default_call, &entries);
+    let jt = builder.func.create_jump_table(jt_data);
+    builder.ins().br_table(sel_clean, jt);
+
+    // load_cache is cleared at block boundaries, so an elided store
+    // would leak a stale value into a sibling arm.
+    let prev_store_elim = context.store_elim_enabled;
+    context.store_elim_enabled = false;
+
+    for (i, arm) in chain.arms.iter().enumerate() {
+        builder.switch_to_block(arm_blocks[i]);
+        context.load_cache.clear();
+        let len = arm.body.len();
+        for (j, s) in arm.body.iter().enumerate() {
+            let last = is_last && (j + 1 == len);
+            s.build_binary(context, builder, last)?;
+        }
+        if is_last {
+            builder.ins().return_(&[]);
+        } else {
+            builder.ins().jump(final_block, &[]);
+        }
+    }
+
+    builder.switch_to_block(default_block);
+    context.load_cache.clear();
+    let len = chain.default.len();
+    for (j, s) in chain.default.iter().enumerate() {
+        let last = is_last && (j + 1 == len);
+        s.build_binary(context, builder, last)?;
+    }
+    if is_last {
+        builder.ins().return_(&[]);
+    } else {
+        builder.ins().jump(final_block, &[]);
+    }
+
+    builder.switch_to_block(final_block);
+    context.load_cache.clear();
+    context.store_elim_enabled = prev_store_elim;
+
+    Some(())
 }
 
 fn extract_display_args(
