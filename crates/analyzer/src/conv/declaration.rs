@@ -398,7 +398,7 @@ impl Conv<&WithGenericParameterItem> for () {
 impl Conv<&WithParameterItem> for () {
     fn conv(context: &mut Context, value: &WithParameterItem) -> IrResult<Self> {
         let define_context: DefineContext = (&value.colon.colon_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(());
         }
 
@@ -454,7 +454,7 @@ impl Conv<&WithParameterItem> for () {
 impl Conv<&PortDeclarationItem> for () {
     fn conv(context: &mut Context, value: &PortDeclarationItem) -> IrResult<Self> {
         let define_context: DefineContext = (&value.colon.colon_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(());
         }
 
@@ -636,7 +636,7 @@ impl Conv<&AlwaysCombDeclaration> for ir::Declaration {
 impl Conv<&VarDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &VarDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.var.var_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Declaration::Null);
         }
 
@@ -663,7 +663,7 @@ impl Conv<&VarDeclaration> for ir::Declaration {
 impl Conv<&LetDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &LetDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#let.let_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Declaration::Null);
         }
 
@@ -720,7 +720,7 @@ impl Conv<&LetDeclaration> for ir::Declaration {
 impl Conv<&ConstDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &ConstDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#const.const_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Declaration::Null);
         }
 
@@ -787,7 +787,7 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
 impl Conv<&GenDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &GenDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#gen.gen_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Declaration::Null);
         }
 
@@ -812,7 +812,7 @@ impl Conv<&GenDeclaration> for ir::Declaration {
 impl Conv<&AssignDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &AssignDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.assign.assign_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Declaration::Null);
         }
 
@@ -1246,7 +1246,7 @@ impl Conv<&FinalDeclaration> for ir::Declaration {
 impl Conv<&InstDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InstDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.inst.inst_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Declaration::Null);
         }
 

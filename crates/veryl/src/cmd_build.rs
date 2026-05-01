@@ -35,6 +35,7 @@ impl CmdBuild {
         quiet: bool,
         mut ir: Option<&mut veryl_analyzer::ir::Ir>,
         test_filter: Option<&str>,
+        defines: &[String],
     ) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
@@ -108,6 +109,12 @@ impl CmdBuild {
         }
 
         let mut analyzer_context = veryl_analyzer::Context::default();
+        for name in defines {
+            analyzer_context
+                .config
+                .defines
+                .insert(resource_table::insert_str(name));
+        }
         for context in &contexts {
             if !context.skip {
                 let path = &context.path;

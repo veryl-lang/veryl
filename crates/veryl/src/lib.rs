@@ -212,6 +212,11 @@ pub struct OptTest {
     /// Run both ignored and non-ignored tests
     #[arg(long)]
     pub include_ignored: bool,
+
+    /// Define a name visible to `#[ifdef]` (can be specified multiple times).
+    /// Merged with `[test].defines` from Veryl.toml.
+    #[arg(short = 'D', long = "define", value_name = "NAME")]
+    pub define: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

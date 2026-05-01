@@ -163,6 +163,9 @@ impl Runner for Verilator {
             "+define+__veryl_test_{}_{}__",
             metadata.project.name, test
         )];
+        for name in &metadata.test.defines {
+            defines.push(format!("+define+{name}"));
+        }
 
         let mut opt = vec!["--assert", "--binary", "-Wno-MULTITOP"];
 

@@ -141,6 +141,9 @@ impl Runner for Vcs {
             "+define+__veryl_test_{}_{}__",
             metadata.project.name, test
         )];
+        for name in &metadata.test.defines {
+            defines.push(format!("+define+{name}"));
+        }
         if wave {
             if WaveFormFormat::Vcd == metadata.test.waveform_format {
                 defines.push(format!(

@@ -85,6 +85,15 @@ impl CmdTest {
             check: false,
         });
 
+        // Mutate metadata so external simulator runners (which read
+        // metadata.test.defines directly) also see CLI --define overrides.
+        for name in &self.opt.define {
+            if !metadata.test.defines.contains(name) {
+                metadata.test.defines.push(name.clone());
+            }
+        }
+        let combined_defines = metadata.test.defines.clone();
+
         let mut ir = veryl_analyzer::ir::Ir::default();
         build.exec(
             metadata,
@@ -92,6 +101,7 @@ impl CmdTest {
             false,
             Some(&mut ir),
             self.opt.test.as_deref(),
+            &combined_defines,
         )?;
 
         let tests = symbol_table::get_tests(&metadata.project.name);

@@ -64,7 +64,7 @@ impl Conv<&StatementBlockItem> for ir::StatementBlock {
 impl Conv<&LetStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &LetStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#let.let_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
@@ -200,7 +200,7 @@ impl Conv<&Statement> for ir::StatementBlock {
 impl Conv<&IdentifierStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &IdentifierStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.semicolon.semicolon_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
@@ -417,7 +417,7 @@ fn check_true_false(comptime: &Comptime) -> (bool, bool) {
 impl Conv<&IfStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &IfStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#if.if_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
@@ -516,7 +516,7 @@ impl Conv<&IfStatement> for ir::StatementBlock {
 impl Conv<&IfResetStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &IfResetStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.if_reset.if_reset_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
@@ -598,7 +598,7 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
 impl Conv<&ReturnStatement> for ir::Statement {
     fn conv(context: &mut Context, value: &ReturnStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.semicolon.semicolon_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::Statement::Null);
         }
 
@@ -630,7 +630,7 @@ impl Conv<&ReturnStatement> for ir::Statement {
 impl Conv<&ForStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &ForStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#for.for_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
@@ -733,7 +733,7 @@ fn unroll_for(
 impl Conv<&CaseStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &CaseStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.case.case_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
@@ -780,7 +780,7 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
 impl Conv<&SwitchStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &SwitchStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.switch.switch_token).into();
-        if !define_context.is_default() {
+        if !define_context.is_active(&context.config.defines) {
             return Ok(ir::StatementBlock::default());
         }
 
