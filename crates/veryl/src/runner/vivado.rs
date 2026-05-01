@@ -140,6 +140,10 @@ impl Runner for Vivado {
             "-d".to_string(),
             format!("__veryl_test_{}_{}__", metadata.project.name, test),
         ];
+        for name in &metadata.test.defines {
+            defines.push("-d".to_string());
+            defines.push(name.clone());
+        }
 
         if wave {
             if WaveFormFormat::Vcd == metadata.test.waveform_format {

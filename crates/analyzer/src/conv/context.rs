@@ -23,6 +23,7 @@ pub struct Config {
     pub instance_total_limit: usize,
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
+    pub defines: HashSet<StrId>,
 }
 
 impl Default for Config {
@@ -33,6 +34,7 @@ impl Default for Config {
             instance_total_limit: 1024 * 1024,
             evaluate_size_limit: 1024 * 1024,
             evaluate_array_limit: 128,
+            defines: HashSet::default(),
         }
     }
 }

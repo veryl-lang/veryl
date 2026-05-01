@@ -3,7 +3,7 @@ use crate::ir::Ir;
 use crate::{Analyzer, attribute_table, symbol_table};
 use similar::{ChangeTag, TextDiff};
 use veryl_metadata::Metadata;
-use veryl_parser::Parser;
+use veryl_parser::{Parser, resource_table};
 
 #[track_caller]
 fn check_ir(code: &str, exp: &str) {
@@ -2856,4 +2856,58 @@ fn generic_function_inference() {
 "#;
 
     check_ir(code, exp);
+}
+
+#[track_caller]
+fn build_ir_with_defines(code: &str, defines: &[&str]) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(&code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    for name in defines {
+        context
+            .config
+            .defines
+            .insert(resource_table::insert_str(name));
+    }
+    let mut ir = Ir::default();
+    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    Analyzer::analyze_post_pass2();
+    ir.to_string()
+}
+
+#[test]
+fn defines_select_ifdef_branch() {
+    let code = r#"
+    module ModuleA {
+        #[ifdef(DEBUG)]
+        const A: u32 = 1;
+        #[ifndef(DEBUG)]
+        const A: u32 = 2;
+    }
+    "#;
+
+    let ir = build_ir_with_defines(code, &[]);
+    assert!(
+        ir.contains("00000002"),
+        "expected ifndef(DEBUG) branch (=2) in IR:\n{ir}"
+    );
+    assert!(
+        !ir.contains("00000001"),
+        "did not expect ifdef(DEBUG) branch (=1) in IR:\n{ir}"
+    );
+
+    let ir = build_ir_with_defines(code, &["DEBUG"]);
+    assert!(
+        ir.contains("00000001"),
+        "expected ifdef(DEBUG) branch (=1) in IR:\n{ir}"
+    );
+    assert!(
+        !ir.contains("00000002"),
+        "did not expect ifndef(DEBUG) branch (=2) in IR:\n{ir}"
+    );
 }

@@ -5,7 +5,7 @@ use crate::symbol::Symbol;
 use crate::symbol::SymbolKind;
 use crate::symbol_path::SymbolPath;
 use crate::symbol_table;
-use crate::{HashMap, SVec, svec};
+use crate::{HashMap, HashSet, SVec, svec};
 use std::collections::BTreeSet;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
@@ -24,6 +24,11 @@ impl DefineContext {
 
     pub fn is_default(&self) -> bool {
         self.pos.is_empty()
+    }
+
+    pub fn is_active(&self, defines: &HashSet<StrId>) -> bool {
+        self.pos.iter().all(|x| defines.contains(x))
+            && self.neg.iter().all(|x| !defines.contains(x))
     }
 }
 
