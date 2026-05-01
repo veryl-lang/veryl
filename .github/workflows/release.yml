@@ -55,11 +55,31 @@ jobs:
     - name: Build for Windows aarch64
       if: matrix.os == 'windows-11-arm'
       run: make release_win_aarch64
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ matrix.os }}
+        path: |
+          *.zip
+          *.rpm
+        if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
     - name: Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         generate_release_notes: true
-        files: "*.zip\n*.rpm"
+        files: |
+          artifacts/*.zip
+          artifacts/*.rpm
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
