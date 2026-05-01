@@ -3015,6 +3015,87 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+function func_a::<V: u32, T: type> -> T {
+    return V as T;
+}
+function func_b::<V: u32, T: type> -> T {
+    return func_a::<V, T>();
+}
+module ModuleA::<T: type> #(
+    param V: u32 = 1,
+) {
+    const A: bbool = func_b::<V, bbool>();
+    const B: T     = func_b::<V, T>();
+}
+module ModuleB::<T: type> #(
+    param V: u32 = 1,
+) {
+    const A: bbool = func_b::<V, bbool>();
+    const B: T     = func_b::<V, T>();
+}
+module ModuleC {
+    inst u0: ModuleB::<i16>;
+    inst u1: ModuleB::<i32>;
+}
+"#;
+
+    let expect = r#"
+
+
+
+module prj___ModuleB__i16 #(
+    parameter int unsigned V = 1
+);
+    localparam bit A = __func_b__V__bbool();
+    localparam shortint B = __func_b__V__i16();
+
+    function automatic bit __func_a__V__bbool;
+        return bit'(V);
+    endfunction
+    function automatic shortint __func_a__V__i16;
+        return shortint'(V);
+    endfunction
+    function automatic bit __func_b__V__bbool;
+        return __func_a__V__bbool();
+    endfunction
+    function automatic shortint __func_b__V__i16;
+        return __func_a__V__i16();
+    endfunction
+endmodule
+module prj___ModuleB__i32 #(
+    parameter int unsigned V = 1
+);
+    localparam bit A = __func_b__V__bbool();
+    localparam int B = __func_b__V__i32();
+
+    function automatic bit __func_a__V__bbool;
+        return bit'(V);
+    endfunction
+    function automatic int __func_a__V__i32;
+        return int'(V);
+    endfunction
+    function automatic bit __func_b__V__bbool;
+        return __func_a__V__bbool();
+    endfunction
+    function automatic int __func_b__V__i32;
+        return __func_a__V__i32();
+    endfunction
+endmodule
+module prj_ModuleC;
+    prj___ModuleB__i16 u0 ();
+    prj___ModuleB__i32 u1 ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]

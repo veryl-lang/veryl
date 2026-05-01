@@ -387,13 +387,21 @@ impl ReferenceTable {
 
         if let Some(ref id) = symbol_table::insert(&token, symbol.clone()) {
             symbol_table::add_generic_instance(target.id, *id);
+        } else {
+            symbol_table::update_generic_instance_affiliation(target.id, &symbol);
         }
 
         generic_maps.push(GenericMap {
             id: None,
             map: target.generic_table(&instance_path.arguments),
         });
-        Self::insert_subordinate_generic_instances(namespace, target, &symbol, generic_maps);
+        Self::insert_subordinate_generic_instances(
+            namespace,
+            target,
+            &symbol,
+            generic_maps,
+            affiliation_symbol,
+        );
     }
 
     fn create_generic_instance(
@@ -430,6 +438,7 @@ impl ReferenceTable {
         target: &Symbol,
         inst_symbol: &Symbol,
         generic_maps: &[GenericMap],
+        affiliation_symbol: Option<&Symbol>,
     ) {
         let is_global_func = target.is_global_function();
         let mut subordinate_paths = if !is_global_func {
@@ -465,7 +474,7 @@ impl ReferenceTable {
                         namespace,
                         &path_symbol.found,
                         &mut generic_maps.to_vec(),
-                        None,
+                        affiliation_symbol,
                     );
                 } else {
                     Self::insert_generic_instance(

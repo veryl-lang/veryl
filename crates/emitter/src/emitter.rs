@@ -93,6 +93,7 @@ pub struct Emitter {
     modport_ports_table: Option<ExpandedModportPortTable>,
     inst_module_namespace: Option<Namespace>,
     bound_namespace: Option<Namespace>,
+    bound_symbol: Option<SymbolId>,
     skip_comment: bool,
 }
 
@@ -149,6 +150,7 @@ impl Default for Emitter {
             modport_ports_table: None,
             inst_module_namespace: None,
             bound_namespace: None,
+            bound_symbol: None,
             skip_comment: false,
         }
     }
@@ -1889,20 +1891,25 @@ impl Emitter {
 
         let src_line = self.src_line;
         self.bound_namespace = Some(component_symbol.inner_namespace());
+        if let Some(generic_inst) = self.current_generic_instance() {
+            self.bound_symbol = Some(generic_inst);
+        } else {
+            self.bound_symbol = Some(component_symbol.id);
+        }
 
         let mut emitted_functions = Vec::new();
         for path in &func_paths {
-            self.emit_global_function(path, component_symbol, &mut emitted_functions);
+            self.emit_global_function(path, &mut emitted_functions);
         }
 
         self.bound_namespace = None;
+        self.bound_symbol = None;
         self.src_line = src_line;
     }
 
     fn emit_global_function(
         &mut self,
         path: &GenericSymbolPath,
-        component_symbol: &Symbol,
         emitted_functions: &mut Vec<SymbolId>,
     ) {
         let (Ok(func_symbol), _) = self.resolve_generic_path(path, None) else {
@@ -1913,29 +1920,13 @@ impl Emitter {
             return;
         }
 
-        if emitted_functions.contains(&func_symbol.found.id) {
-            // The given function has already been emitted.
-            // Nothing to do.
-            return;
-        }
-
-        if emitted_functions.is_empty() {
-            self.newline();
-        }
-
-        emitted_functions.push(func_symbol.found.id);
         let (func_id, definition, generic_map) = match &func_symbol.found.kind {
             SymbolKind::Function(x) => (func_symbol.found.id, x.definition, vec![]),
             SymbolKind::GenericInstance(x) => {
                 if let Some(base_symbol) = symbol_table::get(x.base)
                     && let SymbolKind::Function(base_func) = &base_symbol.kind
                 {
-                    let mut maps = func_symbol.found.generic_maps();
-                    for map in &mut maps {
-                        // Generic instance of global functoin belongs to
-                        // component where it is emitted into.
-                        map.id = Some(component_symbol.id);
-                    }
+                    let maps = func_symbol.found.generic_maps();
                     (base_symbol.id, base_func.definition, maps)
                 } else {
                     return;
@@ -1944,10 +1935,21 @@ impl Emitter {
             _ => return,
         };
 
+        if emitted_functions.is_empty() {
+            self.newline();
+        }
+
+        if emitted_functions.contains(&func_id) {
+            // The given function has already been emitted.
+            // Nothing to do.
+            return;
+        }
+        emitted_functions.push(func_id);
+
         if let Some(func_paths) = &symbol_table::get_reference_functions(func_id) {
             self.generic_map.push(generic_map);
             for func_path in func_paths {
-                self.emit_global_function(func_path, component_symbol, emitted_functions);
+                self.emit_global_function(func_path, emitted_functions);
             }
             self.generic_map.pop();
         }
@@ -2210,29 +2212,32 @@ impl Emitter {
         }
     }
 
-    fn get_generic_maps(&self, symbol: &Symbol) -> Vec<GenericMap> {
-        let mut associated_components = vec![];
-        if symbol.is_global_function()
-            && let Some(bound_namespace) = self.bound_namespace.as_ref()
-            && let Some(bound_symbol) = bound_namespace.get_symbol()
-        {
-            // Generic instance of global function is associated with
-            // caller (bound) namespace.
-            associated_components.push(bound_symbol.id);
-        }
+    fn current_generic_instance(&self) -> Option<SymbolId> {
         if let Some(maps) = self.generic_map.last()
             && let Some(map) = maps.last()
-            && let Some(id) = map.id
         {
-            associated_components.push(id);
+            map.id
+        } else {
+            None
         }
+    }
+
+    fn get_generic_maps(&self, symbol: &Symbol) -> Vec<GenericMap> {
+        let is_global_func = symbol.is_global_function();
+
+        let associated_component = if is_global_func {
+            self.bound_symbol
+        } else {
+            self.current_generic_instance()
+        };
 
         // The given symbol is a top level symbol or
         // the parent symbol is a non generic object.
-        if associated_components.is_empty() {
+        if associated_component.is_none() {
             return symbol.generic_maps();
         }
 
+        let associated_component = associated_component.unwrap();
         symbol
             .generic_maps()
             .into_iter()
@@ -2243,8 +2248,16 @@ impl Emitter {
                         unreachable!();
                     };
 
-                    let affiliation_symbol = inst.affiliation_symbol.unwrap();
-                    associated_components.contains(&affiliation_symbol)
+                    if inst.affiliation_symbols.contains(&associated_component) {
+                        true
+                    } else if is_global_func
+                        && let Some(associated_symbol) = symbol_table::get(associated_component)
+                        && let SymbolKind::GenericInstance(associated_inst) = associated_symbol.kind
+                    {
+                        inst.affiliation_symbols.contains(&associated_inst.base)
+                    } else {
+                        false
+                    }
                 } else {
                     true
                 }

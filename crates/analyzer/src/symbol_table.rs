@@ -1031,6 +1031,34 @@ impl SymbolTable {
         }
     }
 
+    pub fn update_generic_instance_affiliation(&mut self, target: SymbolId, instance: &Symbol) {
+        let Some(target_inst_ids) = self
+            .symbol_table
+            .get(&target)
+            .map(|x| x.generic_instances.clone())
+        else {
+            return;
+        };
+        for target_inst_id in &target_inst_ids {
+            if let Some(target_inst_symbol) = self.symbol_table.get_mut(target_inst_id)
+                && target_inst_symbol.token.text == instance.token.text
+            {
+                let SymbolKind::GenericInstance(target_inst) = &mut target_inst_symbol.kind else {
+                    unreachable!();
+                };
+                let SymbolKind::GenericInstance(inst) = &instance.kind else {
+                    unreachable!();
+                };
+                if let Some(affiliation_symbol) = inst.affiliation_symbols.first()
+                    && !target_inst.affiliation_symbols.contains(affiliation_symbol)
+                {
+                    target_inst.affiliation_symbols.push(*affiliation_symbol);
+                }
+                break;
+            }
+        }
+    }
+
     fn add_imported_item(&mut self, target: SymbolId, import: &Import) {
         if let Some(symbol) = self.symbol_table.get_mut(&target) {
             symbol.imported.push(import.to_owned());
@@ -1836,6 +1864,14 @@ pub fn add_reference(target: SymbolId, token: &Token) {
 pub fn add_generic_instance(target: SymbolId, instance: SymbolId) {
     clear_cache();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_generic_instance(target, instance))
+}
+
+pub fn update_generic_instance_affiliation(target: SymbolId, instance: &Symbol) {
+    clear_cache();
+    SYMBOL_TABLE.with(|f| {
+        f.borrow_mut()
+            .update_generic_instance_affiliation(target, instance)
+    })
 }
 
 pub fn add_import(import: Import) {
