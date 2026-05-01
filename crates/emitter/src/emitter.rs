@@ -161,6 +161,24 @@ fn is_ifdef_attribute(arg: &Attribute) -> bool {
     )
 }
 
+// SV `import` only accepts `package::symbol` or `package::*`, so suppress
+// imports whose target is an enum (wildcard) or an enum member outside a
+// package — emitting them would produce invalid SystemVerilog.
+fn should_skip_emit_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
+    let Ok(symbol) = symbol_table::resolve(arg) else {
+        return false;
+    };
+    match &symbol.found.kind {
+        SymbolKind::Enum(_) if is_wildcard => true,
+        SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled if !is_wildcard => symbol
+            .found
+            .get_parent()
+            .and_then(|enum_sym| enum_sym.get_parent())
+            .is_none_or(|grandparent| !grandparent.is_package(true)),
+        _ => false,
+    }
+}
+
 impl Emitter {
     pub fn new(metadata: &Metadata, src_path: &Path, dst_path: &Path, map_path: &Path) -> Self {
         let source_map = SourceMap::new(src_path, dst_path, map_path);
@@ -1019,6 +1037,11 @@ impl Emitter {
     }
 
     fn emit_import_declaration(&mut self, arg: &ImportDeclaration, moved: bool) {
+        let is_wildcard = arg.import_declaration_opt.is_some();
+        if should_skip_emit_import(&arg.scoped_identifier, is_wildcard) {
+            return;
+        }
+
         if moved {
             self.clear_adjust_line();
         }
