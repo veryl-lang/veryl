@@ -366,15 +366,17 @@ impl GenericSymbol {
         if self.arguments.is_empty() {
             None
         } else {
-            let affiliation_id = if let Some(symbol) = affiliation_symbol {
-                Some(symbol.id)
+            let affiliation_symbols = if let Some(symbol) = affiliation_symbol {
+                vec![symbol.id]
+            } else if let Some(symbol) = base.get_parent() {
+                vec![symbol.id]
             } else {
-                base.get_parent().map(|parent| parent.id)
+                vec![]
             };
             let property = GenericInstanceProperty {
                 base: base.id,
                 arguments: self.arguments.clone(),
-                affiliation_symbol: affiliation_id,
+                affiliation_symbols,
             };
             let kind = SymbolKind::GenericInstance(property);
             let token = &self.base;

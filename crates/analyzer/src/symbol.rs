@@ -2751,7 +2751,7 @@ pub struct GenericConstProperty {
 pub struct GenericInstanceProperty {
     pub base: SymbolId,
     pub arguments: Vec<GenericSymbolPath>,
-    pub affiliation_symbol: Option<SymbolId>,
+    pub affiliation_symbols: Vec<SymbolId>,
 }
 
 impl GenericInstanceProperty {
