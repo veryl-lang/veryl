@@ -1,0 +1,93 @@
+package Package90 {
+    enum EnumPkg: logic<3> {
+        P,
+        Q,
+        R,
+    }
+}
+
+import Package90::EnumPkg::P;
+import Package90::EnumPkg::*;
+
+module Module90A {
+    import Package90::EnumPkg::P;
+    import Package90::EnumPkg::*;
+}
+
+module Module90B #(
+    param V: Package90::EnumPkg = P,
+) {
+    import Package90::EnumPkg::P;
+    import Package90::EnumPkg::*;
+    let _v: Package90::EnumPkg = V;
+}
+
+module Module90C (
+    o_d: output logic,
+) {
+    import Package90::EnumPkg::P;
+    import Package90::EnumPkg::*;
+
+    var a  : Package90::EnumPkg;
+    assign a   = P;
+    assign o_d = inside a {P, Q, R};
+}
+
+module Module90D {
+    :g0 {
+        import Package90::EnumPkg::P;
+        let _a: Package90::EnumPkg = P;
+    }
+
+    if true :g1 {
+        import Package90::EnumPkg::P;
+        let _a: Package90::EnumPkg = P;
+    } else {
+        import Package90::EnumPkg::P;
+        let _a: Package90::EnumPkg = P;
+    }
+
+    for i in 0..1 :g2 {
+        import Package90::EnumPkg::P;
+        let _a: Package90::EnumPkg = P;
+    }
+}
+
+module Module90E {
+    enum EnumLocal: logic<3> {
+        A,
+        B,
+        C,
+        D,
+        E,
+        F,
+    }
+
+    import EnumLocal::A;
+    import EnumLocal::*;
+
+    var a: EnumLocal;
+    var x: logic    ;
+
+    assign a = A;
+    assign x = inside a {A, B, C, D, E, F};
+}
+
+interface Interface90A {
+    import Package90::EnumPkg::P;
+    import Package90::EnumPkg::*;
+}
+
+interface Interface90B #(
+    param V: Package90::EnumPkg = P,
+) {
+    import Package90::EnumPkg::P;
+    import Package90::EnumPkg::*;
+    let _v: Package90::EnumPkg = V;
+}
+
+package Package90Z {
+    import Package90::EnumPkg::P;
+    import Package90::EnumPkg::*;
+    const _C: Package90::EnumPkg = P;
+}

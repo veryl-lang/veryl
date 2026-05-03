@@ -1086,8 +1086,13 @@ impl SymbolTable {
             HashMap::default();
         for (import, symbol) in symbols {
             if import.wildcard {
-                if let Some(pkg) = self.get_package(symbol, false) {
-                    let target = pkg.inner_namespace();
+                let wildcard_target = if matches!(symbol.kind, SymbolKind::Enum(_)) {
+                    Some(symbol.clone())
+                } else {
+                    self.get_package(symbol, false)
+                };
+                if let Some(target_symbol) = wildcard_target {
+                    let target = target_symbol.inner_namespace();
                     let paths = target.paths.clone();
                     package_imports
                         .entry(paths)
