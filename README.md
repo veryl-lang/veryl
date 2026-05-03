@@ -145,7 +145,7 @@ This approach has some advantages like rapid development and resusable tooling e
 but the syntax can't be fit for hardware description completely.
 Additionally, enormous Verilog code is generated from short and sophisticated code in these languages.
 This prevents general ASIC workflows like timing improvement, pre/post-mask ECO because these workflows require FF-level modification in Verilog.
-Interopration between these language and SystemVerilog is challenging because these can't connect to SystemVerilog's type like `interface` and `struct` directly.
+Interoperation between these languages and SystemVerilog is challenging because these can't connect to SystemVerilog's type like `interface` and `struct` directly.
 By these reason, the existing Alt-HDLs can't be used as alternative of SystemVerilog, especially if there are many existing SystemVerilog codebase.
 Veryl resolves these problems by HDL-specialized syntax and human-readable SystemVerilog code generation.
 
