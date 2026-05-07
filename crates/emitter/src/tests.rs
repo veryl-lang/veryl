@@ -2617,6 +2617,64 @@ endmodule
 }
 
 #[test]
+fn interface_alias_defined_in_package() {
+    let code = r#"
+proto package a_proto_pkg {
+    const W: p32;
+}
+package a_pkg::<w: p32> for a_proto_pkg {
+    const W: p32 = w;
+}
+interface a_if::<pkg: a_proto_pkg> {
+    var a: logic<pkg::W>;
+    modport mp {
+        a: output,
+    }
+}
+package b_pkg::<W: p32> {
+    alias package   apkg = a_pkg::<W>;
+    alias interface aif  = a_if::<apkg>;
+}
+module module_b (
+    aif: modport b_pkg::<8>::aif::mp,
+) {
+    assign aif.a = 0;
+}
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__8;
+    localparam int unsigned W = 8;
+endpackage
+interface prj___a_if____a_pkg__8;
+    logic [prj___a_pkg__8::W-1:0] a;
+    modport mp (
+        output a
+    );
+endinterface
+package prj___b_pkg__8;
+
+
+
+endpackage
+module prj_module_b (
+    prj___a_if____a_pkg__8.mp aif
+);
+    always_comb aif.a = 0;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn function_call_via_generic_interface() {
     let code = r#"module ModuleA (
     a_if: interface::slave,
