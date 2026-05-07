@@ -201,6 +201,41 @@ async fn diagnostics() {
 
 #[tokio::test]
 #[ntest::timeout(60000)]
+async fn combinational_loop_diagnostic() {
+    let mut server = TestServer::new(Backend::new);
+
+    let req = build_initialize(1);
+    server.send_request(req).await;
+    let _ = server.recv_response().await;
+
+    let req = build_initialized();
+    server.send_request(req).await;
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "window/logMessage");
+
+    let code = "module Top (\n    a: input  logic<8>,\n    b: output logic<8>,\n    c: output logic<8>,\n) {\n    assign b = c + a;\n    assign c = b + 1;\n}\n";
+    let req = build_did_open(code);
+    server.send_request(req).await;
+
+    // did_open log
+    let _ = server.recv_notification().await;
+
+    // diagnostics
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "textDocument/publishDiagnostics");
+    let diags = res.params().unwrap()["diagnostics"].as_array().unwrap();
+    assert!(!diags.is_empty(), "expected combinational_loop diagnostic");
+    let diag = &diags[0];
+    assert_eq!(diag["code"], Value::from("combinational_loop"));
+    let related = diag["relatedInformation"].as_array();
+    assert!(
+        related.is_some_and(|r| !r.is_empty()),
+        "expected non-empty relatedInformation, got: {diag}",
+    );
+}
+
+#[tokio::test]
+#[ntest::timeout(60000)]
 async fn progress() {
     let mut server = TestServer::new(Backend::new);
 

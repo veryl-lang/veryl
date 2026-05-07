@@ -20,7 +20,7 @@ fn analyze(code: &str, top: &str) -> (air::Ir, veryl_parser::resource_table::Str
     let _ = Analyzer::analyze_post_pass1();
     let mut ir = air::Ir::default();
     let _ = analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
-    let _ = Analyzer::analyze_post_pass2();
+    let _ = Analyzer::analyze_post_pass2(&ir);
 
     (ir, resource_table::insert_str(top))
 }
@@ -1048,7 +1048,7 @@ fn smoke_all_testcases() {
         let _ = Analyzer::analyze_post_pass1();
         let mut ir = air::Ir::default();
         let _ = analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
-        let _ = Analyzer::analyze_post_pass2();
+        let _ = Analyzer::analyze_post_pass2(&ir);
 
         for component in &ir.components {
             if let air::Component::Module(m) = component {

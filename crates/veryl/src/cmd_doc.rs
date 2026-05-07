@@ -42,17 +42,18 @@ impl CmdDoc {
         Analyzer::analyze_post_pass1();
 
         let mut analyzer_context = veryl_analyzer::Context::default();
+        let mut ir = veryl_analyzer::ir::Ir::default();
         for context in &contexts {
             let path = &context.path;
             context.analyzer.analyze_pass2(
                 &path.prj,
                 &context.parser.veryl,
                 &mut analyzer_context,
-                None,
+                Some(&mut ir),
             );
         }
 
-        Analyzer::analyze_post_pass2();
+        Analyzer::analyze_post_pass2(&ir);
 
         let mut modules = BTreeMap::new();
         let mut proto_modules = BTreeMap::new();

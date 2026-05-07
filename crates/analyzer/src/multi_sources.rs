@@ -28,8 +28,8 @@ impl miette::SourceCode for MultiSources {
             start += source.text.len();
         }
 
-        let code = code.unwrap();
-        let header = header.unwrap();
+        let code = code.ok_or(miette::MietteError::OutOfBounds)?;
+        let header = header.ok_or(miette::MietteError::OutOfBounds)?;
 
         let local_span = &(span.offset() - start, span.len()).into();
         let local = code.read_span(local_span, context_lines_before, context_lines_after)?;

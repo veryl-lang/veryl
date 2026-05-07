@@ -33,7 +33,7 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
     errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
     errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
-    errors.append(&mut Analyzer::analyze_post_pass2());
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
     let errors: Vec<_> = errors
@@ -43,6 +43,11 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
                 x,
                 AnalyzerError::InvalidLogicalOperand { .. }
                     | AnalyzerError::UnsignedArithShift { .. }
+                    // Let simulator's analyze_dependency report combinational
+                    // loops here -- the analyzer-side check at post_pass2 is
+                    // an additional safety net but these tests target the
+                    // simulator's own detector.
+                    | AnalyzerError::CombinationalLoop { .. }
             )
         })
         .collect();
@@ -95,7 +100,7 @@ fn analyze_multi_file_prj(
             Some(&mut ir),
         ));
     }
-    all_errors.append(&mut Analyzer::analyze_post_pass2());
+    all_errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&all_errors);
     let errors: Vec<_> = all_errors
@@ -105,6 +110,7 @@ fn analyze_multi_file_prj(
                 x,
                 AnalyzerError::InvalidLogicalOperand { .. }
                     | AnalyzerError::UnsignedArithShift { .. }
+                    | AnalyzerError::CombinationalLoop { .. }
             )
         })
         .collect();

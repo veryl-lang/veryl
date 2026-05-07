@@ -115,6 +115,16 @@ impl CmdBuild {
                 .defines
                 .insert(resource_table::insert_str(name));
         }
+        // Build a local IR when the caller didn't supply one, so the
+        // post-pass2 combinational-loop check has something to inspect.
+        // This is cheap relative to the rest of pass2 because most of
+        // the work is recomputing AssignTable / FfTable / per_decl_refs
+        // which we share with the IR build anyway.
+        let mut local_ir = veryl_analyzer::ir::Ir::default();
+        let ir_for_pass2: &mut veryl_analyzer::ir::Ir = match ir {
+            Some(ref mut x) => x,
+            None => &mut local_ir,
+        };
         for context in &contexts {
             if !context.skip {
                 let path = &context.path;
@@ -122,7 +132,7 @@ impl CmdBuild {
                     &path.prj,
                     &context.parser.veryl,
                     &mut analyzer_context,
-                    ir.as_deref_mut(),
+                    Some(ir_for_pass2),
                 );
                 check_error = check_error.append(&mut errors).check_err()?;
             }
@@ -130,7 +140,7 @@ impl CmdBuild {
 
         debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
 
-        let mut errors = Analyzer::analyze_post_pass2();
+        let mut errors = Analyzer::analyze_post_pass2(ir_for_pass2);
         check_error = check_error.append(&mut errors).check_err()?;
 
         debug!(

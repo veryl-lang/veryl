@@ -55,7 +55,7 @@ impl CmdSynth {
             );
         }
 
-        Analyzer::analyze_post_pass2();
+        Analyzer::analyze_post_pass2(&ir);
 
         // CLI `--top` > toml default > first user module.
         let top_override = self.opt.top.as_ref().or(metadata.synth.top.as_ref());

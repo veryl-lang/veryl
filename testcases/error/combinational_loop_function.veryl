@@ -1,0 +1,14 @@
+module combinational_loop_function (
+    a: input  logic<8>,
+    b: output logic<8>,
+) {
+    function ident (
+        x: input logic<8>,
+    ) -> logic<8> {
+        return x;
+    }
+
+    var c: logic<8>;
+    assign b = ident(c);
+    assign c = b;
+}

@@ -14,12 +14,13 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
+    let mut ir = Ir::default();
 
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None));
-    errors.append(&mut Analyzer::analyze_post_pass2());
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
 }
@@ -39,7 +40,7 @@ fn analyze_with_ir(code: &str) -> Vec<AnalyzerError> {
     errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
     errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
-    errors.append(&mut Analyzer::analyze_post_pass2());
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
 }
@@ -60,12 +61,18 @@ fn analyze_with_large_stack(code: &str) -> Vec<AnalyzerError> {
             let parser = Parser::parse(&code, &"").unwrap();
             let analyzer = Analyzer::new(&metadata);
             let mut context = Context::default();
+            let mut ir = Ir::default();
 
             let mut errors = vec![];
             errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
             errors.append(&mut Analyzer::analyze_post_pass1());
-            errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None));
-            errors.append(&mut Analyzer::analyze_post_pass2());
+            errors.append(&mut analyzer.analyze_pass2(
+                &"prj",
+                &parser.veryl,
+                &mut context,
+                Some(&mut ir),
+            ));
+            errors.append(&mut Analyzer::analyze_post_pass2(&ir));
             dbg!(&errors);
             errors
         })
@@ -7931,6 +7938,379 @@ fn unassignable_output() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn combinational_loop() {
+    // 2-block ring: assign b = c + a; assign c = b + 1
+    let code = r#"
+    module ModuleA (
+        a: input  logic<8>,
+        b: output logic<8>,
+        c: output logic<8>,
+    ) {
+        assign b = c + a;
+        assign c = b + 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::CombinationalLoop { .. }));
+
+    // FF-broken feedback: assign x = y, always_ff y <= x. No loop.
+    let code = r#"
+    module ModuleA (
+        clk: input  clock,
+        a:   input  logic<8>,
+        b:   output logic<8>,
+    ) {
+        var y: logic<8>;
+        assign b = y;
+        always_ff (clk) {
+            y = a;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Function call: caller-side feedthrough links read x -> write x.
+    let code = r#"
+    module ModuleA (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        function ident (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return x;
+        }
+
+        var c: logic<8>;
+        assign b = ident(c);
+        assign c = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::CombinationalLoop { .. }));
+
+    // Disjoint partial-write self-reference: `a[1] = a[0]` is not a loop
+    // because the read bit and write bit don't overlap.
+    let code = r#"
+    module ModuleA {
+        var a: logic<2>;
+        always_comb {
+            a[0] = 0;
+        }
+
+        always_comb {
+            a[1] = a[0];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Block-local variables (declared inside `always_comb`) do not create
+    // combinational loops under Veryl's blocking semantics.
+    let code = r#"
+    module ModuleA (
+        a: input  logic<32>,
+        b: output logic<32>,
+    ) {
+        always_comb {
+            var c: logic<32>;
+            var d: logic<32>;
+            c = a;
+            d = 2 * c;
+            c = d;
+            b = c;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Module instance feedthrough: child has `assign out = in;`. Parent
+    // closes the loop with `assign x = y`. Should detect.
+    let code = r#"
+    module Buf (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i;
+    }
+
+    module Top (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        var x: logic<8>;
+        var y: logic<8>;
+        inst u: Buf (
+            i: x,
+            o: y,
+        );
+        assign x = y;
+        assign b = y;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Module instance with FF-driven output: no loop should be detected.
+    let code = r#"
+    module Reg (
+        clk: input  clock,
+        i:   input  logic<8>,
+        o:   output logic<8>,
+    ) {
+        always_ff (clk) {
+            o = i;
+        }
+    }
+
+    module Top (
+        clk: input  clock,
+        a:   input  logic<8>,
+        b:   output logic<8>,
+    ) {
+        var x: logic<8>;
+        var y: logic<8>;
+        inst u: Reg (
+            clk: clk,
+            i: x,
+            o: y,
+        );
+        assign x = y;
+        assign b = y;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Continuous-assign self-reference: real combinational loop.
+    let code = r#"
+    module ModuleA (
+        a: output logic<8>,
+    ) {
+        assign a = a + 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Conditional self-reference: one branch reads x before assigning,
+    // synthesizing to `x = cond ? a : (b + x)` which closes the loop.
+    let code = r#"
+    module ModuleA (
+        cond: input  logic,
+        a:    input  logic<8>,
+        b:    input  logic<8>,
+        x:    output logic<8>,
+    ) {
+        always_comb {
+            if cond {
+                x = a;
+            } else {
+                x = b + x;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Procedural overwrite within always_comb is NOT a loop: the first
+    // assignment dominates the second statement's read of `a`.
+    let code = r#"
+    module ModuleA (
+        a: output logic<8>,
+    ) {
+        always_comb {
+            a = 0;
+            a = a + 1;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Both branches assign x with no self-read. Not a loop.
+    let code = r#"
+    module ModuleA (
+        cond: input  logic,
+        a:    input  logic<8>,
+        b:    input  logic<8>,
+        x:    output logic<8>,
+    ) {
+        always_comb {
+            if cond {
+                x = a;
+            } else {
+                x = b;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Pre-assign before conditional self-reference is dominating and
+    // thus NOT a loop. `x = 0` covers all bits before the if/else.
+    let code = r#"
+    module ModuleA (
+        cond: input  logic,
+        b:    input  logic<8>,
+        x:    output logic<8>,
+    ) {
+        always_comb {
+            x = 0;
+            if cond {
+                x = b;
+            } else {
+                x = b + x;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Bit-precise NodeKey distinguishes ca[0]/ca[1]/ca[2] so the
+    // forward chain through bit-select inst outputs is not a loop
+    // (regression from perlindgren/vips).
+    let code = r#"
+    module FullAdder (
+        a    : input  logic,
+        b    : input  logic,
+        c    : input  logic,
+        sum  : output logic,
+        carry: output logic,
+    ) {
+        assign sum   = a ^ b ^ c;
+        assign carry = (a & b) | (c & (a ^ b));
+    }
+
+    module Arith (
+        a  : input  logic<2>,
+        b  : input  logic<2>,
+        sub: input  logic   ,
+        r  : output logic<2>,
+        c  : output logic   ,
+    ) {
+        var ca: logic<3>;
+        assign ca[0] = sub;
+        assign c     = ca[2];
+
+        var cl_0: logic;
+        var cl_1: logic;
+        assign cl_0 = ca[0];
+        assign cl_1 = ca[1];
+
+        inst u0: FullAdder (
+            a    : a[0]      ,
+            b    : b[0] ^ sub,
+            c    : cl_0      ,
+            sum  : r[0]      ,
+            carry: ca[1]     ,
+        );
+        inst u1: FullAdder (
+            a    : a[1]      ,
+            b    : b[1] ^ sub,
+            c    : cl_1      ,
+            sum  : r[1]      ,
+            carry: ca[2]     ,
+        );
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Forward array chain c[i] -> c[i+1] is not a loop -- requires
+    // per-element index resolution (regression from celox/linear_sorter).
+    let code = r#"
+    module Buf (
+        i: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = i;
+    }
+
+    module Top (
+        d_in:  input  logic<8>,
+        d_out: output logic<8>,
+    ) {
+        var c: logic<8> [3];
+        assign c[0] = d_in;
+        for i in 0..2 :cell {
+            inst u: Buf (
+                i: c[i],
+                o: c[i + 1],
+            );
+        }
+        assign d_out = c[2];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
+
+    // Bit-disjoint feedback through `x`: x = a[1], a[0] = x. Bit
+    // precision distinguishes bit 0 from bit 1, so not a loop.
+    let code = r#"
+    module Top (
+        b_in: input  logic,
+        a:    output logic<2>,
+    ) {
+        var x: logic;
+        var y: logic;
+        assign a[0] = x;
+        assign a[1] = y;
+        assign x    = a[1];
+        assign y    = b_in;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
+    );
 }
 
 #[test]

@@ -21,7 +21,7 @@ fn check_ir(code: &str, exp: &str) {
     errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
     errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
-    errors.append(&mut Analyzer::analyze_post_pass2());
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
 
@@ -576,7 +576,7 @@ fn const_function_with_static_for() {
     analyzer.analyze_pass1(&"prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
     analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
-    Analyzer::analyze_post_pass2();
+    Analyzer::analyze_post_pass2(&ir);
     let ir = ir.to_string();
     // sum() = 0+1+2+3+4 = 10 = 0xa
     assert!(
@@ -609,7 +609,7 @@ fn const_function_with_static_for() {
     analyzer.analyze_pass1(&"prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
     analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
-    Analyzer::analyze_post_pass2();
+    Analyzer::analyze_post_pass2(&ir);
     let ir = ir.to_string();
     // sum(5) = 0+1+2+3+4 = 10 = 0xa
     assert!(
@@ -2876,7 +2876,7 @@ fn build_ir_with_defines(code: &str, defines: &[&str]) -> String {
     analyzer.analyze_pass1(&"prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
     analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
-    Analyzer::analyze_post_pass2();
+    Analyzer::analyze_post_pass2(&ir);
     ir.to_string()
 }
 

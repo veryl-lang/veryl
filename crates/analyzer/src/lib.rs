@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod analyzer_error;
 pub mod attribute;
 pub mod attribute_table;
+pub mod comb_loop_detect;
 pub mod connect_operation_table;
 pub mod conv;
 pub mod definition_table;

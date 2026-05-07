@@ -14,8 +14,8 @@ impl Ir {
         self.components.append(&mut x.components);
     }
 
-    pub fn eval_assign(&self, context: &mut Context) {
-        for x in &self.components {
+    pub fn eval_assign(&mut self, context: &mut Context) {
+        for x in &mut self.components {
             x.eval_assign(context);
         }
     }
@@ -49,6 +49,7 @@ macro_rules! ir_error {
 
 pub type IrResult<T> = Result<T, Box<IrError>>;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum Component {
     Module(Module),
@@ -57,7 +58,7 @@ pub enum Component {
 }
 
 impl Component {
-    pub fn eval_assign(&self, context: &mut Context) {
+    pub fn eval_assign(&mut self, context: &mut Context) {
         match self {
             Component::Module(x) => x.eval_assign(context),
             Component::Interface(_) => (),

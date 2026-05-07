@@ -37,11 +37,12 @@ fn criterion_benchmark(c: &mut Criterion) {
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
         let mut context = Context::default();
+        let mut ir = veryl_analyzer::ir::Ir::default();
         let mut errors = Vec::new();
         errors.append(&mut analyzer.analyze_pass1(prj, &parser.veryl));
         errors.append(&mut Analyzer::analyze_post_pass1());
-        errors.append(&mut analyzer.analyze_pass2(prj, &parser.veryl, &mut context, None));
-        errors.append(&mut Analyzer::analyze_post_pass2());
+        errors.append(&mut analyzer.analyze_pass2(prj, &parser.veryl, &mut context, Some(&mut ir)));
+        errors.append(&mut Analyzer::analyze_post_pass2(&ir));
         analyzer.clear();
         if !errors.is_empty() {
             dbg!(errors);
@@ -67,10 +68,11 @@ fn criterion_benchmark(c: &mut Criterion) {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(black_box(&metadata));
             let mut context = Context::default();
+            let mut ir = veryl_analyzer::ir::Ir::default();
             analyzer.analyze_pass1(prj, &parser.veryl);
             Analyzer::analyze_post_pass1();
-            analyzer.analyze_pass2(prj, &parser.veryl, &mut context, None);
-            Analyzer::analyze_post_pass2();
+            analyzer.analyze_pass2(prj, &parser.veryl, &mut context, Some(&mut ir));
+            Analyzer::analyze_post_pass2(&ir);
             analyzer.clear();
         })
     });

@@ -2089,9 +2089,7 @@ impl Conv<&air::Module> for ProtoModule {
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
 
-        let mut ff_table = air::FfTable::default();
-        src.gather_ff(&mut analyzer_context, &mut ff_table);
-        ff_table.update_is_ff();
+        let mut ff_table = src.ff_table.clone();
         if context.config.disable_ff_opt {
             ff_table.force_all_ff();
         }

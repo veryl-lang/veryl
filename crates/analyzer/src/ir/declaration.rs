@@ -57,7 +57,12 @@ impl Declaration {
             Declaration::Unsupported(_) => (),
             Declaration::Null => (),
         }
-        assign_table.refernced.clear();
+        // NOTE: `assign_table.refernced` is intentionally NOT cleared here.
+        // The only caller (`Module::eval_assign`) creates a fresh per-decl
+        // `AssignTable`, so leaking the cumulative `refernced` map up to the
+        // caller has no effect on subsequent iterations -- but it lets the
+        // caller capture the per-decl reference masks for combinational loop
+        // detection before dropping the table.
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {

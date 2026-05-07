@@ -229,6 +229,9 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             functions,
             declarations,
             suppress_unassigned: false,
+            per_decl_refs: HashMap::default(),
+            assign_tokens: HashMap::default(),
+            ff_table: ir::FfTable::default(),
         })
     }
 }
@@ -432,6 +435,9 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             functions: HashMap::default(),
             declarations: vec![],
             suppress_unassigned: false,
+            per_decl_refs: HashMap::default(),
+            assign_tokens: HashMap::default(),
+            ff_table: ir::FfTable::default(),
         })
     }
 }

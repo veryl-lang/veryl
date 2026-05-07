@@ -50,7 +50,7 @@ impl CmdDump {
             );
         }
 
-        Analyzer::analyze_post_pass2();
+        Analyzer::analyze_post_pass2(&ir);
 
         if self.opt.symbol_table {
             println!("{}", veryl_analyzer::symbol_table::dump());
