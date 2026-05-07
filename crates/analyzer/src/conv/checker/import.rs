@@ -10,16 +10,17 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
         let is_valid_import = if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
             true
         } else if is_wildcard {
-            symbol.found.is_package(false)
+            symbol.found.is_package(false) || matches!(symbol.found.kind, SymbolKind::Enum(_))
         } else if symbol.full_path.len() >= 2 {
-            let package_symbol = symbol
+            let parent_symbol = symbol
                 .full_path
                 .get(symbol.full_path.len() - 2)
                 .map(|x| symbol_table::get(*x).unwrap())
                 .unwrap();
-            // The preceding symbol must be a package or
+            // The preceding symbol must be a package, an enum, or
             // a proto-package referenced through a generic parameter.
-            package_symbol.is_package(false) && symbol.found.is_importable(true)
+            (parent_symbol.is_package(false) || matches!(parent_symbol.kind, SymbolKind::Enum(_)))
+                && symbol.found.is_importable(true)
         } else {
             false
         };

@@ -840,7 +840,8 @@ impl Symbol {
             }
             SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled => {
                 if let Some(parent) = self.get_parent() {
-                    return parent.is_importable(include_proto);
+                    return matches!(parent.kind, SymbolKind::Enum(_))
+                        || parent.is_importable(include_proto);
                 }
             }
             _ => {}
