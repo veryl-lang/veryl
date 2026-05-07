@@ -682,8 +682,11 @@ impl GenericSymbolPath {
 
     pub fn append_namespace_path(&mut self, namespace: &Namespace, target_namespace: &Namespace) {
         fn is_defined_in_package(symbol: &Symbol) -> bool {
-            if matches!(symbol.kind, SymbolKind::GenericParameter(_)) {
-                // Generic parameter is not visible from other namespace
+            if matches!(
+                symbol.kind,
+                SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+            ) {
+                // Generic parameter and const are not visible from other namespace
                 return false;
             }
 

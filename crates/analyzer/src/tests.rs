@@ -5207,6 +5207,26 @@ fn invisible_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package a_pkg {
+        const A: u32 = 1;
+    }
+    package b_pkg {
+        const B: u32 = 1;
+    }
+    package c_pkg::<c: u32> {
+        const C: u32 = c;
+    }
+    package d_pkg::<a: u32, b: u32> {
+        gen   a_b: u32 = a + b;
+        const C  : u32 = c_pkg::<a_b>::C;
+    }
+    alias package pkg = d_pkg::<a_pkg::A, b_pkg::B>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
