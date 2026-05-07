@@ -64,7 +64,7 @@ fn check_referable_generic_expression(
     let mut paths = collect_symbol_paths(expression);
     for path in paths.drain(..) {
         let mut path = context.resolve_path(path);
-        path.unalias();
+        path.unalias(None);
         let error = check_referable_path(&path, base, token);
         if error.is_some() {
             return error;
@@ -344,7 +344,7 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
                 let bound = &param.1.bound;
 
                 let mut arg = context.resolve_path(arg.clone());
-                arg.unalias();
+                arg.unalias(None);
 
                 if let Some(error) =
                     check_referable_path(&arg, Some(&symbol.found), symbol.found.token.into())

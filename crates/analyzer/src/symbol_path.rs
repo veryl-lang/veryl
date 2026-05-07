@@ -467,7 +467,7 @@ impl GenericSymbolPath {
         }
     }
 
-    pub fn unalias(&mut self) {
+    pub fn unalias(&mut self, generic_maps: Option<&Vec<GenericMap>>) {
         if !self.is_resolvable() {
             return;
         }
@@ -475,8 +475,8 @@ impl GenericSymbolPath {
         let Some(namespace) = namespace_table::get(self.paths[0].base.id) else {
             return;
         };
-        let mut generic_maps: Vec<_> = Vec::new();
 
+        let mut generic_maps = generic_maps.cloned().unwrap_or_default();
         for i in 0..self.len() {
             let symbol = symbol_table::resolve((&self.slice(i).mangled_path(), &namespace));
 
@@ -490,7 +490,7 @@ impl GenericSymbolPath {
                         alias_target.paths.push(self.paths[j].clone());
                     }
                 }
-                alias_target.unalias();
+                alias_target.unalias(Some(&generic_maps));
 
                 self.paths = alias_target.paths;
                 self.kind = alias_target.kind;
@@ -500,7 +500,7 @@ impl GenericSymbolPath {
 
             if let Some(path) = self.paths.get_mut(i) {
                 for arg in path.arguments.iter_mut() {
-                    arg.unalias();
+                    arg.unalias(Some(&generic_maps));
                 }
 
                 if let Ok(ref symbol) = symbol
@@ -660,7 +660,7 @@ impl GenericSymbolPath {
                 if let Some(maps) = generic_maps {
                     package_path.apply_map(maps);
                 }
-                package_path.unalias();
+                package_path.unalias(None);
 
                 for (i, path) in package_path.paths.iter().enumerate() {
                     let token = Token::generate(path.base.text, self_file_path);

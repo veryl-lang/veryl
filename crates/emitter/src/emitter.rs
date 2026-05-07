@@ -6245,7 +6245,7 @@ pub fn resolve_generic_path(
     if let Some(maps) = generic_maps {
         path.apply_map(maps);
     }
-    path.unalias();
+    path.unalias(None);
 
     let path_symbols: Vec<_> = (0..path.len())
         .filter_map(|i| {
@@ -6270,7 +6270,7 @@ pub fn resolve_generic_path(
                     break;
                 };
                 let mut arg = default.clone();
-                arg.unalias();
+                arg.unalias(None);
                 path.paths[*i].arguments.push(arg);
             }
 
@@ -6278,7 +6278,7 @@ pub fn resolve_generic_path(
                 if let Some(maps) = generic_maps {
                     arg.apply_map(maps);
                 }
-                arg.unalias();
+                arg.unalias(None);
                 if !symbol.is_global_function() {
                     arg.append_namespace_path(namespace, &symbol.namespace);
                 }

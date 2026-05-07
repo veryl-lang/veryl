@@ -329,7 +329,7 @@ impl ReferenceTable {
                     }
 
                     for arg in args.iter_mut() {
-                        arg.unalias();
+                        arg.unalias(None);
                         // Global function is emitted into the caller namespace.
                         // So namespace expansion is not needed.
                         if !target_symbol.is_global_function() {
@@ -461,7 +461,7 @@ impl ReferenceTable {
             }
 
             path.apply_map(generic_maps);
-            path.unalias();
+            path.unalias(None);
             path.append_namespace_path(namespace, &target.namespace);
 
             if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))

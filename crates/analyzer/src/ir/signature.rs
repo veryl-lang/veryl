@@ -43,7 +43,7 @@ impl Signature {
     pub fn from_path(context: &mut Context, mut path: GenericSymbolPath) -> Option<Self> {
         let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
         path.resolve_imported(&namespace, None);
-        path.unalias();
+        path.unalias(None);
 
         let symbol = symbol_table::resolve(&path).ok()?;
 
