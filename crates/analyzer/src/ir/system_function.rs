@@ -1,3 +1,4 @@
+use crate::analyzer_error::UnevaluableValueKind;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::FfTable;
@@ -5,6 +6,7 @@ use crate::ir::{
     AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
     VarPathSelect,
 };
+use crate::symbol::Affiliation;
 use crate::value::Value;
 use crate::{AnalyzerError, BigUint, ir_error};
 use std::fmt;
@@ -139,7 +141,6 @@ impl SystemFunctionCall {
         token: TokenRange,
     ) -> IrResult<Self> {
         let mut comptime = Comptime::create_unknown(token);
-        comptime.is_const = true;
 
         match name.to_string().as_str() {
             "$bits" => {
@@ -153,6 +154,7 @@ impl SystemFunctionCall {
                     return Err(ir_error!(token));
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));
+                comptime.is_const = true;
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Bits(arg0),
                     comptime,
@@ -169,6 +171,7 @@ impl SystemFunctionCall {
                     return Err(ir_error!(token));
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));
+                comptime.is_const = true;
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Size(arg0),
                     comptime,
@@ -190,6 +193,15 @@ impl SystemFunctionCall {
                     t
                 };
                 let arg0 = create_input(context, name, Some(arg0_type), args.remove(0));
+                // Function bodies are templates; const-ness is resolved per call.
+                if !arg0.0.comptime().is_const && !context.is_affiliated(Affiliation::Function) {
+                    context.insert_error(AnalyzerError::unevaluable_value(
+                        UnevaluableValueKind::SystemFunctionArg("$clog2"),
+                        &arg0.0.token_range(),
+                    ));
+                    return Err(ir_error!(token));
+                }
+                comptime.is_const = true;
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Clog2(arg0),
                     comptime,
@@ -211,6 +223,14 @@ impl SystemFunctionCall {
                     t
                 };
                 let arg0 = create_input(context, name, Some(arg0_type), args.remove(0));
+                if !arg0.0.comptime().is_const && !context.is_affiliated(Affiliation::Function) {
+                    context.insert_error(AnalyzerError::unevaluable_value(
+                        UnevaluableValueKind::SystemFunctionArg("$onehot"),
+                        &arg0.0.token_range(),
+                    ));
+                    return Err(ir_error!(token));
+                }
+                comptime.is_const = true;
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Onehot(arg0),
                     comptime,
@@ -282,6 +302,7 @@ impl SystemFunctionCall {
                 if !args.is_empty() {
                     return Err(ir_error!(token));
                 }
+                comptime.is_const = true;
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Finish,
                     comptime,
@@ -296,6 +317,7 @@ impl SystemFunctionCall {
                 arg.0.eval_comptime(context, None);
 
                 let arg0 = create_input(context, name, None, arg);
+                comptime.is_const = arg0.0.comptime().is_const;
                 comptime.expr_context.signed = true;
 
                 Ok(SystemFunctionCall {
@@ -312,6 +334,7 @@ impl SystemFunctionCall {
                 arg.0.eval_comptime(context, None);
 
                 let arg0 = create_input(context, name, None, arg);
+                comptime.is_const = arg0.0.comptime().is_const;
                 comptime.expr_context.signed = false;
 
                 Ok(SystemFunctionCall {
@@ -347,6 +370,9 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Clog2(x) => {
                 let value = x.0.eval_value(context)?;
+                if value.is_xz() {
+                    return Some(Value::new_x(32, false));
+                }
                 let value = value.payload();
                 let ret = if value.as_ref() == &BigUint::from(0u32) {
                     BigUint::from(0u32)
@@ -357,6 +383,9 @@ impl SystemFunctionCall {
             }
             SystemFunctionKind::Onehot(x) => {
                 let value = x.0.eval_value(context)?;
+                if value.is_xz() {
+                    return Some(Value::new_x(1, false));
+                }
                 let ret = value.payload().count_ones() == 1;
                 Some(Value::new(ret.into(), 1, false))
             }

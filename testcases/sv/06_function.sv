@@ -69,7 +69,7 @@ module veryl_testcase_Module06;
     end
 
     // system function call
-    always_comb e = $clog2(a);
+    always_comb e = $clog2(ParamX);
 
     // function call with named args
     function automatic logic FuncB(

@@ -12100,6 +12100,48 @@ fn unevaluable_value_for_range() {
 }
 
 #[test]
+fn unevaluable_value_system_function_arg() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8> ,
+        q: output logic<32>,
+    ) {
+        always_comb {
+            q = $clog2(d);
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        q: output logic   ,
+    ) {
+        always_comb {
+            q = $onehot(d);
+        }
+    }"#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA {
+        const A: u32 = $clog2(8);
+        const B: u32 = $onehot(8);
+    }"#;
+
+    let errors = analyze(code);
+    let unevaluable_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::UnevaluableValue { .. }))
+        .collect();
+    assert!(unevaluable_errors.is_empty());
+}
+
+#[test]
 fn unevaluable_value_parameter_value() {
     // non-const variable used as parameter override
     let code = r#"
