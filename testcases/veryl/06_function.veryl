@@ -66,7 +66,7 @@ module Module06 {
     }
 
     // system function call
-    assign e = $clog2(a);
+    assign e = $clog2(ParamX);
 
     // function call with named args
     function FuncB (

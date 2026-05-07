@@ -126,7 +126,7 @@ module veryl_testcase_Module49;
         a = $monitoro();
         a = $monitoroff();
         a = $monitoron();
-        a = $onehot(a);
+        a = $onehot(1);
         a = $onehot0();
         a = $past();
         a = $past_gclk();

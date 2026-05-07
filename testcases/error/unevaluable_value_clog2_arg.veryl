@@ -1,0 +1,8 @@
+module unevaluable_value_clog2_arg (
+    d: input  logic<8> ,
+    q: output logic<32>,
+) {
+    always_comb {
+        q = $clog2(d);
+    }
+}

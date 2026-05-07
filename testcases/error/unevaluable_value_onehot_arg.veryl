@@ -1,0 +1,8 @@
+module unevaluable_value_onehot_arg (
+    d: input  logic<8>,
+    q: output logic   ,
+) {
+    always_comb {
+        q = $onehot(d);
+    }
+}

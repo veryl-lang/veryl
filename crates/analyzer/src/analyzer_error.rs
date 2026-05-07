@@ -2972,6 +2972,7 @@ pub enum UnevaluableValueKind {
     ForRange,
     ParameterValue,
     ResetValue,
+    SystemFunctionArg(&'static str),
 }
 
 impl fmt::Display for UnevaluableValueKind {
@@ -2983,6 +2984,9 @@ impl fmt::Display for UnevaluableValueKind {
             UnevaluableValueKind::ForRange => "for range".fmt(f),
             UnevaluableValueKind::ParameterValue => "parameter value".fmt(f),
             UnevaluableValueKind::ResetValue => "reset value".fmt(f),
+            UnevaluableValueKind::SystemFunctionArg(name) => {
+                write!(f, "{name} argument")
+            }
         }
     }
 }
