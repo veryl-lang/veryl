@@ -1,5 +1,5 @@
 module ModuleK::<PKG: ProtoPackageJ> {
-  const K: u32 = PackageL::<PKG>::L;
+    const K: u32 = PackageL::<PKG>::L;
 }
 
 alias package J = PackageJ::<32>;

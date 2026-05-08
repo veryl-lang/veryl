@@ -10,13 +10,8 @@ module veryl_testcase_Module18 (
 
     // multi-line concatenation
     logic _d; always_comb _d = {
-        {8{a}}, {8{b}}, {8{c}},
-        {8{a}}, {8{b}}, {8{c}},
-        {8{a}}, {8{b}}, {8{c}},
-        {8{a}}, {8{b}}, {8{c}},
-        {8{a}}, {8{b}}, {8{c}},
-        {8{a}}, {8{b}}, {8{c}},
-        {8{a}}, {8{b}}, {8{c}}
+        {8{a}}, {8{b}}, {8{c}}, {8{a}}, {8{b}}, {8{c}}, {8{a}}, {8{b}}, {8{c}}, {8{a}}, {8{b}}, {8{c}}, {8{a}}, {8{b}},
+        {8{c}}, {8{a}}, {8{b}}, {8{c}}, {8{a}}, {8{b}}, {8{c}}
     };
 
     logic [20-1:0] d;
@@ -24,12 +19,8 @@ module veryl_testcase_Module18 (
     always_comb {d, e} = a;
 
     veryl_testcase_Module18A u (
-        .a ({
-            1'b1,
-            2'b1,
-            1'b1
-        }),
-        .b (0)
+        .a ({1'b1, 2'b1, 1'b1}),
+        .b (0                 )
     );
 
     logic f;

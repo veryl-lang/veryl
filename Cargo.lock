@@ -5967,6 +5967,7 @@ dependencies = [
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
+ "veryl-pretty",
  "veryl-sourcemap",
 ]
 
@@ -5979,6 +5980,7 @@ dependencies = [
  "veryl-analyzer",
  "veryl-metadata",
  "veryl-parser",
+ "veryl-pretty",
 ]
 
 [[package]]
@@ -6073,6 +6075,10 @@ dependencies = [
  "thiserror",
  "walkdir",
 ]
+
+[[package]]
+name = "veryl-pretty"
+version = "0.20.0"
 
 [[package]]
 name = "veryl-simulator"

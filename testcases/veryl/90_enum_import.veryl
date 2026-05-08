@@ -28,7 +28,7 @@ module Module90C (
     import Package90::EnumPkg::P;
     import Package90::EnumPkg::*;
 
-    var a  : Package90::EnumPkg;
+    var a: Package90::EnumPkg;
     assign a   = P;
     assign o_d = inside a {P, Q, R};
 }

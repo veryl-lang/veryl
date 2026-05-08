@@ -8,7 +8,7 @@ mixed_function_argument (https://doc.veryl-lang.org/book/07_appendix/02_semantic
     ╭─[../../testcases/error/mixed_function_argument.veryl:10:9]
   9 │         let _a: logic = FuncA(
  10 │ ╭─▶         0,
- 11 │ ├─▶         a: 1
+ 11 │ ├─▶         a: 1,
     · ╰──── Error location
  12 │         );
     ╰────

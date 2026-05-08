@@ -7,7 +7,7 @@ module Module38 {
 
     const WORD_BITS: u32 = $bits(word_t);
 
-    var rf   : regfile_t;
+    var rf: regfile_t;
     assign rf[0] = '0;
     assign rf[1] = '0;
 }

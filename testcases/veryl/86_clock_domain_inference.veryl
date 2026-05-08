@@ -9,7 +9,7 @@ pub module Module86A (
     o_dat_b: output 'b logic,
 ) {
     // Inference from assign RHS
-    var x      : logic;
+    var x: logic;
     assign x       = i_dat_a;
     assign o_dat_a = x;
 

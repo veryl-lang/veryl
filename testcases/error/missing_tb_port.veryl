@@ -5,6 +5,6 @@ module missing_tb_port {
 
     initial {
         rst.assert();
-        $finish();
+        $finish   ();
     }
 }

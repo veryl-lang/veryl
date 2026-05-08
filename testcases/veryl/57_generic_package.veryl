@@ -50,8 +50,8 @@ module Module57 {
     const F: u64 = Package57B::<Y>::X;
     const G: u64 = X;
 
-    var _c   : Package57C::<2>::StructC     ;
-    var _d   : Package57D::<1>::StructD::<2>;
+    var _c: Package57C::<2>::StructC     ;
+    var _d: Package57D::<1>::StructD::<2>;
     assign _c.c  = 1;
     assign _d.d0 = 0;
     assign _d.d1 = 1;

@@ -15,20 +15,16 @@ module CounterForLoop (
 #[test(test_for_loop)]
 module test_for_loop {
     inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen(clk);
+    inst rst: $tb::reset_gen ( clk );
 
     var cnt: logic<32>;
 
-    inst dut: CounterForLoop (
-        clk: clk,
-        rst: rst,
-        cnt: cnt,
-    );
+    inst dut: CounterForLoop ( clk: clk, rst: rst, cnt: cnt );
 
     initial {
         rst.assert();
-        clk.next(10);
-        $assert(cnt == 32'd10);
+        clk.next  (10);
+        $assert   (cnt == 32'd10);
         for _i in 0..5 {
             clk.next();
         }
@@ -40,20 +36,16 @@ module test_for_loop {
 #[test(test_for_loop_step)]
 module test_for_loop_step {
     inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen(clk);
+    inst rst: $tb::reset_gen ( clk );
 
     var cnt: logic<32>;
 
-    inst dut: CounterForLoop (
-        clk: clk,
-        rst: rst,
-        cnt: cnt,
-    );
+    inst dut: CounterForLoop ( clk: clk, rst: rst, cnt: cnt );
 
     initial {
         rst.assert();
-        clk.next(10);
-        $assert(cnt == 32'd10);
+        clk.next  (10);
+        $assert   (cnt == 32'd10);
         for _i in 0..10 step += 2 {
             clk.next(2);
         }
@@ -65,20 +57,16 @@ module test_for_loop_step {
 #[test(test_for_loop_rev)]
 module test_for_loop_rev {
     inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen(clk);
+    inst rst: $tb::reset_gen ( clk );
 
     var cnt: logic<32>;
 
-    inst dut: CounterForLoop (
-        clk: clk,
-        rst: rst,
-        cnt: cnt,
-    );
+    inst dut: CounterForLoop ( clk: clk, rst: rst, cnt: cnt );
 
     initial {
         rst.assert();
-        clk.next(10);
-        $assert(cnt == 32'd10);
+        clk.next  (10);
+        $assert   (cnt == 32'd10);
         for _i in rev 0..5 {
             clk.next();
         }

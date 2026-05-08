@@ -120,34 +120,90 @@ mod formatter {
     use veryl_metadata::Metadata;
     use veryl_parser::Parser;
 
-    fn test(name: &str) {
+    fn format_file(file: &str) -> Option<(String, String)> {
         let metadata_path = Metadata::search_from_current().unwrap();
         let metadata = Metadata::load(&metadata_path).unwrap();
 
-        let file = format!("../../testcases/veryl/{}.veryl", name);
-        let input = fs::read_to_string(&file).unwrap();
-        let original = input.clone();
-
-        // minify without lines which contain line comment
-        let mut minified = String::new();
-        for line in input.lines() {
-            if line.contains("//") {
-                minified.push_str(&format!("{}\n", line));
-            } else {
-                minified.push_str(&format!("{}\n", line.replace(' ', "")));
-            }
-        }
-
-        let ret = Parser::parse(&input, &file).unwrap();
+        let input = fs::read_to_string(file).unwrap();
+        // Some error testcases intentionally contain syntax errors that
+        // the parser rejects; nothing to format-check for those.
+        let ret = Parser::parse(&input, &file).ok()?;
         let prj = &metadata.project.name;
         let analyzer = Analyzer::new(&metadata);
-        let _ = analyzer.analyze_pass1(&prj, &ret.veryl);
+        let _ = analyzer.analyze_pass1(prj, &ret.veryl);
         let mut formatter = Formatter::new(&metadata);
         formatter.format(&ret.veryl, &input);
-        assert_eq!(original, formatter.as_str());
+        Some((input, formatter.as_str().to_string()))
+    }
+
+    fn run(file: &str) {
+        if let Some((input, formatted)) = format_file(file) {
+            assert_eq!(input, formatted);
+        }
+    }
+
+    /// Reformat every file under the categories tested below and write
+    /// back the result. Run manually with
+    /// `cargo test -p veryl-tests regenerate_format_testcases -- --ignored`
+    /// after a formatter change that intentionally shifts these layouts.
+    #[test]
+    #[ignore]
+    fn regenerate_format_testcases() {
+        let dirs = [
+            "../../testcases/error",
+            "../../testcases/filelist/src",
+            "../../testcases/native_test/src",
+            "../../testcases/sample/src",
+        ];
+        for dir in dirs {
+            for entry in fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().and_then(|s| s.to_str()) != Some("veryl") {
+                    continue;
+                }
+                let file = path.to_string_lossy().to_string();
+                if let Some((input, formatted)) = format_file(&file)
+                    && input != formatted
+                {
+                    fs::write(&file, formatted).unwrap();
+                }
+            }
+        }
+    }
+
+    fn test(name: &str) {
+        run(&format!("../../testcases/veryl/{}.veryl", name));
     }
 
     include!(concat!(env!("OUT_DIR"), "/test.rs"));
+
+    mod error {
+        fn test(name: &str) {
+            super::run(&format!("../../testcases/error/{}.veryl", name));
+        }
+        include!(concat!(env!("OUT_DIR"), "/error_test.rs"));
+    }
+
+    mod filelist {
+        fn test(name: &str) {
+            super::run(&format!("../../testcases/filelist/src/{}.veryl", name));
+        }
+        include!(concat!(env!("OUT_DIR"), "/filelist_test.rs"));
+    }
+
+    mod native_test {
+        fn test(name: &str) {
+            super::run(&format!("../../testcases/native_test/src/{}.veryl", name));
+        }
+        include!(concat!(env!("OUT_DIR"), "/native_test_test.rs"));
+    }
+
+    mod sample {
+        fn test(name: &str) {
+            super::run(&format!("../../testcases/sample/src/{}.veryl", name));
+        }
+        include!(concat!(env!("OUT_DIR"), "/sample_test.rs"));
+    }
 }
 
 #[cfg(test)]

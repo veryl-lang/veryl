@@ -20,12 +20,7 @@ pub module binary_decoder #(
     // dynamic power consumption while the decoder is not active.
     let masked_bin: logic<BIN_WIDTH> = i_bin & {i_en repeat BIN_WIDTH};
 
-    inst u_bin_decoder: _bin_decoder #(
-        BIN_WIDTH: BIN_WIDTH,
-    ) (
-        i_bin  : masked_bin,
-        o_unary: o_unary   ,
-    );
+    inst u_bin_decoder: _bin_decoder #( BIN_WIDTH: BIN_WIDTH ) ( i_bin: masked_bin, o_unary: o_unary );
 
 }
 
@@ -47,12 +42,7 @@ module _bin_decoder #(
         let   r_bin          : logic<REC_BIN_WIDTH>   = i_bin[REC_BIN_WIDTH - 1:0];
         var   r_unary        : logic<REC_UNARY_WIDTH>;
 
-        inst rec_bin_decoder: _bin_decoder #(
-            BIN_WIDTH: REC_BIN_WIDTH,
-        ) (
-            i_bin  : r_bin  ,
-            o_unary: r_unary,
-        );
+        inst rec_bin_decoder: _bin_decoder #( BIN_WIDTH: REC_BIN_WIDTH ) ( i_bin: r_bin, o_unary: r_unary );
 
         let mask_top: logic<REC_UNARY_WIDTH> = if i_bin[BIN_WIDTH - 1] ? '1 : '0;
         let mask_bot: logic<REC_UNARY_WIDTH> = ~mask_top;

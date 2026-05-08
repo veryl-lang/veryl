@@ -7,28 +7,32 @@ module DualClock (
     cnt_b: output 'b logic<32>,
 ) {
     always_ff (clk_a, rst_a) {
-        if_reset { cnt_a = 0; }
-        else     { cnt_a += 1; }
+        if_reset {
+            cnt_a = 0;
+        } else {
+            cnt_a += 1;
+        }
     }
     always_ff (clk_b, rst_b) {
-        if_reset { cnt_b = 0; }
-        else     { cnt_b += 1; }
+        if_reset {
+            cnt_b = 0;
+        } else {
+            cnt_b += 1;
+        }
     }
 }
 
 #[test(test_dual_clock)]
 module test_dual_clock {
     inst clk_a: $tb::clock_gen;
-    inst rst_a: $tb::reset_gen(clk: clk_a);
+    inst rst_a: $tb::reset_gen ( clk: clk_a );
     inst clk_b: $tb::clock_gen;
-    inst rst_b: $tb::reset_gen(clk: clk_b);
+    inst rst_b: $tb::reset_gen ( clk: clk_b );
 
     var cnt_a: logic<32>;
     var cnt_b: logic<32>;
 
-    inst dut: DualClock (
-        clk_a, rst_a, clk_b, rst_b, cnt_a, cnt_b,
-    );
+    inst dut: DualClock ( clk_a, rst_a, clk_b, rst_b, cnt_a, cnt_b );
 
     initial {
         rst_a.assert();

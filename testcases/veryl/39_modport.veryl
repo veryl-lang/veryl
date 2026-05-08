@@ -2,7 +2,7 @@ module Module39 (
     mst: modport Interface39::master,
     slv: modport Interface39::slave ,
 ) {
-    var a    : logic;
+    var a: logic;
     assign mst.a = a;
     assign a     = slv.get_a();
 }

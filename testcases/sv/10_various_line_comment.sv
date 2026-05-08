@@ -27,9 +27,9 @@ module //a
      begin
         up_down = // a
          (i_up // a
-         << //a
-         1) // a
-         | i_down;
+                << //a
+                 1) // a
+             | i_down;
     end
 
     always_ff // a
@@ -45,18 +45,19 @@ module //a
          else //
          if // a
          (up_down // a
-         == // a
-         2'b10) begin
+            == // a
+             2'b10) begin
             count <= count // a
-             + 1 //a
+                + 1 //a
             ;
         end // a
          else // a
          if //a
          (up_down == 2'b01) begin
             count // a
-             <= count - // a
-             1;
+             <= count
+                - // a
+                 1;
         end
     end
 endmodule

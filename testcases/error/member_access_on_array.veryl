@@ -3,7 +3,7 @@ module member_access_on_array {
         a: logic,
     }
 
-    var x: A[10];
-    let _y: logic = x.a;
-    let _z: logic = x[0].a;
+    var x : A     [10];
+    let _y: logic      = x.a;
+    let _z: logic      = x[0].a;
 }

@@ -3,7 +3,7 @@ module unknown_member {
         x: logic,
     }
 
-    var a  : StructA;
+    var a: StructA;
     assign a.x = 1;
     assign a.a = 1;
 }

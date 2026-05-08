@@ -6,7 +6,7 @@ duplicated_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_e
 
   × "_a" is duplicated
    ╭─[../../testcases/error/duplicated_identifier_raw.veryl:3:9]
- 2 │     var _a: logic;
+ 2 │     var _a  : logic;
  3 │     var r#_a: logic;
    ·         ──┬─
    ·           ╰── Error location

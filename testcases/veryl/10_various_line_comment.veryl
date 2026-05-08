@@ -12,7 +12,7 @@ module //a
     i_down : input  logic   ,
     o_count: output logic<8>,
 ) {
-    var count //a
+    var count   //a
     : logic //a
     < // a
     8 //a
@@ -26,9 +26,9 @@ module //a
      {
         up_down = // a
          (i_up // a
-         << //a
-         1) // a
-         | i_down;
+                << //a
+                 1) // a
+             | i_down;
     }
 
     always_ff // a
@@ -44,18 +44,19 @@ module //a
          else //
          if // a
          up_down // a
-         == // a
-         2'b10 {
+            == // a
+             2'b10 {
             count = count // a
-             + 1 //a
+                + 1 //a
             ;
         } // a
          else // a
          if //a
          up_down == 2'b01 {
             count // a
-             = count - // a
-             1;
+             = count
+                - // a
+                 1;
         }
     }
 }

@@ -3,7 +3,7 @@ module unsupported_statement (
     c: output logic<32>,
 ) {
     always_comb {
-        c = a;
+        c            = a;
         $sv::sv_func();
     }
 }

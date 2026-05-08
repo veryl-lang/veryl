@@ -114,19 +114,9 @@ pub module async_fifo::<S: synchronizer> #(
         }
     }
 
-    inst u_s_bin2gray: gray_encoder #(
-        WIDTH: POINTER_WIDTH,
-    ) (
-        i_bin : wp_sclk     ,
-        o_gray: wp_sclk_gray,
-    );
+    inst u_s_bin2gray: gray_encoder #( WIDTH: POINTER_WIDTH ) ( i_bin: wp_sclk, o_gray: wp_sclk_gray );
 
-    inst u_s_gray2bin: gray_decoder #(
-        WIDTH: POINTER_WIDTH,
-    ) (
-        i_gray: rp_sclk_gray,
-        o_bin : rp_sclk     ,
-    );
+    inst u_s_gray2bin: gray_decoder #( WIDTH: POINTER_WIDTH ) ( i_gray: rp_sclk_gray, o_bin: rp_sclk );
 
     //--------------------------------------------------------------
     //  FIFO Control (Read Side)
@@ -177,19 +167,9 @@ pub module async_fifo::<S: synchronizer> #(
         }
     }
 
-    inst u_d_bin2gray: gray_encoder #(
-        WIDTH: POINTER_WIDTH,
-    ) (
-        i_bin : rp_dclk     ,
-        o_gray: rp_dclk_gray,
-    );
+    inst u_d_bin2gray: gray_encoder #( WIDTH: POINTER_WIDTH ) ( i_bin: rp_dclk, o_gray: rp_dclk_gray );
 
-    inst u_d_gray2bin: gray_decoder #(
-        WIDTH: POINTER_WIDTH,
-    ) (
-        i_gray: wp_dclk_gray,
-        o_bin : wp_dclk     ,
-    );
+    inst u_d_gray2bin: gray_decoder #( WIDTH: POINTER_WIDTH ) ( i_gray: wp_dclk_gray, o_bin: wp_dclk );
 
     //--------------------------------------------------------------
     //  Synchronizer

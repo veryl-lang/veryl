@@ -2,7 +2,9 @@ module recursive_function (
     a: input  logic<32>,
     c: output logic<32>,
 ) {
-    function recurse(x: input logic<32>) -> logic<32> {
+    function recurse (
+        x: input logic<32>,
+    ) -> logic<32> {
         return recurse(x);
     }
 

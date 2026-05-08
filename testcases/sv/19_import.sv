@@ -38,7 +38,6 @@ module veryl_testcase_Module19C
 );
 
 
-
     // comment
     always_comb o_d = '0;
 endmodule

@@ -69,7 +69,6 @@ pub module fifo #(
         o_write_to_ram : write_to_ram ,
         o_read_pointer : read_pointer ,
         o_read_from_ram: read_from_ram,
-
     );
 
     //--------------------------------------------------------------

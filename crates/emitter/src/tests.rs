@@ -380,8 +380,10 @@ fn expand_inside_operator() {
     logic a;
     logic b;
 
-    always_comb a = ((1 + 2 / 3) ==? (0) || ((1 + 2 / 3) >= (0)) && ((1 + 2 / 3) < (10)) || ((1 + 2 / 3) >= (1)) && ((1 + 2 / 3) <= (10)));
-    always_comb b = !((1 * 2 - 1) ==? (0) || ((1 * 2 - 1) >= (0)) && ((1 * 2 - 1) < (10)) || ((1 * 2 - 1) >= (1)) && ((1 * 2 - 1) <= (10)));
+    always_comb a = ((1 + 2 / 3) ==? (0) || ((1 + 2 / 3) >= (0)) && ((1 + 2 / 3) < (10)) || ((1 + 2 / 3) >= (1)) && ((1
+        + 2 / 3) <= (10)));
+    always_comb b = !((1 * 2 - 1) ==? (0) || ((1 * 2 - 1) >= (0)) && ((1 * 2 - 1) < (10)) || ((1 * 2 - 1) >= (1)) && ((1
+        * 2 - 1) <= (10)));
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
@@ -2848,7 +2850,15 @@ fn no_vertical_align() {
 "#;
 
     let expect = r#"module prj_ModuleA;
-    int unsigned _a; always_comb _a = ((1'b1) ? ( ((1'b1) ? ( 1 ) : ( 2 )) ) : ( 3 ));
+    int unsigned _a; always_comb _a = ((1'b1) ? (
+        ((1'b1) ? (
+            1
+        ) : (
+            2
+        ))
+    ) : (
+        3
+    ));
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;

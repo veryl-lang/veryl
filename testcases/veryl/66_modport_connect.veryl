@@ -12,11 +12,7 @@ module Module66 (
     c: interface::port,
 ) {
 
-    inst u: Module66A (
-        a: a,
-        b: b,
-        c: c,
-    );
+    inst u: Module66A ( a: a, b: b, c: c );
 }
 
 module Module66A (

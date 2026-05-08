@@ -11,6 +11,7 @@ members = [
     "crates/migrator",
     "crates/parser",
     "crates/path",
+    "crates/pretty",
     "crates/simulator",
     "crates/sourcemap",
     "crates/std",

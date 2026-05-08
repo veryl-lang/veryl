@@ -46,4 +46,7 @@ fn main() {
 
     gather_test("veryl", "test.rs");
     gather_test("error", "error_test.rs");
+    gather_test("filelist/src", "filelist_test.rs");
+    gather_test("native_test/src", "native_test_test.rs");
+    gather_test("sample/src", "sample_test.rs");
 }

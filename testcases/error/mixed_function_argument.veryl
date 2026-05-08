@@ -8,6 +8,6 @@ module mixed_function_argument {
 
     let _a: logic = FuncA(
         0,
-        a: 1
+        a: 1,
     );
 }

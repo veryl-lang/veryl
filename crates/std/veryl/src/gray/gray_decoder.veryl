@@ -21,12 +21,7 @@ pub module gray_decoder #(
         let top_in : logic<TWIDTH> = i_gray[WIDTH - 1:BWIDTH];
         var top_out: logic<TWIDTH>;
 
-        inst u_top: gray_decoder #(
-            WIDTH: TWIDTH,
-        ) (
-            i_gray: top_in ,
-            o_bin : top_out,
-        );
+        inst u_top: gray_decoder #( WIDTH: TWIDTH ) ( i_gray: top_in, o_bin: top_out );
 
         // Bot Bits
         let bot_in : logic<BWIDTH> = i_gray[BWIDTH - 1:0];
@@ -34,12 +29,7 @@ pub module gray_decoder #(
         // Have to xor all of the bottom bits with the xor-reduction of the top bits
         let bot_red: logic<BWIDTH> = bot_out ^ {top_out[0] repeat BWIDTH};
 
-        inst u_bot: gray_decoder #(
-            WIDTH: BWIDTH,
-        ) (
-            i_gray: bot_in ,
-            o_bin : bot_out,
-        );
+        inst u_bot: gray_decoder #( WIDTH: BWIDTH ) ( i_gray: bot_in, o_bin: bot_out );
 
         assign o_bin = {top_out, bot_red};
     }

@@ -1,11 +1,7 @@
 module Module35 {
     let aa: logic = 1;
 
-    inst xx: Module35B (
-        aa     ,
-        bb  : _,
-        bbbb: _,
-    );
+    inst xx: Module35B ( aa, bb: _, bbbb: _ );
 }
 
 module Module35B (
