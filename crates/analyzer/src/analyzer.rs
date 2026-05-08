@@ -1,5 +1,6 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute_table;
+use crate::comb_loop_detect;
 use crate::conv::{Context, Conv};
 use crate::generic_inference_table;
 use crate::handlers::*;
@@ -114,7 +115,7 @@ impl Analyzer {
     fn create_ir(context: &mut Context, input: &Veryl) -> (Ir, Vec<AnalyzerError>) {
         let ir: IrResult<Ir> = Conv::conv(context, input);
 
-        if let Ok(ir) = ir {
+        if let Ok(mut ir) = ir {
             ir.eval_assign(context);
             let errors = context.drain_errors();
             (ir, errors)
@@ -149,11 +150,12 @@ impl Analyzer {
         ret
     }
 
-    pub fn analyze_post_pass2() -> Vec<AnalyzerError> {
+    pub fn analyze_post_pass2(ir: &Ir) -> Vec<AnalyzerError> {
         let mut ret = Vec::new();
 
         ret.append(&mut symbol_table::check_unused_variable());
         ret.append(&mut symbol_table::check_wavedrom());
+        ret.append(&mut comb_loop_detect::check(ir));
 
         ret
     }

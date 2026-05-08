@@ -17,6 +17,7 @@ mod system_function;
 mod utils;
 mod variable;
 mod width_expr;
+pub use assign_table::ReferencedEntry;
 pub use comptime::{
     Comptime, ExpressionContext, InstanceKind, PartSelectPath, Type, TypeKind, TypeKindEnum,
     TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,

@@ -695,10 +695,10 @@ impl Server {
             if self.document_map.contains_key(&src) {
                 return;
             }
+            if let Some(src_id) = resource_table::get_path_id(&src) {
+                drop_tables(src_id);
+            }
             if let Ok(x) = Parser::parse(&text, &src) {
-                if let Some(src) = resource_table::get_path_id(&src) {
-                    drop_tables(src);
-                }
                 let analyzer = Analyzer::new(metadata);
                 let _ = analyzer.analyze_pass1(&path.prj, &x.veryl);
 
@@ -734,24 +734,27 @@ impl Server {
             }
 
             if let Some(metadata) = self.get_metadata(url) {
+                // Drop before parse: parse re-registers the text, so
+                // dropping after would erase the just-registered entry.
+                if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
+                    drop_tables(path_id);
+                }
                 let diag = match Parser::parse(text, &path) {
                     Ok(x) => {
                         let path_id = resource_table::get_path_id(path.to_path_buf());
-                        if let Some(path_id) = path_id {
-                            drop_tables(path_id);
-                        }
 
                         let analyzer = Analyzer::new(&metadata);
                         let mut context = Context::default();
+                        let mut ir = veryl_analyzer::ir::Ir::default();
                         let mut errors = analyzer.analyze_pass1(prj, &x.veryl);
                         errors.append(&mut Analyzer::analyze_post_pass1());
                         errors.append(&mut analyzer.analyze_pass2(
                             prj,
                             &x.veryl,
                             &mut context,
-                            None,
+                            Some(&mut ir),
                         ));
-                        errors.append(&mut Analyzer::analyze_post_pass2());
+                        errors.append(&mut Analyzer::analyze_post_pass2(&ir));
                         let ret: Vec<_> = errors
                             .drain(0..)
                             .filter(|x| {
@@ -815,22 +818,37 @@ impl Server {
 fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
     let miette_diag: &dyn miette::Diagnostic = err.as_ref();
 
-    let range = if let Some(mut labels) = miette_diag.labels() {
-        labels.next().map_or(Range::default(), |label| {
+    let (primary, participants) = miette_diag
+        .labels()
+        .map(|mut it| (it.next(), it.collect::<Vec<_>>()))
+        .unwrap_or((None, Vec::new()));
+
+    let range = primary
+        .as_ref()
+        .map(|label| {
             if rope.len_bytes() <= label.offset() {
                 Range::default()
             } else {
                 let line = rope.byte_to_line(label.offset());
                 let pos = label.offset() - rope.line_to_byte(line);
-                let line = line as u32;
-                let pos = pos as u32;
-                let len = label.len() as u32;
-                Range::new(Position::new(line, pos), Position::new(line, pos + len))
+                let len = label.len();
+                Range::new(
+                    Position::new(line as u32, pos as u32),
+                    Position::new(line as u32, (pos + len) as u32),
+                )
             }
         })
-    } else {
-        Range::default()
-    };
+        .unwrap_or_default();
+
+    // Non-primary labels become navigable related-information.
+    let related_information: Option<Vec<DiagnosticRelatedInformation>> =
+        miette_diag.source_code().and_then(|sc| {
+            let related: Vec<_> = participants
+                .iter()
+                .filter_map(|label| label_to_related(label, sc))
+                .collect();
+            (!related.is_empty()).then_some(related)
+        });
 
     let code = miette_diag
         .code()
@@ -878,9 +896,26 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
         code,
         Some(String::from("veryl-ls")),
         message,
-        None,
+        related_information,
         None,
     )
+}
+
+fn label_to_related(
+    label: &miette::LabeledSpan,
+    source_code: &dyn miette::SourceCode,
+) -> Option<DiagnosticRelatedInformation> {
+    let sc = source_code.read_span(label.inner(), 0, 0).ok()?;
+    let path = sc.name()?;
+    let uri = Url::from_file_path(path)?;
+    let line = sc.line() as u32;
+    let col = sc.column() as u32;
+    let len = label.len() as u32;
+    let range = Range::new(Position::new(line, col), Position::new(line, col + len));
+    Some(DiagnosticRelatedInformation {
+        location: Location { uri, range },
+        message: label.label().unwrap_or("").to_string(),
+    })
 }
 
 fn to_location(token: &Token) -> Option<Location> {

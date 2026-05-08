@@ -97,13 +97,14 @@ mod analyzer {
         assert!(errors.is_empty());
 
         let mut context = Context::default();
+        let mut ir = veryl_analyzer::ir::Ir::default();
         for (prj, veryl, analyzer) in &parse_results {
-            let errors = analyzer.analyze_pass2(prj, veryl, &mut context, None);
+            let errors = analyzer.analyze_pass2(prj, veryl, &mut context, Some(&mut ir));
             dbg!(&errors);
             assert!(errors.is_empty());
         }
 
-        let errors = Analyzer::analyze_post_pass2();
+        let errors = Analyzer::analyze_post_pass2(&ir);
         dbg!(&errors);
         assert!(errors.is_empty());
     }
@@ -317,7 +318,7 @@ mod error {
                             &mut context,
                             Some(&mut ir),
                         ));
-                        errors.append(&mut Analyzer::analyze_post_pass2());
+                        errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
                         if !errors.is_empty() {
                             let err = Report::from(errors.remove(0));
@@ -598,13 +599,14 @@ mod filelist {
         assert!(err.is_empty());
 
         let mut context = Context::default();
+        let mut ir = veryl_analyzer::ir::Ir::default();
         for (path, _, parser, analyzer) in &contexts {
-            let err = analyzer.analyze_pass2(&path.prj, &parser.veryl, &mut context, None);
+            let err = analyzer.analyze_pass2(&path.prj, &parser.veryl, &mut context, Some(&mut ir));
             dbg!(&err);
             assert!(err.is_empty());
         }
 
-        let err = Analyzer::analyze_post_pass2();
+        let err = Analyzer::analyze_post_pass2(&ir);
         dbg!(&err);
         assert!(err.is_empty());
 
@@ -754,7 +756,7 @@ mod native_test {
             assert!(errors.is_empty(), "pass2 errors: {errors:?}");
         }
 
-        let errors = Analyzer::analyze_post_pass2();
+        let errors = Analyzer::analyze_post_pass2(&ir);
         assert!(errors.is_empty(), "post_pass2 errors: {errors:?}");
 
         let tests = symbol_table::get_tests(&metadata.project.name);

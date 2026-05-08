@@ -60,6 +60,24 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(combinational_loop),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("combinational loop detected on \"{identifier}\"")]
+    CombinationalLoop {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label(collection, "involved in loop")]
+        loop_participants: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(cyclic_type_dependency),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1629,6 +1647,7 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousElsif { token_source, .. } => *token_source,
             AnalyzerError::AnonymousIdentifierUsage { token_source, .. } => *token_source,
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
+            AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::ExceedLimit { token_source, .. } => *token_source,
@@ -1746,6 +1765,20 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             inst_context: vec![],
+            token_source: token.source(),
+        }
+    }
+    pub fn combinational_loop(
+        identifier: &str,
+        token: &TokenRange,
+        participants: &[TokenRange],
+    ) -> Self {
+        let (input, loop_participants) = source_with_context(token, participants);
+        AnalyzerError::CombinationalLoop {
+            identifier: identifier.to_string(),
+            input,
+            error_location: token.into(),
+            loop_participants,
             token_source: token.source(),
         }
     }

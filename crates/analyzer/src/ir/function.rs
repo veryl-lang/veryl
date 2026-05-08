@@ -230,6 +230,12 @@ impl FunctionCall {
         assign_table: &mut AssignTable,
         assign_context: AssignContext,
     ) {
+        // Record reads from input expressions so that downstream consumers
+        // of `AssignTable.refernced` (e.g. the combinational-loop detector)
+        // see input-variable references at the call site.
+        for expr in self.inputs.values() {
+            expr.eval_assign(context, assign_table, assign_context);
+        }
         for output in self.outputs.values() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {

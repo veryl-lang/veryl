@@ -138,15 +138,16 @@ impl Preprocessor for Veryl {
                                     analyzer.clear();
 
                                     let mut errors = vec![];
+                                    let mut ir = veryl_analyzer::ir::Ir::default();
                                     errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
                                     errors.append(&mut Analyzer::analyze_post_pass1());
                                     errors.append(&mut analyzer.analyze_pass2(
                                         prj,
                                         &ret.veryl,
                                         &mut context,
-                                        None,
+                                        Some(&mut ir),
                                     ));
-                                    errors.append(&mut Analyzer::analyze_post_pass2());
+                                    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
                                     let errors: Vec<_> = errors
                                         .into_iter()

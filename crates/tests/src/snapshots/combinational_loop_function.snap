@@ -1,0 +1,22 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
+
+  × combinational loop detected on "b"
+    ╭─[../../testcases/error/combinational_loop_function.veryl:12:12]
+ 11 │     var c: logic<8>;
+ 12 │     assign b = ident(c);
+    ·            ┬
+    ·            ╰── Error location
+ 13 │     assign c = b;
+    ╰────
+    ╭─[../../testcases/error/combinational_loop_function.veryl:13:12]
+ 12 │     assign b = ident(c);
+ 13 │     assign c = b;
+    ·            ┬
+    ·            ╰── involved in loop
+ 14 │ }
+    ╰────
+  help:
