@@ -529,6 +529,7 @@ impl ReferenceTable {
 
             let mut maps = vec![map];
             path.apply_map(&maps);
+            path.unalias(None);
             path.append_namespace_path(&namespace, &symbol.namespace);
 
             Self::insert_generic_instance(

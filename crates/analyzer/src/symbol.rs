@@ -762,7 +762,7 @@ impl Symbol {
     pub fn is_package(&self, include_proto: bool) -> bool {
         match &self.kind {
             SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => return true,
-            SymbolKind::ProtoPackage(_) => return include_proto,
+            SymbolKind::ProtoPackage(_) | SymbolKind::ProtoAliasPackage(_) => return include_proto,
             SymbolKind::GenericInstance(x) => {
                 let symbol = symbol_table::get(x.base).unwrap();
                 return symbol.is_package(false);
@@ -833,7 +833,13 @@ impl Symbol {
             | SymbolKind::Enum(_)
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
-            | SymbolKind::Function(_) => {
+            | SymbolKind::Function(_)
+            | SymbolKind::AliasModule(_)
+            | SymbolKind::ProtoAliasModule(_)
+            | SymbolKind::AliasInterface(_)
+            | SymbolKind::ProtoAliasInterface(_)
+            | SymbolKind::AliasPackage(_)
+            | SymbolKind::ProtoAliasPackage(_) => {
                 if let Some(parent) = self.get_parent() {
                     return parent.is_package(include_proto);
                 }

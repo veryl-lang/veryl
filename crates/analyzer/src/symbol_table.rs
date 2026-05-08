@@ -901,6 +901,27 @@ impl SymbolTable {
                 .collect()
         }
 
+        // Namespace::get_symbol (used in Symbol::get_parent) uses symbol_table::resolve.
+        // This causes 'RefCell already mutably borrowed' error.
+        // The function below is to prevent this error.
+        fn get_parent_symbol(symbol_table: &SymbolTable, symbol: &Symbol) -> Option<Symbol> {
+            let mut namespace = symbol.namespace.clone();
+            namespace.strip_anonymous_path();
+
+            if let Some(path) = namespace.pop()
+                && namespace.depth() >= 1
+            {
+                let context = ResolveContext::new(&namespace);
+                let symbol_path = SymbolPath::new(&[path]);
+                symbol_table
+                    .resolve(&symbol_path, &[], context)
+                    .map(|x| (*x.found).clone())
+                    .ok()
+            } else {
+                None
+            }
+        }
+
         match &symbol.kind {
             SymbolKind::Module(x) => vec![collect_generic_params(self, &x.generic_parameters)],
             SymbolKind::Interface(x) => vec![collect_generic_params(self, &x.generic_parameters)],
@@ -910,7 +931,7 @@ impl SymbolTable {
                 self.collect_generic_bounds(&symbol)
             }
             SymbolKind::Function(x) => {
-                let mut bounds = if let Some(parent) = symbol.get_parent() {
+                let mut bounds = if let Some(parent) = get_parent_symbol(self, symbol) {
                     self.collect_generic_bounds(&parent)
                 } else {
                     vec![]
@@ -919,7 +940,7 @@ impl SymbolTable {
                 bounds
             }
             SymbolKind::Struct(x) => {
-                let mut bounds = if let Some(parent) = symbol.get_parent() {
+                let mut bounds = if let Some(parent) = get_parent_symbol(self, symbol) {
                     self.collect_generic_bounds(&parent)
                 } else {
                     vec![]
@@ -928,7 +949,7 @@ impl SymbolTable {
                 bounds
             }
             SymbolKind::Union(x) => {
-                let mut bounds = if let Some(parent) = symbol.get_parent() {
+                let mut bounds = if let Some(parent) = get_parent_symbol(self, symbol) {
                     self.collect_generic_bounds(&parent)
                 } else {
                     vec![]
@@ -937,7 +958,7 @@ impl SymbolTable {
                 bounds
             }
             SymbolKind::Block => {
-                if let Some(parent) = symbol.get_parent() {
+                if let Some(parent) = get_parent_symbol(self, symbol) {
                     self.collect_generic_bounds(&parent)
                 } else {
                     vec![]
@@ -1069,58 +1090,48 @@ impl SymbolTable {
         self.import_list.push(import);
     }
 
-    pub fn get_imported_symbols(&self) -> Vec<(Import, Symbol)> {
-        let mut ret = Vec::new();
-        for import in &self.import_list {
+    pub fn apply_import(&mut self) {
+        let import_list: Vec<_> = self.import_list.drain(0..).collect();
+        for import in &import_list {
             let context = ResolveContext::new(&import.path.1);
-            if let Ok(symbol) = self.resolve(&import.path.0.generic_path(), &[], context) {
-                ret.push((import.clone(), (*symbol.found).clone()));
-            }
-        }
-        ret
-    }
+            let Ok((symbol, imported)) = self
+                .resolve(&import.path.0.generic_path(), &[], context)
+                .map(|x| ((*x.found).clone(), x.imported))
+            else {
+                continue;
+            };
 
-    pub fn apply_import(&mut self, symbols: &[(Import, Symbol)]) {
-        // Group wildcard imports by target namespace for batch processing
-        let mut package_imports: HashMap<SVec<StrId>, Vec<(Namespace, &Import)>> =
-            HashMap::default();
-        for (import, symbol) in symbols {
             if import.wildcard {
                 let wildcard_target = if matches!(symbol.kind, SymbolKind::Enum(_)) {
                     Some(symbol.clone())
                 } else {
-                    self.get_package(symbol, false)
+                    self.get_package(&symbol, false, imported)
                 };
                 if let Some(target_symbol) = wildcard_target {
                     let target = target_symbol.inner_namespace();
-                    let paths = target.paths.clone();
-                    package_imports
-                        .entry(paths)
-                        .or_default()
-                        .push((target, import));
-                }
-            } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                self.add_imported_item(symbol.id, import);
-            }
-        }
-        // Batch apply all wildcard imports using namespace_index
-        for (paths, imports) in &package_imports {
-            if let Some(ids) = self.namespace_index.get(paths).cloned() {
-                for id in ids {
-                    if let Some(symbol) = self.symbol_table.get_mut(&id) {
-                        for (target, import) in imports {
-                            if symbol.namespace.matched(target) {
+                    if let Some(ids) = self.namespace_index.get(&target.paths) {
+                        for id in ids {
+                            let Some(symbol) = self.symbol_table.get_mut(id) else {
+                                continue;
+                            };
+                            if symbol.namespace.matched(&target) {
                                 symbol.imported.push((*import).to_owned());
                             }
                         }
                     }
                 }
+            } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
+                self.add_imported_item(symbol.id, import);
             }
         }
-        self.import_list.clear();
     }
 
-    fn get_package(&self, symbol: &Symbol, include_proto: bool) -> Option<Symbol> {
+    fn get_package(
+        &self,
+        symbol: &Symbol,
+        include_proto: bool,
+        include_proto_alias: bool,
+    ) -> Option<Symbol> {
         match &symbol.kind {
             SymbolKind::Package(_) => return Some(symbol.clone()),
             SymbolKind::ProtoPackage(_) if include_proto => return Some(symbol.clone()),
@@ -1130,12 +1141,18 @@ impl SymbolTable {
                 // because symbol_table::get is forbidden in apply_import which borrows `&mut self`
                 // It is not necessary for apply_import
                 if let Ok(symbol) = self.resolve(&x.target.generic_path(), &[], context) {
-                    return self.get_package(&symbol.found, include_proto);
+                    return self.get_package(&symbol.found, include_proto, false);
+                }
+            }
+            SymbolKind::ProtoAliasPackage(x) if include_proto_alias => {
+                let context = ResolveContext::new(&symbol.namespace);
+                if let Ok(symbol) = self.resolve(&x.target.generic_path(), &[], context) {
+                    return self.get_package(&symbol.found, true, false);
                 }
             }
             SymbolKind::GenericInstance(x) => {
                 let symbol = self.get(x.base).unwrap();
-                return self.get_package(&symbol, false);
+                return self.get_package(&symbol, false, false);
             }
             SymbolKind::GenericParameter(x) => {
                 if let GenericBoundKind::Proto(proto) = &x.bound
@@ -1143,7 +1160,7 @@ impl SymbolTable {
                 {
                     let context = ResolveContext::new(&symbol.namespace);
                     if let Ok(symbol) = self.resolve(&x.path.generic_path(), &[], context) {
-                        return self.get_package(&symbol.found, true);
+                        return self.get_package(&symbol.found, true, false);
                     }
                 }
             }
@@ -1886,8 +1903,7 @@ pub fn add_import(import: Import) {
 
 pub fn apply_import() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
-    let symbols = SYMBOL_TABLE.with(|f| f.borrow().get_imported_symbols());
-    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import(&symbols));
+    SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import());
 }
 
 pub fn add_bind(bind: Bind) {

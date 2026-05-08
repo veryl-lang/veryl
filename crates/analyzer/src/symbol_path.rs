@@ -662,6 +662,14 @@ impl GenericSymbolPath {
                 }
                 package_path.unalias(None);
 
+                if let Ok(package_symbol) =
+                    symbol_table::resolve((&package_path.generic_path(), namespace))
+                    && package_symbol.imported
+                {
+                    // 'package_path' points imported alias package or proto alias package.
+                    package_path.resolve_imported(namespace, generic_maps);
+                }
+
                 for (i, path) in package_path.paths.iter().enumerate() {
                     let token = Token::generate(path.base.text, self_file_path);
                     namespace_table::insert(token.id, self_file_path, &self_namespace);

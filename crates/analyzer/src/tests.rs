@@ -1313,6 +1313,55 @@ fn invalid_import() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+
+    let code = r#"
+    package a_pkg::<a: u32> {
+        const A: u32 = a;
+    }
+    package b_pkg::<b: u32> {
+        alias package a = a_pkg::<b>;
+    }
+    module c_module {
+        import b_pkg::<32>::a;
+        import a::*;
+        const C: u32 = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package a_proto_pkg {
+        const A: u32;
+    }
+    package a_pkg::<a: u32> for a_proto_pkg {
+        const A: u32 = a;
+    }
+    proto package b_proto_pkg {
+        alias package a: a_proto_pkg;
+    }
+    package b_pkg::<b: u32> for b_proto_pkg {
+        alias package a = a_pkg::<b>;
+    }
+    module c_module::<pkg: b_proto_pkg> {
+        import pkg::*;
+        import a::*;
+        const C: u32 = A;
+    }
+    module d_module::<pkg: b_proto_pkg> {
+        import pkg::*;
+        import a::A;
+        const D: u32 = A;
+    }
+    module e_module {
+        inst u0: c_module::<b_pkg::<32>>;
+        inst u1: d_module::<b_pkg::<32>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
