@@ -198,6 +198,39 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
         }
     }
 
+    // Per-reference masks. Per-decl aggregates alone would collapse
+    // bit-disjoint reads/writes of the same var into one atomic range
+    // (e.g. `b = a[0]; c = a[1];` aggregates a's mask to {0,1}).
+    for ((src_id, src_idx), entry) in &module.ff_table.table {
+        for (_, assign_target, src_read_mask, _) in &entry.refered {
+            if *src_read_mask != BigUint::default() {
+                masks
+                    .entry((*src_id, *src_idx))
+                    .or_default()
+                    .push(src_read_mask.clone());
+            }
+            if let Some((dst_id, dst_idx_opt, lhs_mask)) = assign_target
+                && *lhs_mask != BigUint::default()
+            {
+                if let Some(dst_idx) = dst_idx_opt {
+                    masks
+                        .entry((*dst_id, *dst_idx))
+                        .or_default()
+                        .push(lhs_mask.clone());
+                } else if let Some(var) = module.variables.get(dst_id)
+                    && let Some(total) = var.r#type.total_array()
+                {
+                    for i in 0..total {
+                        masks
+                            .entry((*dst_id, i))
+                            .or_default()
+                            .push(lhs_mask.clone());
+                    }
+                }
+            }
+        }
+    }
+
     // Inst input expressions: gather_ff records them but without masks.
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
@@ -326,11 +359,22 @@ fn build_module_graph(
         }
         let src_id_idx = (*src_id, *src_idx);
 
-        for (reader_decl, assign_target, from_ff) in &entry.refered {
+        for (reader_decl, assign_target, src_read_mask, from_ff) in &entry.refered {
             if *from_ff {
                 continue;
             }
-            let read_mask = lookup_read_mask(&module.per_decl_refs, *reader_decl, src_id_idx);
+            // `decl_read_mask == 0` also filters out reads gathered by
+            // `gather_ff` but missing from `eval_assign` (notably inst
+            // input expressions, which `add_inst_feedthrough_edges` handles).
+            let decl_read_mask = lookup_read_mask(&module.per_decl_refs, *reader_decl, src_id_idx);
+            if decl_read_mask == BigUint::default() {
+                continue;
+            }
+            let read_mask = if *src_read_mask != BigUint::default() {
+                &decl_read_mask & src_read_mask
+            } else {
+                decl_read_mask
+            };
             if read_mask == BigUint::default() {
                 continue;
             }
@@ -349,25 +393,50 @@ fn build_module_graph(
                 overlap
             };
 
-            let dst_id_idxs: Vec<(VarId, usize)> = match assign_target {
-                Some((dst_id, Some(dst_idx))) => vec![(*dst_id, *dst_idx)],
-                Some((dst_id, None)) => writes_per_decl
+            // Per-statement LHS mask preferred over per-decl aggregate.
+            // Otherwise `t1[0] = 0; t1[1] = src;` would route src into both
+            // bits.
+            let dst_with_masks: Vec<((VarId, usize), BigUint)> = match assign_target {
+                Some((dst_id, Some(dst_idx), lhs_mask)) => {
+                    let mask = if *lhs_mask != BigUint::default() {
+                        lhs_mask.clone()
+                    } else {
+                        lookup_write_mask(&module.per_decl_refs, *reader_decl, (*dst_id, *dst_idx))
+                    };
+                    if mask != BigUint::default() {
+                        vec![((*dst_id, *dst_idx), mask)]
+                    } else {
+                        vec![]
+                    }
+                }
+                Some((dst_id, None, lhs_mask)) => writes_per_decl
                     .get(reader_decl)
                     .map(|w| {
                         w.iter()
                             .filter(|(id, _, _)| id == dst_id)
-                            .map(|(id, idx, _)| (*id, *idx))
+                            .map(|(id, idx, decl_mask)| {
+                                let mask = if *lhs_mask != BigUint::default() {
+                                    lhs_mask & decl_mask
+                                } else {
+                                    decl_mask.clone()
+                                };
+                                ((*id, *idx), mask)
+                            })
+                            .filter(|(_, m)| m != &BigUint::default())
                             .collect()
                     })
                     .unwrap_or_default(),
                 None => writes_per_decl
                     .get(reader_decl)
-                    .map(|w| w.iter().map(|(id, idx, _)| (*id, *idx)).collect())
+                    .map(|w| {
+                        w.iter()
+                            .map(|(id, idx, m)| ((*id, *idx), m.clone()))
+                            .collect()
+                    })
                     .unwrap_or_default(),
             };
 
-            for dst_id_idx in dst_id_idxs {
-                let write_mask = lookup_write_mask(&module.per_decl_refs, *reader_decl, dst_id_idx);
+            for (dst_id_idx, write_mask) in dst_with_masks {
                 if write_mask == BigUint::default() {
                     continue;
                 }

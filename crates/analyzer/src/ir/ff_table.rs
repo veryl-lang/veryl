@@ -1,18 +1,21 @@
+use crate::BigUint;
 use crate::HashMap;
 use crate::ir::VarId;
 
-/// Identifies the LHS of an assignment: (VarId, Option<array_element_index>).
-/// None index means dynamic (unknown at analysis time).
-type AssignTarget = (VarId, Option<usize>);
+/// LHS of an assignment: `(VarId, array element index, bit-mask)`.
+/// `None` array index = dynamic. Empty bit-mask = unavailable (consumers
+/// fall back to per-decl aggregates).
+pub type AssignTarget = (VarId, Option<usize>, BigUint);
 
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
     pub assigned: Option<usize>,
-    /// (decl_index, assign_target, from_ff) pairs where this variable is referenced.
-    /// None assign_target for condition expressions (if/case).
-    /// from_ff: true if the reference is in an always_ff block (NBA-sensitive),
-    /// false if in always_comb / continuous assign (re-evaluated after NBA).
-    pub refered: Vec<(usize, Option<AssignTarget>, bool)>,
+    /// `(decl_index, assign_target, src_read_mask, from_ff)` per reference.
+    /// `assign_target` is `None` for condition expressions and similar
+    /// non-assign contexts. Empty `src_read_mask` = unavailable (fall back
+    /// to per-decl aggregate). `from_ff` distinguishes always_ff (NBA-
+    /// sensitive) from always_comb / continuous assign.
+    pub refered: Vec<(usize, Option<AssignTarget>, BigUint, bool)>,
     pub is_ff: bool,
     pub assigned_comb: Option<usize>,
 }
@@ -27,28 +30,31 @@ impl FfTableEntry {
             //   so they correctly see new FF values; ff_opt is safe for them.
             // - Within the same always_ff (assigned_decl), self-reference is
             //   safe; but cross-variable assignments must see old values.
-            self.is_ff = self.refered.iter().any(|(decl, assign_target, from_ff)| {
-                if !from_ff {
-                    return false;
-                }
-                if *decl != assigned_decl {
-                    return true;
-                }
-                match assign_target {
-                    Some((target_id, target_idx)) => {
-                        if *target_id != self_key.0 {
-                            return true;
-                        }
-                        // Same VarId: compare array index.
-                        // None index (dynamic) is conservative → FF.
-                        match target_idx {
-                            Some(idx) => *idx != self_key.1,
-                            None => true,
-                        }
+            self.is_ff = self
+                .refered
+                .iter()
+                .any(|(decl, assign_target, _src_mask, from_ff)| {
+                    if !from_ff {
+                        return false;
                     }
-                    None => true,
-                }
-            });
+                    if *decl != assigned_decl {
+                        return true;
+                    }
+                    match assign_target {
+                        Some((target_id, target_idx, _)) => {
+                            if *target_id != self_key.0 {
+                                return true;
+                            }
+                            // Same VarId: compare array index.
+                            // None index (dynamic) is conservative → FF.
+                            match target_idx {
+                                Some(idx) => *idx != self_key.1,
+                                None => true,
+                            }
+                        }
+                        None => true,
+                    }
+                });
         }
     }
 }
@@ -90,14 +96,18 @@ impl FfTable {
         index: usize,
         decl: usize,
         assign_target: Option<AssignTarget>,
+        src_read_mask: BigUint,
         from_ff: bool,
     ) {
         self.table
             .entry((id, index))
-            .and_modify(|x| x.refered.push((decl, assign_target, from_ff)))
-            .or_insert(FfTableEntry {
+            .and_modify(|x| {
+                x.refered
+                    .push((decl, assign_target.clone(), src_read_mask.clone(), from_ff))
+            })
+            .or_insert_with(|| FfTableEntry {
                 assigned: None,
-                refered: vec![(decl, assign_target, from_ff)],
+                refered: vec![(decl, assign_target, src_read_mask, from_ff)],
                 is_ff: false,
                 assigned_comb: None,
             });

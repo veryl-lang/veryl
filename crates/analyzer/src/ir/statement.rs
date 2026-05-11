@@ -1,6 +1,7 @@
 use crate::AnalyzerError;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
+use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
 use crate::ir::{
     Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, Type, VarId, VarIndex,
@@ -555,6 +556,26 @@ impl fmt::Display for AssignDestination {
     }
 }
 
+fn compute_assign_target(
+    dst: Option<&AssignDestination>,
+    context: &mut Context,
+) -> Option<AssignTarget> {
+    let dst = dst?;
+    let var_info = context.get_variable_info(dst.id)?;
+    let arr_idx = dst
+        .index
+        .eval_value(context)
+        .and_then(|v| var_info.r#type.array.calc_index(&v));
+    let mask = if let Some((beg, end)) = dst.select.eval_value(context, &var_info.r#type, false) {
+        ValueBigUint::gen_mask_range(beg, end)
+    } else if let Some(width) = var_info.total_width() {
+        ValueBigUint::gen_mask(width)
+    } else {
+        crate::BigUint::default()
+    };
+    Some((dst.id, arr_idx, mask))
+}
+
 #[derive(Clone)]
 pub struct AssignStatement {
     pub dst: Vec<AssignDestination>,
@@ -592,30 +613,18 @@ impl AssignStatement {
     }
 
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        let assign_target = self.dst.first().map(|d| {
-            let idx = d
-                .index
-                .eval_value(context)
-                .and_then(|v| context.get_variable_info(d.id)?.r#type.array.calc_index(&v));
-            (d.id, idx)
-        });
+        let assign_target = compute_assign_target(self.dst.first(), context);
         self.expr
-            .gather_ff(context, table, decl, assign_target, true);
+            .gather_ff(context, table, decl, assign_target.as_ref(), true);
         for dst in &self.dst {
             dst.gather_ff(context, table, decl);
         }
     }
 
     pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        let assign_target = self.dst.first().map(|d| {
-            let idx = d
-                .index
-                .eval_value(context)
-                .and_then(|v| context.get_variable_info(d.id)?.r#type.array.calc_index(&v));
-            (d.id, idx)
-        });
+        let assign_target = compute_assign_target(self.dst.first(), context);
         self.expr
-            .gather_ff(context, table, decl, assign_target, false);
+            .gather_ff(context, table, decl, assign_target.as_ref(), false);
         for dst in &self.dst {
             dst.gather_ff_comb_assign(context, table, decl);
         }

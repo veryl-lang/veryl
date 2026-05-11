@@ -1,6 +1,7 @@
 use crate::conv::Context;
 use crate::conv::utils::check_compatibility;
 use crate::ir::assign_table::{AssignContext, AssignTable};
+use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
     AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
     ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
@@ -269,7 +270,7 @@ impl FunctionCall {
         context: &mut Context,
         table: &mut FfTable,
         decl: usize,
-        assign_target: Option<(VarId, Option<usize>)>,
+        assign_target: Option<&AssignTarget>,
         from_ff: bool,
     ) {
         for input in self.inputs.values() {

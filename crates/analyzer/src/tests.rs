@@ -8360,6 +8360,96 @@ fn combinational_loop() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. }))
     );
+
+    // Dst-side bit-disjoint writes: `t1[0] = 0; t1[1] = t3;`. Reads of
+    // t3 must edge only to t1[1], not t1[0], so no `t1[0]→t2→t3→t1[1]`
+    // false cycle through inst feedthrough.
+    let code = r#"
+    module ModuleAOk2 (
+        a: input  logic,
+        b: input  logic,
+        x: output logic,
+    ) {
+        always_comb {
+            x = a & ~b;
+        }
+    }
+
+    module ModuleBOk2 (
+        a: input  logic,
+        y: output logic,
+    ) {
+        always_comb {
+            y = a;
+        }
+    }
+
+    module ModuleCOk2 (
+        a: input  logic,
+        y: output logic,
+    ) {
+        var t1: logic<2>;
+        var t2: logic;
+        var t3: logic;
+
+        inst mb: ModuleBOk2 (
+            a: t1[0],
+            y: t2,
+        );
+
+        inst ma: ModuleAOk2 (
+            a: a,
+            b: t2,
+            x: t3,
+        );
+
+        always_comb {
+            t1[0] = 0;
+            t1[1] = t3;
+            y     = t3;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "false positive: {errors:?}"
+    );
+
+    // Src-side bit-disjoint reads: `b = a[0]; c = a[1];` in one decl.
+    // The other decl writes `a[1] = b`; per-decl aggregation would
+    // incorrectly tie b's flow to a@bit1, closing a false cycle.
+    let code = r#"
+    module ModuleA (
+        d:   input  logic<2>,
+        out: output logic,
+    ) {
+        var a: logic<2>;
+        var b: logic;
+        var c: logic;
+
+        always_comb {
+            b = a[0];
+            c = a[1];
+        }
+
+        always_comb {
+            a[0] = d[0];
+            a[1] = b;
+        }
+
+        assign out = c;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "source-side false positive: {errors:?}"
+    );
 }
 
 #[test]
