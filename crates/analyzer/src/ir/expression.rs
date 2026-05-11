@@ -1,6 +1,7 @@
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
+use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::convert_cast;
 use crate::ir::{
     Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall,
@@ -477,7 +478,7 @@ impl Expression {
         context: &mut Context,
         table: &mut FfTable,
         decl: usize,
-        assign_target: Option<(VarId, Option<usize>)>,
+        assign_target: Option<&AssignTarget>,
         from_ff: bool,
     ) {
         match self {
@@ -784,19 +785,42 @@ impl Factor {
         context: &mut Context,
         table: &mut FfTable,
         decl: usize,
-        assign_target: Option<(VarId, Option<usize>)>,
+        assign_target: Option<&AssignTarget>,
         from_ff: bool,
     ) {
         match self {
-            Factor::Variable(id, index, _, _) => {
+            Factor::Variable(id, index, select, _) => {
                 if let Some(variable) = context.get_variable_info(*id) {
+                    let src_read_mask = if let Some((beg, end)) =
+                        select.eval_value(context, &variable.r#type, false)
+                    {
+                        ValueBigUint::gen_mask_range(beg, end)
+                    } else if let Some(width) = variable.total_width() {
+                        ValueBigUint::gen_mask(width)
+                    } else {
+                        crate::BigUint::default()
+                    };
                     if let Some(index) = index.eval_value(context) {
                         if let Some(index) = variable.r#type.array.calc_index(&index) {
-                            table.insert_refered(*id, index, decl, assign_target, from_ff);
+                            table.insert_refered(
+                                *id,
+                                index,
+                                decl,
+                                assign_target.cloned(),
+                                src_read_mask,
+                                from_ff,
+                            );
                         }
                     } else if let Some(total_array) = variable.r#type.total_array() {
                         for i in 0..total_array {
-                            table.insert_refered(*id, i, decl, assign_target, from_ff);
+                            table.insert_refered(
+                                *id,
+                                i,
+                                decl,
+                                assign_target.cloned(),
+                                src_read_mask.clone(),
+                                from_ff,
+                            );
                         }
                     }
                 }

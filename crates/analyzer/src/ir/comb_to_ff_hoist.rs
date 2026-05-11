@@ -58,7 +58,7 @@ pub fn plan_hoists(
         let mut reader_decls: Vec<usize> = entry
             .refered
             .iter()
-            .filter_map(|(d, _, from_ff)| if *from_ff { Some(*d) } else { None })
+            .filter_map(|(d, _, _, from_ff)| if *from_ff { Some(*d) } else { None })
             .collect();
         if reader_decls.len() != entry.refered.len() {
             continue;
