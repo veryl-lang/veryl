@@ -164,9 +164,9 @@ fn is_ifdef_attribute(arg: &Attribute) -> bool {
 }
 
 // SV `import` only accepts `package::symbol` or `package::*`, so suppress
-// imports whose target is an enum (wildcard) or an enum member outside a
-// package — emitting them would produce invalid SystemVerilog.
-fn should_skip_emit_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
+// imports whose target is an enum (wildcard), an enum member or an alias
+// outside a package — emitting them would produce invalid SystemVerilog.
+fn should_skip_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
     let Ok(symbol) = symbol_table::resolve(arg) else {
         return false;
     };
@@ -177,6 +177,12 @@ fn should_skip_emit_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
             .get_parent()
             .and_then(|enum_sym| enum_sym.get_parent())
             .is_none_or(|grandparent| !grandparent.is_package(true)),
+        SymbolKind::AliasModule(_)
+        | SymbolKind::ProtoAliasModule(_)
+        | SymbolKind::AliasInterface(_)
+        | SymbolKind::ProtoAliasInterface(_)
+        | SymbolKind::AliasPackage(_)
+        | SymbolKind::ProtoAliasPackage(_) => !is_wildcard,
         _ => false,
     }
 }
@@ -1040,7 +1046,7 @@ impl Emitter {
 
     fn emit_import_declaration(&mut self, arg: &ImportDeclaration, moved: bool) {
         let is_wildcard = arg.import_declaration_opt.is_some();
-        if should_skip_emit_import(&arg.scoped_identifier, is_wildcard) {
+        if should_skip_import(&arg.scoped_identifier, is_wildcard) {
             return;
         }
 

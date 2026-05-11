@@ -3253,3 +3253,120 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn imported_alias_package() {
+    let code = r#"
+package a_pkg::<a: u32> {
+    const A: u32 = a;
+}
+package b_pkg::<b: u32> {
+    alias package a = a_pkg::<b>;
+}
+module c_module {
+    import b_pkg::<32>::a;
+    import a::*;
+    const C: u32 = A;
+}
+"#;
+
+    let expect = r#"package prj___a_pkg__32;
+    localparam int unsigned A = 32;
+endpackage
+package prj___b_pkg__32;
+
+
+endpackage
+module prj_c_module;
+
+    import prj___a_pkg__32::*;
+
+
+    localparam int unsigned C = A;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+proto package a_proto_pkg {
+    const A: u32;
+}
+package a_pkg::<a: u32> for a_proto_pkg {
+    const A: u32 = a;
+}
+proto package b_proto_pkg {
+    alias package a: a_proto_pkg;
+}
+package b_pkg::<b: u32> for b_proto_pkg {
+    alias package a = a_pkg::<b>;
+}
+module c_module::<pkg: b_proto_pkg> {
+    import pkg::*;
+    import a::*;
+    const C: u32 = A;
+}
+module d_module::<pkg: b_proto_pkg> {
+    import pkg::*;
+    import a::A;
+    const D: u32 = A;
+}
+module e_module {
+    inst u0: c_module::<b_pkg::<32>>;
+    inst u1: d_module::<b_pkg::<32>>;
+}
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__32;
+    localparam int unsigned A = 32;
+endpackage
+
+
+package prj___b_pkg__32;
+
+
+endpackage
+module prj___c_module____b_pkg__32;
+    import prj___b_pkg__32::*;
+    import prj___a_pkg__32::*;
+
+
+    localparam int unsigned C = prj___a_pkg__32::A;
+endmodule
+module prj___d_module____b_pkg__32;
+    import prj___b_pkg__32::*;
+    import prj___a_pkg__32::A;
+
+
+    localparam int unsigned D = prj___a_pkg__32::A;
+endmodule
+module prj_e_module;
+    prj___c_module____b_pkg__32 u0 ();
+    prj___d_module____b_pkg__32 u1 ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
