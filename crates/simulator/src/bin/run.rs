@@ -106,7 +106,7 @@ fn main() {
         let pct = jit as f64 / total as f64 * 100.0;
         eprintln!("JIT: {jit}/{total} statements ({pct:.1}%)");
     }
-    eprintln!("FF commit entries: {}", sim.ir.ff_commit_entries.len());
+    eprintln!("FF write sites: {}", sim.ir.site_table.len());
     eprintln!(
         "FF buffer: {} bytes, Comb buffer: {} bytes",
         sim.ir.ff_values.len(),

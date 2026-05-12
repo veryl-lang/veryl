@@ -25,6 +25,10 @@ pub enum HelperSig {
     Compare,
     /// (I64, I32) -> I64  [reductions: a, nb -> result]
     Reduce,
+    /// (I32, I64, I32) -> void  [write-log push: offset, payload, width_class]
+    /// Phase 2d-prep of ff_commit redesign — signature reserved for the
+    /// upcoming JIT-emitted FF write log push call.  Not yet emitted.
+    WriteLogPushStatic,
 }
 
 pub struct Context {
@@ -92,6 +96,11 @@ pub fn get_or_create_sig(
             sig.params.push(AbiParam::new(I64)); // a
             sig.params.push(AbiParam::new(I32)); // nb
             sig.returns.push(AbiParam::new(I64));
+        }
+        HelperSig::WriteLogPushStatic => {
+            sig.params.push(AbiParam::new(I32)); // offset
+            sig.params.push(AbiParam::new(I64)); // payload
+            sig.params.push(AbiParam::new(I32)); // width_class (caller-zext from u16)
         }
     }
 

@@ -2,6 +2,7 @@ use crate::ir::{
     Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
     read_native_value, write_native_value,
 };
+use crate::ir::write_log::{clear_event_write_log, ff_commit_from_log, set_event_write_log};
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::str::FromStr;
 use veryl_analyzer::value::MaskCache;
@@ -37,6 +38,49 @@ pub struct Simulator {
     pub profile: SimProfile,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
+    /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
+    /// commit path.  Accumulated across the run; printed when
+    /// `print_write_log_diag` is invoked or the cycle counter crosses a
+    /// logarithmic checkpoint.
+    pub write_log_diag: WriteLogDiag,
+}
+
+#[derive(Default)]
+pub struct WriteLogDiag {
+    pub enabled: bool,
+    pub total_cycles: u64,
+    pub total_entries: u64,
+    pub max_entries_per_cycle: u32,
+    pub cycles_with_entries: u64,
+    next_print_cycle: u64,
+}
+
+impl WriteLogDiag {
+    fn maybe_print(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        if self.total_cycles >= self.next_print_cycle {
+            self.next_print_cycle = self.next_print_cycle.saturating_mul(2).max(1_000_000);
+            self.dump();
+        }
+    }
+
+    pub fn dump(&self) {
+        let avg = if self.cycles_with_entries > 0 {
+            self.total_entries as f64 / self.cycles_with_entries as f64
+        } else {
+            0.0
+        };
+        eprintln!(
+            "[write_log_diag] cycles={} cycles_with_entries={} total_entries={} max_per_cycle={} avg_per_active_cycle={:.2}",
+            self.total_cycles,
+            self.cycles_with_entries,
+            self.total_entries,
+            self.max_entries_per_cycle,
+            avg,
+        );
+    }
 }
 
 impl Simulator {
@@ -53,6 +97,11 @@ impl Simulator {
             profile: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
+            write_log_diag: WriteLogDiag {
+                enabled: std::env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
+                next_print_cycle: 1_000_000,
+                ..Default::default()
+            },
         };
 
         if let Some(dumper) = dump {
@@ -219,6 +268,14 @@ impl Simulator {
             self.last_event_stmts = ptr;
             ptr
         };
+        // Install the per-Ir WriteLogBuffer as the thread-local active log
+        // before evaluating the event's statements.  FF stores (JIT and
+        // interpret) push entries; `ff_commit_from_log` applies them to
+        // FF current storage at cycle end.
+        // SAFETY: the buffer outlives the call to dispatch_stmt_fast and is
+        // cleared before this stack frame returns.
+        unsafe { set_event_write_log(&mut self.ir.write_log_buffer); }
+
         if !stmts_ptr.is_null() {
             // SAFETY: event_statements is never mutated after Ir construction.
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
@@ -235,13 +292,22 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let ff_start = std::time::Instant::now();
 
-        Self::ff_commit_specialized(
-            &mut self.ir.ff_values,
-            &self.ir.ff_commit_u32_runs,
-            &self.ir.ff_commit_u64_runs,
-            &self.ir.ff_commit_other,
-            self.ir.ff_commit_use_avx2,
-        );
+        ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
+
+        clear_event_write_log();
+        if self.write_log_diag.enabled {
+            let n = self.ir.write_log_buffer.count();
+            self.write_log_diag.total_cycles += 1;
+            if n > 0 {
+                self.write_log_diag.total_entries += n as u64;
+                self.write_log_diag.cycles_with_entries += 1;
+                if n > self.write_log_diag.max_entries_per_cycle {
+                    self.write_log_diag.max_entries_per_cycle = n;
+                }
+            }
+            self.write_log_diag.maybe_print();
+        }
+        self.ir.write_log_buffer.reset();
 
         #[cfg(feature = "profile")]
         {
@@ -251,113 +317,6 @@ impl Simulator {
         self.comb_dirty = true;
 
         self.dump_variables();
-    }
-
-    /// Commit FF updates: copy next → current for all FF variables.
-    /// Dispatches to a vpermd/vpermq AVX2 shuffle on x86_64 when the
-    /// CPU supports it, falling back to a scalar loop otherwise.
-    #[inline(always)]
-    fn ff_commit_specialized(
-        ff_values: &mut [u8],
-        u32_runs: &[(u32, u32)],
-        u64_runs: &[(u32, u32)],
-        other: &[(usize, usize)],
-        use_avx2: bool,
-    ) {
-        let ptr = ff_values.as_mut_ptr();
-        #[cfg(target_arch = "x86_64")]
-        {
-            if use_avx2 {
-                unsafe { Self::ff_commit_runs_avx2(ptr, u32_runs, u64_runs) };
-            } else {
-                Self::ff_commit_runs_scalar(ptr, u32_runs, u64_runs);
-            }
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            let _ = use_avx2;
-            Self::ff_commit_runs_scalar(ptr, u32_runs, u64_runs);
-        }
-        for &(current_offset, value_size) in other {
-            unsafe {
-                let dst = ptr.add(current_offset);
-                let src = ptr.add(current_offset + value_size);
-                std::ptr::copy_nonoverlapping(src, dst, value_size);
-            }
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    unsafe fn ff_commit_runs_avx2(ptr: *mut u8, u32_runs: &[(u32, u32)], u64_runs: &[(u32, u32)]) {
-        unsafe {
-            use std::arch::x86_64::*;
-            // u32: 4 entries per 32-byte chunk.  [c0|n0|c1|n1|c2|n2|c3|n3]
-            // vpermd mask [1,1,3,3,5,5,7,7] → [n0|n0|n1|n1|n2|n2|n3|n3].
-            let mask = _mm256_setr_epi32(1, 1, 3, 3, 5, 5, 7, 7);
-            for &(start, count) in u32_runs {
-                let base = ptr.add(start as usize);
-                let count = count as usize;
-                let chunks = count / 4;
-                for i in 0..chunks {
-                    let p = base.add(i * 32) as *mut __m256i;
-                    let v = _mm256_loadu_si256(p);
-                    let shuffled = _mm256_permutevar8x32_epi32(v, mask);
-                    _mm256_storeu_si256(p, shuffled);
-                }
-                for i in (chunks * 4)..count {
-                    let dst = base.add(i * 8) as *mut u32;
-                    let src = base.add(i * 8 + 4) as *const u32;
-                    let s = std::ptr::read_unaligned(src);
-                    std::ptr::write_unaligned(dst, s);
-                }
-            }
-            // u64: 2 entries per 32-byte chunk.  [c0|n0|c1|n1] (4 u64 lanes)
-            // vpermq imm8 [1,1,3,3] → [n0|n0|n1|n1].
-            for &(start, count) in u64_runs {
-                let base = ptr.add(start as usize);
-                let count = count as usize;
-                let chunks = count / 2;
-                for i in 0..chunks {
-                    let p = base.add(i * 32) as *mut __m256i;
-                    let v = _mm256_loadu_si256(p);
-                    let shuffled = _mm256_permute4x64_epi64::<0b11_11_01_01>(v);
-                    _mm256_storeu_si256(p, shuffled);
-                }
-                for i in (chunks * 2)..count {
-                    let dst = base.add(i * 16) as *mut u64;
-                    let src = base.add(i * 16 + 8) as *const u64;
-                    let s = std::ptr::read_unaligned(src);
-                    std::ptr::write_unaligned(dst, s);
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn ff_commit_runs_scalar(ptr: *mut u8, u32_runs: &[(u32, u32)], u64_runs: &[(u32, u32)]) {
-        for &(start, count) in u32_runs {
-            unsafe {
-                let base = ptr.add(start as usize);
-                for i in 0..count as usize {
-                    let dst = base.add(i * 8) as *mut u32;
-                    let src = base.add(i * 8 + 4) as *const u32;
-                    let s = std::ptr::read_unaligned(src);
-                    std::ptr::write_unaligned(dst, s);
-                }
-            }
-        }
-        for &(start, count) in u64_runs {
-            unsafe {
-                let base = ptr.add(start as usize);
-                for i in 0..count as usize {
-                    let dst = base.add(i * 16) as *mut u64;
-                    let src = base.add(i * 16 + 8) as *const u64;
-                    let s = std::ptr::read_unaligned(src);
-                    std::ptr::write_unaligned(dst, s);
-                }
-            }
-        }
     }
 
     /// Set a variable value by VarId. Used to write clock/reset signal values

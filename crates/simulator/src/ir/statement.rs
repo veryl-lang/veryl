@@ -1,7 +1,9 @@
 use crate::FuncPtr;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
-use crate::cranelift::Context as CraneliftContext;
+use crate::cranelift::{Context as CraneliftContext, HelperSig, call_helper_void};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::write_log::event_write_log_push_static_addr;
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
@@ -121,6 +123,12 @@ pub struct AssignDynamicStatement {
     pub dynamic_select: Option<DynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
+    /// Phase 3.4 of ff_commit redesign — write-log push uses
+    /// (`ff_log_base_current_offset` + `idx * dst_stride`) at runtime.
+    /// `ff_log_base_current_offset` is `dst_base.raw() - value_size` for
+    /// the element-0 current slot.  `None` outside the FF-2state-narrow
+    /// emit gate (see `apply_values_ptr`).
+    pub ff_log_base_current_offset: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -598,6 +606,27 @@ impl ProtoAssignDynamicStatement {
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
+        // Phase 3.4 part 2 of ff_commit redesign: AssignDynamic JIT log
+        // push.  Runtime current_offset = (static_offset - nb) +
+        // byte_offset_runtime.  Skip when not FF, when use_4state, when
+        // wide, or when env gate off.
+        //
+        // value_size == nb when !use_4state (2-state storage); we only
+        // emit for that case here.  `dst_width <= 64` is implied by
+        // can_build_binary's full_width <= 64 gate.
+        let emit_log = self.dst_base.is_ff()
+            && !context.use_4state
+            && self.dst_width <= 64;
+        let log_offset_i32 = if emit_log {
+            let log_base = builder
+                .ins()
+                .iconst(I64, (self.dst_base.raw() - nb as isize) as i64);
+            let log_offset_64 = builder.ins().iadd(log_base, byte_offset);
+            Some(builder.ins().ireduce(I32, log_offset_64))
+        } else {
+            None
+        };
+
         let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
@@ -629,6 +658,20 @@ impl ProtoAssignDynamicStatement {
             }
         };
 
+        let emit_log_push = |context: &mut CraneliftContext,
+                             builder: &mut FunctionBuilder,
+                             payload: cranelift::prelude::Value| {
+            if let Some(offset_val) = log_offset_i32 {
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::WriteLogPushStatic,
+                    event_write_log_push_static_addr(),
+                    &[offset_val, payload, width_class_val],
+                );
+            }
+        };
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
@@ -650,6 +693,7 @@ impl ProtoAssignDynamicStatement {
                 let result = builder.ins().bor(mask_xz, org);
                 store_i64_to_native(builder, result, addr, nb_i32);
             }
+            emit_log_push(context, builder, result);
         } else if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
 
@@ -665,6 +709,7 @@ impl ProtoAssignDynamicStatement {
                 let result = builder.ins().bor(mask_xz, org);
                 store_i64_to_native(builder, result, addr, nb_i32);
             }
+            emit_log_push(context, builder, result);
         } else {
             match self.dst_width {
                 8 => {
@@ -738,6 +783,9 @@ impl ProtoAssignDynamicStatement {
                     }
                 }
             }
+            // Simple-else log push: payload is the I64 value whose lower
+            // `nb*8` bits match what istoreN deposited.
+            emit_log_push(context, builder, payload);
         }
 
         Some(())
@@ -1499,6 +1547,19 @@ impl ProtoStatement {
                     } else {
                         comb_values_ptr.offset(x.dst_base.raw())
                     };
+                    // Phase 3.4 ff_commit redesign — element-0 current
+                    // offset (used as the base for runtime index math in
+                    // eval_step).  Same gate as AssignStatement.
+                    let ff_log_base_current_offset = if x.dst_base.is_ff()
+                        && !use_4state
+                        && x.dst_width <= 64
+                    {
+                        let next_off = x.dst_base.raw();
+                        debug_assert!(next_off >= nb as isize);
+                        Some((next_off - nb as isize) as u32)
+                    } else {
+                        None
+                    };
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1537,6 +1598,7 @@ impl ProtoStatement {
                         dynamic_select,
                         rhs_select: x.rhs_select,
                         expr,
+                        ff_log_base_current_offset,
                     })
                 }
                 ProtoStatement::If(x) => Statement::If(x.apply_values_ptr(
@@ -1848,6 +1910,13 @@ pub struct AssignStatement {
     pub dynamic_select: Option<DynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
+    /// Phase 3 of ff_commit redesign — FF current byte offset for the
+    /// write-log push helper.  Populated by `apply_values_ptr` only when
+    /// (a) `VERYL_FF_COMMIT_REDESIGN=1`, (b) the destination is a 2-state
+    /// FF, (c) width ≤ 64, and (d) no select / dynamic_select RMW —
+    /// matching the JIT-side gate.  `None` for every other path; those
+    /// paths continue to use only the master next-slot store.
+    pub ff_log_offset: Option<u32>,
 }
 
 impl AssignStatement {
@@ -1885,6 +1954,19 @@ impl AssignStatement {
                     &current,
                 );
             }
+            // Phase 3.3 of ff_commit redesign — dynamic_select RMW log
+            // push.  Offset is static (the dyn_sel only selects bit
+            // ranges within a packed-bitfield FF dst).
+            if let Some(offset) = self.ff_log_offset {
+                let payload = current.to_u64().unwrap_or(0);
+                unsafe {
+                    crate::ir::write_log::event_write_log_push_static(
+                        offset,
+                        payload,
+                        self.dst_native_bytes as u16,
+                    );
+                }
+            }
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
                 read_native_value(
@@ -1904,11 +1986,40 @@ impl AssignStatement {
                     &current,
                 );
             }
+            // Phase 3.2 of ff_commit redesign — select RMW log push.
+            // `current` after assign holds the final merged value the
+            // master next-slot store deposited.
+            if let Some(offset) = self.ff_log_offset {
+                let payload = current.to_u64().unwrap_or(0);
+                unsafe {
+                    crate::ir::write_log::event_write_log_push_static(
+                        offset,
+                        payload,
+                        self.dst_native_bytes as u16,
+                    );
+                }
+            }
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
             unsafe {
                 write_native_value(self.dst, self.dst_native_bytes, self.dst_use_4state, &value);
+            }
+            // Phase 3 of ff_commit redesign — interpret path log push.
+            // Mirrors the JIT-side emit at statement.rs build_binary so
+            // both paths produce matching WriteLogEntry sequences.  Same
+            // gate (ff_log_offset.is_some()) and same payload (post-trunc
+            // u64) as the JIT path.  `value.to_u64()` cannot fail when
+            // dst_width ≤ 64.
+            if let Some(offset) = self.ff_log_offset {
+                let payload = value.to_u64().unwrap_or(0);
+                unsafe {
+                    crate::ir::write_log::event_write_log_push_static(
+                        offset,
+                        payload,
+                        self.dst_native_bytes as u16,
+                    );
+                }
             }
         }
     }
@@ -1940,6 +2051,25 @@ impl AssignDynamicStatement {
         } else {
             value
         };
+        // Phase 3.4 ff_commit redesign — runtime offset for write-log push:
+        //   ff_log_base_current_offset + idx * dst_stride.
+        // Compute once here; emit after the matching write.
+        let log_offset = self.ff_log_base_current_offset.map(|base| {
+            let runtime = base as isize + self.dst_stride * idx as isize;
+            runtime as u32
+        });
+        let log_payload = |current: &Value| current.to_u64().unwrap_or(0);
+        let push_log = |payload: u64| {
+            if let Some(offset) = log_offset {
+                unsafe {
+                    crate::ir::write_log::event_write_log_push_static(
+                        offset,
+                        payload,
+                        self.dst_native_bytes as u16,
+                    );
+                }
+            }
+        };
         if let Some(dyn_sel) = &self.dynamic_select {
             let dyn_idx = dyn_sel
                 .index_expr
@@ -1962,6 +2092,7 @@ impl AssignDynamicStatement {
             unsafe {
                 write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
             };
+            push_log(log_payload(&current));
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
                 read_native_value(
@@ -1976,10 +2107,12 @@ impl AssignDynamicStatement {
             unsafe {
                 write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
             };
+            push_log(log_payload(&current));
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
             unsafe { write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &value) };
+            push_log(log_payload(&value));
         }
     }
 
@@ -2088,6 +2221,26 @@ impl ProtoAssignStatement {
                     num_elements: dyn_sel.num_elements,
                 });
 
+            // Phase 3 of ff_commit redesign — interpret path log offset.
+            // Set when env=1, FF dst, !use_4state, dst_width ≤ 64.
+            // Phase 3.1: simple store.  Phase 3.2: select RMW.
+            // Phase 3.3: dynamic_select RMW (offset is still static —
+            // dynamic_select shifts bits within a packed bitfield FF;
+            // AssignDynamicStatement is the array-with-runtime-index case
+            // that requires runtime offset, addressed separately).
+            let ff_log_offset = if self.dst.is_ff()
+                && !use_4state
+                && self.dst_width <= 64
+            {
+                // current_offset = next_offset - nb for 2-state interleaved
+                // [current][next] layout (variable.rs:399-404).
+                let next_off = self.dst.raw();
+                debug_assert!(next_off >= nb as isize);
+                Some((next_off - nb as isize) as u32)
+            } else {
+                None
+            };
+
             AssignStatement {
                 dst,
                 dst_width: self.dst_width,
@@ -2097,6 +2250,7 @@ impl ProtoAssignStatement {
                 dynamic_select,
                 rhs_select: self.rhs_select,
                 expr,
+                ff_log_offset,
             }
         }
     }
@@ -2162,6 +2316,27 @@ impl ProtoAssignStatement {
 
         let dst_offset = self.dst.raw() as i32;
         let cache_key = self.dst;
+
+        // Phase 2d/3.2/3.3 of ff_commit redesign: dual-write — keep the
+        // master next-slot store and additionally push a WriteLogEntry
+        // pointing at the FF current byte offset.  Gated by
+        // VERYL_FF_COMMIT_REDESIGN=1.
+        //
+        // Scope: simple stores (else branch), select RMW (Phase 3.2),
+        // and dynamic_select RMW (Phase 3.3) — all with dst_width ≤ 64
+        // and 2-state (!use_4state).  `wide` (>64-bit) and 4-state
+        // paths still fall through to next-slot store only.
+        //
+        // dynamic_select on AssignStatement targets bit ranges within a
+        // packed-bitfield FF dst whose byte offset stays static, so the
+        // static `event_write_log_push_static` helper is the right one
+        // (the array-with-runtime-index case is `AssignDynamicStatement`).
+        let emit_log = self.dst.is_ff() && !wide && !context.use_4state;
+        // current_offset = next_offset - native_bytes for 2-state.
+        // FF storage layout is `[current][next]` interleaved per element
+        // (see variable.rs:399-404, value_size == native_bytes when
+        // !use_4state).
+        let log_current_offset = dst_offset - nb_i32;
 
         // Helpers covering nb ∈ {1, 2, 4, 8, 16} for the
         // dynamic_select / select / fallback paths below.  Use the fused
@@ -2250,6 +2425,21 @@ impl ProtoAssignStatement {
                 result_mask_xz
             };
             context.load_cache.insert(cache_key, (fwd, fwd_m));
+
+            // Phase 3.3: dynamic_select RMW log push.  dyn_sel selects
+            // bit ranges within a packed FF dst whose byte offset stays
+            // static, so `event_write_log_push_static` is fine.
+            if emit_log {
+                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::WriteLogPushStatic,
+                    event_write_log_push_static_addr(),
+                    &[offset_val, fwd, width_class_val],
+                );
+            }
         } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
@@ -2308,6 +2498,21 @@ impl ProtoAssignStatement {
                 result_mask_xz
             };
             context.load_cache.insert(cache_key, (fwd, fwd_m));
+
+            // Select RMW log push.  `fwd` is the post-RMW payload masked
+            // to dst_width — pushed as the cycle's update to the FF
+            // current slot via `ff_commit_from_log`.
+            if emit_log {
+                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::WriteLogPushStatic,
+                    event_write_log_push_static_addr(),
+                    &[offset_val, fwd, width_class_val],
+                );
+            }
         } else {
             // Store elimination relies on load_cache forwarding to
             // serve subsequent reads; skip only when the cache is live.
@@ -2448,6 +2653,21 @@ impl ProtoAssignStatement {
                 mask_xz
             };
             context.load_cache.insert(cache_key, (fwd_p, fwd_m));
+
+            // Phase 2d: write-log push (dual-write).  Emit alongside the
+            // master next-slot store.  fwd_p is the width-masked payload
+            // that matches what istoreN would actually deposit.
+            if emit_log {
+                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::WriteLogPushStatic,
+                    event_write_log_push_static_addr(),
+                    &[offset_val, fwd_p, width_class_val],
+                );
+            }
         }
 
         Some(())

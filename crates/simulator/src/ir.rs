@@ -4,12 +4,15 @@ mod declaration;
 mod dup_assign_dce;
 mod event;
 mod expression;
+pub(crate) mod inst_layout;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod load_cache_lookahead;
 mod module;
 pub mod schedule;
+pub(crate) mod site_table;
 mod statement;
 mod variable;
+pub(crate) mod write_log;
 
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
@@ -60,16 +63,19 @@ pub struct Ir {
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
-    /// FF commit entries: (current_offset, value_size) pairs.
-    /// After event execution, next → current copy is performed for each entry.
-    pub ff_commit_entries: Vec<(usize, usize)>,
-    /// Runs of consecutive FFs sharing the specialized size with
-    /// stride = 2 * size, as `(start_current_offset, count)`.  The
-    /// compile-time stride lets LLVM auto-vectorize the inner loop.
-    pub ff_commit_u32_runs: Vec<(u32, u32)>,
-    pub ff_commit_u64_runs: Vec<(u32, u32)>,
-    /// Entries that don't fit u32/u64 specialization (rare: size 1, 2, 16, 32, etc.).
-    pub ff_commit_other: Vec<(usize, usize)>,
+    /// FF write site table: compile-time metadata for each FF write site,
+    /// built at ProtoModule conv time.  Consumed by phases that need to
+    /// reason about FF writes statically (write-log buffer sizing, NBA
+    /// invariant checks, per-Inst metadata for MT-ready commit).
+    pub site_table: site_table::SiteTable,
+    /// Per-top-level-Inst FF byte range metadata.  Foundation for
+    /// cache-line aligned padding and MT-ready per-Inst commit (#459).
+    pub inst_layout: inst_layout::InstLayout,
+    /// FF write log buffer.  Sized at Ir construction time from
+    /// `site_table.len()`; FF writes (JIT + interpret) push entries
+    /// during event evaluation and `ff_commit_from_log` applies them
+    /// at cycle end.
+    pub write_log_buffer: write_log::WriteLogBuffer,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
     /// Sensitivity-fanout + topological-rank index for the seeded-worklist
@@ -85,10 +91,6 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
-    /// Runtime feature detection: if true, ff_commit uses an AVX2 shuffle
-    /// fast path; otherwise a scalar fallback (which LLVM auto-vectorizes
-    /// for the base SSE2 target).
-    pub ff_commit_use_avx2: bool,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
     /// instances created from the same cached `ProtoModule` can share the binary.
     _binary: Arc<Vec<BinaryStorage>>,
@@ -110,37 +112,6 @@ impl Ir {
         config: &Config,
         token: TokenRange,
     ) -> Ir {
-        let mut ff_commit_u32_runs: Vec<(u32, u32)> = Vec::new();
-        let mut ff_commit_u64_runs: Vec<(u32, u32)> = Vec::new();
-        let mut ff_commit_other: Vec<(usize, usize)> = Vec::new();
-        {
-            let entries = &module.ff_commit_entries;
-            let mut i = 0;
-            while i < entries.len() {
-                let (off, sz) = entries[i];
-                if sz != 4 && sz != 8 {
-                    ff_commit_other.push((off, sz));
-                    i += 1;
-                    continue;
-                }
-                let stride = sz * 2;
-                let mut j = i + 1;
-                while j < entries.len() {
-                    let (off_j, sz_j) = entries[j];
-                    if sz_j != sz || off_j != off + stride * (j - i) {
-                        break;
-                    }
-                    j += 1;
-                }
-                let count = (j - i) as u32;
-                if sz == 4 {
-                    ff_commit_u32_runs.push((off as u32, count));
-                } else {
-                    ff_commit_u64_runs.push((off as u32, count));
-                }
-                i = j;
-            }
-        }
         Ir {
             name: module.name,
             token,
@@ -152,11 +123,11 @@ impl Ir {
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
-            ff_commit_entries: module.ff_commit_entries,
-            ff_commit_u32_runs,
-            ff_commit_u64_runs,
-            ff_commit_other,
-            ff_commit_use_avx2: detect_avx2(),
+            write_log_buffer: write_log::WriteLogBuffer::with_capacity(
+                write_log_capacity(&module.site_table),
+            ),
+            site_table: module.site_table,
+            inst_layout: module.inst_layout,
             disable_ff_opt: config.disable_ff_opt,
             comb_schedule: module.comb_schedule,
             use_seeded_worklist: config.use_seeded_worklist,
@@ -517,13 +488,16 @@ pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
 // concurrent mutation of ff_values/comb_values via interior raw pointers.
 unsafe impl Send for Ir {}
 
-#[cfg(target_arch = "x86_64")]
-fn detect_avx2() -> bool {
-    std::is_x86_feature_detected!("avx2")
-}
-#[cfg(not(target_arch = "x86_64"))]
-fn detect_avx2() -> bool {
-    false
+/// Initial WriteLogBuffer capacity derived from the FF write site table.
+/// Plan calls for exact `site_table.len()` sizing under the assumption
+/// each static site fires at most once per cycle.  We multiply by 4 for a
+/// conservative headroom: per-iteration runtime writes from `For`-unrolled
+/// loop bodies can exceed the static-site upper bound.  Subsequent phases
+/// may revisit this once the consumer is wired up and the runtime peak is
+/// measurable.
+fn write_log_capacity(site_table: &site_table::SiteTable) -> usize {
+    // Minimum 4096 to avoid tiny test designs ending up with zero capacity.
+    (site_table.len() * 4).max(4096)
 }
 
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {

@@ -4,7 +4,9 @@ use crate::HashSet;
 use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
+use crate::ir::inst_layout::InstLayout;
 use crate::ir::schedule::IrSchedule;
+use crate::ir::site_table::SiteTable;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
     write_native_value,
@@ -35,8 +37,14 @@ pub struct Module {
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
-    /// FF commit entries: (current_offset, value_size) pairs.
-    pub ff_commit_entries: Vec<(usize, usize)>,
+    /// FF write site table: compile-time metadata for each FF write site
+    /// reachable from the pre-JIT event ProtoStatements.  Consumed for
+    /// log buffer sizing and NBA invariant checks.
+    pub site_table: SiteTable,
+    /// Per-top-level-Inst FF byte range metadata.  Foundation for
+    /// cache-line aligned padding between Inst FF blocks and MT-ready
+    /// per-Inst commit (#459).
+    pub inst_layout: InstLayout,
     /// Sensitivity-fanout + topological-rank index for the seeded-worklist
     /// scheduler. Populated from the topologically-sorted comb list;
     /// `eval_comb_worklist` uses it when `Config::use_seeded_worklist` is on.
@@ -63,6 +71,10 @@ pub struct ProtoModule {
     pub comb_statements: ProtoStatements,
     /// Number of eval_comb passes needed for full convergence.
     pub required_comb_passes: usize,
+    /// See `Module::site_table`.
+    pub site_table: SiteTable,
+    /// See `Module::inst_layout`.
+    pub inst_layout: InstLayout,
     /// See `Module::comb_schedule`.
     pub comb_schedule: IrSchedule,
     /// See `Module::nontrivial_comb_scc`.
@@ -203,27 +215,6 @@ fn create_variables_recursive(
     }
 }
 
-/// Collect all FF commit entries (current_offset, value_size) from module metadata.
-fn collect_ff_commit_entries(
-    module_meta: &ModuleVariableMeta,
-    use_4state: bool,
-) -> Vec<(usize, usize)> {
-    let mut entries = vec![];
-    for meta in module_meta.variable_meta.values() {
-        for element in &meta.elements {
-            if element.is_ff() {
-                let vs = value_size(element.native_bytes, use_4state);
-                entries.push((element.current_offset() as usize, vs));
-            }
-        }
-    }
-    for child in &module_meta.children {
-        entries.extend(collect_ff_commit_entries(child, use_4state));
-    }
-    entries.sort_unstable();
-    entries
-}
-
 impl ProtoModule {
     pub fn instantiate(&self) -> Module {
         log::trace!(
@@ -268,9 +259,6 @@ impl ProtoModule {
             self.use_4state,
         ));
 
-        let ff_commit_entries =
-            collect_ff_commit_entries(&self.module_variable_meta, self.use_4state);
-
         #[cfg(debug_assertions)]
         self.validate_offsets();
 
@@ -284,7 +272,8 @@ impl ProtoModule {
             event_statements,
             comb_statements,
             required_comb_passes: self.required_comb_passes,
-            ff_commit_entries,
+            site_table: self.site_table.clone(),
+            inst_layout: self.inst_layout.clone(),
             comb_schedule: self.comb_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
         }
@@ -2226,6 +2215,21 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        // Build FF write site_table from pre-JIT event ProtoStatements.
+        // Walks all events before try_jit consumes them; FF writes only
+        // appear inside event scopes (always_ff blocks).
+        let mut site_table = SiteTable::new();
+        for stmts in all_event_statements.values() {
+            site_table.extend_from_protos(stmts);
+        }
+        if std::env::var("VERYL_SITE_TABLE_DIAG").ok().as_deref() == Some("1") {
+            eprintln!(
+                "[site_table_diag] module={:?} sites={}",
+                src.name,
+                site_table.len(),
+            );
+        }
+
         // Event statements preserve source order (no topological sorting).
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
@@ -2240,6 +2244,30 @@ impl Conv<&air::Module> for ProtoModule {
             variable_meta,
             children: all_child_modules,
         };
+
+        let inst_layout = InstLayout::build_from_top(&module_variable_meta);
+        debug_assert!(
+            inst_layout.ranges_disjoint(),
+            "inst_layout: top-level Inst FF ranges overlap (module={:?})",
+            src.name,
+        );
+        if std::env::var("VERYL_INST_LAYOUT_DIAG").ok().as_deref() == Some("1") {
+            eprintln!(
+                "[inst_layout_diag] module={:?} insts={} disjoint={}",
+                src.name,
+                inst_layout.len(),
+                inst_layout.ranges_disjoint(),
+            );
+            for r in &inst_layout.ranges {
+                eprintln!(
+                    "  inst={:?} ff_range=[{}..{}) bytes={}",
+                    r.name,
+                    r.ff_start,
+                    r.ff_end,
+                    r.ff_end - r.ff_start,
+                );
+            }
+        }
 
         if std::env::var("VERYL_SCC_TRACE").is_ok() {
             trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
@@ -2275,6 +2303,8 @@ impl Conv<&air::Module> for ProtoModule {
             event_statements,
             comb_statements,
             required_comb_passes,
+            site_table,
+            inst_layout,
             comb_schedule,
             nontrivial_comb_scc,
         })
