@@ -2,15 +2,11 @@
 //!
 //! NBA semantics: each FF write is recorded as a `WriteLogEntry` and applied
 //! to `current` storage at cycle end by `ff_commit_from_log`.  This decouples
-//! the commit cost from total FF count (sparse-write regime — heliodor dirty
-//! rate ~12.9%/cycle) and makes per-Inst independent commit possible for MT
-//! (#459).
+//! the commit cost from total FF count (favorable in sparse-write regimes).
 //!
 //! Entry layout: 16 bytes per entry.  Hot path stores 8-byte payload, 4-byte
 //! offset, 2-byte mask_xz placeholder (used only in 4-state mode), and a
 //! 2-byte width_class tag.
-//!
-//! See `/home/hatta/.claude/plans/distributed-wondering-flute.md`.
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -32,7 +28,7 @@ pub struct WriteLogEntry {
 /// same site push extra entries; the consumer applies them in order so
 /// last-write-wins.
 ///
-/// Layout-stable for JIT access (Phase 1.6): `#[repr(C)]` guarantees the
+/// Layout-stable for JIT access: `#[repr(C)]` guarantees the
 /// field order and offsets so JIT-emitted code can read/write `entries_ptr`
 /// at offset 0, `count` at offset 8, and `capacity` at offset 12 directly
 /// (no helper call, no TLS).  `_entries_owner` keeps the heap allocation
@@ -131,9 +127,7 @@ impl WriteLogBuffer {
     pub fn entries_slice(&self) -> &[WriteLogEntry] {
         // SAFETY: entries_ptr points to a Box<[WriteLogEntry]> of length
         // capacity; count <= capacity by construction.
-        unsafe {
-            std::slice::from_raw_parts(self.entries_ptr, self.capacity as usize)
-        }
+        unsafe { std::slice::from_raw_parts(self.entries_ptr, self.capacity as usize) }
     }
 }
 
@@ -217,18 +211,14 @@ pub(crate) unsafe extern "C" fn event_write_log_push_static(
         let Some(ptr) = cell.get() else {
             // No active log: emit becomes a no-op.  Reached when the
             // helper symbol is bound but the TLS hasn't been installed
-            // (e.g., during initial-block paths before Phase 3 wiring).
+            // (e.g., during initial-block paths before the write-log
+            // is wired up).
             return;
         };
         let buf = unsafe { &mut *ptr.as_ptr() };
         let idx = buf.count as usize;
         let cap = buf.capacity as usize;
-        debug_assert!(
-            idx < cap,
-            "write_log overflow: idx={} cap={}",
-            idx,
-            cap,
-        );
+        debug_assert!(idx < cap, "write_log overflow: idx={} cap={}", idx, cap,);
         if idx < cap {
             // SAFETY: entries_ptr points to capacity-sized allocation,
             // idx < cap, so the offset is in bounds.

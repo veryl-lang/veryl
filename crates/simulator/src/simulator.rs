@@ -1,8 +1,8 @@
+use crate::ir::write_log::{clear_event_write_log, ff_commit_from_log, set_event_write_log};
 use crate::ir::{
     Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
     read_native_value, write_native_value,
 };
-use crate::ir::write_log::{clear_event_write_log, ff_commit_from_log, set_event_write_log};
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::str::FromStr;
 use veryl_analyzer::value::MaskCache;
@@ -39,9 +39,9 @@ pub struct Simulator {
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
     /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
-    /// commit path.  Accumulated across the run; printed when
-    /// `print_write_log_diag` is invoked or the cycle counter crosses a
-    /// logarithmic checkpoint.
+    /// commit path.  Accumulated across the run; `dump` is invoked
+    /// automatically when the cycle counter crosses a logarithmic
+    /// checkpoint (doubling cadence, capped at 1 M cycles).
     pub write_log_diag: WriteLogDiag,
 }
 
@@ -250,7 +250,9 @@ impl Simulator {
         // turn into no-ops, leaving the FF current slot stale.
         // SAFETY: the buffer outlives the call to dispatch_stmt_fast and
         // is cleared before this stack frame returns.
-        unsafe { set_event_write_log(&mut self.ir.write_log_buffer); }
+        unsafe {
+            set_event_write_log(&mut self.ir.write_log_buffer);
+        }
 
         if self.comb_dirty {
             #[cfg(feature = "profile")]

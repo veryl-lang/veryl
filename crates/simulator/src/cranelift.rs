@@ -1,6 +1,7 @@
 use crate::ir::Context as ConvContext;
 use crate::ir::ProtoStatement;
 use crate::ir::VarOffset;
+use crate::ir::load_cache_lookahead::{FutureReads, compute_read_positions};
 use crate::{HashMap, HashSet};
 use cranelift::codegen::control::ControlPlane;
 use cranelift::codegen::ir::{AbiParam, Function, SigRef, Signature, StackSlotData, UserFuncName};
@@ -26,8 +27,6 @@ pub enum HelperSig {
     /// (I64, I32) -> I64  [reductions: a, nb -> result]
     Reduce,
     /// (I32, I64, I32) -> void  [write-log push: offset, payload, width_class]
-    /// Phase 2d-prep of ff_commit redesign — signature reserved for the
-    /// upcoming JIT-emitted FF write log push call.  Not yet emitted.
     WriteLogPushStatic,
 }
 
@@ -54,13 +53,14 @@ pub struct Context {
     /// Used for unified comb where helper functions may modify values
     /// between cached loads.
     pub disable_load_cache: bool,
-    /// Stage 7 Phase B look-ahead load_cache eviction (env-gated).
+    /// Look-ahead load_cache eviction (default-on, opt-out via
+    /// VERYL_STAGE7_LOOKAHEAD=0).
     /// Pre-computed per-VarOffset future read positions across the
     /// chunk's top-level statement sequence.  After each stmt, the
     /// main loop evicts cached entries by Belady-optimal policy
     /// (farthest next-read first) when size exceeds capacity.
-    /// `None` when VERYL_STAGE7_LOOKAHEAD is unset.
-    pub future_reads: Option<crate::ir::load_cache_lookahead::FutureReads>,
+    /// `None` when eviction is disabled (load_cache off or env opt-out).
+    pub future_reads: Option<FutureReads>,
     /// Belady eviction trigger.  Cache size <= capacity → no evict.
     /// Default ~physical GPR budget after ABI-reserved regs.
     pub lookahead_capacity: usize,
@@ -139,9 +139,8 @@ pub fn call_helper_ret(
     builder.inst_results(call)[0]
 }
 
-/// Phase 1.6: emit an inline write-log push.  Replaces
-/// `call_helper_void(WriteLogPushStatic, ...)` with direct loads/stores to
-/// the `WriteLogBuffer` whose pointer is passed as the 3rd JIT arg
+/// Emit an inline write-log push: direct loads/stores to the
+/// `WriteLogBuffer` whose pointer is passed as the 3rd JIT arg
 /// (`context.log_buf`).
 ///
 /// Layout (mirrors `write_log::WriteLogBuffer`):
@@ -395,18 +394,15 @@ fn build_binary_inner(
         lookahead_capacity: 0,
     };
 
-    // Stage 7 Phase B: pre-compute future-read positions for Belady-
-    // optimal load_cache eviction (env-gated `VERYL_STAGE7_LOOKAHEAD`,
-    // default-on; opt-out via VERYL_STAGE7_LOOKAHEAD=0).  Cap each
-    // chunk's resident cache entry count at `lookahead_capacity` to
-    // bound SSA Value live range to ~physical GPR budget and prevent
+    // Pre-compute future-read positions for Belady-optimal load_cache
+    // eviction (default-on; opt-out via VERYL_STAGE7_LOOKAHEAD=0).
+    // Cap each chunk's resident cache entry count at `lookahead_capacity`
+    // to bound SSA Value live range to ~physical GPR budget and prevent
     // regalloc spill cascade.  See ir/load_cache_lookahead.rs.
     if !effective_disable_load_cache
         && std::env::var("VERYL_STAGE7_LOOKAHEAD").as_deref() != Ok("0")
     {
-        cranelift_context.future_reads = Some(
-            crate::ir::load_cache_lookahead::compute_read_positions(&proto),
-        );
+        cranelift_context.future_reads = Some(compute_read_positions(&proto));
         cranelift_context.lookahead_capacity = std::env::var("VERYL_STAGE7_LOOKAHEAD_CAP")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -418,10 +414,9 @@ fn build_binary_inner(
         let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
 
-        // Stage 7 Phase B: Belady-optimal eviction after each top-level
-        // stmt.  While cache size > capacity, evict the entry whose
-        // next read is farthest in the future (None = never used again,
-        // evicted first).
+        // Belady-optimal eviction after each top-level stmt.  While
+        // cache size > capacity, evict the entry whose next read is
+        // farthest in the future (None = never used again, evicted first).
         if let Some(future) = cranelift_context.future_reads.take() {
             let cap = cranelift_context.lookahead_capacity;
             while cranelift_context.load_cache.len() > cap {

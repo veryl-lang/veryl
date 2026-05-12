@@ -384,14 +384,14 @@ pub fn create_variable_meta(
         let nb = native_bytes_for(width, is_ff_var);
         let vs = value_size(nb, use_4state);
 
-        // Phase 1.5 v2: packed FF allocation.  All-or-nothing per-array
-        // — if any element receives ≥2 writes in any cycle event, the
-        // array stays unpacked (dual-slot, next_offset = current + vs)
-        // so multi-RMW chain forwarding works.  Otherwise the array is
+        // Packed FF allocation.  All-or-nothing per-array — if any
+        // element receives ≥2 writes in any cycle event, the array
+        // stays unpacked (dual-slot, next_offset = current + vs) so
+        // multi-RMW chain forwarding works.  Otherwise the array is
         // packed (single slot per element, next_offset = current
         // sentinel, the dead next bytes are eliminated from ff_values).
-        let any_multi_rmw = is_ff_var
-            && (0..total_array).any(|i| multi_rmw_set.contains(&(v.id, i)));
+        let any_multi_rmw =
+            is_ff_var && (0..total_array).any(|i| multi_rmw_set.contains(&(v.id, i)));
         let packed_ff = is_ff_var && !any_multi_rmw;
 
         // `v.value.len() < total_array` means the analyzer supplied only

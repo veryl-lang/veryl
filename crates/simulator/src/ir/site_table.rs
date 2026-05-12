@@ -11,9 +11,8 @@
 //! - IR-level DCE on never-fired sites (future)
 //!
 //! The table participates in no runtime hot path; it is built at Ir
-//! construction time and consulted by env-gated diag checks.
-//!
-//! See `/home/hatta/.claude/plans/distributed-wondering-flute.md`.
+//! construction time and consulted by `write_log_capacity` (for
+//! WriteLogBuffer sizing) and by env-gated diag checks.
 
 use super::ProtoStatement;
 use super::variable::native_bytes_for;
@@ -55,12 +54,7 @@ impl SiteTable {
         id
     }
 
-    pub fn add_static(
-        &mut self,
-        current_offset: u32,
-        width_bits: u32,
-        native_bytes: u8,
-    ) -> u32 {
+    pub fn add_static(&mut self, current_offset: u32, width_bits: u32, native_bytes: u8) -> u32 {
         self.push(SiteInfo {
             current_offset,
             width_bits,

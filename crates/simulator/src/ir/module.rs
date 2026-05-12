@@ -5,8 +5,10 @@ use crate::cranelift;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
 use crate::ir::inst_layout::InstLayout;
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::multi_write_analysis::analyze_multi_write;
 use crate::ir::schedule::IrSchedule;
-use crate::ir::site_table::SiteTable;
+use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
     write_native_value,
@@ -42,8 +44,8 @@ pub struct Module {
     /// log buffer sizing and NBA invariant checks.
     pub site_table: SiteTable,
     /// Per-top-level-Inst FF byte range metadata.  Foundation for
-    /// cache-line aligned padding between Inst FF blocks and MT-ready
-    /// per-Inst commit (#459).
+    /// cache-line aligned padding between Inst FF blocks and per-Inst
+    /// independent commit.
     pub inst_layout: InstLayout,
     /// Sensitivity-fanout + topological-rank index for the seeded-worklist
     /// scheduler. Populated from the topologically-sorted comb list;
@@ -346,12 +348,10 @@ fn validate_meta_offsets(
         for (i, elem) in var_meta.elements.iter().enumerate() {
             let off = elem.current_offset() as usize;
             if elem.is_ff() {
-                // Post Phase 1.5 compaction (env-gated): packed FFs have
-                // next_offset == current_offset (sentinel) and only
-                // occupy `vs` bytes; unpacked (multi-RMW) FFs still have
-                // `next_offset == current_offset + vs` and need `vs * 2`
-                // bytes total.  When Phase 1.5 is off, all FFs are
-                // unpacked and this check matches the legacy `vs * 2`.
+                // Packed FFs have `next_offset == current_offset`
+                // (sentinel) and occupy only `vs` bytes; unpacked
+                // (multi-RMW) FFs have `next_offset == current_offset + vs`
+                // and need `vs * 2` bytes total.
                 let packed = elem.next_offset == elem.current_offset();
                 let span = if packed { vs } else { vs * 2 };
                 assert!(
@@ -2124,13 +2124,13 @@ impl Conv<&air::Module> for ProtoModule {
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
 
-        // Phase 1.5 v2: analyzer-IR pre-pass to identify multi-RMW FFs.
-        // Result drives packed-aware allocation in `create_variable_meta`
-        // — FFs that receive ≥2 writes per event need dual-slot storage
-        // (multi-RMW chain forwarding), all others use packed single-slot
-        // layout (dead next bytes eliminated, ff_values shrunk).
+        // Analyzer-IR pre-pass to identify multi-RMW FFs.  Result drives
+        // packed-aware allocation in `create_variable_meta` — FFs that
+        // receive ≥2 writes per event need dual-slot storage (multi-RMW
+        // chain forwarding), all others use packed single-slot layout
+        // (dead next bytes eliminated, ff_values shrunk).
         #[cfg(not(target_family = "wasm"))]
-        let multi_rmw_set = super::multi_write_analysis::analyze_multi_write(
+        let multi_rmw_set = analyze_multi_write(
             declarations,
             &mut analyzer_context,
             context.config.disable_ff_opt,
@@ -2257,8 +2257,7 @@ impl Conv<&air::Module> for ProtoModule {
             );
         }
 
-        // Phase 1 packed-layout PoC diag (option Y''):
-        // Count FF offsets with multiple write sites — these are the
+        // Diag: count FF offsets with multiple write sites — the
         // "multi-RMW candidates" that require scratch/cache forwarding
         // to preserve NBA semantics under packed [current]-only layout.
         // The remaining (single-site) FFs need no scratch at all.
@@ -2271,8 +2270,7 @@ impl Conv<&air::Module> for ProtoModule {
         // requirement.
         if std::env::var("VERYL_FF_MULTI_WRITE_DIAG").ok().as_deref() == Some("1") {
             use std::collections::BTreeMap;
-            let mut by_offset: BTreeMap<u32, Vec<&crate::ir::site_table::SiteInfo>> =
-                BTreeMap::new();
+            let mut by_offset: BTreeMap<u32, Vec<&SiteInfo>> = BTreeMap::new();
             for s in &site_table.sites {
                 by_offset.entry(s.current_offset).or_default().push(s);
             }
@@ -2322,10 +2320,16 @@ impl Conv<&air::Module> for ProtoModule {
                 .collect();
             multi_list.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
             for (off, chain) in multi_list.iter().take(10) {
-                let width = by_offset.get(off).and_then(|v| v.first())
-                    .map(|s| s.width_bits).unwrap_or(0);
-                let kind = by_offset.get(off).and_then(|v| v.first())
-                    .map(|s| s.kind).unwrap_or(crate::ir::site_table::SiteKind::Static);
+                let width = by_offset
+                    .get(off)
+                    .and_then(|v| v.first())
+                    .map(|s| s.width_bits)
+                    .unwrap_or(0);
+                let kind = by_offset
+                    .get(off)
+                    .and_then(|v| v.first())
+                    .map(|s| s.kind)
+                    .unwrap_or(SiteKind::Static);
                 eprintln!(
                     "  off=0x{:x} max_chain={} width_bits={} kind={:?}",
                     off, chain, width, kind,
@@ -2465,4 +2469,3 @@ fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
     }
     result
 }
-

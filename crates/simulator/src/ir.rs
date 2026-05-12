@@ -71,7 +71,7 @@ pub struct Ir {
     /// invariant checks, per-Inst metadata for MT-ready commit).
     pub site_table: site_table::SiteTable,
     /// Per-top-level-Inst FF byte range metadata.  Foundation for
-    /// cache-line aligned padding and MT-ready per-Inst commit (#459).
+    /// cache-line aligned padding and per-Inst independent commit.
     pub inst_layout: inst_layout::InstLayout,
     /// FF write log buffer.  Sized at Ir construction time from
     /// `site_table.len()`; FF writes (JIT + interpret) push entries
@@ -140,9 +140,9 @@ impl Ir {
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             _binary: binary,
         };
-        // Phase 1.6: bake the WriteLogBuffer's heap-stable address into
-        // every JIT-dispatched Binary/BinaryBatch so emitted code can
-        // perform inline log pushes without a TLS lookup.
+        // Bake the WriteLogBuffer's heap-stable address into every
+        // JIT-dispatched Binary/BinaryBatch so emitted code can perform
+        // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
         ir
     }

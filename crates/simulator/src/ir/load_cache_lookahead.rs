@@ -1,37 +1,33 @@
-// Stage 7 Phase B look-ahead load_cache eviction policy (env-gated).
+// Look-ahead load_cache eviction policy (default-on, opt-out via
+// VERYL_STAGE7_LOOKAHEAD=0).
 //
 // Pre-computes per-VarOffset future read positions across the JIT
 // chunk's top-level ProtoStatement sequence, so that
-// `cranelift::build_binary_inner` can evict cache entries with no
-// near-future use after each statement.
+// `cranelift::build_binary_inner` can apply Belady-optimal eviction
+// (evict the entry whose next read is farthest in the future) after
+// each statement when the live cache exceeds a fixed capacity.
 //
 // Mechanism: the load_cache holds Cranelift Values across statements.
 // Each cache hit emits a `use_var`-equivalent IR reference, extending
 // the SSA Value's live range to the latest hit.  Without intervention,
 // values that hit early-and-late but not in between still occupy a
-// register across the gap, starving regalloc.  The look-ahead policy
-// removes a cached Value from the HashMap when its next read is more
-// than `threshold` statements ahead — subsequent IR generation won't
-// reference the Value, regalloc sees its live range end at the most
-// recent use, and the register is freed.  The `threshold + 1`-th and
-// later reads pay one fresh `iadd_imm + load`, but the freed register
-// makes room for the values that ARE used densely.
+// register across the gap, starving regalloc.  Capping the cache at
+// ~physical GPR budget and evicting the worst future-reuse entry
+// bounds SSA live ranges and prevents the regalloc spill cascade that
+// otherwise dominates the unconstrained case.
 //
-// Limitations of this PoC: position is counted in TOP-LEVEL stmt
-// indices only (does not descend into If/For bodies).  Reads inside
-// conditional bodies are observed as occurring at the position of the
-// containing If/For statement.  This is conservative — values used
-// only inside one branch are seen as "used at branch position", which
-// matches load_cache lifetime (cleared at If boundaries by
-// statement.rs).
+// Position is counted in TOP-LEVEL stmt indices only (does not descend
+// into If/For bodies).  Reads inside conditional bodies are observed as
+// occurring at the position of the containing If/For statement.  This
+// is conservative — values used only inside one branch are seen as
+// "used at branch position", which matches load_cache lifetime (cleared
+// at If boundaries by statement.rs).
 //
 // env vars:
-//   VERYL_STAGE7_LOOKAHEAD=1   enable evict policy (default-off)
-//   VERYL_STAGE7_LOOKAHEAD_THRESHOLD=N
-//                              keep cache entry if next_read - cur <= N
-//                              (default 20).  N=0 means evict whenever
-//                              next_read is past current stmt; large N
-//                              effectively disables eviction.
+//   VERYL_STAGE7_LOOKAHEAD=0     disable eviction policy (default: on)
+//   VERYL_STAGE7_LOOKAHEAD_CAP=N max cache entries before eviction
+//                                (default 12 ≈ x86_64 GPR budget after
+//                                ABI-reserved regs)
 
 #![cfg(not(target_family = "wasm"))]
 
@@ -162,4 +158,3 @@ fn walk_expr(expr: &ProtoExpression, idx: usize, reads: &mut FutureReads) {
         ProtoExpression::Value { .. } => {}
     }
 }
-

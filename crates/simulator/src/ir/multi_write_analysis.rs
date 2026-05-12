@@ -1,15 +1,13 @@
-//! Phase 1.5 v2 Step 1: analyzer-IR level multi-RMW write analysis.
+//! Analyzer-IR multi-RMW write analysis.
 //!
 //! Walks `air::Declaration` (post comb_to_ff_hoist) and computes
 //! per-`(VarId, element_index)` max writes per cycle event.  An element
 //! with ≥2 writes in any event is "multi-RMW" and requires dual-slot
-//! storage (the Phase 1.5 packed layout cannot be applied).
+//! storage (the packed layout cannot be applied).
 //!
-//! This replicates the semantics of simulator-level
-//! `collect_multi_write_offsets` but operates on analyzer IR so the
-//! result can be consumed by `create_variable_meta` to allocate
-//! packed-aware FF storage from the start, avoiding the post-hoc remap
-//! pass that conflicts with child-level JIT caches.
+//! Operating on analyzer IR lets `create_variable_meta` allocate
+//! packed-aware FF storage from the start, avoiding a post-hoc remap
+//! pass that would conflict with child-level JIT caches.
 //!
 //! Result key `(VarId, usize)` matches `air::FfTable` indexing (flat
 //! array element index produced by `r#type.array.calc_index`).
@@ -48,7 +46,10 @@ pub fn analyze_multi_write(
                 events.entry(key).or_default().push(&ff.statements);
             }
             air::Declaration::Comb(c) if force_all_ff => {
-                events.entry(EventKey::Comb).or_default().push(&c.statements);
+                events
+                    .entry(EventKey::Comb)
+                    .or_default()
+                    .push(&c.statements);
             }
             _ => {}
         }
@@ -75,10 +76,7 @@ pub fn analyze_multi_write(
 
 #[derive(Eq, PartialEq, Hash, Clone)]
 enum EventKey {
-    Ff {
-        clock: VarId,
-        reset: Option<VarId>,
-    },
+    Ff { clock: VarId, reset: Option<VarId> },
     Comb,
 }
 

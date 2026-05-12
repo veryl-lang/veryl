@@ -1,15 +1,10 @@
 //! Per-top-level-Inst FF byte range metadata.
 //!
-//! Phase 1c-prep of the ff_commit redesign.  For each top-level child of
-//! the top ProtoModule we record the minimum/maximum FF byte offset
-//! reachable in that subtree.  This is metadata only, no runtime path
-//! is changed; future phases consume the ranges to:
-//!
-//! - apply cache-line aligned padding between Inst FF blocks (Phase 1c)
-//! - drive per-Inst write-log commit dispatch (Phase 4)
-//! - enable MT-ready independent commit per worker (#459)
-//!
-//! See `/home/hatta/.claude/plans/distributed-wondering-flute.md`.
+//! For each top-level child of the top ProtoModule we record the minimum/
+//! maximum FF byte offset reachable in that subtree.  Metadata only — no
+//! runtime path is changed.  Future work may consume the ranges to apply
+//! cache-line aligned padding between Inst FF blocks or to drive per-Inst
+//! independent commit dispatch.
 
 use super::variable::ModuleVariableMeta;
 use veryl_parser::resource_table::StrId;
@@ -59,8 +54,7 @@ impl InstLayout {
     }
 
     /// True iff no two ranges overlap.  Always expected to hold for
-    /// well-formed designs; future ff_commit phases rely on this for
-    /// race-free per-Inst commit.
+    /// well-formed designs; race-free per-Inst commit relies on it.
     pub fn ranges_disjoint(&self) -> bool {
         let mut sorted: Vec<&InstFfRange> = self.ranges.iter().collect();
         sorted.sort_by_key(|r| r.ff_start);

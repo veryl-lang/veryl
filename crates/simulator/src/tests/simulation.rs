@@ -8609,12 +8609,11 @@ fn ordering_ff_to_comb_chain() {
 }
 
 /// Wide FF (>64-bit) NBA semantic: intra-cycle read after write should
-/// return the OLD value, not the in-flight new value.  Verifies #556
-/// fix — prior to fix, wide FFs bypassed the write-log so writes went
-/// directly to the FF storage and intra-cycle reads observed the new
-/// value (NBA violation) and, for unpacked wide FFs, current never
-/// updated because the next-slot path produced no log entries for
-/// `ff_commit_from_log` to apply.
+/// return the OLD value, not the in-flight new value.  Without write-log
+/// emit, wide FFs wrote directly to FF storage and intra-cycle reads
+/// observed the new value (NBA violation); for unpacked wide FFs current
+/// also never updated because the next-slot path produced no log entries
+/// for `ff_commit_from_log` to apply.
 #[test]
 fn wide_ff_nba_intra_cycle_read_after_write() {
     let code = r#"
