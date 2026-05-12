@@ -35,6 +35,9 @@ pub struct Context {
     pub use_4state: bool,
     pub ff_values: Value,
     pub comb_values: Value,
+    /// Pointer to the per-Ir `WriteLogBuffer` (3rd JIT arg).  Used by
+    /// `emit_inline_write_log_push` to perform inline log entry stores.
+    pub log_buf: Value,
     pub zero: Value,
     pub zero_128: Value,
     /// Load CSE cache: VarOffset → (payload, mask_xz)
@@ -136,6 +139,80 @@ pub fn call_helper_ret(
     builder.inst_results(call)[0]
 }
 
+/// Phase 1.6: emit an inline write-log push.  Replaces
+/// `call_helper_void(WriteLogPushStatic, ...)` with direct loads/stores to
+/// the `WriteLogBuffer` whose pointer is passed as the 3rd JIT arg
+/// (`context.log_buf`).
+///
+/// Layout (mirrors `write_log::WriteLogBuffer`):
+///   offset 0 : entries_ptr (*mut WriteLogEntry)  — `i64` load
+///   offset 8 : count       (u32)                 — `i32` load + store
+/// Entry layout (16 B):
+///   offset 0 : offset      (u32)
+///   offset 4 : mask_xz     (u16) — store 0
+///   offset 6 : width_class (u16) — caller passes I32, truncate to I16
+///   offset 8 : payload     (u64)
+///
+/// Asm sequence: load count, increment, store count (back), load entries_ptr,
+/// compute entry slot = ptr + count*16, store offset/mask_xz/width_class/
+/// payload.  ~8 instructions vs ~30+ via helper call.
+pub fn emit_inline_write_log_push(
+    context: &Context,
+    builder: &mut FunctionBuilder,
+    offset: Value,
+    payload: Value,
+    width_class: Value,
+) {
+    use crate::ir::write_log::{
+        WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
+        WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+        WRITE_LOG_OFFSET_COUNT, WRITE_LOG_OFFSET_ENTRIES_PTR,
+    };
+    let log_buf = context.log_buf;
+    let flags = MemFlags::trusted();
+
+    // count = *(log_buf + WRITE_LOG_OFFSET_COUNT) as u32
+    let count = builder
+        .ins()
+        .load(I32, flags, log_buf, WRITE_LOG_OFFSET_COUNT);
+    // new_count = count + 1
+    let one = builder.ins().iconst(I32, 1);
+    let new_count = builder.ins().iadd(count, one);
+    // *(log_buf + WRITE_LOG_OFFSET_COUNT) = new_count
+    builder
+        .ins()
+        .store(flags, new_count, log_buf, WRITE_LOG_OFFSET_COUNT);
+    // entries_ptr = *(log_buf + WRITE_LOG_OFFSET_ENTRIES_PTR) as *mut Entry
+    let entries_ptr = builder
+        .ins()
+        .load(I64, flags, log_buf, WRITE_LOG_OFFSET_ENTRIES_PTR);
+    // entry_slot = entries_ptr + count * ENTRY_SIZE
+    let count_i64 = builder.ins().uextend(I64, count);
+    let entry_size = builder.ins().iconst(I64, WRITE_LOG_ENTRY_SIZE as i64);
+    let byte_offset = builder.ins().imul(count_i64, entry_size);
+    let entry_slot = builder.ins().iadd(entries_ptr, byte_offset);
+    // entry.offset (i32 @ +0) = offset
+    builder
+        .ins()
+        .store(flags, offset, entry_slot, WRITE_LOG_ENTRY_OFFSET_OFFSET);
+    // entry.mask_xz (i16 @ +4) = 0  — istore16 of zero
+    let zero_i16 = builder.ins().iconst(I32, 0);
+    builder
+        .ins()
+        .istore16(flags, zero_i16, entry_slot, WRITE_LOG_ENTRY_OFFSET_MASK_XZ);
+    // entry.width_class (i16 @ +6) = width_class (i32, low 16 bits)
+    builder.ins().istore16(
+        flags,
+        width_class,
+        entry_slot,
+        WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS,
+    );
+    // entry.payload (i64 @ +8) = payload
+    builder
+        .ins()
+        .store(flags, payload, entry_slot, WRITE_LOG_ENTRY_OFFSET_PAYLOAD);
+}
+
 /// Allocate a stack slot of `nb` bytes and return its address as an I64 value.
 pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -218,6 +295,7 @@ fn build_binary_inner(
     let mut sig = Signature::new(call_conv);
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (ff base)
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (comb base)
+    sig.params.push(AbiParam::new(ptr_type)); // *mut u8 (write_log buffer)
 
     let mut func = Function::with_name_signature(UserFuncName::default(), sig);
     let mut func_ctx = FunctionBuilderContext::new();
@@ -229,6 +307,7 @@ fn build_binary_inner(
 
     let ff_values = builder.block_params(block)[0];
     let comb_values = builder.block_params(block)[1];
+    let log_buf = builder.block_params(block)[2];
     let zero = builder.ins().iconst(I64, 0);
     let zero_lo = builder.ins().iconst(I64, 0);
     let zero_hi = builder.ins().iconst(I64, 0);
@@ -238,6 +317,7 @@ fn build_binary_inner(
         use_4state: config.use_4state,
         ff_values,
         comb_values,
+        log_buf,
         zero,
         zero_128,
         load_cache: HashMap::default(),

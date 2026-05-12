@@ -2041,27 +2041,29 @@ fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
 
     for stmt in stmts {
         match stmt {
-            Statement::Binary(func, ff, comb) => {
+            Statement::Binary(func, ff, comb, log_buf) => {
                 let func_addr = func as usize;
                 match result.last_mut() {
-                    Some(Statement::BinaryBatch(batch_func, args))
+                    Some(Statement::BinaryBatch(batch_func, _, args))
                         if *batch_func as usize == func_addr =>
                     {
                         args.push((ff, comb));
                     }
-                    Some(Statement::Binary(prev_func, prev_ff, prev_comb))
+                    Some(Statement::Binary(prev_func, prev_ff, prev_comb, prev_log_buf))
                         if *prev_func as usize == func_addr =>
                     {
                         let prev_ff = *prev_ff;
                         let prev_comb = *prev_comb;
                         let prev_func = *prev_func;
+                        let prev_log_buf = *prev_log_buf;
                         *result.last_mut().unwrap() = Statement::BinaryBatch(
                             prev_func,
+                            prev_log_buf,
                             vec![(prev_ff, prev_comb), (ff, comb)],
                         );
                     }
                     _ => {
-                        result.push(Statement::Binary(func, ff, comb));
+                        result.push(Statement::Binary(func, ff, comb, log_buf));
                     }
                 }
             }

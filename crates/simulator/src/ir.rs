@@ -22,7 +22,7 @@ pub use module::{Module, ProtoModule};
 pub use statement::{
     CompiledBlockStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, RuntimeForBound,
     RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
-    parse_hex_content,
+    parse_hex_content, patch_stmt_log_buf,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
@@ -75,7 +75,11 @@ pub struct Ir {
     /// `site_table.len()`; FF writes (JIT + interpret) push entries
     /// during event evaluation and `ff_commit_from_log` applies them
     /// at cycle end.
-    pub write_log_buffer: write_log::WriteLogBuffer,
+    ///
+    /// Heap-allocated (`Box`) so the buffer's address is stable across
+    /// moves of the surrounding `Ir`/`Simulator` — JIT code holds a raw
+    /// pointer baked into each `Statement::Binary` at construction.
+    pub write_log_buffer: Box<write_log::WriteLogBuffer>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
     /// Sensitivity-fanout + topological-rank index for the seeded-worklist
@@ -112,7 +116,7 @@ impl Ir {
         config: &Config,
         token: TokenRange,
     ) -> Ir {
-        Ir {
+        let mut ir = Ir {
             name: module.name,
             token,
             ports: module.ports,
@@ -123,9 +127,9 @@ impl Ir {
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
-            write_log_buffer: write_log::WriteLogBuffer::with_capacity(
+            write_log_buffer: Box::new(write_log::WriteLogBuffer::with_capacity(
                 write_log_capacity(&module.site_table),
-            ),
+            )),
             site_table: module.site_table,
             inst_layout: module.inst_layout,
             disable_ff_opt: config.disable_ff_opt,
@@ -133,6 +137,31 @@ impl Ir {
             use_seeded_worklist: config.use_seeded_worklist,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             _binary: binary,
+        };
+        // Phase 1.6: bake the WriteLogBuffer's heap-stable address into
+        // every JIT-dispatched Binary/BinaryBatch so emitted code can
+        // perform inline log pushes without a TLS lookup.
+        ir.install_write_log_ptr();
+        ir
+    }
+
+    /// Walk every event/comb statement tree and overwrite the placeholder
+    /// `log_buf` field in `Statement::Binary` / `Statement::BinaryBatch`
+    /// with the actual heap address of `self.write_log_buffer`.
+    ///
+    /// Called once at the end of `from_module_arc`.  The address is
+    /// stable for `self`'s lifetime because the buffer lives on the heap
+    /// inside a `Box`.
+    fn install_write_log_ptr(&mut self) {
+        let log_buf =
+            (&*self.write_log_buffer) as *const _ as *mut write_log::WriteLogBuffer as *mut u8;
+        for stmts in self.event_statements.values_mut() {
+            for s in stmts {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        for s in &mut self.comb_statements {
+            patch_stmt_log_buf(s, log_buf);
         }
     }
 
@@ -466,13 +495,14 @@ impl Ir {
 #[inline(always)]
 pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
     match s {
-        Statement::Binary(func, ff, comb) => unsafe {
-            func(*ff, *comb);
+        Statement::Binary(func, ff, comb, log_buf) => unsafe {
+            func(*ff, *comb, *log_buf);
         },
-        Statement::BinaryBatch(func, args) => unsafe {
+        Statement::BinaryBatch(func, log_buf, args) => unsafe {
             let f = *func;
+            let lb = *log_buf;
             for &(ff, comb) in args {
-                f(ff, comb);
+                f(ff, comb, lb);
             }
         },
         _ => {

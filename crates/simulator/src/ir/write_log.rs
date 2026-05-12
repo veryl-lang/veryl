@@ -31,23 +31,87 @@ pub struct WriteLogEntry {
 /// upper bound (one entry per site per cycle).  Repeated writes to the
 /// same site push extra entries; the consumer applies them in order so
 /// last-write-wins.
-#[derive(Debug, Default)]
+///
+/// Layout-stable for JIT access (Phase 1.6): `#[repr(C)]` guarantees the
+/// field order and offsets so JIT-emitted code can read/write `entries_ptr`
+/// at offset 0, `count` at offset 8, and `capacity` at offset 12 directly
+/// (no helper call, no TLS).  `_entries_owner` keeps the heap allocation
+/// alive; `entries_ptr` is cached at construction and stays valid for the
+/// buffer's lifetime (`Box<[T]>` is never reallocated).
+#[repr(C)]
+#[derive(Debug)]
 pub struct WriteLogBuffer {
-    pub entries: Box<[WriteLogEntry]>,
+    /// Raw pointer to entries[0].  Stable for buffer lifetime — JIT
+    /// reads this at offset 0 to compute entry slot addresses.
+    pub entries_ptr: *mut WriteLogEntry,
     /// Live count of entries written this cycle.  Reset to 0 by the
-    /// consumer at end of commit.
+    /// consumer at end of commit.  JIT reads/writes at offset 8.
     pub count: u32,
+    /// Capacity in entries.  Constant after construction.  JIT may
+    /// read for debug bounds check at offset 12.
+    pub capacity: u32,
+    /// Owning storage — JIT never touches; keeps `entries_ptr` valid.
+    _entries_owner: Box<[WriteLogEntry]>,
+}
+
+// SAFETY: WriteLogBuffer is owned by a single Ir which is bound to a
+// single thread (Ir is Send but not Sync).
+unsafe impl Send for WriteLogBuffer {}
+
+/// Layout offsets baked into JIT codegen.  Any change here requires
+/// matching updates in `cranelift.rs::emit_inline_write_log_push`.
+/// Only meaningful on 64-bit native targets where the JIT is enabled;
+/// on wasm32 the pointer-size-dependent offsets differ and the JIT is
+/// disabled, so the constants and the static layout assertions are
+/// gated out.
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_OFFSET_ENTRIES_PTR: i32 = 0;
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_OFFSET_COUNT: i32 = 8;
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_ENTRY_SIZE: i32 = 16;
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_ENTRY_OFFSET_OFFSET: i32 = 0;
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_ENTRY_OFFSET_MASK_XZ: i32 = 4;
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS: i32 = 6;
+#[cfg(not(target_family = "wasm"))]
+pub const WRITE_LOG_ENTRY_OFFSET_PAYLOAD: i32 = 8;
+
+#[cfg(not(target_family = "wasm"))]
+const _: () = {
+    assert!(std::mem::offset_of!(WriteLogBuffer, entries_ptr) == 0);
+    assert!(std::mem::offset_of!(WriteLogBuffer, count) == 8);
+    assert!(std::mem::offset_of!(WriteLogBuffer, capacity) == 12);
+    assert!(std::mem::offset_of!(WriteLogEntry, offset) == 0);
+    assert!(std::mem::offset_of!(WriteLogEntry, mask_xz) == 4);
+    assert!(std::mem::offset_of!(WriteLogEntry, width_class) == 6);
+    assert!(std::mem::offset_of!(WriteLogEntry, payload) == 8);
+    assert!(std::mem::size_of::<WriteLogEntry>() == 16);
+};
+
+impl Default for WriteLogBuffer {
+    fn default() -> Self {
+        Self::with_capacity(0)
+    }
 }
 
 impl WriteLogBuffer {
     /// Allocate a buffer with `capacity` slots, all zero-initialized.
     pub fn with_capacity(capacity: usize) -> Self {
-        let entries = vec![WriteLogEntry::default(); capacity].into_boxed_slice();
-        Self { entries, count: 0 }
+        let mut entries = vec![WriteLogEntry::default(); capacity].into_boxed_slice();
+        let entries_ptr = entries.as_mut_ptr();
+        Self {
+            entries_ptr,
+            count: 0,
+            capacity: capacity as u32,
+            _entries_owner: entries,
+        }
     }
 
     pub fn capacity(&self) -> usize {
-        self.entries.len()
+        self.capacity as usize
     }
 
     pub fn count(&self) -> u32 {
@@ -61,6 +125,16 @@ impl WriteLogBuffer {
     pub fn reset(&mut self) {
         self.count = 0;
     }
+
+    /// Safe slice view of the live entries (used by `ff_commit_from_log`
+    /// and tests).
+    pub fn entries_slice(&self) -> &[WriteLogEntry] {
+        // SAFETY: entries_ptr points to a Box<[WriteLogEntry]> of length
+        // capacity; count <= capacity by construction.
+        unsafe {
+            std::slice::from_raw_parts(self.entries_ptr, self.capacity as usize)
+        }
+    }
 }
 
 /// Apply each `WriteLogEntry`'s payload to the FF current slot.  The buffer
@@ -68,7 +142,7 @@ impl WriteLogBuffer {
 /// apply last-write-wins, matching JIT/interpret semantics.
 pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
     let limit = buffer.count as usize;
-    for entry in buffer.entries.iter().take(limit) {
+    for entry in buffer.entries_slice().iter().take(limit) {
         let nb = entry.width_class as usize;
         if nb == 0 || nb > 8 {
             continue;
@@ -116,13 +190,6 @@ pub(crate) fn clear_event_write_log() {
     EVENT_WRITE_LOG.with(|cell| cell.set(None));
 }
 
-/// Function address of `event_write_log_push_static` for Cranelift
-/// `call_indirect` (the JIT codegen emits an `iconst(I64, addr)` then
-/// `call_indirect`).
-pub(crate) fn event_write_log_push_static_addr() -> usize {
-    event_write_log_push_static as *const () as usize
-}
-
 /// Push a static FF write entry into the active log buffer.  Called from
 /// JIT code (`extern "C"`) and from the interpret path.  Width class is
 /// one of 1/2/4/8 (== native bytes) or 0xFF for wide-FF marker.
@@ -146,19 +213,24 @@ pub(crate) unsafe extern "C" fn event_write_log_push_static(
         };
         let buf = unsafe { &mut *ptr.as_ptr() };
         let idx = buf.count as usize;
+        let cap = buf.capacity as usize;
         debug_assert!(
-            idx < buf.entries.len(),
+            idx < cap,
             "write_log overflow: idx={} cap={}",
             idx,
-            buf.entries.len(),
+            cap,
         );
-        if idx < buf.entries.len() {
-            buf.entries[idx] = WriteLogEntry {
-                offset,
-                mask_xz: 0,
-                width_class,
-                payload,
-            };
+        if idx < cap {
+            // SAFETY: entries_ptr points to capacity-sized allocation,
+            // idx < cap, so the offset is in bounds.
+            unsafe {
+                *buf.entries_ptr.add(idx) = WriteLogEntry {
+                    offset,
+                    mask_xz: 0,
+                    width_class,
+                    payload,
+                };
+            }
             buf.count = (idx as u32).saturating_add(1);
         }
     });
@@ -206,12 +278,13 @@ mod tests {
             clear_event_write_log();
         }
         assert_eq!(buf.count, 2);
-        assert_eq!(buf.entries[0].offset, 0x1000);
-        assert_eq!(buf.entries[0].payload, 0xdead_beef);
-        assert_eq!(buf.entries[0].width_class, 8);
-        assert_eq!(buf.entries[1].offset, 0x1008);
-        assert_eq!(buf.entries[1].payload, 0xfeed_face);
-        assert_eq!(buf.entries[1].width_class, 4);
+        let entries = buf.entries_slice();
+        assert_eq!(entries[0].offset, 0x1000);
+        assert_eq!(entries[0].payload, 0xdead_beef);
+        assert_eq!(entries[0].width_class, 8);
+        assert_eq!(entries[1].offset, 0x1008);
+        assert_eq!(entries[1].payload, 0xfeed_face);
+        assert_eq!(entries[1].width_class, 4);
     }
 
     #[test]

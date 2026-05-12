@@ -1,9 +1,7 @@
 use crate::FuncPtr;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
-use crate::cranelift::{Context as CraneliftContext, HelperSig, call_helper_void};
-#[cfg(not(target_family = "wasm"))]
-use crate::ir::write_log::event_write_log_push_static_addr;
+use crate::cranelift::Context as CraneliftContext;
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
@@ -67,10 +65,13 @@ impl ProtoStatements {
                     }
                 }
                 ProtoStatementBlock::Compiled(func) => {
+                    // log_buf populated by `Ir::install_write_log_ptr` after
+                    // WriteLogBuffer allocation; null until then.
                     result.push(Statement::Binary(
                         *func,
                         ff_ptr as *const u8,
                         comb_ptr as *const u8,
+                        std::ptr::null_mut(),
                     ));
                 }
             }
@@ -204,8 +205,13 @@ pub enum Statement {
     If(IfStatement),
     For(ForStatement),
     Break,
-    Binary(FuncPtr, *const u8, *const u8),
-    BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
+    /// JIT-compiled chunk.  `func(ff, comb, log_buf)` — `log_buf` points
+    /// to the per-Ir `WriteLogBuffer`, populated post-Ir-construction by
+    /// `Ir::install_write_log_ptr` (Phase 1.6).
+    Binary(FuncPtr, *const u8, *const u8, *mut u8),
+    /// Run of consecutive `Binary` chunks sharing the same `func`.  All
+    /// entries see the same `log_buf` (Ir-wide).
+    BinaryBatch(FuncPtr, *mut u8, Vec<(*const u8, *const u8)>),
     SequentialBlock(Vec<Statement>),
     SystemFunctionCall(SystemFunctionCall),
     TbMethodCall { inst: StrId, method: TbMethodKind },
@@ -214,6 +220,44 @@ pub enum Statement {
 // SAFETY: Raw pointers point into the owning Ir's exclusively-owned buffers.
 // No cross-thread aliasing when each thread operates on a distinct Ir.
 unsafe impl Send for Statement {}
+
+/// Phase 1.6: recursively overwrite the `log_buf` slot in every nested
+/// `Binary` / `BinaryBatch` with the per-Ir buffer pointer.  Called once
+/// at end of `Ir::from_module_arc` so JIT-emitted code can perform
+/// inline log pushes through the 3rd `FuncPtr` argument.
+pub fn patch_stmt_log_buf(s: &mut Statement, log_buf: *mut u8) {
+    match s {
+        Statement::Binary(_, _, _, slot) => {
+            *slot = log_buf;
+        }
+        Statement::BinaryBatch(_, slot, _) => {
+            *slot = log_buf;
+        }
+        Statement::If(if_stmt) => {
+            for s in &mut if_stmt.true_side {
+                patch_stmt_log_buf(s, log_buf);
+            }
+            for s in &mut if_stmt.false_side {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        Statement::For(for_stmt) => {
+            for s in &mut for_stmt.body {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        Statement::SequentialBlock(body) => {
+            for s in body {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        Statement::Assign(_)
+        | Statement::AssignDynamic(_)
+        | Statement::Break
+        | Statement::SystemFunctionCall(_)
+        | Statement::TbMethodCall { .. } => {}
+    }
+}
 unsafe impl Send for AssignStatement {}
 unsafe impl Send for AssignDynamicStatement {}
 unsafe impl Send for IfStatement {}
@@ -224,7 +268,7 @@ impl Statement {
     pub fn is_binary(&self) -> bool {
         matches!(
             self,
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _)
+            Statement::Binary(_, _, _, _) | Statement::BinaryBatch(_, _, _)
         )
     }
 
@@ -286,13 +330,14 @@ impl Statement {
                 ControlFlow::Continue
             }
             Statement::Break => ControlFlow::Break,
-            Statement::Binary(func, ff_values, comb_values) => unsafe {
-                func(*ff_values, *comb_values);
+            Statement::Binary(func, ff_values, comb_values, log_buf) => unsafe {
+                func(*ff_values, *comb_values, *log_buf);
                 ControlFlow::Continue
             },
-            Statement::BinaryBatch(func, args) => unsafe {
+            Statement::BinaryBatch(func, log_buf, args) => unsafe {
+                let lb = *log_buf;
                 for &(ff_values, comb_values) in args {
-                    func(ff_values, comb_values);
+                    func(ff_values, comb_values, lb);
                 }
                 ControlFlow::Continue
             },
@@ -322,7 +367,7 @@ impl Statement {
                     s.gather_variable(inputs, outputs);
                 }
             }
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) | Statement::Break => (),
+            Statement::Binary(_, _, _, _) | Statement::BinaryBatch(_, _, _) | Statement::Break => (),
             Statement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_variable(inputs, outputs);
@@ -663,12 +708,12 @@ impl ProtoAssignDynamicStatement {
                              payload: cranelift::prelude::Value| {
             if let Some(offset_val) = log_offset_i32 {
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
-                call_helper_void(
+                crate::cranelift::emit_inline_write_log_push(
                     context,
                     builder,
-                    HelperSig::WriteLogPushStatic,
-                    event_write_log_push_static_addr(),
-                    &[offset_val, payload, width_class_val],
+                    offset_val,
+                    payload,
+                    width_class_val,
                 );
             }
         };
@@ -1718,7 +1763,7 @@ impl ProtoStatement {
                         (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes);
                     let adjusted_comb =
                         (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes);
-                    Statement::Binary(x.func, adjusted_ff, adjusted_comb)
+                    Statement::Binary(x.func, adjusted_ff, adjusted_comb, std::ptr::null_mut())
                 }
                 ProtoStatement::For(x) => {
                     let var_ptr = if x.var_offset.is_ff() {
@@ -2432,12 +2477,12 @@ impl ProtoAssignStatement {
             if emit_log {
                 let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
-                call_helper_void(
+                crate::cranelift::emit_inline_write_log_push(
                     context,
                     builder,
-                    HelperSig::WriteLogPushStatic,
-                    event_write_log_push_static_addr(),
-                    &[offset_val, fwd, width_class_val],
+                    offset_val,
+                    fwd,
+                    width_class_val,
                 );
             }
         } else if let Some((beg, end)) = self.select {
@@ -2505,12 +2550,12 @@ impl ProtoAssignStatement {
             if emit_log {
                 let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
-                call_helper_void(
+                crate::cranelift::emit_inline_write_log_push(
                     context,
                     builder,
-                    HelperSig::WriteLogPushStatic,
-                    event_write_log_push_static_addr(),
-                    &[offset_val, fwd, width_class_val],
+                    offset_val,
+                    fwd,
+                    width_class_val,
                 );
             }
         } else {
@@ -2660,12 +2705,12 @@ impl ProtoAssignStatement {
             if emit_log {
                 let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
-                call_helper_void(
+                crate::cranelift::emit_inline_write_log_push(
                     context,
                     builder,
-                    HelperSig::WriteLogPushStatic,
-                    event_write_log_push_static_addr(),
-                    &[offset_val, fwd_p, width_class_val],
+                    offset_val,
+                    fwd_p,
+                    width_class_val,
                 );
             }
         }
