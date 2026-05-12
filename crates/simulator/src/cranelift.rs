@@ -213,6 +213,71 @@ pub fn emit_inline_write_log_push(
         .store(flags, payload, entry_slot, WRITE_LOG_ENTRY_OFFSET_PAYLOAD);
 }
 
+/// Batched variant of `emit_inline_write_log_push` for wide FFs.
+/// Reserves `entries.len()` consecutive slots in one count update and
+/// shares the `count` and `entries_ptr` loads across the batch.
+pub fn emit_inline_write_log_push_batch(
+    context: &Context,
+    builder: &mut FunctionBuilder,
+    entries: &[(Value, Value, Value)], // (offset, payload, width_class)
+) {
+    use crate::ir::write_log::{
+        WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
+        WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+        WRITE_LOG_OFFSET_COUNT, WRITE_LOG_OFFSET_ENTRIES_PTR,
+    };
+    if entries.is_empty() {
+        return;
+    }
+    let log_buf = context.log_buf;
+    let flags = MemFlags::trusted();
+
+    let count = builder
+        .ins()
+        .load(I32, flags, log_buf, WRITE_LOG_OFFSET_COUNT);
+    let n = builder.ins().iconst(I32, entries.len() as i64);
+    let new_count = builder.ins().iadd(count, n);
+    builder
+        .ins()
+        .store(flags, new_count, log_buf, WRITE_LOG_OFFSET_COUNT);
+    let entries_ptr = builder
+        .ins()
+        .load(I64, flags, log_buf, WRITE_LOG_OFFSET_ENTRIES_PTR);
+    let count_i64 = builder.ins().uextend(I64, count);
+    let entry_size = builder.ins().iconst(I64, WRITE_LOG_ENTRY_SIZE as i64);
+    let byte_offset = builder.ins().imul(count_i64, entry_size);
+    let base_slot = builder.ins().iadd(entries_ptr, byte_offset);
+    let zero_i16 = builder.ins().iconst(I32, 0);
+
+    for (i, (offset, payload, width_class)) in entries.iter().enumerate() {
+        let slot_offset = (i as i32) * WRITE_LOG_ENTRY_SIZE;
+        builder.ins().store(
+            flags,
+            *offset,
+            base_slot,
+            slot_offset + WRITE_LOG_ENTRY_OFFSET_OFFSET,
+        );
+        builder.ins().istore16(
+            flags,
+            zero_i16,
+            base_slot,
+            slot_offset + WRITE_LOG_ENTRY_OFFSET_MASK_XZ,
+        );
+        builder.ins().istore16(
+            flags,
+            *width_class,
+            base_slot,
+            slot_offset + WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS,
+        );
+        builder.ins().store(
+            flags,
+            *payload,
+            base_slot,
+            slot_offset + WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
+        );
+    }
+}
+
 /// Allocate a stack slot of `nb` bytes and return its address as an I64 value.
 pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     let slot = builder.create_sized_stack_slot(StackSlotData::new(

@@ -142,17 +142,26 @@ impl WriteLogBuffer {
 /// apply last-write-wins, matching JIT/interpret semantics.
 pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
     let limit = buffer.count as usize;
+    let len = ff_values.len();
+    let dst = ff_values.as_mut_ptr();
     for entry in buffer.entries_slice().iter().take(limit) {
         let nb = entry.width_class as usize;
-        if nb == 0 || nb > 8 {
-            continue;
-        }
         let offset = entry.offset as usize;
-        if offset + nb > ff_values.len() {
+        if offset + nb > len {
             continue;
         }
-        for i in 0..nb {
-            ff_values[offset + i] = ((entry.payload >> (i * 8)) & 0xFF) as u8;
+        // Single word store per width class — keeps wide FF commit
+        // throughput high (4 words for 256-bit ⇒ 4 stores, not 32).
+        // SAFETY: bounds verified above; dst is the start of the slice.
+        unsafe {
+            let p = dst.add(offset);
+            match nb {
+                8 => (p as *mut u64).write_unaligned(entry.payload),
+                4 => (p as *mut u32).write_unaligned(entry.payload as u32),
+                2 => (p as *mut u16).write_unaligned(entry.payload as u16),
+                1 => *p = entry.payload as u8,
+                _ => continue,
+            }
         }
     }
 }

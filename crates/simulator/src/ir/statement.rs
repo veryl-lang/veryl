@@ -2037,25 +2037,15 @@ impl AssignStatement {
             }
             // Phase 3.3 of ff_commit redesign — dynamic_select RMW log
             // push.  Offset is static (the dyn_sel only selects bit
-            // ranges within a packed-bitfield FF dst).  For 4-state FFs
-            // a second entry carries the mask_xz portion (stored at
-            // `offset + nb`, see write_native_value layout).
+            // ranges within a packed-bitfield FF dst).  Wide FFs split
+            // into per-word entries; see `emit_ff_log`.
             if let Some(offset) = self.ff_log_offset {
-                let payload = current.to_u64().unwrap_or(0);
-                let nb = self.dst_native_bytes as u16;
-                unsafe {
-                    crate::ir::write_log::event_write_log_push_static(
-                        offset, payload, nb,
-                    );
-                    if self.dst_use_4state {
-                        let mask = current.mask_xz_u128() as u64;
-                        crate::ir::write_log::event_write_log_push_static(
-                            offset + self.dst_native_bytes as u32,
-                            mask,
-                            nb,
-                        );
-                    }
-                }
+                emit_ff_log(
+                    &current,
+                    offset,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                );
             }
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
@@ -2080,24 +2070,15 @@ impl AssignStatement {
             }
             // Phase 3.2 of ff_commit redesign — select RMW log push.
             // `current` after assign holds the final merged value the
-            // master next-slot store deposited.  4-state appends a
-            // second entry carrying the mask_xz bytes.
+            // master next-slot store deposited.  Wide FFs split into
+            // per-word entries; see `emit_ff_log`.
             if let Some(offset) = self.ff_log_offset {
-                let payload = current.to_u64().unwrap_or(0);
-                let nb = self.dst_native_bytes as u16;
-                unsafe {
-                    crate::ir::write_log::event_write_log_push_static(
-                        offset, payload, nb,
-                    );
-                    if self.dst_use_4state {
-                        let mask = current.mask_xz_u128() as u64;
-                        crate::ir::write_log::event_write_log_push_static(
-                            offset + self.dst_native_bytes as u32,
-                            mask,
-                            nb,
-                        );
-                    }
-                }
+                emit_ff_log(
+                    &current,
+                    offset,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                );
             }
         } else {
             let mut value = value;
@@ -2114,27 +2095,18 @@ impl AssignStatement {
             }
             // Phase 3 of ff_commit redesign — interpret path log push.
             // Mirrors the JIT-side emit at statement.rs build_binary so
-            // both paths produce matching WriteLogEntry sequences.  Same
-            // gate (ff_log_offset.is_some()) and same payload (post-trunc
-            // u64) as the JIT path.  `value.to_u64()` cannot fail when
-            // dst_width ≤ 64.  4-state appends a second entry for the
-            // mask_xz bytes at `offset + nb`.
+            // both paths produce matching WriteLogEntry sequences.  Narrow
+            // FFs (dst_width ≤ 64) emit one payload entry plus an optional
+            // 4-state mask entry at `offset + nb`.  Wide FFs (dst_width >
+            // 64) emit one entry per 8-byte word, with parallel mask
+            // entries when use_4state is set.
             if let Some(offset) = self.ff_log_offset {
-                let payload = value.to_u64().unwrap_or(0);
-                let nb = self.dst_native_bytes as u16;
-                unsafe {
-                    crate::ir::write_log::event_write_log_push_static(
-                        offset, payload, nb,
-                    );
-                    if self.dst_use_4state {
-                        let mask = value.mask_xz_u128() as u64;
-                        crate::ir::write_log::event_write_log_push_static(
-                            offset + self.dst_native_bytes as u32,
-                            mask,
-                            nb,
-                        );
-                    }
-                }
+                emit_ff_log(
+                    &value,
+                    offset,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                );
             }
         }
     }
@@ -2352,7 +2324,10 @@ impl ProtoAssignStatement {
             // `dst_ff_current_offset`.
             // 4-state FFs emit a second log entry for the mask_xz portion
             // at `dst_ff_current_offset + nb` (see eval_step).
-            let emit_log = self.dst.is_ff() && self.dst_width <= 64;
+            // Wide FFs (>64 bits) emit one log entry per 8-byte word; the
+            // ff_log_offset records the canonical base and eval_step / JIT
+            // codegen splits per word.
+            let emit_log = self.dst.is_ff();
             let ff_log_offset = if emit_log {
                 Some(self.dst_ff_current_offset as u32)
             } else {
@@ -2451,7 +2426,11 @@ impl ProtoAssignStatement {
         // are skipped — log-push-only path.  Multi-RMW FFs keep the
         // dual-slot dst=Ff(next) with cache forwarding for in-block
         // chain semantics.
-        let emit_log = self.dst.is_ff() && !wide;
+        //
+        // Wide FFs (65-128 bit, nb=16) emit a pair of 8-byte log entries
+        // for the payload (and another pair for the 4-state mask).  See
+        // the log push block below.
+        let emit_log = self.dst.is_ff();
         let is_packed_ff =
             emit_log && (self.dst.raw() == self.dst_ff_current_offset);
         let log_current_offset = self.dst_ff_current_offset as i32;
@@ -2827,31 +2806,82 @@ impl ProtoAssignStatement {
 
             // Phase 2d: write-log push (dual-write).  Emit alongside the
             // master next-slot store.  fwd_p is the width-masked payload
-            // that matches what istoreN would actually deposit.  4-state
-            // appends a mask_xz entry at `log_current_offset + nb`.
+            // that matches what istoreN would actually deposit.  Narrow
+            // FFs emit one entry per payload (+ one mask entry for
+            // 4-state).  Wide FFs (nb > 8) split the I128 payload into
+            // low/high u64 words, emitting one entry per word — the
+            // commit-side consumer in `ff_commit_from_log` writes
+            // width_class=8 bytes per entry.
             if emit_log {
-                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
-                let width_class_val = builder.ins().iconst(I32, nb as i64);
-                crate::cranelift::emit_inline_write_log_push(
-                    context,
-                    builder,
-                    offset_val,
-                    fwd_p,
-                    width_class_val,
-                );
-                if context.use_4state
-                    && let Some(fwd_m_v) = fwd_m
-                {
-                    let mask_offset_val = builder
-                        .ins()
-                        .iconst(I32, (log_current_offset + nb_i32) as i64);
+                if nb <= 8 {
+                    let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                    let width_class_val = builder.ins().iconst(I32, nb as i64);
                     crate::cranelift::emit_inline_write_log_push(
                         context,
                         builder,
-                        mask_offset_val,
-                        fwd_m_v,
+                        offset_val,
+                        fwd_p,
                         width_class_val,
                     );
+                    if context.use_4state
+                        && let Some(fwd_m_v) = fwd_m
+                    {
+                        let mask_offset_val = builder
+                            .ins()
+                            .iconst(I32, (log_current_offset + nb_i32) as i64);
+                        crate::cranelift::emit_inline_write_log_push(
+                            context,
+                            builder,
+                            mask_offset_val,
+                            fwd_m_v,
+                            width_class_val,
+                        );
+                    }
+                } else {
+                    // Wide FF: split into per-8-byte words.  fwd_p is
+                    // typically I128 (built by ensure_wide_ptr_val and
+                    // related helpers in the narrow-path expression flow
+                    // for 65-128 bit dsts).
+                    let n_words = nb / 8;
+                    let width_class_val = builder.ins().iconst(I32, 8);
+                    for i in 0..n_words {
+                        let shifted = if i == 0 {
+                            fwd_p
+                        } else {
+                            builder.ins().ushr_imm(fwd_p, (i * 64) as i64)
+                        };
+                        let word = builder.ins().ireduce(I64, shifted);
+                        let off = log_current_offset + (i * 8) as i32;
+                        let entry_offset_val = builder.ins().iconst(I32, off as i64);
+                        crate::cranelift::emit_inline_write_log_push(
+                            context,
+                            builder,
+                            entry_offset_val,
+                            word,
+                            width_class_val,
+                        );
+                    }
+                    if context.use_4state
+                        && let Some(fwd_m_v) = fwd_m
+                    {
+                        for i in 0..n_words {
+                            let shifted = if i == 0 {
+                                fwd_m_v
+                            } else {
+                                builder.ins().ushr_imm(fwd_m_v, (i * 64) as i64)
+                            };
+                            let word = builder.ins().ireduce(I64, shifted);
+                            let off = log_current_offset + nb_i32 + (i * 8) as i32;
+                            let entry_offset_val = builder.ins().iconst(I32, off as i64);
+                            crate::cranelift::emit_inline_write_log_push(
+                                context,
+                                builder,
+                                entry_offset_val,
+                                word,
+                                width_class_val,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -2886,6 +2916,21 @@ impl ProtoAssignStatement {
         };
         let dst_offset = self.dst.raw() as i32;
 
+        // FF write log emit for wide FFs.  Packed FFs (dst.raw() ==
+        // dst_ff_current_offset) skip the direct store entirely so
+        // intra-cycle reads return the OLD current value (NBA correct);
+        // unpacked FFs (dst.raw() == next_offset) keep the direct store
+        // for in-block chain forwarding via load_cache, then emit log
+        // entries against the canonical current_offset so
+        // `ff_commit_from_log` applies them at cycle end.
+        let is_ff = self.dst.is_ff();
+        let ff_packed = is_ff && (self.dst.raw() == self.dst_ff_current_offset);
+        let log_current_offset = if is_ff {
+            self.dst_ff_current_offset as i32
+        } else {
+            0
+        };
+
         // Source is a wide pointer (for >128-bit expressions)
         // Use expr_width captured before build_binary to determine representation.
         // build_binary returns a pointer for width > 128, register otherwise.
@@ -2900,14 +2945,36 @@ impl ProtoAssignStatement {
         // Apply width mask to the source to truncate extra bits
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
-        // Copy word by word from source to destination
-        for i in 0..n_words {
-            let off = (i * 8) as i32;
-            let val = builder.ins().load(I64, flags, src_ptr, off);
-            builder.ins().store(flags, val, base_addr, dst_offset + off);
+        // Direct store (skip for packed FF — log push alone is enough).
+        if !ff_packed {
+            for i in 0..n_words {
+                let off = (i * 8) as i32;
+                let val = builder.ins().load(I64, flags, src_ptr, off);
+                builder.ins().store(flags, val, base_addr, dst_offset + off);
+            }
         }
 
-        // 4-state mask
+        // FF write-log push: one entry per 8-byte word at the canonical
+        // current_offset.  Width class = 8 per entry.  Batched so the
+        // count update / entries_ptr load is shared across the N words.
+        if is_ff {
+            let width_class_val = builder.ins().iconst(I32, 8);
+            let mut batch: Vec<(
+                cranelift::prelude::Value,
+                cranelift::prelude::Value,
+                cranelift::prelude::Value,
+            )> = Vec::with_capacity(n_words);
+            for i in 0..n_words {
+                let off = (i * 8) as i32;
+                let val = builder.ins().load(I64, flags, src_ptr, off);
+                let entry_offset_val = builder.ins().iconst(I32, (log_current_offset + off) as i64);
+                batch.push((entry_offset_val, val, width_class_val));
+            }
+            crate::cranelift::emit_inline_write_log_push_batch(context, builder, &batch);
+        }
+
+        // 4-state mask: direct store (skip for packed FF) + parallel log
+        // entries at `current_offset + nb`.
         if let Some(mask_xz) = mask_xz {
             let mask_ptr = if is_wide_ptr(self.expr.width()) {
                 mask_xz
@@ -2916,12 +2983,31 @@ impl ProtoAssignStatement {
                 ensure_wide_ptr_val(builder, mask_xz, self.expr.width(), nb)
             };
             emit_wide_apply_mask(context, builder, mask_ptr, nb, self.dst_width);
-            for i in 0..n_words {
-                let off = (i * 8) as i32;
-                let val = builder.ins().load(I64, flags, mask_ptr, off);
-                builder
-                    .ins()
-                    .store(flags, val, base_addr, dst_offset + nb as i32 + off);
+            if !ff_packed {
+                for i in 0..n_words {
+                    let off = (i * 8) as i32;
+                    let val = builder.ins().load(I64, flags, mask_ptr, off);
+                    builder
+                        .ins()
+                        .store(flags, val, base_addr, dst_offset + nb as i32 + off);
+                }
+            }
+            if is_ff {
+                let width_class_val = builder.ins().iconst(I32, 8);
+                let mut batch: Vec<(
+                    cranelift::prelude::Value,
+                    cranelift::prelude::Value,
+                    cranelift::prelude::Value,
+                )> = Vec::with_capacity(n_words);
+                for i in 0..n_words {
+                    let off = (i * 8) as i32;
+                    let val = builder.ins().load(I64, flags, mask_ptr, off);
+                    let entry_offset_val = builder
+                        .ins()
+                        .iconst(I32, (log_current_offset + nb as i32 + off) as i64);
+                    batch.push((entry_offset_val, val, width_class_val));
+                }
+                crate::cranelift::emit_inline_write_log_push_batch(context, builder, &batch);
             }
         }
 
@@ -3730,6 +3816,67 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             append_ff_next_copies(&mut result);
         }
         Ok(result)
+    }
+}
+
+/// Push FF write log entries for `value` against the canonical
+/// `base_offset` (the FF's current byte offset).  Narrow FFs (nb ≤ 8)
+/// emit a single payload entry plus an optional mask entry at
+/// `base_offset + nb` (4-state).  Wide FFs split the payload (and mask)
+/// into per-8-byte-word entries; the consumer in `ff_commit_from_log`
+/// applies each entry's width-class bytes to its offset.
+///
+/// SAFETY: callers must run while an `EVENT_WRITE_LOG` buffer is
+/// installed; without one this becomes a no-op.
+fn emit_ff_log(value: &Value, base_offset: u32, nb: usize, use_4state: bool) {
+    let nb_u16 = nb as u16;
+    let nb_u32 = nb as u32;
+    if nb <= 8 {
+        let payload = value.to_u64().unwrap_or(0);
+        unsafe {
+            crate::ir::write_log::event_write_log_push_static(
+                base_offset, payload, nb_u16,
+            );
+            if use_4state {
+                let mask = value.mask_xz_u128() as u64;
+                crate::ir::write_log::event_write_log_push_static(
+                    base_offset + nb_u32, mask, nb_u16,
+                );
+            }
+        }
+        return;
+    }
+    // Wide: per-word entries (8 bytes each).
+    let n_words = nb / 8;
+    let payload_digits: Vec<u64> = match value {
+        Value::U64(v) => vec![v.payload],
+        Value::BigUint(v) => v.payload.to_u64_digits(),
+    };
+    for i in 0..n_words {
+        let p = payload_digits.get(i).copied().unwrap_or(0);
+        unsafe {
+            crate::ir::write_log::event_write_log_push_static(
+                base_offset + (i as u32) * 8,
+                p,
+                8,
+            );
+        }
+    }
+    if use_4state {
+        let mask_digits: Vec<u64> = match value {
+            Value::U64(v) => vec![v.mask_xz],
+            Value::BigUint(v) => v.mask_xz.to_u64_digits(),
+        };
+        for i in 0..n_words {
+            let m = mask_digits.get(i).copied().unwrap_or(0);
+            unsafe {
+                crate::ir::write_log::event_write_log_push_static(
+                    base_offset + nb_u32 + (i as u32) * 8,
+                    m,
+                    8,
+                );
+            }
+        }
     }
 }
 

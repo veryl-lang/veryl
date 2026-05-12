@@ -8608,6 +8608,62 @@ fn ordering_ff_to_comb_chain() {
     });
 }
 
+/// Wide FF (>64-bit) NBA semantic: intra-cycle read after write should
+/// return the OLD value, not the in-flight new value.  Verifies #556
+/// fix — prior to fix, wide FFs bypassed the write-log so writes went
+/// directly to the FF storage and intra-cycle reads observed the new
+/// value (NBA violation) and, for unpacked wide FFs, current never
+/// updated because the next-slot path produced no log entries for
+/// `ff_commit_from_log` to apply.
+#[test]
+fn wide_ff_nba_intra_cycle_read_after_write() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        cnt:      output logic<128>,
+        cnt_prev: output logic<128>,
+    ) {
+        var c:      logic<128>;
+        var c_prev: logic<128>;
+
+        always_ff {
+            if_reset {
+                c = 0;
+                c_prev = 0;
+            } else {
+                c = c + 1;
+                c_prev = c;
+            }
+        }
+
+        assign cnt = c;
+        assign cnt_prev = c_prev;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        dual.step_reset("rst");
+        for i in 0u64..16 {
+            dual.step_clock("clk");
+            let cnt_expected = Value::new(i + 1, 128, false);
+            let cnt_prev_expected = Value::new(i, 128, false);
+            assert_eq!(
+                dual.get("cnt").unwrap(),
+                cnt_expected,
+                "cycle {}: cnt mismatch",
+                i + 1
+            );
+            assert_eq!(
+                dual.get("cnt_prev").unwrap(),
+                cnt_prev_expected,
+                "cycle {}: cnt_prev should be OLD cnt (NBA semantic)",
+                i + 1
+            );
+        }
+    });
+}
+
 /// Multi-level hierarchy: grandparent → parent → child comb propagation.
 /// Unified comb list ensures correct ordering across all hierarchy levels.
 #[test]

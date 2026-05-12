@@ -528,8 +528,18 @@ unsafe impl Send for Ir {}
 /// may revisit this once the consumer is wired up and the runtime peak is
 /// measurable.
 fn write_log_capacity(site_table: &site_table::SiteTable) -> usize {
+    // Per-site worst-case entry count: narrow FFs emit at most 2 entries
+    // per cycle (payload + 4-state mask), wide FFs emit `2 * n_words`.
+    // `n_words = nb / 8` (nb=16 for 65-128 bits → 2 words → 4 entries per
+    // cycle in the 4-state worst case).  Multiply by 2 for over-
+    // provisioning headroom (initial dual-writes, multi-RMW chains).
+    let mut total: usize = 0;
+    for s in &site_table.sites {
+        let n_words = ((s.native_bytes as usize) / 8).max(1);
+        total += n_words * 2 * 2;
+    }
     // Minimum 4096 to avoid tiny test designs ending up with zero capacity.
-    (site_table.len() * 4).max(4096)
+    total.max(4096)
 }
 
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
