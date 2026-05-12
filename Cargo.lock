@@ -3600,9 +3600,9 @@ dependencies = [
 
 [[package]]
 name = "merkle_hash"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "025450e7f75788743d2f9465c120a0ad0b350367715e1230c0d21a9e4a8fdc9d"
+checksum = "ffc9dee3efaf0a2f827ad50f29b98f520992b4dbc301b90ae8c3c1d76658663a"
 dependencies = [
  "blake3",
  "camino",

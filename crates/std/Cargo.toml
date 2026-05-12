@@ -17,4 +17,4 @@ thiserror   = {workspace = true}
 veryl-path  = {version = "0.20.0", path = "../path"}
 
 [build-dependencies]
-merkle_hash = "3.8"
+merkle_hash = "3.9"
