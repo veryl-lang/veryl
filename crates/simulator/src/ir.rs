@@ -4,10 +4,17 @@ mod declaration;
 mod dup_assign_dce;
 mod event;
 mod expression;
+pub(crate) mod inst_layout;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod load_cache_lookahead;
 mod module;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod multi_write_analysis;
 pub mod schedule;
+pub(crate) mod site_table;
 mod statement;
 mod variable;
+pub(crate) mod write_log;
 
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
@@ -17,7 +24,7 @@ pub use module::{Module, ProtoModule};
 pub use statement::{
     CompiledBlockStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, RuntimeForBound,
     RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
-    parse_hex_content,
+    parse_hex_content, patch_stmt_log_buf,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
@@ -58,16 +65,23 @@ pub struct Ir {
     /// Number of eval_comb passes needed for full convergence.
     /// Pre-computed from backward edges in the sorted comb statement list.
     pub required_comb_passes: usize,
-    /// FF commit entries: (current_offset, value_size) pairs.
-    /// After event execution, next → current copy is performed for each entry.
-    pub ff_commit_entries: Vec<(usize, usize)>,
-    /// Runs of consecutive FFs sharing the specialized size with
-    /// stride = 2 * size, as `(start_current_offset, count)`.  The
-    /// compile-time stride lets LLVM auto-vectorize the inner loop.
-    pub ff_commit_u32_runs: Vec<(u32, u32)>,
-    pub ff_commit_u64_runs: Vec<(u32, u32)>,
-    /// Entries that don't fit u32/u64 specialization (rare: size 1, 2, 16, 32, etc.).
-    pub ff_commit_other: Vec<(usize, usize)>,
+    /// FF write site table: compile-time metadata for each FF write site,
+    /// built at ProtoModule conv time.  Consumed by phases that need to
+    /// reason about FF writes statically (write-log buffer sizing, NBA
+    /// invariant checks, per-Inst metadata for MT-ready commit).
+    pub site_table: site_table::SiteTable,
+    /// Per-top-level-Inst FF byte range metadata.  Foundation for
+    /// cache-line aligned padding and per-Inst independent commit.
+    pub inst_layout: inst_layout::InstLayout,
+    /// FF write log buffer.  Sized at Ir construction time from
+    /// `site_table.len()`; FF writes (JIT + interpret) push entries
+    /// during event evaluation and `ff_commit_from_log` applies them
+    /// at cycle end.
+    ///
+    /// Heap-allocated (`Box`) so the buffer's address is stable across
+    /// moves of the surrounding `Ir`/`Simulator` — JIT code holds a raw
+    /// pointer baked into each `Statement::Binary` at construction.
+    pub write_log_buffer: Box<write_log::WriteLogBuffer>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
     /// Sensitivity-fanout + topological-rank index for the seeded-worklist
@@ -83,10 +97,6 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
-    /// Runtime feature detection: if true, ff_commit uses an AVX2 shuffle
-    /// fast path; otherwise a scalar fallback (which LLVM auto-vectorizes
-    /// for the base SSE2 target).
-    pub ff_commit_use_avx2: bool,
     /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
     /// instances created from the same cached `ProtoModule` can share the binary.
     _binary: Arc<Vec<BinaryStorage>>,
@@ -108,38 +118,7 @@ impl Ir {
         config: &Config,
         token: TokenRange,
     ) -> Ir {
-        let mut ff_commit_u32_runs: Vec<(u32, u32)> = Vec::new();
-        let mut ff_commit_u64_runs: Vec<(u32, u32)> = Vec::new();
-        let mut ff_commit_other: Vec<(usize, usize)> = Vec::new();
-        {
-            let entries = &module.ff_commit_entries;
-            let mut i = 0;
-            while i < entries.len() {
-                let (off, sz) = entries[i];
-                if sz != 4 && sz != 8 {
-                    ff_commit_other.push((off, sz));
-                    i += 1;
-                    continue;
-                }
-                let stride = sz * 2;
-                let mut j = i + 1;
-                while j < entries.len() {
-                    let (off_j, sz_j) = entries[j];
-                    if sz_j != sz || off_j != off + stride * (j - i) {
-                        break;
-                    }
-                    j += 1;
-                }
-                let count = (j - i) as u32;
-                if sz == 4 {
-                    ff_commit_u32_runs.push((off as u32, count));
-                } else {
-                    ff_commit_u64_runs.push((off as u32, count));
-                }
-                i = j;
-            }
-        }
-        Ir {
+        let mut ir = Ir {
             name: module.name,
             token,
             ports: module.ports,
@@ -150,16 +129,44 @@ impl Ir {
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
-            ff_commit_entries: module.ff_commit_entries,
-            ff_commit_u32_runs,
-            ff_commit_u64_runs,
-            ff_commit_other,
-            ff_commit_use_avx2: detect_avx2(),
+            write_log_buffer: {
+                let (narrow_cap, wide_cap) = write_log_capacity(&module.site_table);
+                Box::new(write_log::WriteLogBuffer::with_capacity(
+                    narrow_cap, wide_cap,
+                ))
+            },
+            site_table: module.site_table,
+            inst_layout: module.inst_layout,
             disable_ff_opt: config.disable_ff_opt,
             comb_schedule: module.comb_schedule,
             use_seeded_worklist: config.use_seeded_worklist,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             _binary: binary,
+        };
+        // Bake the WriteLogBuffer's heap-stable address into every
+        // JIT-dispatched Binary/BinaryBatch so emitted code can perform
+        // inline log pushes without a TLS lookup.
+        ir.install_write_log_ptr();
+        ir
+    }
+
+    /// Walk every event/comb statement tree and overwrite the placeholder
+    /// `log_buf` field in `Statement::Binary` / `Statement::BinaryBatch`
+    /// with the actual heap address of `self.write_log_buffer`.
+    ///
+    /// Called once at the end of `from_module_arc`.  The address is
+    /// stable for `self`'s lifetime because the buffer lives on the heap
+    /// inside a `Box`.
+    fn install_write_log_ptr(&mut self) {
+        let log_buf =
+            (&*self.write_log_buffer) as *const _ as *mut write_log::WriteLogBuffer as *mut u8;
+        for stmts in self.event_statements.values_mut() {
+            for s in stmts {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        for s in &mut self.comb_statements {
+            patch_stmt_log_buf(s, log_buf);
         }
     }
 
@@ -493,13 +500,14 @@ impl Ir {
 #[inline(always)]
 pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
     match s {
-        Statement::Binary(func, ff, comb) => unsafe {
-            func(*ff, *comb);
+        Statement::Binary(func, ff, comb, log_buf) => unsafe {
+            func(*ff, *comb, *log_buf);
         },
-        Statement::BinaryBatch(func, args) => unsafe {
+        Statement::BinaryBatch(func, log_buf, args) => unsafe {
             let f = *func;
+            let lb = *log_buf;
             for &(ff, comb) in args {
-                f(ff, comb);
+                f(ff, comb, lb);
             }
         },
         _ => {
@@ -515,13 +523,33 @@ pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
 // concurrent mutation of ff_values/comb_values via interior raw pointers.
 unsafe impl Send for Ir {}
 
-#[cfg(target_arch = "x86_64")]
-fn detect_avx2() -> bool {
-    std::is_x86_feature_detected!("avx2")
-}
-#[cfg(not(target_arch = "x86_64"))]
-fn detect_avx2() -> bool {
-    false
+/// Initial WriteLogBuffer capacities derived from the FF write site table.
+/// Returns `(narrow_cap, wide_cap)`.  Narrow FFs (`native_bytes ≤ 8`) emit
+/// at most 2 entries per cycle (payload + 4-state mask); wide FFs emit at
+/// most 2 wide entries per cycle (one per payload/mask).  Each contributes
+/// to its respective pool, with a ×2 over-provisioning headroom for
+/// initial dual-writes and multi-RMW chains.
+fn write_log_capacity(site_table: &site_table::SiteTable) -> (usize, usize) {
+    let mut narrow: usize = 0;
+    let mut wide: usize = 0;
+    let mut any_wide = false;
+    for s in &site_table.sites {
+        let nb = s.native_bytes as usize;
+        if nb <= 8 {
+            narrow += 2 * 2;
+        } else {
+            any_wide = true;
+            // Number of wide entries needed (≤56 byte payload per entry).
+            let chunks = nb.div_ceil(write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
+            wide += 2 * chunks * 2;
+        }
+    }
+    // Narrow floor avoids tiny designs ending up with zero capacity; the
+    // wide pool stays empty when no wide sites exist so designs that only
+    // use narrow FFs skip the 64-byte-aligned wide allocation altogether.
+    let narrow_cap = narrow.max(4096);
+    let wide_cap = if any_wide { wide.max(64) } else { 0 };
+    (narrow_cap, wide_cap)
 }
 
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {

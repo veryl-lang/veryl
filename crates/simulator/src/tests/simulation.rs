@@ -8608,6 +8608,237 @@ fn ordering_ff_to_comb_chain() {
     });
 }
 
+/// Wide FF (>64-bit) NBA semantic: intra-cycle read after write should
+/// return the OLD value, not the in-flight new value.  Without write-log
+/// emit, wide FFs wrote directly to FF storage and intra-cycle reads
+/// observed the new value (NBA violation); for unpacked wide FFs current
+/// also never updated because the next-slot path produced no log entries
+/// for `ff_commit_from_log` to apply.
+#[test]
+fn wide_ff_nba_intra_cycle_read_after_write() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        cnt:      output logic<128>,
+        cnt_prev: output logic<128>,
+    ) {
+        var c:      logic<128>;
+        var c_prev: logic<128>;
+
+        always_ff {
+            if_reset {
+                c = 0;
+                c_prev = 0;
+            } else {
+                c = c + 1;
+                c_prev = c;
+            }
+        }
+
+        assign cnt = c;
+        assign cnt_prev = c_prev;
+    }
+    "#;
+
+    verify_jit_interpreter_equivalence(code, |dual| {
+        dual.step_reset("rst");
+        for i in 0u64..16 {
+            dual.step_clock("clk");
+            let cnt_expected = Value::new(i + 1, 128, false);
+            let cnt_prev_expected = Value::new(i, 128, false);
+            assert_eq!(
+                dual.get("cnt").unwrap(),
+                cnt_expected,
+                "cycle {}: cnt mismatch",
+                i + 1
+            );
+            assert_eq!(
+                dual.get("cnt_prev").unwrap(),
+                cnt_prev_expected,
+                "cycle {}: cnt_prev should be OLD cnt (NBA semantic)",
+                i + 1
+            );
+        }
+    });
+}
+
+/// For-loop blocking writes to the same VarId across iterations.  A
+/// constant-bound `for i in 0..N` with `c += 1` inside writes c N times
+/// per cycle.  Two semantic regimes coexist in the simulator:
+///
+///   - Default config: the analyzer's `is_ff` refinement (FfTable) treats
+///     same-block self-references as comb-safe and allocates c in comb
+///     storage.  Each iteration's write is immediately visible to the
+///     next iteration's read, yielding the "blocking-chain" result c = N.
+///   - `--disable-ff-opt` (Config.disable_ff_opt = true): forces c to FF
+///     with dual-slot (current/next) storage and strict NBA semantics.
+///     Every iteration's read sees the OLD current-slot value, every
+///     iteration's write lands in the next-slot, and the final commit
+///     leaves c = OLD+1 = 1.  Cross-iteration "chaining" is not preserved
+///     under strict NBA — this matches SystemVerilog `<=` semantics.
+///
+/// Constant-bound `for` loops are unrolled by the analyzer's `unroll_for`
+/// pass into N individual Assigns, so `multi_write_analysis` correctly
+/// counts N writes and marks c as multi-RMW (dual-slot, not packed) under
+/// the forced-FF regime.  Without that detection the packed layout would
+/// produce the wrong NBA result (silent log-overwrite, c = 1 by accident
+/// rather than by NBA semantics).
+#[test]
+fn for_loop_blocking_write_same_var() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        cnt: output logic<8>,
+    ) {
+        var c: logic<8>;
+
+        always_ff {
+            if_reset {
+                c = 0;
+            } else {
+                for i in 0..4 {
+                    c = c + 1 + i - i;
+                }
+            }
+        }
+
+        assign cnt = c;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.step(&clk);
+
+        let v = sim.get("cnt").unwrap();
+        // Default ff_opt path stores c as comb (blocking chain → 4).
+        // --disable-ff-opt forces c to dual-slot FF (NBA → 1).
+        let expected_payload = if config.disable_ff_opt { 1 } else { 4 };
+        let expected = Value::new(expected_payload, 8, false);
+        assert_eq!(
+            v, expected,
+            "config={:?}: expected cnt = {} after 1 clock",
+            config, expected_payload,
+        );
+    }
+}
+
+/// LHS concatenation `{hi, lo} = expr` inside always_ff.  The simulator
+/// splits a multi-dst air::AssignStatement into N separate
+/// ProtoStatement::Assigns, one per destination, each with a `rhs_select`
+/// slice covering the corresponding bit range of the expression.  Phase
+/// 1.5 v2's multi_write_analysis sees every `dst` entry through
+/// `add_dst_write`, so packed/unpacked classification is correct even
+/// when a single source statement writes multiple FF targets.
+#[test]
+fn lhs_concatenation_in_always_ff() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        x:   input  logic<32>,
+        hi:  output logic<20>,
+        lo:  output logic<12>,
+    ) {
+        var hi_q: logic<20>;
+        var lo_q: logic<12>;
+
+        always_ff {
+            if_reset {
+                hi_q = 0;
+                lo_q = 0;
+            } else {
+                {hi_q, lo_q} = x;
+            }
+        }
+
+        assign hi = hi_q;
+        assign lo = lo_q;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("x", Value::new(0xABCDE_123, 32, false));
+        sim.step(&clk);
+
+        let hi = sim.get("hi").unwrap();
+        let lo = sim.get("lo").unwrap();
+        assert_eq!(
+            hi,
+            Value::new(0xABCDE, 20, false),
+            "config={:?}: hi mismatch",
+            config,
+        );
+        assert_eq!(
+            lo,
+            Value::new(0x123, 12, false),
+            "config={:?}: lo mismatch",
+            config,
+        );
+    }
+}
+
+/// LHS concatenation inside an initial block, written to comb-storage
+/// variables.  The split-Assign path must produce a separate
+/// `ProtoStatement::Assign` per destination, each carrying its own
+/// `rhs_select` bit slice, so a 16-bit literal placed into `{hi, lo}`
+/// lands as `hi = 0xAB` and `lo = 0xCD`.
+#[test]
+fn lhs_concatenation_in_initial() {
+    let code = r#"
+    module Top (
+        hi: output logic<8>,
+        lo: output logic<8>,
+    ) {
+        var hi_v: logic<8>;
+        var lo_v: logic<8>;
+
+        initial {
+            {hi_v, lo_v} = 16'hAB_CD;
+        }
+
+        assign hi = hi_v;
+        assign lo = lo_v;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let hi = sim.get("hi").unwrap();
+        let lo = sim.get("lo").unwrap();
+        assert_eq!(
+            hi,
+            Value::new(0xAB, 8, false),
+            "config={:?}: initial-block hi mismatch",
+            config,
+        );
+        assert_eq!(
+            lo,
+            Value::new(0xCD, 8, false),
+            "config={:?}: initial-block lo mismatch",
+            config,
+        );
+    }
+}
+
 /// Multi-level hierarchy: grandparent → parent → child comb propagation.
 /// Unified comb list ensures correct ordering across all hierarchy levels.
 #[test]

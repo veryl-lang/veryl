@@ -1,6 +1,7 @@
 use crate::ir::Context as ConvContext;
 use crate::ir::ProtoStatement;
 use crate::ir::VarOffset;
+use crate::ir::load_cache_lookahead::{FutureReads, compute_read_positions};
 use crate::{HashMap, HashSet};
 use cranelift::codegen::control::ControlPlane;
 use cranelift::codegen::ir::{AbiParam, Function, SigRef, Signature, StackSlotData, UserFuncName};
@@ -25,12 +26,17 @@ pub enum HelperSig {
     Compare,
     /// (I64, I32) -> I64  [reductions: a, nb -> result]
     Reduce,
+    /// (I32, I64, I32) -> void  [write-log push: offset, payload, width_class]
+    WriteLogPushStatic,
 }
 
 pub struct Context {
     pub use_4state: bool,
     pub ff_values: Value,
     pub comb_values: Value,
+    /// Pointer to the per-Ir `WriteLogBuffer` (3rd JIT arg).  Used by
+    /// `emit_inline_write_log_push` to perform inline log entry stores.
+    pub log_buf: Value,
     pub zero: Value,
     pub zero_128: Value,
     /// Load CSE cache: VarOffset → (payload, mask_xz)
@@ -47,6 +53,17 @@ pub struct Context {
     /// Used for unified comb where helper functions may modify values
     /// between cached loads.
     pub disable_load_cache: bool,
+    /// Look-ahead load_cache eviction (default-on, opt-out via
+    /// VERYL_STAGE7_LOOKAHEAD=0).
+    /// Pre-computed per-VarOffset future read positions across the
+    /// chunk's top-level statement sequence.  After each stmt, the
+    /// main loop evicts cached entries by Belady-optimal policy
+    /// (farthest next-read first) when size exceeds capacity.
+    /// `None` when eviction is disabled (load_cache off or env opt-out).
+    pub future_reads: Option<FutureReads>,
+    /// Belady eviction trigger.  Cache size <= capacity → no evict.
+    /// Default ~physical GPR budget after ABI-reserved regs.
+    pub lookahead_capacity: usize,
 }
 
 /// Get or create a SigRef for the given helper signature kind.
@@ -83,6 +100,11 @@ pub fn get_or_create_sig(
             sig.params.push(AbiParam::new(I32)); // nb
             sig.returns.push(AbiParam::new(I64));
         }
+        HelperSig::WriteLogPushStatic => {
+            sig.params.push(AbiParam::new(I32)); // offset
+            sig.params.push(AbiParam::new(I64)); // payload
+            sig.params.push(AbiParam::new(I32)); // width_class (caller-zext from u16)
+        }
     }
 
     let sig_ref = builder.import_signature(sig);
@@ -115,6 +137,160 @@ pub fn call_helper_ret(
     let ptr = builder.ins().iconst(I64, func_addr as i64);
     let call = builder.ins().call_indirect(sig_ref, ptr, args);
     builder.inst_results(call)[0]
+}
+
+/// Emit an inline write-log push: direct loads/stores to the
+/// `WriteLogBuffer` whose pointer is passed as the 3rd JIT arg
+/// (`context.log_buf`).
+///
+/// Layout (mirrors `write_log::WriteLogBuffer`):
+///   offset 0 : entries_ptr (*mut WriteLogEntry)  — `i64` load
+///   offset 8 : count       (u32)                 — `i32` load + store
+/// Entry layout (16 B):
+///   offset 0 : offset      (u32)
+///   offset 4 : mask_xz     (u16) — store 0
+///   offset 6 : width_class (u16) — caller passes I32, truncate to I16
+///   offset 8 : payload     (u64)
+///
+/// Asm sequence: load count, increment, store count (back), load entries_ptr,
+/// compute entry slot = ptr + count*16, store offset/mask_xz/width_class/
+/// payload.  ~8 instructions vs ~30+ via helper call.
+pub fn emit_inline_write_log_push(
+    context: &Context,
+    builder: &mut FunctionBuilder,
+    offset: Value,
+    payload: Value,
+    width_class: Value,
+) {
+    use crate::ir::write_log::{
+        WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
+        WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+        WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
+    };
+    let log_buf = context.log_buf;
+    let flags = MemFlags::trusted();
+
+    let count = builder
+        .ins()
+        .load(I32, flags, log_buf, WRITE_LOG_NARROW_OFFSET_COUNT);
+    let one = builder.ins().iconst(I32, 1);
+    let new_count = builder.ins().iadd(count, one);
+    builder
+        .ins()
+        .store(flags, new_count, log_buf, WRITE_LOG_NARROW_OFFSET_COUNT);
+    let entries_ptr = builder
+        .ins()
+        .load(I64, flags, log_buf, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR);
+    // entry_slot = entries_ptr + count * ENTRY_SIZE
+    let count_i64 = builder.ins().uextend(I64, count);
+    let entry_size = builder.ins().iconst(I64, WRITE_LOG_ENTRY_SIZE as i64);
+    let byte_offset = builder.ins().imul(count_i64, entry_size);
+    let entry_slot = builder.ins().iadd(entries_ptr, byte_offset);
+    // entry.offset (i32 @ +0) = offset
+    builder
+        .ins()
+        .store(flags, offset, entry_slot, WRITE_LOG_ENTRY_OFFSET_OFFSET);
+    // entry.mask_xz (i16 @ +4) = 0  — istore16 of zero
+    let zero_i16 = builder.ins().iconst(I32, 0);
+    builder
+        .ins()
+        .istore16(flags, zero_i16, entry_slot, WRITE_LOG_ENTRY_OFFSET_MASK_XZ);
+    // entry.width_class (i16 @ +6) = width_class (i32, low 16 bits)
+    builder.ins().istore16(
+        flags,
+        width_class,
+        entry_slot,
+        WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS,
+    );
+    // entry.payload (i64 @ +8) = payload
+    builder
+        .ins()
+        .store(flags, payload, entry_slot, WRITE_LOG_ENTRY_OFFSET_PAYLOAD);
+}
+
+/// Batched variant of `emit_inline_write_log_push` for wide FFs.
+/// Emit an inline write-log push for a wide FF.  Writes a single 64-byte
+/// `WriteLogWideEntry` containing the canonical FF offset, the byte
+/// count, and `nb` bytes copied from `payload_ptr`.  `nb` must satisfy
+/// `nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES` (= 56).
+pub fn emit_inline_write_log_push_wide(
+    context: &Context,
+    builder: &mut FunctionBuilder,
+    offset: Value,
+    payload_ptr: Value,
+    nb: usize,
+) {
+    use crate::ir::write_log::{
+        WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
+        WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+    };
+    debug_assert!(nb > 0 && nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
+    let log_buf = context.log_buf;
+    let flags = MemFlags::trusted();
+
+    // Reserve one wide slot and advance the count.
+    let count = builder
+        .ins()
+        .load(I32, flags, log_buf, WRITE_LOG_WIDE_OFFSET_COUNT);
+    let one = builder.ins().iconst(I32, 1);
+    let new_count = builder.ins().iadd(count, one);
+    builder
+        .ins()
+        .store(flags, new_count, log_buf, WRITE_LOG_WIDE_OFFSET_COUNT);
+    let entries_ptr = builder
+        .ins()
+        .load(I64, flags, log_buf, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR);
+    let count_i64 = builder.ins().uextend(I64, count);
+    let entry_size = builder.ins().iconst(I64, WRITE_LOG_WIDE_ENTRY_SIZE as i64);
+    let byte_offset = builder.ins().imul(count_i64, entry_size);
+    let entry_slot = builder.ins().iadd(entries_ptr, byte_offset);
+
+    // Write the canonical offset and the payload byte-count.
+    builder.ins().store(
+        flags,
+        offset,
+        entry_slot,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+    );
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    builder
+        .ins()
+        .istore8(flags, nb_val, entry_slot, WRITE_LOG_WIDE_ENTRY_OFFSET_NB);
+
+    // Copy the payload in i64 chunks, then any trailing 4 / 2 / 1 bytes.
+    let payload_dst_base = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD;
+    let mut i: usize = 0;
+    while i + 8 <= nb {
+        let v = builder.ins().load(I64, flags, payload_ptr, i as i32);
+        builder
+            .ins()
+            .store(flags, v, entry_slot, payload_dst_base + i as i32);
+        i += 8;
+    }
+    while i < nb {
+        let rem = nb - i;
+        let chunk = if rem >= 4 {
+            4
+        } else if rem >= 2 {
+            2
+        } else {
+            1
+        };
+        let v = builder.ins().load(I32, flags, payload_ptr, i as i32);
+        match chunk {
+            4 => builder
+                .ins()
+                .store(flags, v, entry_slot, payload_dst_base + i as i32),
+            2 => builder
+                .ins()
+                .istore16(flags, v, entry_slot, payload_dst_base + i as i32),
+            _ => builder
+                .ins()
+                .istore8(flags, v, entry_slot, payload_dst_base + i as i32),
+        };
+        i += chunk;
+    }
 }
 
 /// Allocate a stack slot of `nb` bytes and return its address as an I64 value.
@@ -199,6 +375,7 @@ fn build_binary_inner(
     let mut sig = Signature::new(call_conv);
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (ff base)
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (comb base)
+    sig.params.push(AbiParam::new(ptr_type)); // *mut u8 (write_log buffer)
 
     let mut func = Function::with_name_signature(UserFuncName::default(), sig);
     let mut func_ctx = FunctionBuilderContext::new();
@@ -210,6 +387,7 @@ fn build_binary_inner(
 
     let ff_values = builder.block_params(block)[0];
     let comb_values = builder.block_params(block)[1];
+    let log_buf = builder.block_params(block)[2];
     let zero = builder.ins().iconst(I64, 0);
     let zero_lo = builder.ins().iconst(I64, 0);
     let zero_hi = builder.ins().iconst(I64, 0);
@@ -219,6 +397,7 @@ fn build_binary_inner(
         use_4state: config.use_4state,
         ff_values,
         comb_values,
+        log_buf,
         zero,
         zero_128,
         load_cache: HashMap::default(),
@@ -227,12 +406,55 @@ fn build_binary_inner(
         helper_sigs: HashMap::default(),
         call_conv,
         disable_load_cache: effective_disable_load_cache,
+        future_reads: None,
+        lookahead_capacity: 0,
     };
+
+    // Pre-compute future-read positions for Belady-optimal load_cache
+    // eviction (default-on; opt-out via VERYL_STAGE7_LOOKAHEAD=0).
+    // Cap each chunk's resident cache entry count at `lookahead_capacity`
+    // to bound SSA Value live range to ~physical GPR budget and prevent
+    // regalloc spill cascade.  See ir/load_cache_lookahead.rs.
+    if !effective_disable_load_cache
+        && std::env::var("VERYL_STAGE7_LOOKAHEAD").as_deref() != Ok("0")
+    {
+        cranelift_context.future_reads = Some(compute_read_positions(&proto));
+        cranelift_context.lookahead_capacity = std::env::var("VERYL_STAGE7_LOOKAHEAD_CAP")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(12);
+    }
 
     let len = proto.len();
     for (i, x) in proto.iter().enumerate() {
         let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
+
+        // Belady-optimal eviction after each top-level stmt.  While
+        // cache size > capacity, evict the entry whose next read is
+        // farthest in the future (None = never used again, evicted first).
+        if let Some(future) = cranelift_context.future_reads.take() {
+            let cap = cranelift_context.lookahead_capacity;
+            while cranelift_context.load_cache.len() > cap {
+                let evict = cranelift_context
+                    .load_cache
+                    .keys()
+                    .max_by_key(|off| match future.get(off) {
+                        None => usize::MAX,
+                        Some(positions) => match positions.iter().copied().find(|&p| p > i) {
+                            None => usize::MAX,
+                            Some(next) => next - i,
+                        },
+                    })
+                    .copied();
+                if let Some(off) = evict {
+                    cranelift_context.load_cache.remove(&off);
+                } else {
+                    break;
+                }
+            }
+            cranelift_context.future_reads = Some(future);
+        }
     }
 
     builder.ins().return_(&[]);

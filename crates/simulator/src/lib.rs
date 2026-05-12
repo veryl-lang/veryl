@@ -14,7 +14,7 @@ pub use ir::Config;
 pub use simulator::Simulator;
 pub use simulator_error::SimulatorError;
 
-pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8);
+pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8, *mut u8);
 
 #[cfg(test)]
 mod tests;

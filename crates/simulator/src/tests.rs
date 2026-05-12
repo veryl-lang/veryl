@@ -137,9 +137,25 @@ fn find_var_at_offset(
                 let nb = var.native_bytes;
                 if target_offset >= var_offset && target_offset < var_offset + nb {
                     let path = if prefix.is_empty() {
-                        format!("{}", var.path)
+                        format!("{}.cur", var.path)
                     } else {
-                        format!("{}.{}", prefix, var.path)
+                        format!("{}.{}.cur", prefix, var.path)
+                    };
+                    return Some(path);
+                }
+            }
+        }
+        for &ptr in &var.next_values {
+            let ptr_addr = ptr as usize;
+            let base_addr = buf_base as usize;
+            if ptr_addr >= base_addr && ptr_addr < base_addr + buf_len {
+                let var_offset = ptr_addr - base_addr;
+                let nb = var.native_bytes;
+                if target_offset >= var_offset && target_offset < var_offset + nb {
+                    let path = if prefix.is_empty() {
+                        format!("{}.nxt", var.path)
+                    } else {
+                        format!("{}.{}.nxt", prefix, var.path)
                     };
                     return Some(path);
                 }

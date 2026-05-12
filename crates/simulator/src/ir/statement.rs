@@ -1,7 +1,9 @@
 use crate::FuncPtr;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
-use crate::cranelift::Context as CraneliftContext;
+use crate::cranelift::{
+    Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
+};
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
@@ -13,6 +15,9 @@ use crate::ir::expression::{
 };
 use crate::ir::variable::{
     VarOffset, native_bytes_for as calc_native_bytes_for, read_native_value, write_native_value,
+};
+use crate::ir::write_log::{
+    WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, event_write_log_push_static, event_write_log_push_wide,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -65,10 +70,13 @@ impl ProtoStatements {
                     }
                 }
                 ProtoStatementBlock::Compiled(func) => {
+                    // log_buf populated by `Ir::install_write_log_ptr` after
+                    // WriteLogBuffer allocation; null until then.
                     result.push(Statement::Binary(
                         *func,
                         ff_ptr as *const u8,
                         comb_ptr as *const u8,
+                        std::ptr::null_mut(),
                     ));
                 }
             }
@@ -121,6 +129,12 @@ pub struct AssignDynamicStatement {
     pub dynamic_select: Option<DynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
+    /// Write-log push uses (`ff_log_base_current_offset` + `idx *
+    /// dst_stride`) at runtime.  `ff_log_base_current_offset` is
+    /// `dst_base.raw() - value_size` for the element-0 current slot.
+    /// `None` outside the FF-2state-narrow emit gate (see
+    /// `apply_values_ptr`).
+    pub ff_log_base_current_offset: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -196,16 +210,62 @@ pub enum Statement {
     If(IfStatement),
     For(ForStatement),
     Break,
-    Binary(FuncPtr, *const u8, *const u8),
-    BinaryBatch(FuncPtr, Vec<(*const u8, *const u8)>),
+    /// JIT-compiled chunk.  `func(ff, comb, log_buf)` — `log_buf` points
+    /// to the per-Ir `WriteLogBuffer`, populated post-Ir-construction by
+    /// `Ir::install_write_log_ptr`.
+    Binary(FuncPtr, *const u8, *const u8, *mut u8),
+    /// Run of consecutive `Binary` chunks sharing the same `func`.  All
+    /// entries see the same `log_buf` (Ir-wide).
+    BinaryBatch(FuncPtr, *mut u8, Vec<(*const u8, *const u8)>),
     SequentialBlock(Vec<Statement>),
     SystemFunctionCall(SystemFunctionCall),
-    TbMethodCall { inst: StrId, method: TbMethodKind },
+    TbMethodCall {
+        inst: StrId,
+        method: TbMethodKind,
+    },
 }
 
 // SAFETY: Raw pointers point into the owning Ir's exclusively-owned buffers.
 // No cross-thread aliasing when each thread operates on a distinct Ir.
 unsafe impl Send for Statement {}
+
+/// Recursively overwrite the `log_buf` slot in every nested `Binary` /
+/// `BinaryBatch` with the per-Ir buffer pointer.  Called once at end of
+/// `Ir::from_module_arc` so JIT-emitted code can perform inline log
+/// pushes through the 3rd `FuncPtr` argument.
+pub fn patch_stmt_log_buf(s: &mut Statement, log_buf: *mut u8) {
+    match s {
+        Statement::Binary(_, _, _, slot) => {
+            *slot = log_buf;
+        }
+        Statement::BinaryBatch(_, slot, _) => {
+            *slot = log_buf;
+        }
+        Statement::If(if_stmt) => {
+            for s in &mut if_stmt.true_side {
+                patch_stmt_log_buf(s, log_buf);
+            }
+            for s in &mut if_stmt.false_side {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        Statement::For(for_stmt) => {
+            for s in &mut for_stmt.body {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        Statement::SequentialBlock(body) => {
+            for s in body {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
+        Statement::Assign(_)
+        | Statement::AssignDynamic(_)
+        | Statement::Break
+        | Statement::SystemFunctionCall(_)
+        | Statement::TbMethodCall { .. } => {}
+    }
+}
 unsafe impl Send for AssignStatement {}
 unsafe impl Send for AssignDynamicStatement {}
 unsafe impl Send for IfStatement {}
@@ -216,7 +276,7 @@ impl Statement {
     pub fn is_binary(&self) -> bool {
         matches!(
             self,
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _)
+            Statement::Binary(_, _, _, _) | Statement::BinaryBatch(_, _, _)
         )
     }
 
@@ -278,13 +338,14 @@ impl Statement {
                 ControlFlow::Continue
             }
             Statement::Break => ControlFlow::Break,
-            Statement::Binary(func, ff_values, comb_values) => unsafe {
-                func(*ff_values, *comb_values);
+            Statement::Binary(func, ff_values, comb_values, log_buf) => unsafe {
+                func(*ff_values, *comb_values, *log_buf);
                 ControlFlow::Continue
             },
-            Statement::BinaryBatch(func, args) => unsafe {
+            Statement::BinaryBatch(func, log_buf, args) => unsafe {
+                let lb = *log_buf;
                 for &(ff_values, comb_values) in args {
-                    func(ff_values, comb_values);
+                    func(ff_values, comb_values, lb);
                 }
                 ControlFlow::Continue
             },
@@ -314,7 +375,7 @@ impl Statement {
                     s.gather_variable(inputs, outputs);
                 }
             }
-            Statement::Binary(_, _, _) | Statement::BinaryBatch(_, _) | Statement::Break => (),
+            Statement::Binary(_, _, _, _) | Statement::BinaryBatch(_, _, _) | Statement::Break => {}
             Statement::SequentialBlock(body) => {
                 for s in body {
                     s.gather_variable(inputs, outputs);
@@ -598,6 +659,23 @@ impl ProtoAssignDynamicStatement {
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
+        // FF write log push: log offset = (canonical current base) +
+        // runtime byte_offset, regardless of whether dst_base points to
+        // the current slot (packed layout) or the next slot (dual-slot
+        // multi-RMW).  The canonical `dst_ff_current_base_offset` always
+        // reflects the current slot origin.
+        let emit_log = self.dst_base.is_ff() && self.dst_width <= 64;
+        let is_packed_ff_dyn = emit_log && (self.dst_base.raw() == self.dst_ff_current_base_offset);
+        let log_offset_i32 = if emit_log {
+            let log_base = builder
+                .ins()
+                .iconst(I64, self.dst_ff_current_base_offset as i64);
+            let log_offset_64 = builder.ins().iadd(log_base, byte_offset);
+            Some(builder.ins().ireduce(I32, log_offset_64))
+        } else {
+            None
+        };
+
         let load_mem_flag = MemFlags::trusted();
         let store_mem_flag = MemFlags::trusted();
 
@@ -629,6 +707,27 @@ impl ProtoAssignDynamicStatement {
             }
         };
 
+        let emit_log_push = |context: &mut CraneliftContext,
+                             builder: &mut FunctionBuilder,
+                             payload: cranelift::prelude::Value,
+                             mask: Option<cranelift::prelude::Value>| {
+            if let Some(offset_val) = log_offset_i32 {
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                emit_inline_write_log_push(context, builder, offset_val, payload, width_class_val);
+                if context.use_4state
+                    && let Some(mask_v) = mask
+                {
+                    let mask_offset_val = builder.ins().iadd_imm(offset_val, nb as i64);
+                    emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        mask_v,
+                        width_class_val,
+                    );
+                }
+            }
+        };
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
@@ -642,14 +741,22 @@ impl ProtoAssignDynamicStatement {
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band(org, not_mask);
             let result = builder.ins().bor(payload, org);
-            store_i64_to_native(builder, result, addr, 0);
-            if let Some(mask_xz) = mask_xz {
+            if !is_packed_ff_dyn {
+                store_i64_to_native(builder, result, addr, 0);
+            }
+            let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band(org, not_mask);
-                let result = builder.ins().bor(mask_xz, org);
-                store_i64_to_native(builder, result, addr, nb_i32);
-            }
+                let result_m = builder.ins().bor(mask_xz, org);
+                if !is_packed_ff_dyn {
+                    store_i64_to_native(builder, result_m, addr, nb_i32);
+                }
+                Some(result_m)
+            } else {
+                None
+            };
+            emit_log_push(context, builder, result, mask_result);
         } else if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
 
@@ -657,87 +764,92 @@ impl ProtoAssignDynamicStatement {
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band_imm(org, !mask as i64);
             let result = builder.ins().bor(payload, org);
-            store_i64_to_native(builder, result, addr, 0);
-            if let Some(mask_xz) = mask_xz {
+            if !is_packed_ff_dyn {
+                store_i64_to_native(builder, result, addr, 0);
+            }
+            let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band_imm(org, !mask as i64);
-                let result = builder.ins().bor(mask_xz, org);
-                store_i64_to_native(builder, result, addr, nb_i32);
-            }
+                let result_m = builder.ins().bor(mask_xz, org);
+                if !is_packed_ff_dyn {
+                    store_i64_to_native(builder, result_m, addr, nb_i32);
+                }
+                Some(result_m)
+            } else {
+                None
+            };
+            emit_log_push(context, builder, result, mask_result);
         } else {
-            match self.dst_width {
-                8 => {
-                    builder.ins().istore8(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder.ins().istore8(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
-                16 => {
-                    builder.ins().istore16(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore16(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
-                32 => {
-                    builder.ins().istore32(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore32(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
-                64 => {
-                    builder.ins().store(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
+            // Mask payload to dst_width when not a clean native width;
+            // matches the loaded-width semantics that ff_commit_from_log
+            // expects from the log payload.
+            let (payload_to_store, payload_for_log) = match self.dst_width {
+                8 | 16 | 32 | 64 => (payload, payload),
                 _ => {
                     if self.dst_width >= 64 {
                         return None;
                     }
                     let mask = (1u64 << self.dst_width) - 1;
-                    let payload = builder.ins().band_imm(payload, mask as i64);
+                    let masked = builder.ins().band_imm(payload, mask as i64);
+                    (masked, masked)
+                }
+            };
+            let mask_xz_for_log = if let Some(mask_xz_v) = mask_xz {
+                let m = if !matches!(self.dst_width, 8 | 16 | 32 | 64) {
+                    let mask = (1u64 << self.dst_width) - 1;
+                    builder.ins().band_imm(mask_xz_v, mask as i64)
+                } else {
+                    mask_xz_v
+                };
+                Some(m)
+            } else {
+                None
+            };
+            if !is_packed_ff_dyn {
+                match nb {
+                    1 => {
+                        builder
+                            .ins()
+                            .istore8(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                    2 => {
+                        builder
+                            .ins()
+                            .istore16(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                    4 => {
+                        builder
+                            .ins()
+                            .istore32(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                    _ => {
+                        builder
+                            .ins()
+                            .store(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                }
+                if let Some(mask_v) = mask_xz_for_log {
                     match nb {
                         1 => {
-                            builder.ins().istore8(store_mem_flag, payload, addr, 0);
+                            builder.ins().istore8(store_mem_flag, mask_v, addr, nb_i32);
                         }
                         2 => {
-                            builder.ins().istore16(store_mem_flag, payload, addr, 0);
+                            builder.ins().istore16(store_mem_flag, mask_v, addr, nb_i32);
                         }
                         4 => {
-                            builder.ins().istore32(store_mem_flag, payload, addr, 0);
+                            builder.ins().istore32(store_mem_flag, mask_v, addr, nb_i32);
                         }
                         _ => {
-                            builder.ins().store(store_mem_flag, payload, addr, 0);
-                        }
-                    }
-                    if let Some(mask_xz) = mask_xz {
-                        let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
-                        match nb {
-                            1 => {
-                                builder.ins().istore8(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
-                            2 => {
-                                builder
-                                    .ins()
-                                    .istore16(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
-                            4 => {
-                                builder
-                                    .ins()
-                                    .istore32(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
-                            _ => {
-                                builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
+                            builder.ins().store(store_mem_flag, mask_v, addr, nb_i32);
                         }
                     }
                 }
             }
+            // Simple-else log push: payload is the I64 value whose lower
+            // `nb*8` bits match what istoreN deposited.  4-state appends
+            // mask_xz at `offset + nb`.
+            emit_log_push(context, builder, payload_for_log, mask_xz_for_log);
         }
 
         Some(())
@@ -1499,6 +1611,19 @@ impl ProtoStatement {
                     } else {
                         comb_values_ptr.offset(x.dst_base.raw())
                     };
+                    // Element-0 current offset used as the base for
+                    // runtime index math in eval_step.  Same gate as
+                    // AssignStatement.  For packed arrays `dst_base`
+                    // points at `Ff(current)`, so naive `dst_base.raw()
+                    // - nb` would land OOB; the canonical current base
+                    // in `dst_ff_current_base_offset` is correct in both
+                    // packed and unpacked layouts.
+                    let _ = nb;
+                    let ff_log_base_current_offset = if x.dst_base.is_ff() && x.dst_width <= 64 {
+                        Some(x.dst_ff_current_base_offset as u32)
+                    } else {
+                        None
+                    };
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1537,6 +1662,7 @@ impl ProtoStatement {
                         dynamic_select,
                         rhs_select: x.rhs_select,
                         expr,
+                        ff_log_base_current_offset,
                     })
                 }
                 ProtoStatement::If(x) => Statement::If(x.apply_values_ptr(
@@ -1656,7 +1782,7 @@ impl ProtoStatement {
                         (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes);
                     let adjusted_comb =
                         (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes);
-                    Statement::Binary(x.func, adjusted_ff, adjusted_comb)
+                    Statement::Binary(x.func, adjusted_ff, adjusted_comb, std::ptr::null_mut())
                 }
                 ProtoStatement::For(x) => {
                     let var_ptr = if x.var_offset.is_ff() {
@@ -1848,6 +1974,18 @@ pub struct AssignStatement {
     pub dynamic_select: Option<DynamicBitSelect>,
     pub rhs_select: Option<(usize, usize)>,
     pub expr: Expression,
+    /// FF current byte offset for the write-log push helper.
+    /// Populated by `apply_values_ptr` only when the destination is a
+    /// 2-state FF with width ≤ 64.  `None` for wide/4-state paths;
+    /// those continue to use only the direct store.
+    pub ff_log_offset: Option<u32>,
+    /// True when `dst` points to the FF current slot (packed layout).
+    /// In packed mode the eval_step skips the write_native_value call —
+    /// the FF current slot is owned by `ff_commit_from_log` replay at
+    /// cycle end.  False for dual-slot multi-RMW FFs (dst points to
+    /// next slot, direct write is the intermediate state for cache
+    /// forwarding).
+    pub ff_is_packed: bool,
 }
 
 impl AssignStatement {
@@ -1877,13 +2015,21 @@ impl AssignStatement {
                 )
             };
             current.assign(value, beg, end);
-            unsafe {
-                write_native_value(
-                    self.dst,
-                    self.dst_native_bytes,
-                    self.dst_use_4state,
-                    &current,
-                );
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(
+                        self.dst,
+                        self.dst_native_bytes,
+                        self.dst_use_4state,
+                        &current,
+                    );
+                }
+            }
+            // dynamic_select RMW log push.  Offset is static (dyn_sel
+            // only selects bit ranges within a packed-bitfield FF dst).
+            // Wide FFs split into per-word entries; see `emit_ff_log`.
+            if let Some(offset) = self.ff_log_offset {
+                emit_ff_log(&current, offset, self.dst_native_bytes, self.dst_use_4state);
             }
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
@@ -1896,19 +2042,43 @@ impl AssignStatement {
                 )
             };
             current.assign(value, beg, end);
-            unsafe {
-                write_native_value(
-                    self.dst,
-                    self.dst_native_bytes,
-                    self.dst_use_4state,
-                    &current,
-                );
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(
+                        self.dst,
+                        self.dst_native_bytes,
+                        self.dst_use_4state,
+                        &current,
+                    );
+                }
+            }
+            // select RMW log push.  `current` after assign holds the
+            // final merged value the direct store deposited.  Wide FFs
+            // split into per-word entries; see `emit_ff_log`.
+            if let Some(offset) = self.ff_log_offset {
+                emit_ff_log(&current, offset, self.dst_native_bytes, self.dst_use_4state);
             }
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
-            unsafe {
-                write_native_value(self.dst, self.dst_native_bytes, self.dst_use_4state, &value);
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(
+                        self.dst,
+                        self.dst_native_bytes,
+                        self.dst_use_4state,
+                        &value,
+                    );
+                }
+            }
+            // Interpret-path log push.  Mirrors the JIT-side emit at
+            // build_binary so both paths produce matching WriteLogEntry
+            // sequences.  Narrow FFs (dst_width ≤ 64) emit one payload
+            // entry plus an optional 4-state mask entry at `offset + nb`.
+            // Wide FFs (dst_width > 64) emit one entry per 8-byte word,
+            // with parallel mask entries when use_4state is set.
+            if let Some(offset) = self.ff_log_offset {
+                emit_ff_log(&value, offset, self.dst_native_bytes, self.dst_use_4state);
             }
         }
     }
@@ -1940,6 +2110,29 @@ impl AssignDynamicStatement {
         } else {
             value
         };
+        // Runtime offset for write-log push:
+        //   ff_log_base_current_offset + idx * dst_stride.
+        // Compute once here; emit after the matching write.  4-state
+        // FFs additionally push a mask_xz entry at `offset + nb`.
+        let log_offset = self.ff_log_base_current_offset.map(|base| {
+            let runtime = base as isize + self.dst_stride * idx as isize;
+            runtime as u32
+        });
+        let nb_u16 = self.dst_native_bytes as u16;
+        let nb_u32 = self.dst_native_bytes as u32;
+        let use_4state = self.dst_use_4state;
+        let push_log = |current: &Value| {
+            if let Some(offset) = log_offset {
+                let payload = current.to_u64().unwrap_or(0);
+                unsafe {
+                    event_write_log_push_static(offset, payload, nb_u16);
+                    if use_4state {
+                        let mask = current.mask_xz_u128() as u64;
+                        event_write_log_push_static(offset + nb_u32, mask, nb_u16);
+                    }
+                }
+            }
+        };
         if let Some(dyn_sel) = &self.dynamic_select {
             let dyn_idx = dyn_sel
                 .index_expr
@@ -1962,6 +2155,7 @@ impl AssignDynamicStatement {
             unsafe {
                 write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
             };
+            push_log(&current);
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
                 read_native_value(
@@ -1976,10 +2170,12 @@ impl AssignDynamicStatement {
             unsafe {
                 write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
             };
+            push_log(&current);
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
             unsafe { write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &value) };
+            push_log(&value);
         }
     }
 
@@ -2088,6 +2284,23 @@ impl ProtoAssignStatement {
                     num_elements: dyn_sel.num_elements,
                 });
 
+            // FF write log offset = canonical current byte offset.
+            // Packed FFs have dst == Ff(current), dual-slot FFs have
+            // dst == Ff(next); the canonical offset is always
+            // `dst_ff_current_offset`.
+            // 4-state FFs emit a second log entry for the mask_xz portion
+            // at `dst_ff_current_offset + nb` (see eval_step).
+            // Wide FFs (>64 bits) emit one log entry per 8-byte word; the
+            // ff_log_offset records the canonical base and eval_step / JIT
+            // codegen splits per word.
+            let emit_log = self.dst.is_ff();
+            let ff_log_offset = if emit_log {
+                Some(self.dst_ff_current_offset as u32)
+            } else {
+                None
+            };
+            let ff_is_packed = emit_log && (self.dst.raw() == self.dst_ff_current_offset);
+
             AssignStatement {
                 dst,
                 dst_width: self.dst_width,
@@ -2097,6 +2310,8 @@ impl ProtoAssignStatement {
                 dynamic_select,
                 rhs_select: self.rhs_select,
                 expr,
+                ff_log_offset,
+                ff_is_packed,
             }
         }
     }
@@ -2163,6 +2378,25 @@ impl ProtoAssignStatement {
         let dst_offset = self.dst.raw() as i32;
         let cache_key = self.dst;
 
+        // FF write log push.  log_current_offset is always the canonical
+        // FF current byte offset, regardless of whether `dst` points to
+        // the current slot (packed layout, `dst.raw() == ff_current`) or
+        // the next slot (dual-slot multi-RMW path, `dst.raw() == next`).
+        // Use the canonical offset directly to make the layout choice
+        // transparent to ff_commit_from_log.
+        //
+        // For packed FFs (`is_packed_ff`), the direct store and cache
+        // insert are skipped — log-push-only path.  Multi-RMW FFs keep
+        // the dual-slot dst=Ff(next) with cache forwarding for in-block
+        // chain semantics.
+        //
+        // Wide FFs (65-128 bit, nb=16) emit a pair of 8-byte log entries
+        // for the payload (and another pair for the 4-state mask).  See
+        // the log push block below.
+        let emit_log = self.dst.is_ff();
+        let is_packed_ff = emit_log && (self.dst.raw() == self.dst_ff_current_offset);
+        let log_current_offset = self.dst_ff_current_offset as i32;
+
         // Helpers covering nb ∈ {1, 2, 4, 8, 16} for the
         // dynamic_select / select / fallback paths below.  Use the fused
         // uload8/16/32 ops so narrow loads lower to a single movzbq.
@@ -2220,7 +2454,9 @@ impl ProtoAssignStatement {
 
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            store_native_to_native(builder, result, dst_offset);
+            if !is_packed_ff {
+                store_native_to_native(builder, result, dst_offset);
+            }
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
@@ -2228,7 +2464,9 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                if !is_packed_ff {
+                    store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                }
                 Some(result_m)
             } else {
                 None
@@ -2249,7 +2487,35 @@ impl ProtoAssignStatement {
             } else {
                 result_mask_xz
             };
-            context.load_cache.insert(cache_key, (fwd, fwd_m));
+            if !is_packed_ff {
+                context.load_cache.insert(cache_key, (fwd, fwd_m));
+            }
+
+            // dynamic_select RMW log push.  dyn_sel selects bit ranges
+            // within a packed FF dst whose byte offset stays static, so
+            // `event_write_log_push_static` is fine.  4-state pushes a
+            // second entry for the mask_xz portion at
+            // `log_current_offset + nb` (matches the storage layout
+            // `[payload][mask]` produced by write_native_value).
+            if emit_log {
+                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                emit_inline_write_log_push(context, builder, offset_val, fwd, width_class_val);
+                if context.use_4state
+                    && let Some(fwd_m_v) = fwd_m
+                {
+                    let mask_offset_val = builder
+                        .ins()
+                        .iconst(I32, (log_current_offset + nb_i32) as i64);
+                    emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        fwd_m_v,
+                        width_class_val,
+                    );
+                }
+            }
         } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
@@ -2278,7 +2544,9 @@ impl ProtoAssignStatement {
             };
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            store_native_to_native(builder, result, dst_offset);
+            if !is_packed_ff {
+                store_native_to_native(builder, result, dst_offset);
+            }
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
@@ -2286,7 +2554,9 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                if !is_packed_ff {
+                    store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                }
                 Some(result_m)
             } else {
                 None
@@ -2307,13 +2577,44 @@ impl ProtoAssignStatement {
             } else {
                 result_mask_xz
             };
-            context.load_cache.insert(cache_key, (fwd, fwd_m));
+            if !is_packed_ff {
+                context.load_cache.insert(cache_key, (fwd, fwd_m));
+            }
+
+            // Select RMW log push.  `fwd` is the post-RMW payload masked
+            // to dst_width — pushed as the cycle's update to the FF
+            // current slot via `ff_commit_from_log`.  4-state appends
+            // a mask_xz entry at `log_current_offset + nb`.
+            if emit_log {
+                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                let width_class_val = builder.ins().iconst(I32, nb as i64);
+                emit_inline_write_log_push(context, builder, offset_val, fwd, width_class_val);
+                if context.use_4state
+                    && let Some(fwd_m_v) = fwd_m
+                {
+                    let mask_offset_val = builder
+                        .ins()
+                        .iconst(I32, (log_current_offset + nb_i32) as i64);
+                    emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        fwd_m_v,
+                        width_class_val,
+                    );
+                }
+            }
         } else {
             // Store elimination relies on load_cache forwarding to
             // serve subsequent reads; skip only when the cache is live.
-            let skip_store = context.store_elim_enabled
+            // Packed FF also skips the direct store and cache insert
+            // — the FF current slot is owned by ff_commit_from_log
+            // replay, and an intra-cycle write would corrupt OLD-value
+            // reads (NBA violation).
+            let skip_store = (context.store_elim_enabled
                 && !context.disable_load_cache
-                && context.store_elim_offsets.contains(&cache_key);
+                && context.store_elim_offsets.contains(&cache_key))
+                || is_packed_ff;
 
             // Writer-side mask is redundant when the post-rhs_select
             // payload is provably narrow-clean.  Two cases:
@@ -2433,6 +2734,8 @@ impl ProtoAssignStatement {
 
             // Forward value to load cache.  Mask to dst_width to match
             // load+uextend, with the same elision as the storage mask above.
+            // Packed FF skips the cache insert so subsequent same-cycle
+            // FF reads load OLD value from memory (NBA semantics).
             let fwd_p = if self.dst_width < 64 && !skip_writer_mask {
                 let m = gen_mask_for_width(self.dst_width);
                 band_const(builder, payload, m, false)
@@ -2447,7 +2750,89 @@ impl ProtoAssignStatement {
             } else {
                 mask_xz
             };
-            context.load_cache.insert(cache_key, (fwd_p, fwd_m));
+            if !is_packed_ff {
+                context.load_cache.insert(cache_key, (fwd_p, fwd_m));
+            }
+
+            // Write-log push (dual-write for unpacked FFs).  fwd_p is
+            // the width-masked payload that matches what istoreN would
+            // actually deposit.  Narrow FFs emit one entry per payload
+            // (+ one mask entry for 4-state).  Wide FFs (nb > 8) split
+            // the I128 payload into low/high u64 words, emitting one
+            // entry per word — the commit-side consumer in
+            // `ff_commit_from_log` writes width_class=8 bytes per entry.
+            if emit_log {
+                if nb <= 8 {
+                    let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+                    let width_class_val = builder.ins().iconst(I32, nb as i64);
+                    emit_inline_write_log_push(
+                        context,
+                        builder,
+                        offset_val,
+                        fwd_p,
+                        width_class_val,
+                    );
+                    if context.use_4state
+                        && let Some(fwd_m_v) = fwd_m
+                    {
+                        let mask_offset_val = builder
+                            .ins()
+                            .iconst(I32, (log_current_offset + nb_i32) as i64);
+                        emit_inline_write_log_push(
+                            context,
+                            builder,
+                            mask_offset_val,
+                            fwd_m_v,
+                            width_class_val,
+                        );
+                    }
+                } else {
+                    // Wide FF: split into per-8-byte words.  fwd_p is
+                    // typically I128 (built by ensure_wide_ptr_val and
+                    // related helpers in the narrow-path expression flow
+                    // for 65-128 bit dsts).
+                    let n_words = nb / 8;
+                    let width_class_val = builder.ins().iconst(I32, 8);
+                    for i in 0..n_words {
+                        let shifted = if i == 0 {
+                            fwd_p
+                        } else {
+                            builder.ins().ushr_imm(fwd_p, (i * 64) as i64)
+                        };
+                        let word = builder.ins().ireduce(I64, shifted);
+                        let off = log_current_offset + (i * 8) as i32;
+                        let entry_offset_val = builder.ins().iconst(I32, off as i64);
+                        emit_inline_write_log_push(
+                            context,
+                            builder,
+                            entry_offset_val,
+                            word,
+                            width_class_val,
+                        );
+                    }
+                    if context.use_4state
+                        && let Some(fwd_m_v) = fwd_m
+                    {
+                        for i in 0..n_words {
+                            let shifted = if i == 0 {
+                                fwd_m_v
+                            } else {
+                                builder.ins().ushr_imm(fwd_m_v, (i * 64) as i64)
+                            };
+                            let word = builder.ins().ireduce(I64, shifted);
+                            let off = log_current_offset + nb_i32 + (i * 8) as i32;
+                            let entry_offset_val = builder.ins().iconst(I32, off as i64);
+                            emit_inline_write_log_push(
+                                context,
+                                builder,
+                                entry_offset_val,
+                                word,
+                                width_class_val,
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         Some(())
@@ -2480,6 +2865,21 @@ impl ProtoAssignStatement {
         };
         let dst_offset = self.dst.raw() as i32;
 
+        // FF write log emit for wide FFs.  Packed FFs (dst.raw() ==
+        // dst_ff_current_offset) skip the direct store entirely so
+        // intra-cycle reads return the OLD current value (NBA correct);
+        // unpacked FFs (dst.raw() == next_offset) keep the direct store
+        // for in-block chain forwarding via load_cache, then emit log
+        // entries against the canonical current_offset so
+        // `ff_commit_from_log` applies them at cycle end.
+        let is_ff = self.dst.is_ff();
+        let ff_packed = is_ff && (self.dst.raw() == self.dst_ff_current_offset);
+        let log_current_offset = if is_ff {
+            self.dst_ff_current_offset as i32
+        } else {
+            0
+        };
+
         // Source is a wide pointer (for >128-bit expressions)
         // Use expr_width captured before build_binary to determine representation.
         // build_binary returns a pointer for width > 128, register otherwise.
@@ -2494,14 +2894,24 @@ impl ProtoAssignStatement {
         // Apply width mask to the source to truncate extra bits
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
-        // Copy word by word from source to destination
-        for i in 0..n_words {
-            let off = (i * 8) as i32;
-            let val = builder.ins().load(I64, flags, src_ptr, off);
-            builder.ins().store(flags, val, base_addr, dst_offset + off);
+        // Direct store (skip for packed FF — log push alone is enough).
+        if !ff_packed {
+            for i in 0..n_words {
+                let off = (i * 8) as i32;
+                let val = builder.ins().load(I64, flags, src_ptr, off);
+                builder.ins().store(flags, val, base_addr, dst_offset + off);
+            }
         }
 
-        // 4-state mask
+        // FF write-log push: emit wide entries holding up to 56 bytes of
+        // payload each.  For nb ≤ 56 a single entry suffices; wider FFs
+        // chunk into multiple entries at canonical offsets.
+        if is_ff {
+            emit_wide_log_chunks(context, builder, src_ptr, log_current_offset, nb);
+        }
+
+        // 4-state mask: direct store (skip for packed FF) + parallel wide
+        // log entries at `current_offset + nb`.
         if let Some(mask_xz) = mask_xz {
             let mask_ptr = if is_wide_ptr(self.expr.width()) {
                 mask_xz
@@ -2510,16 +2920,56 @@ impl ProtoAssignStatement {
                 ensure_wide_ptr_val(builder, mask_xz, self.expr.width(), nb)
             };
             emit_wide_apply_mask(context, builder, mask_ptr, nb, self.dst_width);
-            for i in 0..n_words {
-                let off = (i * 8) as i32;
-                let val = builder.ins().load(I64, flags, mask_ptr, off);
-                builder
-                    .ins()
-                    .store(flags, val, base_addr, dst_offset + nb as i32 + off);
+            if !ff_packed {
+                for i in 0..n_words {
+                    let off = (i * 8) as i32;
+                    let val = builder.ins().load(I64, flags, mask_ptr, off);
+                    builder
+                        .ins()
+                        .store(flags, val, base_addr, dst_offset + nb as i32 + off);
+                }
+            }
+            if is_ff {
+                emit_wide_log_chunks(
+                    context,
+                    builder,
+                    mask_ptr,
+                    log_current_offset + nb as i32,
+                    nb,
+                );
             }
         }
 
         Some(())
+    }
+}
+
+/// Emit one or more wide write-log entries covering `nb` bytes starting
+/// at `src_ptr`.  Each entry holds up to `WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES`
+/// (56) bytes; wider FFs are split into multiple entries at consecutive
+/// FF offsets.
+#[cfg(not(target_family = "wasm"))]
+fn emit_wide_log_chunks(
+    context: &CraneliftContext,
+    builder: &mut FunctionBuilder,
+    src_ptr: cranelift::prelude::Value,
+    base_offset: i32,
+    nb: usize,
+) {
+    use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    let mut written: usize = 0;
+    while written < nb {
+        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+        let entry_offset_val = builder
+            .ins()
+            .iconst(I32, (base_offset as i64) + written as i64);
+        let chunk_ptr = if written == 0 {
+            src_ptr
+        } else {
+            builder.ins().iadd_imm(src_ptr, written as i64)
+        };
+        emit_inline_write_log_push_wide(context, builder, entry_offset_val, chunk_ptr, chunk);
+        written += chunk;
     }
 }
 
@@ -3324,6 +3774,78 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             append_ff_next_copies(&mut result);
         }
         Ok(result)
+    }
+}
+
+/// Push FF write log entries for `value` against the canonical
+/// `base_offset` (the FF's current byte offset).  Narrow FFs (nb ≤ 8)
+/// emit a single payload entry plus an optional mask entry at
+/// `base_offset + nb` (4-state).  Wide FFs split the payload (and mask)
+/// into per-8-byte-word entries; the consumer in `ff_commit_from_log`
+/// applies each entry's width-class bytes to its offset.
+///
+/// SAFETY: callers must run while an `EVENT_WRITE_LOG` buffer is
+/// installed; without one this becomes a no-op.
+fn emit_ff_log(value: &Value, base_offset: u32, nb: usize, use_4state: bool) {
+    let nb_u16 = nb as u16;
+    let nb_u32 = nb as u32;
+    if nb <= 8 {
+        let payload = value.to_u64().unwrap_or(0);
+        unsafe {
+            event_write_log_push_static(base_offset, payload, nb_u16);
+            if use_4state {
+                let mask = value.mask_xz_u128() as u64;
+                event_write_log_push_static(base_offset + nb_u32, mask, nb_u16);
+            }
+        }
+        return;
+    }
+    // Wide: a contiguous byte buffer per side, then split into wide-entry
+    // chunks of at most WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES.
+    let n_words = nb / 8;
+    let payload_digits: Vec<u64> = match value {
+        Value::U64(v) => vec![v.payload],
+        Value::BigUint(v) => v.payload.to_u64_digits(),
+    };
+    let mut payload_bytes: Vec<u8> = Vec::with_capacity(n_words * 8);
+    for i in 0..n_words {
+        let p = payload_digits.get(i).copied().unwrap_or(0);
+        payload_bytes.extend_from_slice(&p.to_le_bytes());
+    }
+    let mut written: usize = 0;
+    while written < nb {
+        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+        unsafe {
+            event_write_log_push_wide(
+                base_offset + written as u32,
+                payload_bytes.as_ptr().add(written),
+                chunk,
+            );
+        }
+        written += chunk;
+    }
+    if use_4state {
+        let mask_digits: Vec<u64> = match value {
+            Value::U64(v) => vec![v.mask_xz],
+            Value::BigUint(v) => v.mask_xz.to_u64_digits(),
+        };
+        let mut mask_bytes: Vec<u8> = Vec::with_capacity(n_words * 8);
+        for i in 0..n_words {
+            let m = mask_digits.get(i).copied().unwrap_or(0);
+            mask_bytes.extend_from_slice(&m.to_le_bytes());
+        }
+        let mut written: usize = 0;
+        while written < nb {
+            let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+            unsafe {
+                event_write_log_push_wide(
+                    base_offset + nb_u32 + written as u32,
+                    mask_bytes.as_ptr().add(written),
+                    chunk,
+                );
+            }
+            written += chunk;
+        }
     }
 }
 
