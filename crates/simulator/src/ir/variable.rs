@@ -1,4 +1,4 @@
-use crate::HashMap;
+use crate::{HashMap, HashSet};
 use std::fmt;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::{Type, VarId, VarPath};
@@ -337,6 +337,7 @@ impl VariableMeta {
 pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
     ff_table: &air::FfTable,
+    multi_rmw_set: &HashSet<(VarId, usize)>,
     use_4state: bool,
     ff_start_bytes: isize,
     comb_start_bytes: isize,
@@ -383,6 +384,16 @@ pub fn create_variable_meta(
         let nb = native_bytes_for(width, is_ff_var);
         let vs = value_size(nb, use_4state);
 
+        // Phase 1.5 v2: packed FF allocation.  All-or-nothing per-array
+        // — if any element receives ≥2 writes in any cycle event, the
+        // array stays unpacked (dual-slot, next_offset = current + vs)
+        // so multi-RMW chain forwarding works.  Otherwise the array is
+        // packed (single slot per element, next_offset = current
+        // sentinel, the dead next bytes are eliminated from ff_values).
+        let any_multi_rmw = is_ff_var
+            && (0..total_array).any(|i| multi_rmw_set.contains(&(v.id, i)));
+        let packed_ff = is_ff_var && !any_multi_rmw;
+
         // `v.value.len() < total_array` means the analyzer supplied only
         // the template entry — replicate it across all elements.
         let template_mode = v.value.len() < total_array;
@@ -397,13 +408,23 @@ pub fn create_variable_meta(
         for i in 0..total_array {
             if force_ff || ff_table.is_ff(v.id, i) {
                 let current_offset = ff_pos;
-                let next_offset = ff_pos + vs as isize;
-                elements.push(VariableElement {
-                    native_bytes: nb,
-                    current: VarOffset::Ff(current_offset),
-                    next_offset,
-                });
-                ff_pos += (vs * 2) as isize; // current + next
+                if packed_ff {
+                    // Sentinel: next == current, only `vs` bytes occupied.
+                    elements.push(VariableElement {
+                        native_bytes: nb,
+                        current: VarOffset::Ff(current_offset),
+                        next_offset: current_offset,
+                    });
+                    ff_pos += vs as isize;
+                } else {
+                    let next_offset = ff_pos + vs as isize;
+                    elements.push(VariableElement {
+                        native_bytes: nb,
+                        current: VarOffset::Ff(current_offset),
+                        next_offset,
+                    });
+                    ff_pos += (vs * 2) as isize; // current + next
+                }
             } else {
                 let current_offset = comb_pos;
                 elements.push(VariableElement {

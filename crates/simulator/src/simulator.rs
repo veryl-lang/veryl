@@ -241,6 +241,17 @@ impl Simulator {
             self.profile.step_count += 1;
         }
 
+        // Install the per-Ir WriteLogBuffer before settle_comb so that
+        // comb-scope FF writes (which appear under `--disable-ff-opt`'s
+        // force_all_ff path and never go through the event scope) also
+        // emit log entries and get committed alongside event-scope writes
+        // at cycle end.  Without this install, settle_comb's FF stores
+        // hit `event_write_log_push_static`'s "no active log" branch and
+        // turn into no-ops, leaving the FF current slot stale.
+        // SAFETY: the buffer outlives the call to dispatch_stmt_fast and
+        // is cleared before this stack frame returns.
+        unsafe { set_event_write_log(&mut self.ir.write_log_buffer); }
+
         if self.comb_dirty {
             #[cfg(feature = "profile")]
             let start = std::time::Instant::now();
@@ -268,13 +279,6 @@ impl Simulator {
             self.last_event_stmts = ptr;
             ptr
         };
-        // Install the per-Ir WriteLogBuffer as the thread-local active log
-        // before evaluating the event's statements.  FF stores (JIT and
-        // interpret) push entries; `ff_commit_from_log` applies them to
-        // FF current storage at cycle end.
-        // SAFETY: the buffer outlives the call to dispatch_stmt_fast and is
-        // cleared before this stack frame returns.
-        unsafe { set_event_write_log(&mut self.ir.write_log_buffer); }
 
         if !stmts_ptr.is_null() {
             // SAFETY: event_statements is never mutated after Ir construction.

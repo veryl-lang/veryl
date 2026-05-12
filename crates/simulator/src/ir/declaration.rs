@@ -335,9 +335,22 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
+
+        // Phase 1.5 v2: analyzer-IR pre-pass to identify multi-RMW FFs.
+        // Same as ProtoModule::conv but for child module.
+        #[cfg(not(target_family = "wasm"))]
+        let multi_rmw_set = crate::ir::multi_write_analysis::analyze_multi_write(
+            child_decls,
+            &mut child_analyzer_context,
+            context.config.disable_ff_opt,
+        );
+        #[cfg(target_family = "wasm")]
+        let multi_rmw_set = crate::HashSet::default();
+
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
             &child_ff_table,
+            &multi_rmw_set,
             context.config.use_4state,
             ff_start,
             comb_start,

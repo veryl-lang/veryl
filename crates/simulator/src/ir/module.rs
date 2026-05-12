@@ -346,14 +346,23 @@ fn validate_meta_offsets(
         for (i, elem) in var_meta.elements.iter().enumerate() {
             let off = elem.current_offset() as usize;
             if elem.is_ff() {
+                // Post Phase 1.5 compaction (env-gated): packed FFs have
+                // next_offset == current_offset (sentinel) and only
+                // occupy `vs` bytes; unpacked (multi-RMW) FFs still have
+                // `next_offset == current_offset + vs` and need `vs * 2`
+                // bytes total.  When Phase 1.5 is off, all FFs are
+                // unpacked and this check matches the legacy `vs * 2`.
+                let packed = elem.next_offset == elem.current_offset();
+                let span = if packed { vs } else { vs * 2 };
                 assert!(
-                    off + vs * 2 <= ff_bytes,
-                    "validate_meta: ff var {:?}[{}] offset {} + vs*2 {} > ff_bytes {}",
+                    off + span <= ff_bytes,
+                    "validate_meta: ff var {:?}[{}] offset {} + span {} > ff_bytes {} (packed={})",
                     id,
                     i,
                     off,
-                    vs * 2,
+                    span,
                     ff_bytes,
+                    packed,
                 );
             } else {
                 assert!(
@@ -2114,9 +2123,25 @@ impl Conv<&air::Module> for ProtoModule {
 
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
+
+        // Phase 1.5 v2: analyzer-IR pre-pass to identify multi-RMW FFs.
+        // Result drives packed-aware allocation in `create_variable_meta`
+        // — FFs that receive ≥2 writes per event need dual-slot storage
+        // (multi-RMW chain forwarding), all others use packed single-slot
+        // layout (dead next bytes eliminated, ff_values shrunk).
+        #[cfg(not(target_family = "wasm"))]
+        let multi_rmw_set = super::multi_write_analysis::analyze_multi_write(
+            declarations,
+            &mut analyzer_context,
+            context.config.disable_ff_opt,
+        );
+        #[cfg(target_family = "wasm")]
+        let multi_rmw_set = crate::HashSet::default();
+
         let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
             &ff_table,
+            &multi_rmw_set,
             context.config.use_4state,
             ff_start,
             comb_start,
@@ -2232,6 +2257,82 @@ impl Conv<&air::Module> for ProtoModule {
             );
         }
 
+        // Phase 1 packed-layout PoC diag (option Y''):
+        // Count FF offsets with multiple write sites — these are the
+        // "multi-RMW candidates" that require scratch/cache forwarding
+        // to preserve NBA semantics under packed [current]-only layout.
+        // The remaining (single-site) FFs need no scratch at all.
+        //
+        // The "simple" count is an upper bound that includes if-else
+        // mutual-exclusion sites.  The "true" multi-RMW count enumerates
+        // execution paths through the AST and tallies writes per path —
+        // sites under disjoint If branches collapse, sites that fire
+        // together accumulate.  Path-aware result is the actual scratch
+        // requirement.
+        if std::env::var("VERYL_FF_MULTI_WRITE_DIAG").ok().as_deref() == Some("1") {
+            use std::collections::BTreeMap;
+            let mut by_offset: BTreeMap<u32, Vec<&crate::ir::site_table::SiteInfo>> =
+                BTreeMap::new();
+            for s in &site_table.sites {
+                by_offset.entry(s.current_offset).or_default().push(s);
+            }
+            let total_offsets = by_offset.len();
+            let upper_single = by_offset.values().filter(|v| v.len() == 1).count();
+            let upper_multi = by_offset.values().filter(|v| v.len() > 1).count();
+            let total_sites = site_table.len();
+
+            // Path-aware: per-FF max-writes-in-any-execution-path.
+            // Uses O(tree_size) recursive analysis instead of 2^n path
+            // enumeration.  An offset with max_writes ≥ 2 is "true
+            // multi-RMW" — requires scratch/cache forwarding.
+            let mut true_multi: std::collections::BTreeSet<u32> =
+                std::collections::BTreeSet::default();
+            let mut max_chain_per_offset: BTreeMap<u32, u32> = BTreeMap::new();
+            for stmts in all_event_statements.values() {
+                let mw = collect_max_writes(stmts);
+                for (off, cnt) in mw {
+                    if cnt >= 2 {
+                        true_multi.insert(off);
+                    }
+                    let e = max_chain_per_offset.entry(off).or_insert(0);
+                    if cnt > *e {
+                        *e = cnt;
+                    }
+                }
+            }
+            let true_multi_bytes: u32 = true_multi
+                .iter()
+                .filter_map(|off| by_offset.get(off).and_then(|v| v.first()))
+                .map(|s| s.native_bytes as u32)
+                .sum();
+            eprintln!(
+                "[ff_multi_write_diag] module={:?} total_offsets={} sites={} \
+                 upper_single={} upper_multi={} true_multi={} true_multi_bytes={}",
+                src.name,
+                total_offsets,
+                total_sites,
+                upper_single,
+                upper_multi,
+                true_multi.len(),
+                true_multi_bytes,
+            );
+            let mut multi_list: Vec<_> = max_chain_per_offset
+                .iter()
+                .filter(|(_, c)| **c >= 2)
+                .collect();
+            multi_list.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
+            for (off, chain) in multi_list.iter().take(10) {
+                let width = by_offset.get(off).and_then(|v| v.first())
+                    .map(|s| s.width_bits).unwrap_or(0);
+                let kind = by_offset.get(off).and_then(|v| v.first())
+                    .map(|s| s.kind).unwrap_or(crate::ir::site_table::SiteKind::Static);
+                eprintln!(
+                    "  off=0x{:x} max_chain={} width_bits={} kind={:?}",
+                    off, chain, width, kind,
+                );
+            }
+        }
+
         // Event statements preserve source order (no topological sorting).
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
@@ -2312,3 +2413,56 @@ impl Conv<&air::Module> for ProtoModule {
         })
     }
 }
+
+/// ProtoStatement-walking per-FF-offset max-writes-in-any-execution-path
+/// analysis.  Used by the `VERYL_FF_MULTI_WRITE_DIAG=1` diag block (above)
+/// to corroborate the analyzer-IR multi_write_analysis result against the
+/// post-build ProtoStatement view.  Not on the hot path.
+fn collect_max_writes(stmts: &[ProtoStatement]) -> HashMap<u32, u32> {
+    let mut acc: HashMap<u32, u32> = HashMap::default();
+    for s in stmts {
+        let sub = collect_max_writes_one(s);
+        for (off, n) in sub {
+            *acc.entry(off).or_insert(0) += n;
+        }
+    }
+    acc
+}
+
+fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
+    use crate::ir::statement::ProtoStatement as P;
+    let mut result: HashMap<u32, u32> = HashMap::default();
+    match stmt {
+        P::Assign(a) if a.dst.is_ff() => {
+            result.insert(a.dst_ff_current_offset as u32, 1);
+        }
+        P::AssignDynamic(a) if a.dst_base.is_ff() => {
+            result.insert(a.dst_ff_current_base_offset as u32, 1);
+        }
+        P::If(i) => {
+            let t = collect_max_writes(&i.true_side);
+            let f = collect_max_writes(&i.false_side);
+            for (off, n) in &t {
+                let e = result.entry(*off).or_insert(0);
+                if *n > *e {
+                    *e = *n;
+                }
+            }
+            for (off, n) in &f {
+                let e = result.entry(*off).or_insert(0);
+                if *n > *e {
+                    *e = *n;
+                }
+            }
+        }
+        P::For(f) => {
+            return collect_max_writes(&f.body);
+        }
+        P::SequentialBlock(body) => {
+            return collect_max_writes(body);
+        }
+        _ => {}
+    }
+    result
+}
+

@@ -651,21 +651,20 @@ impl ProtoAssignDynamicStatement {
         let addr = builder.ins().iadd(base_addr, static_offset);
         let addr = builder.ins().iadd(addr, byte_offset);
 
-        // Phase 3.4 part 2 of ff_commit redesign: AssignDynamic JIT log
-        // push.  Runtime current_offset = (static_offset - nb) +
-        // byte_offset_runtime.  Skip when not FF, when use_4state, when
-        // wide, or when env gate off.
-        //
-        // value_size == nb when !use_4state (2-state storage); we only
-        // emit for that case here.  `dst_width <= 64` is implied by
-        // can_build_binary's full_width <= 64 gate.
-        let emit_log = self.dst_base.is_ff()
-            && !context.use_4state
-            && self.dst_width <= 64;
+        // FF write log push: log offset = (canonical current base) +
+        // runtime byte_offset, regardless of whether dst_base points to
+        // the current slot (packed layout) or the next slot (dual-slot
+        // multi-RMW).  Phase 1 packed-layout transform may rewrite
+        // dst_base from Ff(next_base) to Ff(current_base); the canonical
+        // `dst_ff_current_base_offset` always reflects the current slot
+        // origin.
+        let emit_log = self.dst_base.is_ff() && self.dst_width <= 64;
+        let is_packed_ff_dyn =
+            emit_log && (self.dst_base.raw() == self.dst_ff_current_base_offset);
         let log_offset_i32 = if emit_log {
             let log_base = builder
                 .ins()
-                .iconst(I64, (self.dst_base.raw() - nb as isize) as i64);
+                .iconst(I64, self.dst_ff_current_base_offset as i64);
             let log_offset_64 = builder.ins().iadd(log_base, byte_offset);
             Some(builder.ins().ireduce(I32, log_offset_64))
         } else {
@@ -705,7 +704,8 @@ impl ProtoAssignDynamicStatement {
 
         let emit_log_push = |context: &mut CraneliftContext,
                              builder: &mut FunctionBuilder,
-                             payload: cranelift::prelude::Value| {
+                             payload: cranelift::prelude::Value,
+                             mask: Option<cranelift::prelude::Value>| {
             if let Some(offset_val) = log_offset_i32 {
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
                 crate::cranelift::emit_inline_write_log_push(
@@ -715,6 +715,18 @@ impl ProtoAssignDynamicStatement {
                     payload,
                     width_class_val,
                 );
+                if context.use_4state
+                    && let Some(mask_v) = mask
+                {
+                    let mask_offset_val = builder.ins().iadd_imm(offset_val, nb as i64);
+                    crate::cranelift::emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        mask_v,
+                        width_class_val,
+                    );
+                }
             }
         };
         if let Some(dyn_sel) = &self.dynamic_select {
@@ -730,15 +742,22 @@ impl ProtoAssignDynamicStatement {
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band(org, not_mask);
             let result = builder.ins().bor(payload, org);
-            store_i64_to_native(builder, result, addr, 0);
-            if let Some(mask_xz) = mask_xz {
+            if !is_packed_ff_dyn {
+                store_i64_to_native(builder, result, addr, 0);
+            }
+            let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band(org, not_mask);
-                let result = builder.ins().bor(mask_xz, org);
-                store_i64_to_native(builder, result, addr, nb_i32);
-            }
-            emit_log_push(context, builder, result);
+                let result_m = builder.ins().bor(mask_xz, org);
+                if !is_packed_ff_dyn {
+                    store_i64_to_native(builder, result_m, addr, nb_i32);
+                }
+                Some(result_m)
+            } else {
+                None
+            };
+            emit_log_push(context, builder, result, mask_result);
         } else if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
 
@@ -746,91 +765,96 @@ impl ProtoAssignDynamicStatement {
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band_imm(org, !mask as i64);
             let result = builder.ins().bor(payload, org);
-            store_i64_to_native(builder, result, addr, 0);
-            if let Some(mask_xz) = mask_xz {
+            if !is_packed_ff_dyn {
+                store_i64_to_native(builder, result, addr, 0);
+            }
+            let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band_imm(org, !mask as i64);
-                let result = builder.ins().bor(mask_xz, org);
-                store_i64_to_native(builder, result, addr, nb_i32);
-            }
-            emit_log_push(context, builder, result);
+                let result_m = builder.ins().bor(mask_xz, org);
+                if !is_packed_ff_dyn {
+                    store_i64_to_native(builder, result_m, addr, nb_i32);
+                }
+                Some(result_m)
+            } else {
+                None
+            };
+            emit_log_push(context, builder, result, mask_result);
         } else {
-            match self.dst_width {
-                8 => {
-                    builder.ins().istore8(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder.ins().istore8(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
-                16 => {
-                    builder.ins().istore16(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore16(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
-                32 => {
-                    builder.ins().istore32(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder
-                            .ins()
-                            .istore32(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
-                64 => {
-                    builder.ins().store(store_mem_flag, payload, addr, 0);
-                    if let Some(mask_xz) = mask_xz {
-                        builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
-                    }
-                }
+            // Mask payload to dst_width when not a clean native width;
+            // matches the loaded-width semantics that ff_commit_from_log
+            // expects from the log payload.
+            let (payload_to_store, payload_for_log) = match self.dst_width {
+                8 | 16 | 32 | 64 => (payload, payload),
                 _ => {
                     if self.dst_width >= 64 {
                         return None;
                     }
                     let mask = (1u64 << self.dst_width) - 1;
-                    let payload = builder.ins().band_imm(payload, mask as i64);
+                    let masked = builder.ins().band_imm(payload, mask as i64);
+                    (masked, masked)
+                }
+            };
+            let mask_xz_for_log = if let Some(mask_xz_v) = mask_xz {
+                let m = if !matches!(self.dst_width, 8 | 16 | 32 | 64) {
+                    let mask = (1u64 << self.dst_width) - 1;
+                    builder.ins().band_imm(mask_xz_v, mask as i64)
+                } else {
+                    mask_xz_v
+                };
+                Some(m)
+            } else {
+                None
+            };
+            if !is_packed_ff_dyn {
+                match nb {
+                    1 => {
+                        builder
+                            .ins()
+                            .istore8(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                    2 => {
+                        builder
+                            .ins()
+                            .istore16(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                    4 => {
+                        builder
+                            .ins()
+                            .istore32(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                    _ => {
+                        builder
+                            .ins()
+                            .store(store_mem_flag, payload_to_store, addr, 0);
+                    }
+                }
+                if let Some(mask_v) = mask_xz_for_log {
                     match nb {
                         1 => {
-                            builder.ins().istore8(store_mem_flag, payload, addr, 0);
+                            builder.ins().istore8(store_mem_flag, mask_v, addr, nb_i32);
                         }
                         2 => {
-                            builder.ins().istore16(store_mem_flag, payload, addr, 0);
+                            builder
+                                .ins()
+                                .istore16(store_mem_flag, mask_v, addr, nb_i32);
                         }
                         4 => {
-                            builder.ins().istore32(store_mem_flag, payload, addr, 0);
+                            builder
+                                .ins()
+                                .istore32(store_mem_flag, mask_v, addr, nb_i32);
                         }
                         _ => {
-                            builder.ins().store(store_mem_flag, payload, addr, 0);
-                        }
-                    }
-                    if let Some(mask_xz) = mask_xz {
-                        let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
-                        match nb {
-                            1 => {
-                                builder.ins().istore8(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
-                            2 => {
-                                builder
-                                    .ins()
-                                    .istore16(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
-                            4 => {
-                                builder
-                                    .ins()
-                                    .istore32(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
-                            _ => {
-                                builder.ins().store(store_mem_flag, mask_xz, addr, nb_i32);
-                            }
+                            builder.ins().store(store_mem_flag, mask_v, addr, nb_i32);
                         }
                     }
                 }
             }
             // Simple-else log push: payload is the I64 value whose lower
-            // `nb*8` bits match what istoreN deposited.
-            emit_log_push(context, builder, payload);
+            // `nb*8` bits match what istoreN deposited.  4-state appends
+            // mask_xz at `offset + nb`.
+            emit_log_push(context, builder, payload_for_log, mask_xz_for_log);
         }
 
         Some(())
@@ -1595,16 +1619,21 @@ impl ProtoStatement {
                     // Phase 3.4 ff_commit redesign — element-0 current
                     // offset (used as the base for runtime index math in
                     // eval_step).  Same gate as AssignStatement.
-                    let ff_log_base_current_offset = if x.dst_base.is_ff()
-                        && !use_4state
-                        && x.dst_width <= 64
-                    {
-                        let next_off = x.dst_base.raw();
-                        debug_assert!(next_off >= nb as isize);
-                        Some((next_off - nb as isize) as u32)
-                    } else {
-                        None
-                    };
+                    //
+                    // Phase 1 D apply_packed_layout rewrites `dst_base`
+                    // to `Ff(current)` for packed arrays, so the legacy
+                    // `dst_base.raw() - nb` computation (which assumed
+                    // `dst_base` was the next slot) produces a bogus
+                    // offset (current - nb, often pointing OOB).  The
+                    // canonical current base is always available in
+                    // `dst_ff_current_base_offset`, so use it directly.
+                    let _ = nb;
+                    let ff_log_base_current_offset =
+                        if x.dst_base.is_ff() && x.dst_width <= 64 {
+                            Some(x.dst_ff_current_base_offset as u32)
+                        } else {
+                            None
+                        };
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1957,11 +1986,16 @@ pub struct AssignStatement {
     pub expr: Expression,
     /// Phase 3 of ff_commit redesign — FF current byte offset for the
     /// write-log push helper.  Populated by `apply_values_ptr` only when
-    /// (a) `VERYL_FF_COMMIT_REDESIGN=1`, (b) the destination is a 2-state
-    /// FF, (c) width ≤ 64, and (d) no select / dynamic_select RMW —
-    /// matching the JIT-side gate.  `None` for every other path; those
-    /// paths continue to use only the master next-slot store.
+    /// the destination is a 2-state FF with width ≤ 64.  `None` for
+    /// wide/4-state paths; those continue to use only the direct store.
     pub ff_log_offset: Option<u32>,
+    /// Phase 1 packed-layout flag.  True when `dst` points to the FF
+    /// current slot (post `apply_packed_layout` transform).  In packed
+    /// mode the eval_step skips the write_native_value call — the FF
+    /// current slot is owned by `ff_commit_from_log` replay at cycle end.
+    /// False for dual-slot multi-RMW FFs (dst points to next slot,
+    /// direct write is the intermediate state for cache forwarding).
+    pub ff_is_packed: bool,
 }
 
 impl AssignStatement {
@@ -1991,25 +2025,36 @@ impl AssignStatement {
                 )
             };
             current.assign(value, beg, end);
-            unsafe {
-                write_native_value(
-                    self.dst,
-                    self.dst_native_bytes,
-                    self.dst_use_4state,
-                    &current,
-                );
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(
+                        self.dst,
+                        self.dst_native_bytes,
+                        self.dst_use_4state,
+                        &current,
+                    );
+                }
             }
             // Phase 3.3 of ff_commit redesign — dynamic_select RMW log
             // push.  Offset is static (the dyn_sel only selects bit
-            // ranges within a packed-bitfield FF dst).
+            // ranges within a packed-bitfield FF dst).  For 4-state FFs
+            // a second entry carries the mask_xz portion (stored at
+            // `offset + nb`, see write_native_value layout).
             if let Some(offset) = self.ff_log_offset {
                 let payload = current.to_u64().unwrap_or(0);
+                let nb = self.dst_native_bytes as u16;
                 unsafe {
                     crate::ir::write_log::event_write_log_push_static(
-                        offset,
-                        payload,
-                        self.dst_native_bytes as u16,
+                        offset, payload, nb,
                     );
+                    if self.dst_use_4state {
+                        let mask = current.mask_xz_u128() as u64;
+                        crate::ir::write_log::event_write_log_push_static(
+                            offset + self.dst_native_bytes as u32,
+                            mask,
+                            nb,
+                        );
+                    }
                 }
             }
         } else if let Some((beg, end)) = self.select {
@@ -2023,47 +2068,72 @@ impl AssignStatement {
                 )
             };
             current.assign(value, beg, end);
-            unsafe {
-                write_native_value(
-                    self.dst,
-                    self.dst_native_bytes,
-                    self.dst_use_4state,
-                    &current,
-                );
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(
+                        self.dst,
+                        self.dst_native_bytes,
+                        self.dst_use_4state,
+                        &current,
+                    );
+                }
             }
             // Phase 3.2 of ff_commit redesign — select RMW log push.
             // `current` after assign holds the final merged value the
-            // master next-slot store deposited.
+            // master next-slot store deposited.  4-state appends a
+            // second entry carrying the mask_xz bytes.
             if let Some(offset) = self.ff_log_offset {
                 let payload = current.to_u64().unwrap_or(0);
+                let nb = self.dst_native_bytes as u16;
                 unsafe {
                     crate::ir::write_log::event_write_log_push_static(
-                        offset,
-                        payload,
-                        self.dst_native_bytes as u16,
+                        offset, payload, nb,
                     );
+                    if self.dst_use_4state {
+                        let mask = current.mask_xz_u128() as u64;
+                        crate::ir::write_log::event_write_log_push_static(
+                            offset + self.dst_native_bytes as u32,
+                            mask,
+                            nb,
+                        );
+                    }
                 }
             }
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
-            unsafe {
-                write_native_value(self.dst, self.dst_native_bytes, self.dst_use_4state, &value);
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(
+                        self.dst,
+                        self.dst_native_bytes,
+                        self.dst_use_4state,
+                        &value,
+                    );
+                }
             }
             // Phase 3 of ff_commit redesign — interpret path log push.
             // Mirrors the JIT-side emit at statement.rs build_binary so
             // both paths produce matching WriteLogEntry sequences.  Same
             // gate (ff_log_offset.is_some()) and same payload (post-trunc
             // u64) as the JIT path.  `value.to_u64()` cannot fail when
-            // dst_width ≤ 64.
+            // dst_width ≤ 64.  4-state appends a second entry for the
+            // mask_xz bytes at `offset + nb`.
             if let Some(offset) = self.ff_log_offset {
                 let payload = value.to_u64().unwrap_or(0);
+                let nb = self.dst_native_bytes as u16;
                 unsafe {
                     crate::ir::write_log::event_write_log_push_static(
-                        offset,
-                        payload,
-                        self.dst_native_bytes as u16,
+                        offset, payload, nb,
                     );
+                    if self.dst_use_4state {
+                        let mask = value.mask_xz_u128() as u64;
+                        crate::ir::write_log::event_write_log_push_static(
+                            offset + self.dst_native_bytes as u32,
+                            mask,
+                            nb,
+                        );
+                    }
                 }
             }
         }
@@ -2098,20 +2168,30 @@ impl AssignDynamicStatement {
         };
         // Phase 3.4 ff_commit redesign — runtime offset for write-log push:
         //   ff_log_base_current_offset + idx * dst_stride.
-        // Compute once here; emit after the matching write.
+        // Compute once here; emit after the matching write.  4-state
+        // FFs additionally push a mask_xz entry at `offset + nb`.
         let log_offset = self.ff_log_base_current_offset.map(|base| {
             let runtime = base as isize + self.dst_stride * idx as isize;
             runtime as u32
         });
-        let log_payload = |current: &Value| current.to_u64().unwrap_or(0);
-        let push_log = |payload: u64| {
+        let nb_u16 = self.dst_native_bytes as u16;
+        let nb_u32 = self.dst_native_bytes as u32;
+        let use_4state = self.dst_use_4state;
+        let push_log = |current: &Value| {
             if let Some(offset) = log_offset {
+                let payload = current.to_u64().unwrap_or(0);
                 unsafe {
                     crate::ir::write_log::event_write_log_push_static(
-                        offset,
-                        payload,
-                        self.dst_native_bytes as u16,
+                        offset, payload, nb_u16,
                     );
+                    if use_4state {
+                        let mask = current.mask_xz_u128() as u64;
+                        crate::ir::write_log::event_write_log_push_static(
+                            offset + nb_u32,
+                            mask,
+                            nb_u16,
+                        );
+                    }
                 }
             }
         };
@@ -2137,7 +2217,7 @@ impl AssignDynamicStatement {
             unsafe {
                 write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
             };
-            push_log(log_payload(&current));
+            push_log(&current);
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
                 read_native_value(
@@ -2152,12 +2232,12 @@ impl AssignDynamicStatement {
             unsafe {
                 write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
             };
-            push_log(log_payload(&current));
+            push_log(&current);
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
             unsafe { write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &value) };
-            push_log(log_payload(&value));
+            push_log(&value);
         }
     }
 
@@ -2266,25 +2346,20 @@ impl ProtoAssignStatement {
                     num_elements: dyn_sel.num_elements,
                 });
 
-            // Phase 3 of ff_commit redesign — interpret path log offset.
-            // Set when env=1, FF dst, !use_4state, dst_width ≤ 64.
-            // Phase 3.1: simple store.  Phase 3.2: select RMW.
-            // Phase 3.3: dynamic_select RMW (offset is still static —
-            // dynamic_select shifts bits within a packed bitfield FF;
-            // AssignDynamicStatement is the array-with-runtime-index case
-            // that requires runtime offset, addressed separately).
-            let ff_log_offset = if self.dst.is_ff()
-                && !use_4state
-                && self.dst_width <= 64
-            {
-                // current_offset = next_offset - nb for 2-state interleaved
-                // [current][next] layout (variable.rs:399-404).
-                let next_off = self.dst.raw();
-                debug_assert!(next_off >= nb as isize);
-                Some((next_off - nb as isize) as u32)
+            // FF write log offset = canonical current byte offset.
+            // Packed FFs have dst == Ff(current), dual-slot FFs have
+            // dst == Ff(next); the canonical offset is always
+            // `dst_ff_current_offset`.
+            // 4-state FFs emit a second log entry for the mask_xz portion
+            // at `dst_ff_current_offset + nb` (see eval_step).
+            let emit_log = self.dst.is_ff() && self.dst_width <= 64;
+            let ff_log_offset = if emit_log {
+                Some(self.dst_ff_current_offset as u32)
             } else {
                 None
             };
+            let ff_is_packed =
+                emit_log && (self.dst.raw() == self.dst_ff_current_offset);
 
             AssignStatement {
                 dst,
@@ -2296,6 +2371,7 @@ impl ProtoAssignStatement {
                 rhs_select: self.rhs_select,
                 expr,
                 ff_log_offset,
+                ff_is_packed,
             }
         }
     }
@@ -2362,26 +2438,23 @@ impl ProtoAssignStatement {
         let dst_offset = self.dst.raw() as i32;
         let cache_key = self.dst;
 
-        // Phase 2d/3.2/3.3 of ff_commit redesign: dual-write — keep the
-        // master next-slot store and additionally push a WriteLogEntry
-        // pointing at the FF current byte offset.  Gated by
-        // VERYL_FF_COMMIT_REDESIGN=1.
+        // FF write log push.  log_current_offset is always the canonical
+        // FF current byte offset, regardless of whether `dst` points to
+        // the current slot (packed layout, `dst.raw() == ff_current`) or
+        // the next slot (dual-slot multi-RMW path, `dst.raw() == next`).
+        // Use the canonical offset directly to make the layout-choice
+        // transparent to ff_commit_from_log.
         //
-        // Scope: simple stores (else branch), select RMW (Phase 3.2),
-        // and dynamic_select RMW (Phase 3.3) — all with dst_width ≤ 64
-        // and 2-state (!use_4state).  `wide` (>64-bit) and 4-state
-        // paths still fall through to next-slot store only.
-        //
-        // dynamic_select on AssignStatement targets bit ranges within a
-        // packed-bitfield FF dst whose byte offset stays static, so the
-        // static `event_write_log_push_static` helper is the right one
-        // (the array-with-runtime-index case is `AssignDynamicStatement`).
-        let emit_log = self.dst.is_ff() && !wide && !context.use_4state;
-        // current_offset = next_offset - native_bytes for 2-state.
-        // FF storage layout is `[current][next]` interleaved per element
-        // (see variable.rs:399-404, value_size == native_bytes when
-        // !use_4state).
-        let log_current_offset = dst_offset - nb_i32;
+        // Phase 1 packed-layout transform (module.rs `apply_packed_layout`)
+        // rewrites non-multi-RMW FF dsts from Ff(next) to Ff(current).
+        // For those (`is_packed_ff`), the direct store and cache insert
+        // are skipped — log-push-only path.  Multi-RMW FFs keep the
+        // dual-slot dst=Ff(next) with cache forwarding for in-block
+        // chain semantics.
+        let emit_log = self.dst.is_ff() && !wide;
+        let is_packed_ff =
+            emit_log && (self.dst.raw() == self.dst_ff_current_offset);
+        let log_current_offset = self.dst_ff_current_offset as i32;
 
         // Helpers covering nb ∈ {1, 2, 4, 8, 16} for the
         // dynamic_select / select / fallback paths below.  Use the fused
@@ -2440,7 +2513,9 @@ impl ProtoAssignStatement {
 
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            store_native_to_native(builder, result, dst_offset);
+            if !is_packed_ff {
+                store_native_to_native(builder, result, dst_offset);
+            }
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
@@ -2448,7 +2523,9 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                if !is_packed_ff {
+                    store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                }
                 Some(result_m)
             } else {
                 None
@@ -2469,11 +2546,16 @@ impl ProtoAssignStatement {
             } else {
                 result_mask_xz
             };
-            context.load_cache.insert(cache_key, (fwd, fwd_m));
+            if !is_packed_ff {
+                context.load_cache.insert(cache_key, (fwd, fwd_m));
+            }
 
             // Phase 3.3: dynamic_select RMW log push.  dyn_sel selects
             // bit ranges within a packed FF dst whose byte offset stays
-            // static, so `event_write_log_push_static` is fine.
+            // static, so `event_write_log_push_static` is fine.  4-state
+            // pushes a second entry for the mask_xz portion at
+            // `log_current_offset + nb` (matches the storage layout
+            // `[payload][mask]` produced by write_native_value).
             if emit_log {
                 let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
@@ -2484,6 +2566,20 @@ impl ProtoAssignStatement {
                     fwd,
                     width_class_val,
                 );
+                if context.use_4state
+                    && let Some(fwd_m_v) = fwd_m
+                {
+                    let mask_offset_val = builder
+                        .ins()
+                        .iconst(I32, (log_current_offset + nb_i32) as i64);
+                    crate::cranelift::emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        fwd_m_v,
+                        width_class_val,
+                    );
+                }
             }
         } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
@@ -2513,7 +2609,9 @@ impl ProtoAssignStatement {
             };
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
-            store_native_to_native(builder, result, dst_offset);
+            if !is_packed_ff {
+                store_native_to_native(builder, result, dst_offset);
+            }
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
@@ -2521,7 +2619,9 @@ impl ProtoAssignStatement {
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org_m);
-                store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                if !is_packed_ff {
+                    store_native_to_native(builder, result_m, dst_offset + nb_i32);
+                }
                 Some(result_m)
             } else {
                 None
@@ -2542,11 +2642,14 @@ impl ProtoAssignStatement {
             } else {
                 result_mask_xz
             };
-            context.load_cache.insert(cache_key, (fwd, fwd_m));
+            if !is_packed_ff {
+                context.load_cache.insert(cache_key, (fwd, fwd_m));
+            }
 
             // Select RMW log push.  `fwd` is the post-RMW payload masked
             // to dst_width — pushed as the cycle's update to the FF
-            // current slot via `ff_commit_from_log`.
+            // current slot via `ff_commit_from_log`.  4-state appends
+            // a mask_xz entry at `log_current_offset + nb`.
             if emit_log {
                 let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
@@ -2557,13 +2660,32 @@ impl ProtoAssignStatement {
                     fwd,
                     width_class_val,
                 );
+                if context.use_4state
+                    && let Some(fwd_m_v) = fwd_m
+                {
+                    let mask_offset_val = builder
+                        .ins()
+                        .iconst(I32, (log_current_offset + nb_i32) as i64);
+                    crate::cranelift::emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        fwd_m_v,
+                        width_class_val,
+                    );
+                }
             }
         } else {
             // Store elimination relies on load_cache forwarding to
             // serve subsequent reads; skip only when the cache is live.
-            let skip_store = context.store_elim_enabled
+            // Packed FF (post Phase 1 transform) also skips the direct
+            // store and cache insert — the FF current slot is owned by
+            // ff_commit_from_log replay, and an intra-cycle write would
+            // corrupt OLD-value reads (NBA violation).
+            let skip_store = (context.store_elim_enabled
                 && !context.disable_load_cache
-                && context.store_elim_offsets.contains(&cache_key);
+                && context.store_elim_offsets.contains(&cache_key))
+                || is_packed_ff;
 
             // Writer-side mask is redundant when the post-rhs_select
             // payload is provably narrow-clean.  Two cases:
@@ -2683,6 +2805,8 @@ impl ProtoAssignStatement {
 
             // Forward value to load cache.  Mask to dst_width to match
             // load+uextend, with the same elision as the storage mask above.
+            // Packed FF skips the cache insert so subsequent same-cycle
+            // FF reads load OLD value from memory (NBA semantics).
             let fwd_p = if self.dst_width < 64 && !skip_writer_mask {
                 let m = gen_mask_for_width(self.dst_width);
                 band_const(builder, payload, m, false)
@@ -2697,11 +2821,14 @@ impl ProtoAssignStatement {
             } else {
                 mask_xz
             };
-            context.load_cache.insert(cache_key, (fwd_p, fwd_m));
+            if !is_packed_ff {
+                context.load_cache.insert(cache_key, (fwd_p, fwd_m));
+            }
 
             // Phase 2d: write-log push (dual-write).  Emit alongside the
             // master next-slot store.  fwd_p is the width-masked payload
-            // that matches what istoreN would actually deposit.
+            // that matches what istoreN would actually deposit.  4-state
+            // appends a mask_xz entry at `log_current_offset + nb`.
             if emit_log {
                 let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
@@ -2712,6 +2839,20 @@ impl ProtoAssignStatement {
                     fwd_p,
                     width_class_val,
                 );
+                if context.use_4state
+                    && let Some(fwd_m_v) = fwd_m
+                {
+                    let mask_offset_val = builder
+                        .ins()
+                        .iconst(I32, (log_current_offset + nb_i32) as i64);
+                    crate::cranelift::emit_inline_write_log_push(
+                        context,
+                        builder,
+                        mask_offset_val,
+                        fwd_m_v,
+                        width_class_val,
+                    );
+                }
             }
         }
 

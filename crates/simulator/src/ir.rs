@@ -8,6 +8,8 @@ pub(crate) mod inst_layout;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod load_cache_lookahead;
 mod module;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod multi_write_analysis;
 pub mod schedule;
 pub(crate) mod site_table;
 mod statement;
