@@ -47,6 +47,16 @@ pub struct Context {
     /// Used for unified comb where helper functions may modify values
     /// between cached loads.
     pub disable_load_cache: bool,
+    /// Stage 7 Phase B look-ahead load_cache eviction (env-gated).
+    /// Pre-computed per-VarOffset future read positions across the
+    /// chunk's top-level statement sequence.  After each stmt, the
+    /// main loop evicts cached entries by Belady-optimal policy
+    /// (farthest next-read first) when size exceeds capacity.
+    /// `None` when VERYL_STAGE7_LOOKAHEAD is unset.
+    pub future_reads: Option<crate::ir::load_cache_lookahead::FutureReads>,
+    /// Belady eviction trigger.  Cache size <= capacity → no evict.
+    /// Default ~physical GPR budget after ABI-reserved regs.
+    pub lookahead_capacity: usize,
 }
 
 /// Get or create a SigRef for the given helper signature kind.
@@ -227,12 +237,59 @@ fn build_binary_inner(
         helper_sigs: HashMap::default(),
         call_conv,
         disable_load_cache: effective_disable_load_cache,
+        future_reads: None,
+        lookahead_capacity: 0,
     };
+
+    // Stage 7 Phase B: pre-compute future-read positions for Belady-
+    // optimal load_cache eviction (env-gated `VERYL_STAGE7_LOOKAHEAD`,
+    // default-on; opt-out via VERYL_STAGE7_LOOKAHEAD=0).  Cap each
+    // chunk's resident cache entry count at `lookahead_capacity` to
+    // bound SSA Value live range to ~physical GPR budget and prevent
+    // regalloc spill cascade.  See ir/load_cache_lookahead.rs.
+    if !effective_disable_load_cache
+        && std::env::var("VERYL_STAGE7_LOOKAHEAD").as_deref() != Ok("0")
+    {
+        cranelift_context.future_reads = Some(
+            crate::ir::load_cache_lookahead::compute_read_positions(&proto),
+        );
+        cranelift_context.lookahead_capacity = std::env::var("VERYL_STAGE7_LOOKAHEAD_CAP")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(12);
+    }
 
     let len = proto.len();
     for (i, x) in proto.iter().enumerate() {
         let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
+
+        // Stage 7 Phase B: Belady-optimal eviction after each top-level
+        // stmt.  While cache size > capacity, evict the entry whose
+        // next read is farthest in the future (None = never used again,
+        // evicted first).
+        if let Some(future) = cranelift_context.future_reads.take() {
+            let cap = cranelift_context.lookahead_capacity;
+            while cranelift_context.load_cache.len() > cap {
+                let evict = cranelift_context
+                    .load_cache
+                    .keys()
+                    .max_by_key(|off| match future.get(off) {
+                        None => usize::MAX,
+                        Some(positions) => match positions.iter().copied().find(|&p| p > i) {
+                            None => usize::MAX,
+                            Some(next) => next - i,
+                        },
+                    })
+                    .copied();
+                if let Some(off) = evict {
+                    cranelift_context.load_cache.remove(&off);
+                } else {
+                    break;
+                }
+            }
+            cranelift_context.future_reads = Some(future);
+        }
     }
 
     builder.ins().return_(&[]);

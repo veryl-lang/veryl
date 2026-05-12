@@ -4,6 +4,8 @@ mod declaration;
 mod dup_assign_dce;
 mod event;
 mod expression;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod load_cache_lookahead;
 mod module;
 pub mod schedule;
 mod statement;
