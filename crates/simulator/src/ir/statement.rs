@@ -2,7 +2,7 @@ use crate::FuncPtr;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift::{
-    Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_batch,
+    Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
 };
 use crate::ir::context::{Context as ConvContext, Conv};
 use crate::ir::expression::{
@@ -16,7 +16,9 @@ use crate::ir::expression::{
 use crate::ir::variable::{
     VarOffset, native_bytes_for as calc_native_bytes_for, read_native_value, write_native_value,
 };
-use crate::ir::write_log::event_write_log_push_static;
+use crate::ir::write_log::{
+    WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, event_write_log_push_static, event_write_log_push_wide,
+};
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
 use crate::simulator_error::SimulatorError;
@@ -2901,27 +2903,15 @@ impl ProtoAssignStatement {
             }
         }
 
-        // FF write-log push: one entry per 8-byte word at the canonical
-        // current_offset.  Width class = 8 per entry.  Batched so the
-        // count update / entries_ptr load is shared across the N words.
+        // FF write-log push: emit wide entries holding up to 56 bytes of
+        // payload each.  For nb ≤ 56 a single entry suffices; wider FFs
+        // chunk into multiple entries at canonical offsets.
         if is_ff {
-            let width_class_val = builder.ins().iconst(I32, 8);
-            let mut batch: Vec<(
-                cranelift::prelude::Value,
-                cranelift::prelude::Value,
-                cranelift::prelude::Value,
-            )> = Vec::with_capacity(n_words);
-            for i in 0..n_words {
-                let off = (i * 8) as i32;
-                let val = builder.ins().load(I64, flags, src_ptr, off);
-                let entry_offset_val = builder.ins().iconst(I32, (log_current_offset + off) as i64);
-                batch.push((entry_offset_val, val, width_class_val));
-            }
-            emit_inline_write_log_push_batch(context, builder, &batch);
+            emit_wide_log_chunks(context, builder, src_ptr, log_current_offset, nb);
         }
 
-        // 4-state mask: direct store (skip for packed FF) + parallel log
-        // entries at `current_offset + nb`.
+        // 4-state mask: direct store (skip for packed FF) + parallel wide
+        // log entries at `current_offset + nb`.
         if let Some(mask_xz) = mask_xz {
             let mask_ptr = if is_wide_ptr(self.expr.width()) {
                 mask_xz
@@ -2940,25 +2930,46 @@ impl ProtoAssignStatement {
                 }
             }
             if is_ff {
-                let width_class_val = builder.ins().iconst(I32, 8);
-                let mut batch: Vec<(
-                    cranelift::prelude::Value,
-                    cranelift::prelude::Value,
-                    cranelift::prelude::Value,
-                )> = Vec::with_capacity(n_words);
-                for i in 0..n_words {
-                    let off = (i * 8) as i32;
-                    let val = builder.ins().load(I64, flags, mask_ptr, off);
-                    let entry_offset_val = builder
-                        .ins()
-                        .iconst(I32, (log_current_offset + nb as i32 + off) as i64);
-                    batch.push((entry_offset_val, val, width_class_val));
-                }
-                emit_inline_write_log_push_batch(context, builder, &batch);
+                emit_wide_log_chunks(
+                    context,
+                    builder,
+                    mask_ptr,
+                    log_current_offset + nb as i32,
+                    nb,
+                );
             }
         }
 
         Some(())
+    }
+}
+
+/// Emit one or more wide write-log entries covering `nb` bytes starting
+/// at `src_ptr`.  Each entry holds up to `WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES`
+/// (56) bytes; wider FFs are split into multiple entries at consecutive
+/// FF offsets.
+#[cfg(not(target_family = "wasm"))]
+fn emit_wide_log_chunks(
+    context: &CraneliftContext,
+    builder: &mut FunctionBuilder,
+    src_ptr: cranelift::prelude::Value,
+    base_offset: i32,
+    nb: usize,
+) {
+    use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    let mut written: usize = 0;
+    while written < nb {
+        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+        let entry_offset_val = builder
+            .ins()
+            .iconst(I32, (base_offset as i64) + written as i64);
+        let chunk_ptr = if written == 0 {
+            src_ptr
+        } else {
+            builder.ins().iadd_imm(src_ptr, written as i64)
+        };
+        emit_inline_write_log_push_wide(context, builder, entry_offset_val, chunk_ptr, chunk);
+        written += chunk;
     }
 }
 
@@ -3789,28 +3800,51 @@ fn emit_ff_log(value: &Value, base_offset: u32, nb: usize, use_4state: bool) {
         }
         return;
     }
-    // Wide: per-word entries (8 bytes each).
+    // Wide: a contiguous byte buffer per side, then split into wide-entry
+    // chunks of at most WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES.
     let n_words = nb / 8;
     let payload_digits: Vec<u64> = match value {
         Value::U64(v) => vec![v.payload],
         Value::BigUint(v) => v.payload.to_u64_digits(),
     };
+    let mut payload_bytes: Vec<u8> = Vec::with_capacity(n_words * 8);
     for i in 0..n_words {
         let p = payload_digits.get(i).copied().unwrap_or(0);
+        payload_bytes.extend_from_slice(&p.to_le_bytes());
+    }
+    let mut written: usize = 0;
+    while written < nb {
+        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
         unsafe {
-            event_write_log_push_static(base_offset + (i as u32) * 8, p, 8);
+            event_write_log_push_wide(
+                base_offset + written as u32,
+                payload_bytes.as_ptr().add(written),
+                chunk,
+            );
         }
+        written += chunk;
     }
     if use_4state {
         let mask_digits: Vec<u64> = match value {
             Value::U64(v) => vec![v.mask_xz],
             Value::BigUint(v) => v.mask_xz.to_u64_digits(),
         };
+        let mut mask_bytes: Vec<u8> = Vec::with_capacity(n_words * 8);
         for i in 0..n_words {
             let m = mask_digits.get(i).copied().unwrap_or(0);
+            mask_bytes.extend_from_slice(&m.to_le_bytes());
+        }
+        let mut written: usize = 0;
+        while written < nb {
+            let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
             unsafe {
-                event_write_log_push_static(base_offset + nb_u32 + (i as u32) * 8, m, 8);
+                event_write_log_push_wide(
+                    base_offset + nb_u32 + written as u32,
+                    mask_bytes.as_ptr().add(written),
+                    chunk,
+                );
             }
+            written += chunk;
         }
     }
 }

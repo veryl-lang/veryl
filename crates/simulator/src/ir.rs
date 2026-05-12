@@ -129,9 +129,12 @@ impl Ir {
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
-            write_log_buffer: Box::new(write_log::WriteLogBuffer::with_capacity(
-                write_log_capacity(&module.site_table),
-            )),
+            write_log_buffer: {
+                let (narrow_cap, wide_cap) = write_log_capacity(&module.site_table);
+                Box::new(write_log::WriteLogBuffer::with_capacity(
+                    narrow_cap, wide_cap,
+                ))
+            },
             site_table: module.site_table,
             inst_layout: module.inst_layout,
             disable_ff_opt: config.disable_ff_opt,
@@ -520,26 +523,33 @@ pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
 // concurrent mutation of ff_values/comb_values via interior raw pointers.
 unsafe impl Send for Ir {}
 
-/// Initial WriteLogBuffer capacity derived from the FF write site table.
-/// Plan calls for exact `site_table.len()` sizing under the assumption
-/// each static site fires at most once per cycle.  We multiply by 4 for a
-/// conservative headroom: per-iteration runtime writes from `For`-unrolled
-/// loop bodies can exceed the static-site upper bound.  Subsequent phases
-/// may revisit this once the consumer is wired up and the runtime peak is
-/// measurable.
-fn write_log_capacity(site_table: &site_table::SiteTable) -> usize {
-    // Per-site worst-case entry count: narrow FFs emit at most 2 entries
-    // per cycle (payload + 4-state mask), wide FFs emit `2 * n_words`.
-    // `n_words = nb / 8` (nb=16 for 65-128 bits → 2 words → 4 entries per
-    // cycle in the 4-state worst case).  Multiply by 2 for over-
-    // provisioning headroom (initial dual-writes, multi-RMW chains).
-    let mut total: usize = 0;
+/// Initial WriteLogBuffer capacities derived from the FF write site table.
+/// Returns `(narrow_cap, wide_cap)`.  Narrow FFs (`native_bytes ≤ 8`) emit
+/// at most 2 entries per cycle (payload + 4-state mask); wide FFs emit at
+/// most 2 wide entries per cycle (one per payload/mask).  Each contributes
+/// to its respective pool, with a ×2 over-provisioning headroom for
+/// initial dual-writes and multi-RMW chains.
+fn write_log_capacity(site_table: &site_table::SiteTable) -> (usize, usize) {
+    let mut narrow: usize = 0;
+    let mut wide: usize = 0;
+    let mut any_wide = false;
     for s in &site_table.sites {
-        let n_words = ((s.native_bytes as usize) / 8).max(1);
-        total += n_words * 2 * 2;
+        let nb = s.native_bytes as usize;
+        if nb <= 8 {
+            narrow += 2 * 2;
+        } else {
+            any_wide = true;
+            // Number of wide entries needed (≤56 byte payload per entry).
+            let chunks = nb.div_ceil(write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
+            wide += 2 * chunks * 2;
+        }
     }
-    // Minimum 4096 to avoid tiny test designs ending up with zero capacity.
-    total.max(4096)
+    // Narrow floor avoids tiny designs ending up with zero capacity; the
+    // wide pool stays empty when no wide sites exist so designs that only
+    // use narrow FFs skip the 64-byte-aligned wide allocation altogether.
+    let narrow_cap = narrow.max(4096);
+    let wide_cap = if any_wide { wide.max(64) } else { 0 };
+    (narrow_cap, wide_cap)
 }
 
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {

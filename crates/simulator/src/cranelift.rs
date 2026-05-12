@@ -165,26 +165,22 @@ pub fn emit_inline_write_log_push(
     use crate::ir::write_log::{
         WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
         WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
-        WRITE_LOG_OFFSET_COUNT, WRITE_LOG_OFFSET_ENTRIES_PTR,
+        WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
     };
     let log_buf = context.log_buf;
     let flags = MemFlags::trusted();
 
-    // count = *(log_buf + WRITE_LOG_OFFSET_COUNT) as u32
     let count = builder
         .ins()
-        .load(I32, flags, log_buf, WRITE_LOG_OFFSET_COUNT);
-    // new_count = count + 1
+        .load(I32, flags, log_buf, WRITE_LOG_NARROW_OFFSET_COUNT);
     let one = builder.ins().iconst(I32, 1);
     let new_count = builder.ins().iadd(count, one);
-    // *(log_buf + WRITE_LOG_OFFSET_COUNT) = new_count
     builder
         .ins()
-        .store(flags, new_count, log_buf, WRITE_LOG_OFFSET_COUNT);
-    // entries_ptr = *(log_buf + WRITE_LOG_OFFSET_ENTRIES_PTR) as *mut Entry
+        .store(flags, new_count, log_buf, WRITE_LOG_NARROW_OFFSET_COUNT);
     let entries_ptr = builder
         .ins()
-        .load(I64, flags, log_buf, WRITE_LOG_OFFSET_ENTRIES_PTR);
+        .load(I64, flags, log_buf, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR);
     // entry_slot = entries_ptr + count * ENTRY_SIZE
     let count_i64 = builder.ins().uextend(I64, count);
     let entry_size = builder.ins().iconst(I64, WRITE_LOG_ENTRY_SIZE as i64);
@@ -213,67 +209,87 @@ pub fn emit_inline_write_log_push(
 }
 
 /// Batched variant of `emit_inline_write_log_push` for wide FFs.
-/// Reserves `entries.len()` consecutive slots in one count update and
-/// shares the `count` and `entries_ptr` loads across the batch.
-pub fn emit_inline_write_log_push_batch(
+/// Emit an inline write-log push for a wide FF.  Writes a single 64-byte
+/// `WriteLogWideEntry` containing the canonical FF offset, the byte
+/// count, and `nb` bytes copied from `payload_ptr`.  `nb` must satisfy
+/// `nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES` (= 56).
+pub fn emit_inline_write_log_push_wide(
     context: &Context,
     builder: &mut FunctionBuilder,
-    entries: &[(Value, Value, Value)], // (offset, payload, width_class)
+    offset: Value,
+    payload_ptr: Value,
+    nb: usize,
 ) {
     use crate::ir::write_log::{
-        WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
-        WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
-        WRITE_LOG_OFFSET_COUNT, WRITE_LOG_OFFSET_ENTRIES_PTR,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
+        WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
     };
-    if entries.is_empty() {
-        return;
-    }
+    debug_assert!(nb > 0 && nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
     let log_buf = context.log_buf;
     let flags = MemFlags::trusted();
 
+    // Reserve one wide slot and advance the count.
     let count = builder
         .ins()
-        .load(I32, flags, log_buf, WRITE_LOG_OFFSET_COUNT);
-    let n = builder.ins().iconst(I32, entries.len() as i64);
-    let new_count = builder.ins().iadd(count, n);
+        .load(I32, flags, log_buf, WRITE_LOG_WIDE_OFFSET_COUNT);
+    let one = builder.ins().iconst(I32, 1);
+    let new_count = builder.ins().iadd(count, one);
     builder
         .ins()
-        .store(flags, new_count, log_buf, WRITE_LOG_OFFSET_COUNT);
+        .store(flags, new_count, log_buf, WRITE_LOG_WIDE_OFFSET_COUNT);
     let entries_ptr = builder
         .ins()
-        .load(I64, flags, log_buf, WRITE_LOG_OFFSET_ENTRIES_PTR);
+        .load(I64, flags, log_buf, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR);
     let count_i64 = builder.ins().uextend(I64, count);
-    let entry_size = builder.ins().iconst(I64, WRITE_LOG_ENTRY_SIZE as i64);
+    let entry_size = builder.ins().iconst(I64, WRITE_LOG_WIDE_ENTRY_SIZE as i64);
     let byte_offset = builder.ins().imul(count_i64, entry_size);
-    let base_slot = builder.ins().iadd(entries_ptr, byte_offset);
-    let zero_i16 = builder.ins().iconst(I32, 0);
+    let entry_slot = builder.ins().iadd(entries_ptr, byte_offset);
 
-    for (i, (offset, payload, width_class)) in entries.iter().enumerate() {
-        let slot_offset = (i as i32) * WRITE_LOG_ENTRY_SIZE;
-        builder.ins().store(
-            flags,
-            *offset,
-            base_slot,
-            slot_offset + WRITE_LOG_ENTRY_OFFSET_OFFSET,
-        );
-        builder.ins().istore16(
-            flags,
-            zero_i16,
-            base_slot,
-            slot_offset + WRITE_LOG_ENTRY_OFFSET_MASK_XZ,
-        );
-        builder.ins().istore16(
-            flags,
-            *width_class,
-            base_slot,
-            slot_offset + WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS,
-        );
-        builder.ins().store(
-            flags,
-            *payload,
-            base_slot,
-            slot_offset + WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
-        );
+    // Write the canonical offset and the payload byte-count.
+    builder.ins().store(
+        flags,
+        offset,
+        entry_slot,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+    );
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    builder
+        .ins()
+        .istore8(flags, nb_val, entry_slot, WRITE_LOG_WIDE_ENTRY_OFFSET_NB);
+
+    // Copy the payload in i64 chunks, then any trailing 4 / 2 / 1 bytes.
+    let payload_dst_base = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD;
+    let mut i: usize = 0;
+    while i + 8 <= nb {
+        let v = builder.ins().load(I64, flags, payload_ptr, i as i32);
+        builder
+            .ins()
+            .store(flags, v, entry_slot, payload_dst_base + i as i32);
+        i += 8;
+    }
+    while i < nb {
+        let rem = nb - i;
+        let chunk = if rem >= 4 {
+            4
+        } else if rem >= 2 {
+            2
+        } else {
+            1
+        };
+        let v = builder.ins().load(I32, flags, payload_ptr, i as i32);
+        match chunk {
+            4 => builder
+                .ins()
+                .store(flags, v, entry_slot, payload_dst_base + i as i32),
+            2 => builder
+                .ins()
+                .istore16(flags, v, entry_slot, payload_dst_base + i as i32),
+            _ => builder
+                .ins()
+                .istore8(flags, v, entry_slot, payload_dst_base + i as i32),
+        };
+        i += chunk;
     }
 }
 
