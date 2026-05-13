@@ -1172,7 +1172,7 @@ fn conv_function(
         array: Shape::default(),
         arity,
         args,
-        is_const: proeprty.constantable.unwrap(),
+        is_const: proeprty.constantable.unwrap_or_default(),
         functions: body,
         token,
     };

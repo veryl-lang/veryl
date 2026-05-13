@@ -2614,6 +2614,56 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+package a_pkg::<W: p32> {
+    type T = logic<W>;
+}
+package b_pkg::<W: p32> {
+    function func(w: input p32) -> p32 {
+        return w;
+    }
+
+    type T = logic<func(W)>;
+
+    gen AW: p32 = $bits(T);
+    alias package a = a_pkg::<AW>;
+}
+package c_pkg {
+    alias package b = b_pkg::<8>;
+    type T = b::a::T;
+}
+"#;
+
+    let expect = r#"package prj___a_pkg__8;
+    typedef logic [8-1:0] T;
+endpackage
+package prj___b_pkg__8;
+    function automatic int unsigned func(
+        input var int unsigned w
+    ) ;
+        return w;
+    endfunction
+
+    typedef logic [func(8)-1:0] T;
+
+
+
+endpackage
+package prj_c_pkg;
+
+
+    typedef prj___a_pkg__8::T T;
+endpackage
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
