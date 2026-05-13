@@ -82,6 +82,15 @@
             "default": null,
             "markdownDescription": "Specify veryl-ls binary path."
           },
+          "veryl-vscode.verylLsBinary.args": {
+            "scope": "window",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Specify additional arguments passed to the veryl-ls binary."
+          },
           "waveformRender.closePanelOnDisable": {
             "type": "boolean",
             "default": false,
