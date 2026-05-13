@@ -27,11 +27,13 @@ function startServer(context: vscode.ExtensionContext) {
 		verylLsBinaryPath = verylLsIntegrated;
 	}
 
+	let verylLsBinaryArgs: string[] = workspace.getConfiguration("veryl-vscode").get("verylLsBinary.args") ?? [];
+
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
 	let serverOptions: ServerOptions = {
-		run: {command: verylLsBinaryPath},
-		debug: {command: verylLsBinaryPath},
+		run: {command: verylLsBinaryPath, args: verylLsBinaryArgs},
+		debug: {command: verylLsBinaryPath, args: verylLsBinaryArgs},
 	};
 
 	// Options to control the language client
