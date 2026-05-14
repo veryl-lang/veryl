@@ -129,6 +129,79 @@ fn create_metadata_multi() -> (Metadata, TempDir) {
     (metadata, tempdir)
 }
 
+const INNER_A_TOML: &'static str = r#"
+[project]
+name = "inner_a"
+version = "0.1.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+"#;
+
+const INNER_B_TOML: &'static str = r#"
+[project]
+name = "inner_b"
+version = "0.1.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+"#;
+
+fn create_metadata_inner_repo() -> (Metadata, TempDir) {
+    unsafe {
+        std::env::set_var("GIT_AUTHOR_NAME", "veryl");
+        std::env::set_var("GIT_AUTHOR_EMAIL", "veryl");
+        std::env::set_var("GIT_COMMITTER_NAME", "veryl");
+        std::env::set_var("GIT_COMMITTER_EMAIL", "veryl");
+    }
+
+    let tempdir = tempfile::tempdir().unwrap();
+
+    let repo_path = tempdir.path().join("repo");
+    fs::create_dir(&repo_path).unwrap();
+    let gitignore_path = repo_path.join(".gitignore");
+    fs::write(&gitignore_path, GIT_IGNORE).unwrap();
+
+    let a_path = repo_path.join("a_prj");
+    fs::create_dir(&a_path).unwrap();
+    let a_toml_path = a_path.join("Veryl.toml");
+    fs::write(&a_toml_path, INNER_A_TOML).unwrap();
+
+    let b_path = repo_path.join("b_prj");
+    fs::create_dir(&b_path).unwrap();
+    let b_toml_path = b_path.join("Veryl.toml");
+    fs::write(&b_toml_path, INNER_B_TOML).unwrap();
+
+    let git = Git::init(&repo_path).unwrap();
+    git.add(&gitignore_path).unwrap();
+    git.add(&a_toml_path).unwrap();
+    git.add(&b_toml_path).unwrap();
+    git.commit(&"Add inner projects").unwrap();
+
+    let mut a_metadata = Metadata::load(&a_toml_path).unwrap();
+    a_metadata.publish().unwrap();
+    let mut b_metadata = Metadata::load(&b_toml_path).unwrap();
+    b_metadata.publish().unwrap();
+
+    let main_toml = format!(
+        r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+inner_a = {{git = "file://{repo}", project = "inner_a", version = "0.1.0"}}
+inner_b = {{git = "file://{repo}", project = "inner_b", version = "0.1.0"}}
+"#,
+        repo = repo_path.to_string_lossy().replace("\\", "/"),
+    );
+    let metadata = create_project(tempdir.path(), "main", &main_toml, false);
+
+    (metadata, tempdir)
+}
+
 fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadata {
     unsafe {
         std::env::set_var("GIT_AUTHOR_NAME", "veryl");
@@ -356,6 +429,38 @@ fn lockfile() {
         sub3_3.unwrap().source.get_version(),
         Some(&Version::parse("1.0.0").unwrap())
     );
+
+    let _ = lockfile.clear_cache();
+}
+
+#[test]
+fn lockfile_inner_projects() {
+    let (metadata, _tempdir) = create_metadata_inner_repo();
+    let lockfile = Lockfile::new(&metadata).unwrap();
+
+    let inner_a = lockfile
+        .lock_table
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "inner_a"))
+        .expect("inner_a should be present in the lockfile");
+    let inner_b = lockfile
+        .lock_table
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "inner_b"))
+        .expect("inner_b should be present in the lockfile");
+
+    assert_eq!(
+        inner_a.source.get_version(),
+        Some(&Version::parse("0.1.0").unwrap())
+    );
+    assert_eq!(
+        inner_b.source.get_version(),
+        Some(&Version::parse("0.1.0").unwrap())
+    );
+
+    let _paths = lockfile
+        .paths(Path::new("target"))
+        .expect("paths() should resolve inner-project metadata");
 
     let _ = lockfile.clear_cache();
 }

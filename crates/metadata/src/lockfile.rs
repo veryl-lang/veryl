@@ -630,7 +630,7 @@ impl Lockfile {
                     }
 
                     let path = Self::dependency_path(&x.url, &x.path, &x.revision)?;
-                    let toml = path.join("Veryl.toml");
+                    let toml = path.join(&x.path).join("Veryl.toml");
 
                     // Acquire the lock before checking path existence to prevent
                     // race conditions where gix::prepare_clone creates an
