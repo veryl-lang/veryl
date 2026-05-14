@@ -4048,6 +4048,39 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package ab_pkg {
+        struct a_struct {
+            a: u32,
+        }
+        struct b_struct {
+            b: a_struct,
+        }
+    }
+    proto package c_proto_pkg {
+        const C: ab_pkg::b_struct;
+    }
+    package c_pkg::<a: u32> for c_proto_pkg {
+        const C: ab_pkg::b_struct = ab_pkg::b_struct'{
+            b: ab_pkg::a_struct'{ a: a },
+        };
+    }
+    module d_module::<pkg: c_proto_pkg> {
+        import ab_pkg::*;
+        const C: b_struct = pkg::C;
+        const D: u32      = func_a::<C.b>();
+        function func_a::<a: a_struct>() -> u32 {
+            return a.a;
+        }
+    }
+    module e_module {
+        inst u: d_module::<c_pkg::<32>>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

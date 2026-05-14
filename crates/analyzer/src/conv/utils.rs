@@ -657,7 +657,6 @@ pub fn eval_const_assign(
                         let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
                         comptime.is_const = true;
                         let path = x.path.clone();
-                        comptime.part_select = Some(x);
                         context.insert_var_path_with_id(path, id, comptime);
                     }
 
