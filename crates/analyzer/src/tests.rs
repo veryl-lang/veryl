@@ -26,6 +26,45 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
 }
 
 #[track_caller]
+fn analyze_multiple_inputs(inputs: &[&str]) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let prj_name = "prj";
+    let metadata = Metadata::create_default(prj_name).unwrap();
+
+    let mut contexts = vec![];
+    let mut errors = vec![];
+    for i in 0..inputs.len() {
+        let path = format!("test_{}.veryl", i);
+
+        let parser = Parser::parse(inputs[i], &path).unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        errors.append(&mut analyzer.analyze_pass1(&prj_name, &parser.veryl));
+
+        contexts.push((parser, analyzer));
+    }
+
+    errors.append(&mut Analyzer::analyze_post_pass1());
+
+    let mut analyzer_context = Context::default();
+    let mut ir = Ir::default();
+    for (parser, analyzer) in &contexts {
+        errors.append(&mut analyzer.analyze_pass2(
+            &prj_name,
+            &parser.veryl,
+            &mut analyzer_context,
+            Some(&mut ir),
+        ));
+    }
+
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+
+    dbg!(&errors);
+    errors
+}
+
+#[track_caller]
 fn analyze_with_ir(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
@@ -688,6 +727,44 @@ fn cyclic_type_dependency() {
     "#;
 
     let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package c_pkg::<c0: u32, c1: u32> {
+        const C0: u32 = c0;
+        const C1: u32 = c1;
+    }
+    package b_pkg::<b0: u32, b1: u32> {
+        alias package c = c_pkg::<b0, b1>;
+    }
+    alias package c = c_pkg::<b_pkg::<1, 2>::c::C0, 3>;
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let mut inputs = vec![];
+    inputs.push(
+        r#"
+        alias package d = d_pkg::<b_pkg::c::d::D0, 3>;
+        "#,
+    );
+    inputs.push(
+        r#"
+        package d_pkg::<d0: u32, d1: u32> {
+            const D0: u32 = d0;
+            const D1: u32 = d1;
+        }
+        package c_pkg::<c0: u32, c1: u32> {
+            alias package d = d_pkg::<c0, c1>;
+        }
+        package b_pkg {
+            alias package c = c_pkg::<1, 2>;
+        }
+        "#,
+    );
+
+    let errors = analyze_multiple_inputs(&inputs);
     assert!(errors.is_empty());
 }
 
