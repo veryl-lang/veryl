@@ -1,6 +1,7 @@
 use crate::OptCheck;
+use crate::StopWatch;
 use crate::context::Context;
-use log::info;
+use log::{debug, info};
 use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
 use std::fs;
 use thiserror::Error;
@@ -70,6 +71,8 @@ impl CmdCheck {
         let mut check_error = CheckError::new(metadata.build.error_count_limit);
         let mut contexts = Vec::new();
 
+        let mut stopwatch = StopWatch::new();
+
         for path in &paths {
             info!("Processing file ({})", path.src.to_string_lossy());
 
@@ -86,8 +89,19 @@ impl CmdCheck {
             contexts.push(context);
         }
 
+        debug!(
+            "Executed parse/analyze_pass1 ({} milliseconds, {} files)",
+            stopwatch.lap(),
+            paths.len(),
+        );
+
         let mut errors = Analyzer::analyze_post_pass1();
         check_error = check_error.append(&mut errors).check_err()?;
+
+        debug!(
+            "Executed analyze_post_pass1 ({} milliseconds)",
+            stopwatch.lap()
+        );
 
         let mut analyzer_context = veryl_analyzer::Context::default();
         let mut ir = veryl_analyzer::ir::Ir::default();
@@ -102,8 +116,15 @@ impl CmdCheck {
             check_error = check_error.append(&mut errors).check_err()?;
         }
 
+        debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
+
         let mut errors = Analyzer::analyze_post_pass2(&ir);
         check_error = check_error.append(&mut errors).check_err()?;
+
+        debug!(
+            "Executed analyze_post_pass2 ({} milliseconds)",
+            stopwatch.lap()
+        );
 
         let _ = check_error.check_all()?;
         Ok(true)
