@@ -248,10 +248,10 @@ impl ReferenceTable {
         generic_maps: Option<&Vec<GenericMap>>,
     ) {
         let mut path = path.clone();
-        let mut resolved_generic_maps = vec![];
+        let mut generic_maps = generic_maps.cloned().unwrap_or_default();
 
         let orig_len = path.len();
-        path.resolve_imported(namespace, generic_maps);
+        path.resolve_imported(namespace, Some(&generic_maps));
 
         // Prefix paths added by `resolve_imported` have already been resolved.
         // They should be skipped.
@@ -316,6 +316,25 @@ impl ReferenceTable {
                         continue;
                     }
 
+                    if let Some(mut alias_target) = symbol.found.alias_target(true) {
+                        // If the alias is in a generic instance namespace, include its maps
+                        // so generic parameters in the alias target can be correctly resolved.
+                        let mut alias_maps = generic_maps.clone();
+                        if let Some(ns_sym) = symbol.found.namespace.get_symbol()
+                            && matches!(ns_sym.kind, SymbolKind::GenericInstance(_))
+                        {
+                            alias_maps.extend(ns_sym.generic_maps());
+                        }
+                        alias_target.apply_map(&alias_maps);
+                        self.generic_symbol_path(
+                            &alias_target,
+                            &symbol.found.namespace,
+                            false,
+                            None,
+                            Some(&alias_maps),
+                        );
+                    }
+
                     if (params.len() + n_args) == 0 {
                         continue;
                     }
@@ -329,6 +348,10 @@ impl ReferenceTable {
                     }
 
                     for arg in args.iter_mut() {
+                        // To ensure generic instances are emitted in the correct order,
+                        // generic args must be processed before the base component is processed.
+                        self.generic_symbol_path(arg, namespace, false, None, None);
+
                         arg.unalias(None);
                         // Global function is emitted into the caller namespace.
                         // So namespace expansion is not needed.
@@ -338,13 +361,6 @@ impl ReferenceTable {
                     }
 
                     path.paths[i].arguments.append(&mut args);
-
-                    // To ensure generic instances are emitted in the correct order,
-                    // generic args must be processed before the base component is processed.
-                    for arg in &path.paths[i].arguments {
-                        self.generic_symbol_path(arg, namespace, false, None, None);
-                    }
-
                     if path.is_generic_reference() {
                         Self::add_generic_reference(&target_symbol, namespace, &path, i);
                     } else {
@@ -353,7 +369,7 @@ impl ReferenceTable {
                             i,
                             namespace,
                             &target_symbol,
-                            &mut resolved_generic_maps,
+                            &mut generic_maps,
                             None,
                         );
                     }
