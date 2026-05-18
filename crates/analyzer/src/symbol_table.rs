@@ -96,6 +96,7 @@ pub struct SymbolTable {
     msb_list: Vec<Msb>,
     connect_list: Vec<Connect>,
     reference_func_table: HashMap<SymbolId, Vec<GenericSymbolPath>>,
+    reference_table: HashMap<SymbolId, Vec<Token>>,
     suppress_cache_clear: bool,
 }
 
@@ -1027,20 +1028,24 @@ impl SymbolTable {
                 ids.retain(|x| x != id);
             }
             self.symbol_table.remove(id);
+            self.reference_table.remove(id);
         }
 
         for (_, symbols) in self.name_table.iter_mut() {
             symbols.retain(|x| !drop_list.contains(x));
         }
 
-        for (_, symbol) in self.symbol_table.iter_mut() {
-            symbol.references.retain(|x| x.source != file_path);
+        for tokens in self.reference_table.values_mut() {
+            tokens.retain(|x| x.source != file_path);
         }
     }
 
     pub fn add_reference(&mut self, target: SymbolId, token: &Token) {
-        if let Some(symbol) = self.symbol_table.get_mut(&target) {
-            symbol.references.push(token.to_owned());
+        if self.symbol_table.contains_key(&target) {
+            self.reference_table
+                .entry(target)
+                .or_default()
+                .push(token.to_owned());
         }
     }
 
@@ -1363,6 +1368,10 @@ impl SymbolTable {
         self.reference_func_table.get(&id).cloned()
     }
 
+    pub fn get_references(&self, id: SymbolId) -> Option<Vec<Token>> {
+        self.reference_table.get(&id).cloned()
+    }
+
     pub fn clear(&mut self) {
         self.clone_from(&Self::new());
     }
@@ -1371,7 +1380,10 @@ impl SymbolTable {
         let mut ret = vec![];
         for symbol in self.symbol_table.values() {
             if let SymbolKind::Variable(_) = symbol.kind
-                && symbol.references.is_empty()
+                && self
+                    .reference_table
+                    .get(&symbol.id)
+                    .is_none_or(|v| v.is_empty())
                 && !symbol.allow_unused
             {
                 let name = symbol.token.to_string();
@@ -1474,7 +1486,8 @@ impl fmt::Display for SymbolTable {
             for id in *v {
                 let symbol = self.symbol_table.get(id).unwrap();
                 namespace_width = namespace_width.max(format!("{}", symbol.namespace).len());
-                reference_width = reference_width.max(format!("{}", symbol.references.len()).len());
+                reference_width = reference_width
+                    .max(format!("{}", self.reference_table.get(id).map_or(0, |v| v.len())).len());
                 import_width = import_width.max(format!("{}", symbol.imported.len()).len());
             }
         }
@@ -1486,7 +1499,7 @@ impl fmt::Display for SymbolTable {
                     "    {:symbol_width$} @ {:namespace_width$} {{ref: {:reference_width$}, import: {:import_width$}}}: {},",
                     k,
                     symbol.namespace,
-                    symbol.references.len(),
+                    self.reference_table.get(id).map_or(0, |v| v.len()),
                     symbol.imported.len(),
                     symbol.kind,
                     symbol_width = symbol_width,
@@ -1879,7 +1892,6 @@ pub fn drop(file_path: PathId) {
 }
 
 pub fn add_reference(target: SymbolId, token: &Token) {
-    clear_cache();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference(target, token))
 }
 
@@ -1970,6 +1982,10 @@ pub fn add_reference_functions(id: SymbolId, functions: Vec<GenericSymbolPath>) 
 
 pub fn get_reference_functions(id: SymbolId) -> Option<Vec<GenericSymbolPath>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_reference_functions(id))
+}
+
+pub fn get_references(id: SymbolId) -> Option<Vec<Token>> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_references(id))
 }
 
 pub fn clear() {

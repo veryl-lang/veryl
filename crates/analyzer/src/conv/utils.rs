@@ -2172,19 +2172,24 @@ pub fn get_component(
     sig: &Signature,
     token: TokenRange,
 ) -> IrResult<Arc<ir::Component>> {
-    let symbol = symbol_table::get(sig.symbol).unwrap();
-
-    if let SymbolKind::SystemVerilog = symbol.kind {
-        let component = ir::SystemVerilog {
-            name: symbol.token.text,
-            connects: vec![],
-        };
-        return Ok(Arc::new(ir::Component::SystemVerilog(component)));
-    }
+    // Normalize before any cache operations so keys always match what push() stores.
+    let mut sig = sig.clone();
+    sig.normalize();
+    let sig = &sig;
 
     if let Some(component) = context.get_instance_history(sig) {
         Ok(component)
     } else {
+        let symbol = symbol_table::get(sig.symbol).unwrap();
+
+        if let SymbolKind::SystemVerilog = symbol.kind {
+            let component = ir::SystemVerilog {
+                name: symbol.token.text,
+                connects: vec![],
+            };
+            return Ok(Arc::new(ir::Component::SystemVerilog(component)));
+        }
+
         let err = context.push_instance_history(sig.clone());
 
         if let Err(x) = err {
@@ -2216,11 +2221,11 @@ pub fn get_component(
             SymbolKind::Module(x) => {
                 let definition =
                     definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
-                let Definition::Module(x) = definition else {
+                let Definition::Module(x) = definition.as_ref() else {
                     unreachable!()
                 };
 
-                let component: IrResult<ir::Module> = Conv::conv(c, &x);
+                let component: IrResult<ir::Module> = Conv::conv(c, x);
                 match component {
                     Ok(mut component) => {
                         if !c.config.retain_component_body {
@@ -2242,11 +2247,11 @@ pub fn get_component(
             SymbolKind::Interface(x) => {
                 let definition =
                     definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
-                let Definition::Interface(x) = definition else {
+                let Definition::Interface(x) = definition.as_ref() else {
                     unreachable!()
                 };
 
-                let component: IrResult<ir::Interface> = Conv::conv(c, &x);
+                let component: IrResult<ir::Interface> = Conv::conv(c, x);
                 match component {
                     Ok(component) => {
                         let component = Arc::new(ir::Component::Interface(component));
@@ -2263,11 +2268,11 @@ pub fn get_component(
             SymbolKind::ProtoModule(x) => {
                 let definition =
                     definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
-                let Definition::ProtoModule(x) = definition else {
+                let Definition::ProtoModule(x) = definition.as_ref() else {
                     unreachable!()
                 };
 
-                let component: IrResult<ir::Module> = Conv::conv(c, &x);
+                let component: IrResult<ir::Module> = Conv::conv(c, x);
                 match component {
                     Ok(mut component) => {
                         if !c.config.retain_component_body {
@@ -2646,7 +2651,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         path: &FuncPath,
     ) -> IrResult<()> {
         let definition = definition_table::get(definition).unwrap();
-        match &definition {
+        match definition.as_ref() {
             Definition::Function(x) => Conv::conv(context, (x, Some(path))),
             Definition::ProtoFunction(x) => Conv::conv(context, (x, Some(path))),
             _ => unreachable!(),

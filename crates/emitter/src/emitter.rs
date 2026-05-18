@@ -1984,13 +1984,13 @@ impl Emitter {
         }
 
         let definition = definition_table::get(definition.unwrap()).unwrap();
-        let Definition::Function(definition) = definition else {
+        let Definition::Function(definition) = definition.as_ref() else {
             unreachable!();
         };
 
         self.newline();
         self.clear_adjust_line();
-        self.function_declaration(&definition);
+        self.function_declaration(definition);
     }
 
     fn emit_function_call(
