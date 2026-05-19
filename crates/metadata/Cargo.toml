@@ -13,7 +13,6 @@ edition.workspace     = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-gix            = {version = "0.83.0", optional = true, features = ["blocking-network-client", "blocking-http-transport-reqwest-rust-tls", "revision", "status", "worktree-mutation", "index", "tree-editor"]}
 log            = {workspace = true}
 once_cell      = {workspace = true}
 pathdiff       = "0.2.3"
@@ -35,6 +34,7 @@ walkdir        = {workspace = true}
 miette         = {workspace = true, features = ["fancy-no-syscall"]}
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+gix            = {version = "0.83.0", optional = true, features = ["blocking-network-client", "blocking-http-transport-reqwest-rust-tls", "revision", "status", "worktree-mutation", "index", "tree-editor"]}
 miette         = {workspace = true, features = ["fancy"]}
 which          = "8.0"
 
@@ -42,6 +42,6 @@ which          = "8.0"
 tempfile       = {workspace = true}
 
 [features]
-default      = ["git-command"]
+default      = ["git-command", "git-gitoxide"]
 git-command  = []
 git-gitoxide = ["dep:gix"]
