@@ -925,6 +925,10 @@ pub enum ProtoExpression {
     DynamicVariable {
         base_offset: VarOffset,
         stride: isize,
+        /// Array element's native byte width (`VariableMeta::native_bytes`).
+        /// `width` is the post-select width; using it would under-size `nb`
+        /// and mis-position the 4-state mask_xz half-read.
+        element_native_bytes: usize,
         index_expr: Box<ProtoExpression>,
         num_elements: usize,
         select: Option<(usize, usize)>,
@@ -1464,6 +1468,7 @@ impl ProtoExpression {
                 ProtoExpression::DynamicVariable {
                     base_offset,
                     stride,
+                    element_native_bytes,
                     index_expr,
                     num_elements,
                     select,
@@ -1471,7 +1476,7 @@ impl ProtoExpression {
                     width,
                     expr_context,
                 } => {
-                    let nb = calc_native_bytes_for(*width, base_offset.is_ff());
+                    let nb = *element_native_bytes;
                     let _vs = if use_4state { nb * 2 } else { nb };
                     let base_ptr = if base_offset.is_ff() {
                         #[cfg(debug_assertions)]
@@ -3016,6 +3021,7 @@ impl ProtoExpression {
             ProtoExpression::DynamicVariable {
                 base_offset,
                 stride,
+                element_native_bytes,
                 index_expr,
                 num_elements,
                 select,
@@ -3028,7 +3034,7 @@ impl ProtoExpression {
                     return None;
                 }
 
-                let nb = calc_native_bytes_for(*width, base_offset.is_ff());
+                let nb = *element_native_bytes;
                 let wide = *width > 64;
                 let (idx_payload, _idx_mask_xz) = index_expr.build_binary(context, builder)?;
 
@@ -4247,18 +4253,26 @@ impl Conv<&air::Expression> for ProtoExpression {
                         })
                     } else {
                         // Dynamic index: build linear index ProtoExpression directly
-                        let scope = context.scope();
-                        let meta = scope.variable_meta.get(id).unwrap();
-                        let array_shape = meta.r#type.array.clone();
-                        let dyn_info = meta.dynamic_index_info().unwrap();
-                        let num_elements = meta.elements.len();
-                        let (base_offset, _, stride, is_ff) = dyn_info;
+                        let (array_shape, num_elements, base_offset, stride, is_ff, element_nb) = {
+                            let scope = context.scope();
+                            let meta = scope.variable_meta.get(id).unwrap();
+                            let dyn_info = meta.dynamic_index_info().unwrap();
+                            (
+                                meta.r#type.array.clone(),
+                                meta.elements.len(),
+                                dyn_info.0,
+                                dyn_info.2,
+                                dyn_info.3,
+                                meta.native_bytes,
+                            )
+                        };
 
                         let index_proto = build_linear_index_expr(context, &array_shape, index)?;
 
                         Ok(ProtoExpression::DynamicVariable {
                             base_offset: VarOffset::new(is_ff, base_offset),
                             stride,
+                            element_native_bytes: element_nb,
                             index_expr: Box::new(index_proto),
                             num_elements,
                             select: select_val,

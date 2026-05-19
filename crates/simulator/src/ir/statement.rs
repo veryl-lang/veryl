@@ -3630,6 +3630,55 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
 impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut ConvContext, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
+
+        // Whole-array assignment (`assign out = arr;`): analyzer emits dst
+        // with empty index but non-empty array shape, which the single-stmt
+        // conv path can't address. Expand to N element-wise assigns.
+        if src.dst.len() == 1 {
+            let dst0 = &src.dst[0];
+            if dst0.index.dimension() == 0 {
+                let dst_array = {
+                    let scope = context.scope();
+                    scope
+                        .variable_meta
+                        .get(&dst0.id)
+                        .map(|m| m.r#type.array.clone())
+                };
+                if let Some(arr_shape) = dst_array
+                    && !arr_shape.is_empty()
+                    && let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::Variable(_, vidx, _, _) = factor.as_ref()
+                    && vidx.dimension() == 0
+                {
+                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
+                    let mut result = Vec::with_capacity(total);
+                    for i in 0..total {
+                        let elem_idx = air::VarIndex::from_index(i, &arr_shape);
+                        let mut new_dst = dst0.clone();
+                        new_dst.index = elem_idx.clone();
+                        let mut new_expr = src.expr.clone();
+                        if let air::Expression::Term(ref mut fbox) = new_expr
+                            && let air::Factor::Variable(_, vidx2, _, _) = fbox.as_mut()
+                        {
+                            *vidx2 = elem_idx;
+                        }
+                        let element_assign = air::AssignStatement {
+                            dst: vec![new_dst],
+                            width: src.width,
+                            expr: new_expr,
+                            token: src.token,
+                        };
+                        let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
+                        result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+            }
+        }
+
         if matches!(src.expr, air::Expression::ArrayLiteral(..)) {
             let dst = &src.dst[0];
             let scope = context.scope();

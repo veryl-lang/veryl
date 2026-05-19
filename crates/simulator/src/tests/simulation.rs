@@ -11982,6 +11982,173 @@ fn scc_zero_after_comb_post_comb_dedup() {
     }
 }
 
+/// Direct field read on a dynamically-indexed FF struct array. Before
+/// the DynamicVariable nb fix, fields above the bottom of the element
+/// (here valid/flag2 at bit 41/40 and the top byte of data) read as 0
+/// because the load width was sized to the field, not the element.
+#[test]
+fn dynamic_index_struct_field_read_ff() {
+    let code = r#"
+    module Top (
+        clk    : input  clock     ,
+        rst    : input  reset     ,
+        i_wr_en: input  logic     ,
+        i_idx  : input  logic<3>  ,
+        i_data : input  logic<32> ,
+        o_valid: output logic     ,
+        o_flag2: output logic     ,
+        o_data : output logic<32> ,
+        o_tag  : output logic<8>  ,
+    ) {
+        struct Entry {
+            valid: logic    ,
+            flag2: logic    ,
+            data : logic<32>,
+            tag  : logic<8> ,
+        }
+
+        var arr: Entry [8];
+        always_ff {
+            if_reset {
+                for i in 0..8 {
+                    arr[i].valid = 0;
+                    arr[i].flag2 = 0;
+                    arr[i].data  = 0;
+                    arr[i].tag   = 0;
+                }
+            } else {
+                if i_wr_en {
+                    arr[i_idx].valid = 1;
+                    arr[i_idx].flag2 = 1;
+                    arr[i_idx].data  = i_data;
+                    arr[i_idx].tag   = 8'hA5;
+                }
+            }
+        }
+
+        assign o_valid = arr[i_idx].valid;
+        assign o_flag2 = arr[i_idx].flag2;
+        assign o_data  = arr[i_idx].data;
+        assign o_tag   = arr[i_idx].tag;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // Write 0xDEADBEEF to arr[3].
+        sim.set("i_wr_en", Value::new(1, 1, false));
+        sim.set("i_idx", Value::new(3, 3, false));
+        sim.set("i_data", Value::new(0xDEADBEEF, 32, false));
+        sim.step(&clk);
+
+        // Now read all four fields of arr[3] through direct field access.
+        sim.set("i_wr_en", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        assert_eq!(
+            sim.get("o_valid").unwrap(),
+            Value::new(1, 1, false),
+            "config: jit={}, 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("o_flag2").unwrap(),
+            Value::new(1, 1, false),
+            "config: jit={}, 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("o_data").unwrap(),
+            Value::new(0xDEADBEEF, 32, false),
+            "config: jit={}, 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("o_tag").unwrap(),
+            Value::new(0xA5, 8, false),
+            "config: jit={}, 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// Whole-array assignment between matching-shape array variables. The
+/// element-wise expansion in conv replaces a single-stmt path that
+/// previously panicked in calc_index for empty-index on a non-empty array.
+#[test]
+fn whole_array_assign() {
+    let code = r#"
+    module Top (
+        clk  : input  clock     ,
+        rst  : input  reset     ,
+        i_v  : input  logic<8>  ,
+        i_i  : input  logic<2>  ,
+        i_sel: input  logic<2>  ,
+        o_sel: output logic<8>  ,
+    ) {
+        var arr: logic<8> [4];
+        var o  : logic<8> [4];
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    arr[i] = 0;
+                }
+            } else {
+                arr[i_i] = i_v;
+            }
+        }
+        assign o     = arr;
+        assign o_sel = o[i_sel];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+
+        // Write distinct values into each slot of `arr`.  Each cycle
+        // also triggers a fresh whole-array assign `o = arr`.
+        for i in 0..4u64 {
+            sim.set("i_i", Value::new(i, 2, false));
+            sim.set("i_v", Value::new(0x10 + i, 8, false));
+            sim.step(&clk);
+        }
+        sim.step(&clk);
+
+        // Tap each element through `o[i_sel]` and confirm the whole-array
+        // assign propagated every element correctly.
+        for i in 0..4u64 {
+            sim.set("i_sel", Value::new(i, 2, false));
+            assert_eq!(
+                sim.get("o_sel").unwrap(),
+                Value::new(0x10 + i, 8, false),
+                "config: jit={}, 4st={}, idx={}",
+                config.use_jit,
+                config.use_4state,
+                i,
+            );
+        }
+    }
+}
+
 /// Regression test for duplicate ProtoStatement → false SCC in the
 /// merged-JIT path of `InstDeclaration::conv`.
 ///
