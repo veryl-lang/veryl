@@ -1,4 +1,6 @@
 mod context;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod dead_var_dce;
 mod declaration;
 #[cfg(not(target_family = "wasm"))]
 mod dup_assign_dce;

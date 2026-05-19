@@ -2219,6 +2219,93 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(not(target_family = "wasm"))]
         let unified_sorted = super::dup_assign_dce::dce_aggressive(unified_sorted);
 
+        // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
+        // consumers anywhere in this module's pre-JIT comb stmts and every
+        // event stmt set.  Complements `dup_assign_dce` (which handles the
+        // overwriting-store case) by killing writes that nobody reads in
+        // the first place — typical residue of `comb_to_ff_hoist` leaving
+        // the original comb-side Variable dead once the FF consumes the
+        // hoisted expression.  Env-gated by `VERYL_DEAD_VAR_DCE`, default
+        // ON; opt out with `VERYL_DEAD_VAR_DCE=0`.
+        #[cfg(not(target_family = "wasm"))]
+        let unified_sorted = if super::dead_var_dce::enabled() {
+            // Protect every offset that doesn't back a let-bound local.
+            // `comb_to_ff_hoist` only rewrites VarKind::Let, so the dead
+            // residue we want DCE to drop is always Let-kind.  User-
+            // declared `var`s and module ports may have no in-module
+            // reader yet still be live externally (port wiring at the
+            // parent, or `Simulator::get_var(...)` from a testbench
+            // harness), so keep them out of the candidate set.
+            use veryl_analyzer::ir::VarKind;
+            let mut protect: crate::HashSet<VarOffset> = crate::HashSet::default();
+            for (vid, var) in &src.variables {
+                if matches!(var.kind, VarKind::Let) {
+                    continue;
+                }
+                if let Some(meta) = variable_meta.get(vid) {
+                    for elem in &meta.elements {
+                        protect.insert(elem.current);
+                    }
+                }
+            }
+            // Multi-pass DCE default ON: iterate to fixpoint so that
+            // cascaded drops (a dst becomes dead once its only consumer
+            // was itself dropped) are caught in subsequent passes.  Opt
+            // out via `VERYL_DEAD_VAR_DCE_MULTI=0`.
+            let multi_pass = std::env::var("VERYL_DEAD_VAR_DCE_MULTI").ok().as_deref() != Some("0");
+            let mut unified_sorted = unified_sorted;
+            let mut total_dropped = 0usize;
+            let mut pass = 0usize;
+            loop {
+                let mut slices: Vec<&[ProtoStatement]> =
+                    Vec::with_capacity(1 + all_event_statements.len());
+                slices.push(unified_sorted.as_slice());
+                for stmts in all_event_statements.values() {
+                    slices.push(stmts.as_slice());
+                }
+                let mut dead = super::dead_var_dce::collect_dead_offsets(&slices);
+                for p in &protect {
+                    dead.remove(p);
+                }
+                if dead.is_empty() {
+                    break;
+                }
+                pass += 1;
+                let (rewritten, dropped_here) =
+                    super::dead_var_dce::apply_counting(unified_sorted, &dead);
+                unified_sorted = rewritten;
+                let mut total_dropped_here = dropped_here;
+                for stmts in all_event_statements.values_mut() {
+                    let taken = std::mem::take(stmts);
+                    let (new_stmts, d) = super::dead_var_dce::apply_counting(taken, &dead);
+                    *stmts = new_stmts;
+                    total_dropped_here += d;
+                }
+                if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
+                    eprintln!(
+                        "[DeadVarDce] module={} pass={} dead_set={} dropped_stmts={}",
+                        src.name,
+                        pass,
+                        dead.len(),
+                        total_dropped_here,
+                    );
+                }
+                total_dropped += total_dropped_here;
+                if total_dropped_here == 0 || !multi_pass {
+                    break;
+                }
+            }
+            if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
+                eprintln!(
+                    "[DeadVarDce] module={} total_passes={} total_dropped={}",
+                    src.name, pass, total_dropped,
+                );
+            }
+            unified_sorted
+        } else {
+            unified_sorted
+        };
+
         // Snapshot unified_sorted before JIT consumes it: the worklist
         // schedule (built below) needs to walk the pre-JIT ProtoStatement
         // list because JIT CompiledBlocks don't expose stmt-level I/O to
