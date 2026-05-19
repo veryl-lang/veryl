@@ -1,6 +1,5 @@
 use crate::metadata::UrlPath;
 use crate::metadata_error::MetadataError;
-use gix::bstr::ByteSlice;
 use gix::objs::tree::EntryKind;
 use log::debug;
 use std::path::{Path, PathBuf};
@@ -15,6 +14,9 @@ pub struct Git {
 pub enum GitoxideError {
     #[error("gitoxide error: {0}")]
     Open(#[from] gix::open::Error),
+
+    #[error("gitoxide error: {0}")]
+    Discover(#[from] gix::discover::Error),
 
     #[error("gitoxide error: {0}")]
     Init(#[from] gix::init::Error),
@@ -150,7 +152,7 @@ impl Git {
     }
 
     pub fn fetch(&self) -> Result<(), MetadataError> {
-        let repo = gix::open(&self.path).map_err(GitoxideError::from)?;
+        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
         let remote = repo
             .find_default_remote(gix::remote::Direction::Fetch)
             .unwrap()
@@ -171,7 +173,7 @@ impl Git {
     }
 
     pub fn checkout(&self, rev: Option<&str>) -> Result<(), MetadataError> {
-        let repo = gix::open(&self.path).map_err(GitoxideError::from)?;
+        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
 
         let dst = if let Some(rev) = rev {
             rev.to_string()
@@ -248,17 +250,17 @@ impl Git {
     }
 
     pub fn get_revision(&self) -> Result<String, MetadataError> {
-        let repo = gix::open(&self.path).map_err(GitoxideError::from)?;
+        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
         let head_id = repo.head_id().map_err(GitoxideError::from)?;
         Ok(head_id.to_hex().to_string())
     }
 
     pub fn is_git(&self) -> Result<bool, MetadataError> {
-        Ok(gix::open(&self.path).is_ok())
+        Ok(gix::discover(&self.path).is_ok())
     }
 
     pub fn is_clean(&self) -> Result<bool, MetadataError> {
-        let repo = gix::open(&self.path).map_err(GitoxideError::from)?;
+        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
 
         // Use status with untracked files included (like `git status -s`)
         let platform = match repo.status(gix::progress::Discard) {
@@ -277,22 +279,27 @@ impl Git {
     }
 
     pub fn add(&self, file: &Path) -> Result<(), MetadataError> {
-        let repo = gix::open(&self.path).map_err(GitoxideError::from)?;
+        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
         let mut index = open_or_create_index(&repo)?;
 
         let workdir = repo.workdir().ok_or_else(|| GitoxideError::Generic {
             msg: "repository is bare".to_string(),
         })?;
 
-        // Get the relative path from workdir
         let abs_file = if file.is_absolute() {
             file.to_path_buf()
         } else {
             self.path.join(file)
         };
-        let rel_path = abs_file.strip_prefix(workdir).unwrap_or(file);
+        // Canonicalize both sides so strip_prefix works regardless of UNC prefix mismatch on Windows.
+        let workdir_canon =
+            std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+        let abs_canon = std::fs::canonicalize(&abs_file).unwrap_or_else(|_| abs_file.to_path_buf());
+        let rel_path = abs_canon.strip_prefix(&workdir_canon).unwrap_or(file);
 
-        let rel_path_bstr: &gix::bstr::BStr = path_to_bstr(rel_path);
+        // git index entries use forward slashes regardless of OS.
+        let rel_path_bstring = path_to_unix_bstring(rel_path);
+        let rel_path_bstr: &gix::bstr::BStr = rel_path_bstring.as_ref();
 
         // Read the file, write it as blob to the ODB
         let file_content = std::fs::read(&abs_file).map_err(GitoxideError::from)?;
@@ -336,7 +343,7 @@ impl Git {
     }
 
     pub fn commit(&self, msg: &str) -> Result<(), MetadataError> {
-        let repo = gix::open(&self.path).map_err(GitoxideError::from)?;
+        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
 
         // Build tree from the current index using tree editor
         let index = open_or_create_index(&repo)?;
@@ -380,20 +387,16 @@ fn open_or_create_index(repo: &gix::Repository) -> Result<gix::index::File, Meta
     }
 }
 
-fn path_to_bstr(path: &Path) -> &gix::bstr::BStr {
+fn path_to_unix_bstring(path: &Path) -> gix::bstr::BString {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
-        path.as_os_str().as_bytes().as_bstr()
+        gix::bstr::BString::from(path.as_os_str().as_bytes())
     }
     #[cfg(not(unix))]
     {
-        // On Windows, paths might contain non-UTF8 but this is a reasonable fallback
-        let s = path.to_string_lossy();
-        // We need to return a reference, so leak the string for now
-        // This is acceptable since this is only used in short-lived operations
-        let leaked: &'static str = Box::leak(s.into_owned().into_boxed_str());
-        leaked.as_bytes().as_bstr()
+        let s = path.to_string_lossy().replace('\\', "/");
+        gix::bstr::BString::from(s.into_bytes())
     }
 }
 
