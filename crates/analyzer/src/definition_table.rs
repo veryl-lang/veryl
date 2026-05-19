@@ -1,5 +1,6 @@
 use crate::HashMap;
 use std::cell::RefCell;
+use std::sync::Arc;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_grammar_trait::{
     FunctionDeclaration, InterfaceDeclaration, ModuleDeclaration, ProtoFunctionDeclaration,
@@ -73,17 +74,17 @@ impl Definition {
 
 #[derive(Clone, Default, Debug)]
 pub struct DefinitionTable {
-    table: HashMap<DefinitionId, Definition>,
+    table: HashMap<DefinitionId, Arc<Definition>>,
 }
 
 impl DefinitionTable {
     pub fn insert(&mut self, definition: Definition) -> DefinitionId {
         let id = new_definition_id();
-        self.table.insert(id, definition);
+        self.table.insert(id, Arc::new(definition));
         id
     }
 
-    pub fn get(&self, id: DefinitionId) -> Option<Definition> {
+    pub fn get(&self, id: DefinitionId) -> Option<Arc<Definition>> {
         self.table.get(&id).cloned()
     }
 
@@ -98,7 +99,7 @@ pub fn insert(definition: Definition) -> DefinitionId {
     DEFINITION_TABLE.with(|f| f.borrow_mut().insert(definition))
 }
 
-pub fn get(id: DefinitionId) -> Option<Definition> {
+pub fn get(id: DefinitionId) -> Option<Arc<Definition>> {
     DEFINITION_TABLE.with(|f| f.borrow().get(id))
 }
 

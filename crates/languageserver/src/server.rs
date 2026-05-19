@@ -509,7 +509,8 @@ impl Server {
                     SymbolPath::from(finder.token_group.as_slice())
                 };
                 if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
-                    for reference in &symbol.found.references {
+                    let refs = symbol_table::get_references(symbol.found.id).unwrap_or_default();
+                    for reference in &refs {
                         if let Some(location) = to_location(reference) {
                             ret.push(location);
                         }
@@ -535,9 +536,11 @@ impl Server {
                 {
                     let token_type = semantic_legend::PROPERTY;
                     tokens.push((symbol.token, token_type));
-                    for reference in &symbol.references {
-                        if reference.source == path && !is_keyword_token(*reference) {
-                            tokens.push((*reference, token_type));
+                    if let Some(refs) = symbol_table::get_references(symbol.id) {
+                        for reference in &refs {
+                            if reference.source == path && !is_keyword_token(*reference) {
+                                tokens.push((*reference, token_type));
+                            }
                         }
                     }
                 }
