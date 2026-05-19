@@ -335,7 +335,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         }
         let child_decls: &[air::Declaration] = &hoisted_child_decls;
 
-        let ff_start = context.ff_total_bytes as isize;
+        let mut ff_start = context.ff_total_bytes as isize;
+        if crate::ir::variable::ff_cacheline_pad_enabled() {
+            ff_start = crate::ir::variable::align_up_64(ff_start);
+            context.ff_total_bytes = ff_start as usize;
+        }
         let comb_start = context.comb_total_bytes as isize;
 
         // Analyzer-IR pre-pass to identify multi-RMW FFs.  Same as

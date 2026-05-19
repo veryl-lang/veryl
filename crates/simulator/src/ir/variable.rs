@@ -97,6 +97,21 @@ pub fn native_bytes_for(width: usize, is_ff: bool) -> usize {
     }
 }
 
+/// Inst-boundary cache-line padding for FF storage.  When
+/// `VERYL_FF_CACHELINE_PAD=1`, each child module's FF allocation is
+/// rounded up to the next 64-byte boundary, eliminating false sharing
+/// between sibling Inst FF regions at the cost of ~32B per Inst.
+pub fn ff_cacheline_pad_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("VERYL_FF_CACHELINE_PAD").ok().as_deref() == Some("1"))
+}
+
+#[inline]
+pub fn align_up_64(pos: isize) -> isize {
+    (pos + 63) & !63
+}
+
 /// Returns the byte size of a single value slot (payload + optional mask_xz).
 pub fn value_size(native_bytes: usize, use_4state: bool) -> usize {
     if use_4state {

@@ -384,11 +384,11 @@ fn validate_meta_offsets(
 
 /// Maximum number of statements per JIT function.
 /// Keeps regalloc2 cost manageable (O(N^2) in SSA variable count).
-/// Sized large enough to fuse a typical design's comb body into a single
-/// JIT function — shrinking num_chunks reduces per-step enum-match
-/// dispatch overhead in `eval_comb_full` proportionally.
+/// Sweet spot around 1024-2048: per-step enum-match dispatch overhead
+/// grows as chunks shrink below ~256, while Cranelift regalloc spill
+/// cascade / load_cache eviction churn grows as chunks exceed ~4096.
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
-const JIT_CHUNK_SIZE_DEFAULT: usize = 8192;
+const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
 fn jit_chunk_size() -> usize {
     std::env::var("VERYL_JIT_CHUNK_SIZE")
@@ -2121,6 +2121,10 @@ impl Conv<&air::Module> for ProtoModule {
         }
         let declarations: &[air::Declaration] = &hoisted_declarations;
 
+        if crate::ir::variable::ff_cacheline_pad_enabled() {
+            let aligned = crate::ir::variable::align_up_64(context.ff_total_bytes as isize);
+            context.ff_total_bytes = aligned as usize;
+        }
         let ff_start = context.ff_total_bytes as isize;
         let comb_start = context.comb_total_bytes as isize;
 
@@ -2249,6 +2253,7 @@ impl Conv<&air::Module> for ProtoModule {
         for stmts in all_event_statements.values() {
             site_table.extend_from_protos(stmts);
         }
+
         if std::env::var("VERYL_SITE_TABLE_DIAG").ok().as_deref() == Some("1") {
             eprintln!(
                 "[site_table_diag] module={:?} sites={}",
