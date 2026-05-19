@@ -3104,6 +3104,10 @@ impl ProtoIfStatement {
         let false_block = builder.create_block();
         let final_block = builder.create_block();
 
+        if cold_if_true_enabled() {
+            builder.set_cold_block(true_block);
+        }
+
         // Evaluate condition
         if let Some(x) = &self.cond {
             let (cond_payload, cond_mask_xz) = x.build_binary(context, builder)?;
@@ -4382,4 +4386,17 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
         }
     }
     result
+}
+
+// PGO cold-block heuristic (env-gated, default ON).  Cranelift
+// `set_cold_block` lays the marked block out-of-line and biases static
+// branch prediction toward the hot path.  Marking the if-true side
+// cold wins on designs whose `if (rare_guard) { ... }` patterns
+// dominate (true_side is the rare path); opt out via
+// `VERYL_COLD_IF_TRUE=0`.
+#[cfg(not(target_family = "wasm"))]
+fn cold_if_true_enabled() -> bool {
+    use std::sync::OnceLock;
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_COLD_IF_TRUE").ok().as_deref() != Some("0"))
 }

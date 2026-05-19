@@ -100,6 +100,11 @@ inherits      = "release"
 lto           = false
 codegen-units = 256
 
+[profile.release-verylup-prof]
+inherits = "release-verylup"
+debug    = 1
+strip    = false
+
 [profile.dev.package]
 insta.opt-level   = 3
 similar.opt-level = 3

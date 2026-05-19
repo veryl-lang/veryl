@@ -1,4 +1,6 @@
 mod context;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod dead_var_dce;
 mod declaration;
 #[cfg(not(target_family = "wasm"))]
 mod dup_assign_dce;
@@ -272,7 +274,7 @@ impl Ir {
 
         const MAX_ITER: usize = 128;
         let mut iter = 0;
-        let fallback_fullpass = std::env::var("VERYL_WORKLIST_FULLPASS_FALLBACK").is_ok();
+        let fallback_fullpass = worklist_fullpass_fallback();
         while !dirty.is_empty() && iter < MAX_ITER {
             dirty.sort_by_key(|&id| sched.topo_rank[id as usize]);
             snapshot_buf.copy_from_slice(&self.comb_values);
@@ -335,7 +337,7 @@ impl Ir {
         // to run an extra full pass after worklist converges. Keeps a
         // correctness net for cases where the schedule fanout misses an
         // edge, at a significant perf cost.
-        if std::env::var("VERYL_WORKLIST_SAFETY").is_ok() {
+        if worklist_safety() {
             snapshot_buf.copy_from_slice(&self.comb_values);
             for stmt in &self.comb_statements {
                 dispatch_stmt_fast(stmt, mask_cache);
@@ -379,7 +381,7 @@ impl Ir {
         // Diagnostic: enable with VERYL_WORKLIST_VERIFY=1 to run a full pass
         // after the worklist claims convergence and warn if anything still
         // changes (indicates a missing fanout edge).
-        if std::env::var("VERYL_WORKLIST_VERIFY").is_ok() {
+        if worklist_verify() {
             let verify_before: Vec<u8> = self.comb_values.to_vec();
             for stmt in &self.comb_statements {
                 dispatch_stmt_fast(stmt, mask_cache);
@@ -488,6 +490,27 @@ impl Ir {
         }
         (comb_jit, comb_interp, event_jit, event_interp)
     }
+}
+
+/// Diagnostic env-var caches consulted on every `settle_comb` invocation.
+/// Reading the live env each cycle would call `getenv` millions of times on
+/// long runs; the `OnceLock` load amortizes that to a single probe per
+/// process.  Default-off in production; the env knobs only kick in for
+/// debug runs.
+fn worklist_fullpass_fallback() -> bool {
+    use std::sync::OnceLock;
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_WORKLIST_FULLPASS_FALLBACK").is_ok())
+}
+fn worklist_safety() -> bool {
+    use std::sync::OnceLock;
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_WORKLIST_SAFETY").is_ok())
+}
+fn worklist_verify() -> bool {
+    use std::sync::OnceLock;
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_WORKLIST_VERIFY").is_ok())
 }
 
 /// Inline-friendly dispatch for the per-cycle hot loop.  Handles the
