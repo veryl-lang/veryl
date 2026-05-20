@@ -170,10 +170,7 @@ impl Runner for Cocotb {
 
         let (py_waves, args) = match wave.then_some(metadata.test.waveform_format) {
             Some(WaveFormFormat::Vcd) => ("True", "['--trace']"),
-            Some(WaveFormFormat::Fst) => (
-                "True",
-                "['--trace-fst', '--trace-structs', '--trace-threads', '2']",
-            ),
+            Some(WaveFormFormat::Fst) => ("True", "['--trace-fst', '--trace-structs']"),
             None => ("False", "[]"),
         };
         let runner_path = temp_dir.path().join("runner.py");
