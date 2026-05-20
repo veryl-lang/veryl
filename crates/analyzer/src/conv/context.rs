@@ -1,4 +1,5 @@
 use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
+use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
@@ -11,7 +12,8 @@ use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
 use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
-use std::sync::Arc;
+use miette::Result;
+use std::sync::{Arc, Mutex};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::Token;
@@ -76,6 +78,8 @@ pub struct Context {
     overrides: Vec<HashMap<VarPath, (Comptime, Expression)>>,
     generic_maps: Vec<Vec<GenericMap>>,
     errors: Vec<AnalyzerError>,
+    profiler: Option<Arc<Mutex<ConvProfile>>>,
+    project_name: Option<String>,
 }
 
 impl Context {
@@ -89,6 +93,37 @@ impl Context {
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
         self.config = tgt.config.clone();
+        self.profiler = tgt.profiler.clone();
+        self.project_name = tgt.project_name.clone();
+    }
+
+    pub fn set_project_name(&mut self, project_name: &str) {
+        self.project_name = Some(project_name.to_string());
+    }
+
+    pub fn enable_conv_profiler(&mut self) {
+        if std::env::var("VERYL_CONV_PROFILE").is_ok() {
+            self.profiler = Some(Arc::new(Mutex::new(ConvProfile::default())));
+        }
+    }
+
+    pub fn conv_profile_guard(&self, component_name: StrId) -> Option<ConvProfileGuard> {
+        self.profiler.as_ref().map(|p| {
+            let key = format!(
+                "{}::{}",
+                self.project_name.as_deref().unwrap_or("unknown"),
+                component_name
+            );
+            ConvProfileGuard::new(Arc::clone(p), key)
+        })
+    }
+
+    pub fn finalize_conv_profiler(&self) -> Result<()> {
+        if let Some(profiler) = self.profiler.as_ref().map(|p| p.lock().unwrap()) {
+            profiler.to_toml_file(&std::env::var("VERYL_CONV_PROFILE").unwrap())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn get_override(&self, x: &VarPath) -> Option<&(Comptime, Expression)> {

@@ -1,5 +1,6 @@
 pub mod checker;
 mod context;
+pub mod conv_profiler;
 pub mod declaration;
 pub mod expression;
 pub mod instance;

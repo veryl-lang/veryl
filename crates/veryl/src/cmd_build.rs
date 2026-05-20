@@ -109,12 +109,15 @@ impl CmdBuild {
         }
 
         let mut analyzer_context = veryl_analyzer::Context::default();
+
         for name in defines {
             analyzer_context
                 .config
                 .defines
                 .insert(resource_table::insert_str(name));
         }
+        analyzer_context.enable_conv_profiler();
+
         // Build a local IR when the caller didn't supply one, so the
         // post-pass2 combinational-loop check has something to inspect.
         // This is cheap relative to the rest of pass2 because most of
@@ -128,6 +131,7 @@ impl CmdBuild {
         for context in &contexts {
             if !context.skip {
                 let path = &context.path;
+                analyzer_context.set_project_name(&path.prj);
                 let mut errors = context.analyzer.analyze_pass2(
                     &path.prj,
                     &context.parser.veryl,
@@ -139,6 +143,7 @@ impl CmdBuild {
         }
 
         debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
+        analyzer_context.finalize_conv_profiler()?;
 
         let mut errors = Analyzer::analyze_post_pass2(ir_for_pass2);
         check_error = check_error.append(&mut errors).check_err()?;

@@ -125,6 +125,8 @@ impl Conv<&ModuleDeclaration> for ir::Module {
         let mut context = Context::default();
         context.inherit(upper_context);
 
+        let _guard = context.conv_profile_guard(value.identifier.text());
+
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Module);
 
@@ -243,6 +245,8 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
         let mut context = Context::default();
         context.inherit(upper_context);
 
+        let _guard = context.conv_profile_guard(value.identifier.text());
+
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Interface);
 
@@ -326,6 +330,8 @@ impl Conv<&PackageDeclaration> for () {
         let upper_context = context;
         let mut context = Context::default();
         context.inherit(upper_context);
+
+        let _guard = context.conv_profile_guard(value.identifier.text());
 
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Package);

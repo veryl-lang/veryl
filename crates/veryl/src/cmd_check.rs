@@ -104,9 +104,12 @@ impl CmdCheck {
         );
 
         let mut analyzer_context = veryl_analyzer::Context::default();
+        analyzer_context.enable_conv_profiler();
+
         let mut ir = veryl_analyzer::ir::Ir::default();
         for context in &contexts {
             let path = &context.path;
+            analyzer_context.set_project_name(&path.prj);
             let mut errors = context.analyzer.analyze_pass2(
                 &path.prj,
                 &context.parser.veryl,
@@ -117,6 +120,7 @@ impl CmdCheck {
         }
 
         debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
+        analyzer_context.finalize_conv_profiler()?;
 
         let mut errors = Analyzer::analyze_post_pass2(&ir);
         check_error = check_error.append(&mut errors).check_err()?;
