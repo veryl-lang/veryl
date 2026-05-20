@@ -743,6 +743,88 @@ fn interface() {
 "#;
 
     check_ir(code, exp);
+
+    let code = r#"
+    interface InterfaceA #(
+        param WIDTH: u32 = 8,
+    ) {
+        var a: logic<WIDTH>;
+        modport mp_i {
+            a: input,
+        }
+        modport mp_o {
+            a: output,
+        }
+    }
+    module ModuleA #(
+        param WIDTH: u32 = 8,
+    ) (
+        a: modport InterfaceA::mp_i,
+        b: modport InterfaceA::mp_o,
+    ) {
+        always_comb {
+            for i in 0..(WIDTH / 32) {
+                b.a[i step 32] = a.a[i step 32];
+            }
+        }
+    }
+    module ModuleB {
+        inst a: InterfaceA #(WIDTH: 128);
+        inst b: InterfaceA #(WIDTH: 128);
+
+        assign a.a = '0;
+
+        inst u: ModuleA #(
+            WIDTH: 128,
+        )(
+            a: a,
+            b: b,
+        );
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  param var0(WIDTH): bit<32> = 32'sh00000008;
+  input var1(a.a): logic<8> = 8'hxx;
+  output var6(b.a): logic<8> = 8'hxx;
+
+  comb {
+  }
+}
+module ModuleB {
+  param var0(a.WIDTH): bit<32> = 32'sh00000080;
+  var var1(a.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
+  param var5(b.WIDTH): bit<32> = 32'sh00000080;
+  var var6(b.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
+
+  comb {
+    var1 = '0;
+  }
+  inst u (
+    var1 <- var1;
+    var6 -> var6;
+  ) {
+    module ModuleA {
+      param var0(WIDTH): bit<32> = 32'sh00000080;
+      input var1(a.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
+      output var6(b.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
+      const var11([0].i): signed bit<32> = 32'sh00000000;
+      const var12([1].i): signed bit<32> = 32'sh00000001;
+      const var13([2].i): signed bit<32> = 32'sh00000002;
+      const var14([3].i): signed bit<32> = 32'sh00000003;
+
+      comb {
+        var6[32'sh00000000 step 32'sh00000020] = var1[32'sh00000000 step 32'sh00000020];
+        var6[32'sh00000001 step 32'sh00000020] = var1[32'sh00000001 step 32'sh00000020];
+        var6[32'sh00000002 step 32'sh00000020] = var1[32'sh00000002 step 32'sh00000020];
+        var6[32'sh00000003 step 32'sh00000020] = var1[32'sh00000003 step 32'sh00000020];
+      }
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
 }
 
 #[test]
