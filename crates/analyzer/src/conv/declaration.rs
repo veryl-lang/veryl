@@ -490,7 +490,13 @@ impl Conv<&PortDeclarationItem> for () {
                 Direction::Modport => {
                     match &r#type.kind {
                         ir::TypeKind::Modport(sig, name) => {
-                            let component = get_component(context, sig, token)?;
+                            let component = if let Some(sig) =
+                                context.get_modport_signature(&value.identifier)
+                            {
+                                get_component(context, &sig, token)?
+                            } else {
+                                get_component(context, sig, token)?
+                            };
                             let base = value.identifier.text();
                             let ir::Component::Interface(component) = component.as_ref() else {
                                 return Err(ir_error!(token));
@@ -1413,10 +1419,12 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         }
 
         context.push_override(overridden_params);
+        context.collect_modport_signatures(value);
 
         let component = context.block(|c| get_component(c, &sig, token));
 
         context.pop_override();
+        context.pop_modport_signatures();
 
         let component_arc = component?;
         match component_arc.as_ref() {
@@ -1474,8 +1482,6 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     }
                 }
 
-                // TOOD modport parameter override
-
                 let name = value.identifier.text();
                 Ok(ir::Declaration::Inst(Box::new(ir::InstDeclaration {
                     name,
@@ -1485,6 +1491,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 })))
             }
             ir::Component::Interface(component) => {
+                context.insert_inst_signature(value.identifier.as_ref(), &sig);
+
                 let mut array = Shape::default();
                 if let Some(x) = &value.component_instantiation_opt0 {
                     let exprs: Vec<_> = x.array.as_ref().into();

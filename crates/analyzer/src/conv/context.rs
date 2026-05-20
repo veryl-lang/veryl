@@ -16,6 +16,7 @@ use miette::Result;
 use std::sync::{Arc, Mutex};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
+use veryl_parser::veryl_grammar_trait::{ComponentInstantiation, Identifier};
 use veryl_parser::veryl_token::Token;
 
 #[derive(Clone)]
@@ -54,6 +55,8 @@ pub struct Context {
     pub declarations: Vec<Declaration>,
     pub default_clock: Option<(VarPath, SymbolId)>,
     pub default_reset: Option<(VarPath, SymbolId)>,
+    pub inst_signatures: HashMap<StrId, Signature>,
+    pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
@@ -86,6 +89,7 @@ impl Context {
     pub fn inherit(&mut self, tgt: &mut Context) {
         std::mem::swap(&mut self.overrides, &mut tgt.overrides);
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
+        std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
@@ -412,6 +416,49 @@ impl Context {
             } else {
                 None
             }
+        } else {
+            None
+        }
+    }
+
+    pub fn insert_inst_signature(&mut self, identifier: &Identifier, sig: &Signature) {
+        self.inst_signatures.insert(identifier.text(), sig.clone());
+    }
+
+    pub fn collect_modport_signatures(&mut self, inst: &ComponentInstantiation) {
+        let mut signatures = HashMap::default();
+        if !self.inst_signatures.is_empty()
+            && let Some(ref opt2) = inst.component_instantiation_opt2
+            && let Some(ref port_opt) = opt2.inst_port.inst_port_opt
+        {
+            let port_items: Vec<_> = port_opt.inst_port_list.as_ref().into();
+            for port_item in &port_items {
+                let inst_name = if let Some(ref x) = port_item.inst_port_item_opt {
+                    let Some(identifier) = x.expression.unwrap_identifier().map(|x| x.identifier())
+                    else {
+                        continue;
+                    };
+                    identifier.token.text
+                } else {
+                    port_item.identifier.text()
+                };
+                if let Some(sig) = self.inst_signatures.get(&inst_name) {
+                    let port_name = port_item.identifier.text();
+                    signatures.insert(port_name, sig.clone());
+                }
+            }
+        }
+
+        self.modport_signatures.push(signatures);
+    }
+
+    pub fn pop_modport_signatures(&mut self) {
+        self.modport_signatures.pop();
+    }
+
+    pub fn get_modport_signature(&self, port_identifier: &Identifier) -> Option<Signature> {
+        if let Some(signatures) = self.modport_signatures.last() {
+            signatures.get(&port_identifier.text()).cloned()
         } else {
             None
         }
