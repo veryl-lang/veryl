@@ -49,7 +49,7 @@ fxhash          = "0.2.1"
 handlebars      = "6.4"
 indent          = "0.1.1"
 log             = "0.4.29"
-mdbook          = "0.4.51"
+mdbook          = "0.5.3"
 miette          = {version = "7.6"}
 num-bigint      = "0.4"
 num-traits      = "0.2.19"
