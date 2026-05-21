@@ -17,6 +17,18 @@ import { start } from 'repl';
 
 let client: LanguageClient;
 
+function isLanguageServerEnabled(): boolean {
+	return workspace.getConfiguration("veryl-vscode").get("enabled") ?? true;
+}
+
+function applyLanguageServerState(context: vscode.ExtensionContext) {
+	if (isLanguageServerEnabled()) {
+		startServer(context);
+	} else {
+		stopServer();
+	}
+}
+
 function startServer(context: vscode.ExtensionContext) {
 	let verylLsIntegrated = context.asAbsolutePath(path.join('bin', 'veryl-ls'));
 
@@ -74,6 +86,15 @@ export function activate(context: vscode.ExtensionContext) {
 			stopServer().then(function () {startServer(context);}, startServer);
 		})
 	);
+
+	context.subscriptions.push(
+		workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration("veryl-vscode.enabled")) {
+				applyLanguageServerState(context);
+			}
+		})
+	);
+
   // Added by Kalyan for Waveform Render start
 	// Start and live preview mode
 	context.subscriptions.push(
@@ -117,7 +138,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	// Added by Kalyan for Waveform Render start
 
-	startServer(context);
+	applyLanguageServerState(context);
 }
 
 // This method is called when your extension is deactivated
