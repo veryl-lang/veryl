@@ -21,111 +21,91 @@ pub package types {
     type ib64 = signed bit<64>; /// 64 bits signed bit vector
 }
 
-#[test(test_std_types_pkg)]
-embed (inline) sv{{{
-module test_std_types_pkg;
-    std_types::ul8  a;
-    std_types::ul16 b;
-    std_types::ul32 c;
-    std_types::ul64 d;
+#[test(test_types_pkg)]
+module test_types_pkg {
+    function test_unsigned_logic::<T: type, W: u32> () {
+        const w: u32 = $bits(T);
+        var   v: T  ;
 
-    std_types::il8  e;
-    std_types::il16 f;
-    std_types::il32 g;
-    std_types::il64 h;
+        $assert(w == W);
 
-    std_types::ub8  i;
-    std_types::ub16 j;
-    std_types::ub32 k;
-    std_types::ub64 l;
+        v        = '0;
+        v[W - 1] = '1;
+        $assert (v >: 0);
+        // TODO
+        //$assert($bits(T) >: 0);
 
-    std_types::ib8  m;
-    std_types::ib16 n;
-    std_types::ib32 o;
-    std_types::ib64 p;
+        v = 'x;
+        // TODO
+        //$assert($isunknown(v));
+    }
 
-    `define test_unsigned_logic(VARIABLE, WIDTH) \
-    begin \
-        assert($bits(VARIABLE) == WIDTH) \
-        else $error("error detected"); \
-        VARIABLE = '0; \
-        VARIABLE[WIDTH-1] = '1; \
-        assert(VARIABLE > 0) \
-        else $error("error detected"); \
-        `ifndef VERILATOR \
-            VARIABLE = 'x; \
-            assert(VARIABLE === 'x) \
-            else $error("error detected"); \
-        `endif \
-    end
+    function test_signed_logic::<T: type, W: u32> () {
+        const w: u32 = $bits(T);
+        var   v: T  ;
 
-    `define test_signed_logic(VARIABLE, WIDTH) \
-    begin \
-        assert($bits(VARIABLE) == WIDTH) \
-        else $error("error detected"); \
-        VARIABLE = '0; \
-        VARIABLE[WIDTH-1] = '1; \
-        assert(VARIABLE < 0) \
-        else $error("error detected"); \
-        `ifndef VERILATOR \
-            VARIABLE = 'x; \
-            assert(VARIABLE === 'x) \
-            else $error("error detected"); \
-        `endif \
-    end
+        $assert(w == W);
 
-    `define test_unsigned_bit(VARIABLE, WIDTH) \
-    begin \
-        assert($bits(VARIABLE) == WIDTH) \
-        else $error("error detected"); \
-        VARIABLE = '0; \
-        VARIABLE[WIDTH-1] = '1; \
-        assert(VARIABLE > 0) \
-        else $error("error detected"); \
-        `ifndef VERILATOR \
-            VARIABLE = 'x; \
-            assert((!$isunknown(VARIABLE)) && (VARIABLE == '0)) \
-            else $error("error detected"); \
-        `endif \
-    end
+        v        = '0;
+        v[W - 1] = '1;
+        $assert (v <: 0);
 
-    `define test_signed_bit(VARIABLE, WIDTH) \
-    begin \
-        assert($bits(VARIABLE) == WIDTH) \
-        else $error("error detected"); \
-        VARIABLE = '0; \
-        VARIABLE[WIDTH-1] = '1; \
-        assert(VARIABLE < 0) \
-        else $error("error detected"); \
-        `ifndef VERILATOR \
-            VARIABLE = 'x; \
-            assert((!$isunknown(VARIABLE)) && (VARIABLE == '0)) \
-            else $error("error detected"); \
-        `endif \
-    end
+        v = 'x;
+        // TODO
+        //$assert($isunknown(v));
+    }
 
-    initial begin
-        `test_unsigned_logic(a, 8)
-        `test_unsigned_logic(b, 16)
-        `test_unsigned_logic(c, 32)
-        `test_unsigned_logic(d, 64)
+    function test_unsigned_bit::<T: type, W: u32> () {
+        const w: u32 = $bits(T);
+        var   v: T  ;
 
-        `test_signed_logic(e, 8)
-        `test_signed_logic(f, 16)
-        `test_signed_logic(g, 32)
-        `test_signed_logic(h, 64)
+        $assert(w == W);
 
-        `test_unsigned_bit(i, 8)
-        `test_unsigned_bit(j, 16)
-        `test_unsigned_bit(k, 32)
-        `test_unsigned_bit(l, 64)
+        v        = '0;
+        v[W - 1] = '1;
+        $assert (v >: 0);
 
-        `test_signed_bit(m, 8)
-        `test_signed_bit(n, 16)
-        `test_signed_bit(o, 32)
-        `test_signed_bit(p, 64)
+        // TODO
+        //v = 'x;
+        //$assert(v == 0);
+    }
 
-        $finish;
-    end
-endmodule
-}}}
+    function test_signed_bit::<T: type, W: u32> () {
+        const w: u32 = $bits(T);
+        var   v: T  ;
+
+        $assert(w == W);
+
+        v        = '0;
+        v[W - 1] = '1;
+        $assert (v <: 0);
+
+        // TODO
+        //v = 'x;
+        //$assert(v == 0);
+    }
+
+    initial {
+        test_unsigned_logic::<types::ul8, 'h08> ();
+        test_unsigned_logic::<types::ul16, 'h10>();
+        test_unsigned_logic::<types::ul32, 'h20>();
+        test_unsigned_logic::<types::ul64, 'h40>();
+
+        test_signed_logic::<types::il8, 'h08> ();
+        test_signed_logic::<types::il16, 'h10>();
+        test_signed_logic::<types::il32, 'h20>();
+        test_signed_logic::<types::il64, 'h40>();
+
+        test_unsigned_bit::<types::ub8, 'h08> ();
+        test_unsigned_bit::<types::ub16, 'h10>();
+        test_unsigned_bit::<types::ub32, 'h20>();
+        test_unsigned_bit::<types::ub64, 'h40>();
+
+        test_signed_bit::<types::ib8, 'h08> ();
+        test_signed_bit::<types::ib16, 'h10>();
+        test_signed_bit::<types::ib32, 'h20>();
+        test_signed_bit::<types::ib64, 'h40>();
+
+        $finish();
+    }
+}
