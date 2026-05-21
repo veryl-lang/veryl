@@ -814,6 +814,16 @@ pub(crate) fn collect_assigned(stmt: &Statement, f: &mut impl FnMut(air::VarId))
                 collect_assigned(s, f);
             }
         }
+        Statement::Case(c) => {
+            for arm in &c.arms {
+                for s in &arm.body {
+                    collect_assigned(s, f);
+                }
+            }
+            for s in &c.default {
+                collect_assigned(s, f);
+            }
+        }
         Statement::IfReset(i) => {
             for s in &i.true_side {
                 collect_assigned(s, f);

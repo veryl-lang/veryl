@@ -28,6 +28,7 @@ pub enum Statement {
     Assign(AssignStatement),
     If(IfStatement),
     IfReset(IfResetStatement),
+    Case(CaseStatement),
     For(ForStatement),
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
@@ -206,6 +207,7 @@ impl Statement {
             }
             Statement::If(x) => x.eval_value(context),
             Statement::IfReset(_) => ControlFlow::Continue,
+            Statement::Case(x) => x.eval_value(context),
             Statement::For(x) => {
                 if let Some(iter) = x.range.eval_iter(context) {
                     'outer: for i in iter {
@@ -247,6 +249,7 @@ impl Statement {
             Statement::Assign(x) => x.eval_assign(context, assign_table, assign_context),
             Statement::If(x) => x.eval_assign(context, assign_table, assign_context, base_tables),
             Statement::IfReset(x) => x.eval_assign(context, assign_table, base_tables),
+            Statement::Case(x) => x.eval_assign(context, assign_table, assign_context, base_tables),
             Statement::SystemFunctionCall(x) => {
                 x.eval_assign(context, assign_table, assign_context)
             }
@@ -267,6 +270,7 @@ impl Statement {
             Statement::Assign(x) => x.gather_ff(context, table, decl),
             Statement::If(x) => x.gather_ff(context, table, decl),
             Statement::IfReset(x) => x.gather_ff(context, table, decl),
+            Statement::Case(x) => x.gather_ff(context, table, decl),
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None, true),
             Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, true),
             Statement::For(x) => {
@@ -297,6 +301,7 @@ impl Statement {
                     s.gather_ff_comb_assign(context, table, decl);
                 }
             }
+            Statement::Case(x) => x.gather_ff_comb_assign(context, table, decl),
             Statement::IfReset(x) => {
                 for s in &x.true_side {
                     s.gather_ff_comb_assign(context, table, decl);
@@ -321,6 +326,7 @@ impl Statement {
             Statement::Assign(x) => x.set_index(index),
             Statement::If(x) => x.set_index(index),
             Statement::IfReset(x) => x.set_index(index),
+            Statement::Case(x) => x.set_index(index),
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
             Statement::For(x) => {
@@ -341,6 +347,7 @@ impl fmt::Display for Statement {
             Statement::Assign(x) => x.fmt(f),
             Statement::If(x) => x.fmt(f),
             Statement::IfReset(x) => x.fmt(f),
+            Statement::Case(x) => x.fmt(f),
             Statement::SystemFunctionCall(x) => format!("{x};").fmt(f),
             Statement::FunctionCall(x) => format!("{x};").fmt(f),
             Statement::TbMethodCall(x) => match &x.method {
@@ -846,5 +853,330 @@ impl fmt::Display for IfResetStatement {
             ret.push('}');
         }
         ret.fmt(f)
+    }
+}
+
+/// `case <expr> { ... }` as a flat list of arms.  Multiple patterns
+/// within an arm are OR-ed.  `switch { ... }` and hand-written nested
+/// `if-else` stay as `Statement::If`.
+#[derive(Clone)]
+pub struct CaseStatement {
+    pub arms: Vec<CaseArm>,
+    pub default: Vec<Statement>,
+    pub case_target: Box<Expression>,
+    pub token: TokenRange,
+}
+
+#[derive(Clone)]
+pub struct CaseArm {
+    pub patterns: Vec<CasePattern>,
+    pub body: Vec<Statement>,
+    pub token: TokenRange,
+}
+
+#[derive(Clone)]
+pub enum CasePattern {
+    /// `case_target === value` (case-equality).
+    Eq(Box<Expression>),
+    /// `lo <= case_target` and `case_target < hi` (or `<= hi` when `inclusive`).
+    Range {
+        lo: Box<Expression>,
+        hi: Box<Expression>,
+        inclusive: bool,
+    },
+}
+
+impl CasePattern {
+    /// `None` when either side is non-const.
+    fn matches(&self, target: &Value, context: &mut Context) -> Option<bool> {
+        let target_n = target.to_usize()?;
+        match self {
+            CasePattern::Eq(e) => {
+                let v = e.eval_value(context)?.to_usize()?;
+                Some(target_n == v)
+            }
+            CasePattern::Range { lo, hi, inclusive } => {
+                let lo_n = lo.eval_value(context)?.to_usize()?;
+                let hi_n = hi.eval_value(context)?.to_usize()?;
+                Some(
+                    lo_n <= target_n
+                        && if *inclusive {
+                            target_n <= hi_n
+                        } else {
+                            target_n < hi_n
+                        },
+                )
+            }
+        }
+    }
+
+    fn lower_to_cond(&self, target: &Expression) -> Expression {
+        let comptime = Box::new(Comptime::create_unknown(self.token_range()));
+        match self {
+            CasePattern::Eq(val) => Expression::Binary(
+                Box::new(target.clone()),
+                Op::EqWildcard,
+                val.clone(),
+                comptime,
+            ),
+            CasePattern::Range { lo, hi, inclusive } => {
+                let lo_cond = Expression::Binary(
+                    lo.clone(),
+                    Op::LessEq,
+                    Box::new(target.clone()),
+                    comptime.clone(),
+                );
+                let hi_op = if *inclusive { Op::LessEq } else { Op::Less };
+                let hi_cond = Expression::Binary(
+                    Box::new(target.clone()),
+                    hi_op,
+                    hi.clone(),
+                    comptime.clone(),
+                );
+                Expression::Binary(Box::new(lo_cond), Op::LogicAnd, Box::new(hi_cond), comptime)
+            }
+        }
+    }
+
+    fn token_range(&self) -> TokenRange {
+        match self {
+            CasePattern::Eq(e) => e.token_range(),
+            CasePattern::Range { lo, .. } => lo.token_range(),
+        }
+    }
+
+    fn for_each_expr(&self, mut f: impl FnMut(&Expression)) {
+        match self {
+            CasePattern::Eq(e) => f(e),
+            CasePattern::Range { lo, hi, .. } => {
+                f(lo);
+                f(hi);
+            }
+        }
+    }
+
+    fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut Expression)) {
+        match self {
+            CasePattern::Eq(e) => f(e),
+            CasePattern::Range { lo, hi, .. } => {
+                f(lo);
+                f(hi);
+            }
+        }
+    }
+}
+
+impl CaseStatement {
+    pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
+        let Some(tgt) = self.case_target.eval_value(context) else {
+            return ControlFlow::Continue;
+        };
+        for arm in &self.arms {
+            let mut matched = false;
+            let mut undecided = false;
+            for pat in &arm.patterns {
+                match pat.matches(&tgt, context) {
+                    Some(true) => {
+                        matched = true;
+                        break;
+                    }
+                    Some(false) => {}
+                    None => undecided = true,
+                }
+            }
+            if matched {
+                for stmt in &arm.body {
+                    if stmt.eval_value(context) == ControlFlow::Break {
+                        return ControlFlow::Break;
+                    }
+                }
+                return ControlFlow::Continue;
+            }
+            if undecided {
+                return ControlFlow::Continue;
+            }
+        }
+        for stmt in &self.default {
+            if stmt.eval_value(context) == ControlFlow::Break {
+                return ControlFlow::Break;
+            }
+        }
+        ControlFlow::Continue
+    }
+
+    pub fn eval_assign(
+        &self,
+        context: &mut Context,
+        assign_table: &mut AssignTable,
+        assign_context: AssignContext,
+        base_tables: &[&AssignTable],
+    ) {
+        // Detach `refernced` before borrowing `assign_table` for base_tables.
+        let mut prev_referenced = std::mem::take(&mut assign_table.refernced);
+
+        let base_tables = if assign_table.table.is_empty() {
+            Cow::Borrowed(base_tables)
+        } else {
+            let mut bt = base_tables.to_vec();
+            bt.push(assign_table);
+            Cow::Owned(bt)
+        };
+
+        // `refernced` is rotated through branches so reads accumulate
+        // across the whole case, not just within one arm.
+        let n_branches = self.arms.len() + 1;
+        let mut branch_tables: Vec<AssignTable> = Vec::with_capacity(n_branches);
+        for arm in &self.arms {
+            let mut t = AssignTable::new(context);
+            t.refernced = prev_referenced;
+            for s in &arm.body {
+                s.eval_assign(context, &mut t, assign_context, &base_tables);
+            }
+            prev_referenced = std::mem::take(&mut t.refernced);
+            branch_tables.push(t);
+        }
+        let mut default_table = AssignTable::new(context);
+        default_table.refernced = prev_referenced;
+        for s in &self.default {
+            s.eval_assign(context, &mut default_table, assign_context, &base_tables);
+        }
+        let final_referenced = std::mem::take(&mut default_table.refernced);
+        branch_tables.push(default_table);
+
+        if assign_context.is_comb() && !has_cond_type(&self.token) {
+            let refs: Vec<&AssignTable> = branch_tables.iter().collect();
+            AssignTable::check_uncoverd_n_way(context, &refs, &base_tables);
+        }
+
+        let mut acc = branch_tables.pop().expect("default_table");
+        for mut t in branch_tables.into_iter().rev() {
+            t.merge_by_or(context, &mut acc, false);
+            acc = t;
+        }
+        assign_table.merge_by_or(context, &mut acc, false);
+        assign_table.refernced = final_referenced;
+    }
+
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        self.case_target.gather_ff(context, table, decl, None, true);
+        for arm in &self.arms {
+            for p in &arm.patterns {
+                p.for_each_expr(|e| e.gather_ff(context, table, decl, None, true));
+            }
+            for s in &arm.body {
+                s.gather_ff(context, table, decl);
+            }
+        }
+        for s in &self.default {
+            s.gather_ff(context, table, decl);
+        }
+    }
+
+    pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        // `from_ff=false` so the scrutinee/pattern reads stay out of FF
+        // classification while remaining visible to comb-vs-ff analyses.
+        self.case_target
+            .gather_ff(context, table, decl, None, false);
+        for arm in &self.arms {
+            for p in &arm.patterns {
+                p.for_each_expr(|e| e.gather_ff(context, table, decl, None, false));
+            }
+            for s in &arm.body {
+                s.gather_ff_comb_assign(context, table, decl);
+            }
+        }
+        for s in &self.default {
+            s.gather_ff_comb_assign(context, table, decl);
+        }
+    }
+
+    pub fn set_index(&mut self, index: &VarIndex) {
+        self.case_target.set_index(index);
+        for arm in &mut self.arms {
+            for p in &mut arm.patterns {
+                p.for_each_expr_mut(|e| e.set_index(index));
+            }
+            for s in &mut arm.body {
+                s.set_index(index);
+            }
+        }
+        for s in &mut self.default {
+            s.set_index(index);
+        }
+    }
+
+    /// Expand back to a nested `if/else` chain for consumers that only
+    /// understand `Statement::If`.
+    pub fn lower_to_nested_if(&self) -> Vec<Statement> {
+        let mut tail: Vec<Statement> = self.default.clone();
+        for arm in self.arms.iter().rev() {
+            let cond = arm_cond(&self.case_target, &arm.patterns);
+            let if_stmt = IfStatement {
+                cond,
+                true_side: arm.body.clone(),
+                false_side: std::mem::take(&mut tail),
+                token: arm.token,
+            };
+            tail = vec![Statement::If(if_stmt)];
+        }
+        tail
+    }
+}
+
+/// OR-combine an arm's patterns into a single boolean expression.
+fn arm_cond(target: &Expression, patterns: &[CasePattern]) -> Expression {
+    let mut iter = patterns.iter();
+    let first = iter
+        .next()
+        .expect("CaseArm must have at least one pattern")
+        .lower_to_cond(target);
+    iter.fold(first, |acc, p| {
+        let next = p.lower_to_cond(target);
+        let comptime = Box::new(Comptime::create_unknown(next.token_range()));
+        Expression::Binary(Box::new(acc), Op::LogicOr, Box::new(next), comptime)
+    })
+}
+
+impl fmt::Display for CaseStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ret = format!("case {} {{\n", self.case_target);
+        for arm in &self.arms {
+            let header = arm
+                .patterns
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut body = format!("{header}: {{\n");
+            for s in &arm.body {
+                let text = format!("{}\n", s);
+                body.push_str(&indent_all_by(2, text));
+            }
+            body.push_str("}\n");
+            ret.push_str(&indent_all_by(2, body));
+        }
+        if !self.default.is_empty() {
+            let mut def = "default: {\n".to_string();
+            for s in &self.default {
+                let text = format!("{}\n", s);
+                def.push_str(&indent_all_by(2, text));
+            }
+            def.push_str("}\n");
+            ret.push_str(&indent_all_by(2, def));
+        }
+        ret.push('}');
+        ret.fmt(f)
+    }
+}
+
+impl fmt::Display for CasePattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CasePattern::Eq(e) => e.fmt(f),
+            CasePattern::Range { lo, hi, inclusive } => {
+                let op = if *inclusive { "..=" } else { ".." };
+                write!(f, "{lo}{op}{hi}")
+            }
+        }
     }
 }

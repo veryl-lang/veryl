@@ -2015,6 +2015,50 @@ pub fn eval_factor_symbol(
     Err(ir_error!(token))
 }
 
+/// Extract source-level `CasePattern`s from a `CaseCondition` (one per
+/// `RangeItem`).
+pub fn case_patterns(
+    context: &mut Context,
+    cond: &CaseCondition,
+) -> IrResult<Vec<ir::CasePattern>> {
+    let mut ret = Vec::with_capacity(1 + cond.case_condition_list.len());
+    ret.push(range_item_pattern(context, &cond.range_item)?);
+    for x in &cond.case_condition_list {
+        ret.push(range_item_pattern(context, &x.range_item)?);
+    }
+    Ok(ret)
+}
+
+fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult<ir::CasePattern> {
+    let mut lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+
+    let comptime = lo.eval_comptime(context, None);
+    if !comptime.is_const {
+        context.insert_error(AnalyzerError::unevaluable_value(
+            UnevaluableValueKind::CaseCondition,
+            &range_item.into(),
+        ));
+    }
+
+    let Some(opt) = &range_item.range.range_opt else {
+        return Ok(ir::CasePattern::Eq(Box::new(lo)));
+    };
+    let mut hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
+    let comptime = hi.eval_comptime(context, None);
+    if !comptime.is_const {
+        context.insert_error(AnalyzerError::unevaluable_value(
+            UnevaluableValueKind::CaseCondition,
+            &range_item.into(),
+        ));
+    }
+    let inclusive = matches!(opt.range_operator.as_ref(), RangeOperator::DotDotEqu(_));
+    Ok(ir::CasePattern::Range {
+        lo: Box::new(lo),
+        hi: Box::new(hi),
+        inclusive,
+    })
+}
+
 pub fn case_condition(
     context: &mut Context,
     tgt: &ir::Expression,

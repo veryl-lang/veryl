@@ -73,6 +73,17 @@ fn process_statement(
             merge_branches(ctx, cond, current, &true_branch, &false_branch);
             Ok(())
         }
+        Statement::Case(c) => {
+            // Direct SOP path; fall back to lower-then-mux2 when the arm
+            // pattern isn't recognizable.
+            if let Some(chain) = case_chain_from_case_statement(c)
+                && synth_case_chain(ctx, &chain, current)?
+            {
+                return Ok(());
+            }
+            let lowered = c.lower_to_nested_if();
+            process_statements(ctx, &lowered, current)
+        }
         Statement::IfReset(_) => Err(SynthesizerError::internal(
             "nested if_reset reached synthesizer",
         )),
@@ -410,13 +421,62 @@ fn try_fold_case_like(
     ifst: &air::IfStatement,
     current: &mut HashMap<air::VarId, Vec<NetId>>,
 ) -> Result<bool, SynthesizerError> {
+    let Some(chain) = collect_case_chain(ifst) else {
+        return Ok(false);
+    };
+    synth_case_chain(ctx, &chain, current)
+}
+
+/// Multi-pattern arms expand into multiple chain arms sharing the same
+/// body — case-equality means at most one pattern matches per scrutinee
+/// value, so splitting preserves first-match-wins.
+fn case_chain_from_case_statement(c: &air::CaseStatement) -> Option<CaseChain<'_>> {
+    if c.arms.is_empty() {
+        return None;
+    }
+    let mut arms = Vec::with_capacity(c.arms.len());
+    for arm in &c.arms {
+        for pat in &arm.patterns {
+            let cond = arm_cond_from_pattern(pat)?;
+            arms.push(CaseArm {
+                cond,
+                body: &arm.body,
+            });
+        }
+    }
+    Some(CaseChain {
+        sel_expr: c.case_target.as_ref(),
+        arms,
+        default_body: &c.default,
+    })
+}
+
+fn arm_cond_from_pattern(p: &air::CasePattern) -> Option<ArmCondition> {
+    match p {
+        air::CasePattern::Eq(e) => Some(ArmCondition::Eq(try_constant(e)?)),
+        air::CasePattern::Range { lo, hi, inclusive } => {
+            let lo_k = try_constant(lo)?;
+            let hi_k = try_constant(hi)?;
+            let hi_exclusive = if *inclusive {
+                hi_k.checked_add(1)?
+            } else {
+                hi_k
+            };
+            Some(ArmCondition::Range(Some(lo_k), Some(hi_exclusive)))
+        }
+    }
+}
+
+/// Core SOP synthesis from a `CaseChain`.
+fn synth_case_chain(
+    ctx: &mut ConvContext,
+    chain: &CaseChain<'_>,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<bool, SynthesizerError> {
     // Need ≥ 3 arms to beat the generic path; below that the shared-match
     // overhead costs more than it saves.
     const MIN_ARMS: usize = 3;
 
-    let Some(chain) = collect_case_chain(ifst) else {
-        return Ok(false);
-    };
     if chain.arms.len() < MIN_ARMS {
         return Ok(false);
     }

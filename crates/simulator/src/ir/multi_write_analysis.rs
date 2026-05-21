@@ -115,6 +115,10 @@ fn count_writes_one(
             let f = count_writes_seq(&i.false_side, ctx);
             merge_branches_max(&t, &f, &mut result);
         }
+        Statement::Case(c) => {
+            let lowered = c.lower_to_nested_if();
+            return count_writes_seq(&lowered, ctx);
+        }
         Statement::IfReset(i) => {
             let t = count_writes_seq(&i.true_side, ctx);
             let f = count_writes_seq(&i.false_side, ctx);

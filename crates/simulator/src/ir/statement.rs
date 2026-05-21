@@ -3428,6 +3428,15 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 let x: ProtoIfStatement = Conv::conv(context, x)?;
                 vec![ProtoStatement::If(x)]
             }
+            air::Statement::Case(c) => {
+                let lowered = c.lower_to_nested_if();
+                let mut out: Vec<ProtoStatement> = Vec::new();
+                for s in &lowered {
+                    let v: Vec<ProtoStatement> = Conv::conv(context, s)?;
+                    out.extend(v);
+                }
+                out
+            }
             air::Statement::IfReset(x) => {
                 let x: ProtoIfStatement = Conv::conv(context, x)?;
                 vec![ProtoStatement::If(x)]

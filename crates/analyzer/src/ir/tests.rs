@@ -205,21 +205,21 @@ fn branch() {
         }
       }
     }
-    if (var4 ==? 32'sh00000000) {
-      var5 = 32'sh00000000;
-    } else {
-      if (var4 ==? 32'sh00000001) {
+    case var4 {
+      32'sh00000000: {
+        var5 = 32'sh00000000;
+      }
+      32'sh00000001: {
         var5 = 32'sh00000001;
-      } else {
-        if (var4 ==? 32'sh00000002) {
-          var5 = 32'sh00000002;
-        } else {
-          if (var4 ==? 32'sh00000003) {
-            var5 = 32'sh00000003;
-          } else {
-            var5 = 32'sh00000004;
-          }
-        }
+      }
+      32'sh00000002: {
+        var5 = 32'sh00000002;
+      }
+      32'sh00000003: {
+        var5 = 32'sh00000003;
+      }
+      default: {
+        var5 = 32'sh00000004;
       }
     }
     if (var6 == 32'sh00000000) {
@@ -244,6 +244,67 @@ fn branch() {
 "#;
 
     check_ir(code, exp);
+}
+
+// Regression for `Ir::clone()` stack overflow on deeply chained case
+// statements: when case was lowered to a nested-If chain, derived Clone
+// recursed linearly in arm count and overflowed at N ≈ 2048.  The
+// structural assertion catches a regression cheaply before the
+// stack-bound clone runs.
+#[test]
+fn large_case_no_stack_overflow_on_clone() {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    const N: usize = 1024;
+    let mut code = String::from(
+        "module ModuleA (a: input logic<11>, o: output logic<32>) {\n  always_comb {\n    case a {\n",
+    );
+    for i in 0..N {
+        code.push_str(&format!("      11'h{:03x}: o = 32'h{:08x};\n", i, i));
+    }
+    code.push_str("      default: o = 32'hffffffff;\n    }\n  }\n}\n");
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(&code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    assert!(
+        errors.is_empty(),
+        "analyzer must accept a {N}-arm case without errors, got: {errors:?}"
+    );
+
+    // Pre-flight check: panic here on regression so the stack-bound
+    // clone below doesn't overflow and abort the whole test process.
+    let text = ir.to_string();
+    assert!(
+        text.contains("case var0 {"),
+        "expected Statement::Case rendering in IR — lowering may have regressed to nested If"
+    );
+    assert!(
+        !text.contains("if (var0 ==?"),
+        "found nested-If from case lowering — Statement::Case must be the only form"
+    );
+    assert!(
+        !text.contains("(var0 ==?"),
+        "found `(var0 ==?` in arm rendering — patterns should be rendered directly"
+    );
+
+    let cloned: Ir = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || ir.clone())
+        .unwrap()
+        .join()
+        .expect("Statement::Case clone must not overflow 256 KB stack");
+
+    assert_eq!(text, cloned.to_string(), "clone must preserve IR rendering");
 }
 
 #[test]
