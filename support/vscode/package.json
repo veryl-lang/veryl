@@ -73,6 +73,12 @@
       {
         "title": "Veryl Language Server",
         "properties": {
+          "veryl-vscode.enabled": {
+            "scope": "window",
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Enable or disable the Veryl language server."
+          },
           "veryl-vscode.verylLsBinary.path": {
             "scope": "window",
             "type": [
