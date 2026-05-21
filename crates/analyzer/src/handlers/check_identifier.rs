@@ -1,5 +1,7 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::symbol::Direction as SymDirection;
+use crate::symbol::{Affiliation, SymbolKind};
+use crate::symbol_table;
 use crate::symbol_table::is_sv_keyword;
 use veryl_metadata::{Case, Lint};
 use veryl_parser::ParolError;
@@ -307,13 +309,16 @@ impl VerylGrammarTrait for CheckIdentifier {
     }
 
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point {
+        // After: child `identifier` nodes have populated `namespace_table`,
+        // so LHS resolution can reach vars declared in the always_* body.
+        if let HandlerPoint::After = self.point {
             let token = arg.expression_identifier.identifier().token;
+            let is_local_var = is_local_block_var(arg.expression_identifier.as_ref());
             if self.in_always_comb {
-                self.check(&token, Kind::Wire);
+                self.check(&token, if is_local_var { Kind::Var } else { Kind::Wire });
             }
             if self.in_always_ff {
-                self.check(&token, Kind::Reg);
+                self.check(&token, if is_local_var { Kind::Var } else { Kind::Reg });
             }
         }
         Ok(())
@@ -493,6 +498,19 @@ impl VerylGrammarTrait for CheckIdentifier {
         }
         Ok(())
     }
+}
+
+fn is_local_block_var(expr: &ExpressionIdentifier) -> bool {
+    let Ok(symbol) = symbol_table::resolve(expr.scoped_identifier.as_ref()) else {
+        return false;
+    };
+    let SymbolKind::Variable(prop) = &symbol.found.kind else {
+        return false;
+    };
+    matches!(
+        prop.affiliation,
+        Affiliation::StatementBlock | Affiliation::Function
+    )
 }
 
 fn is_lower_camel_case(text: &str) -> bool {

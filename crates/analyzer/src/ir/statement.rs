@@ -7,6 +7,7 @@ use crate::ir::{
     Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, Type, VarId, VarIndex,
     VarPath, VarSelect,
 };
+use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
 use indent::indent_all_by;
 use std::borrow::Cow;
@@ -523,6 +524,11 @@ impl AssignDestination {
             // Let-bound variables use blocking assignment (BA) semantics
             // and must not be registered as FF in the table.
             if variable.kind == crate::ir::VarKind::Let {
+                return;
+            }
+            // Vars declared inside an always_ff block are procedural locals
+            // (BA semantics) and must not be registered as FF either.
+            if variable.affiliation == Affiliation::AlwaysFf {
                 return;
             }
             if let Some(index) = self.index.eval_value(context) {

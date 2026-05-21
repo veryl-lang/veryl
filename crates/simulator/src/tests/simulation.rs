@@ -12204,3 +12204,51 @@ fn merged_jit_dup_scc_regression() {
         );
     }
 }
+
+/// A `var` declared inside an `always_ff` block is a procedural local
+/// (BA semantics), not a register: its value must not persist across
+/// clock edges.
+#[test]
+fn local_var_in_always_ff_is_not_register() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        o_x: output logic,
+    ) {
+        always_ff {
+            if_reset {
+                o_x = 1'b0;
+            } else {
+                var tmp: logic;
+                if true {
+                    tmp = 1'b1;
+                }
+                o_x = tmp;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("o_x").unwrap(), Value::new(0, 1, false));
+
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_x").unwrap(),
+            Value::new(1, 1, false),
+            "o_x should latch 1 after first clock (jit={}, 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        sim.step(&clk);
+        assert_eq!(sim.get("o_x").unwrap(), Value::new(1, 1, false));
+    }
+}
