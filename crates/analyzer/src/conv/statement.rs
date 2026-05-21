@@ -1,6 +1,6 @@
 use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::utils::{
-    TypePosition, argument_list, build_for_range, build_for_statement, case_condition,
+    TypePosition, argument_list, build_for_range, build_for_statement, case_patterns,
     eval_assign_statement, eval_expr, eval_variable, expand_connect, expand_connect_const,
     function_call, get_return_str, switch_condition, tb_method_call, try_infer_decl_type,
     try_infer_var_assign,
@@ -739,44 +739,54 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
 
         let mut tgt: ir::Expression = Conv::conv(context, value.expression.as_ref())?;
         tgt.eval_comptime(context, None);
-        let mut ret = ir::StatementBlock::default();
+
+        let mut arms: Vec<ir::CaseArm> = Vec::new();
+        let mut default: Vec<ir::Statement> = Vec::new();
 
         for item in &value.case_statement_list {
-            let cond = match item.case_item.case_item_group.as_ref() {
-                CaseItemGroup::CaseCondition(x) => {
-                    Some(case_condition(context, &tgt, x.case_condition.as_ref())?)
-                }
-                CaseItemGroup::Defaul(_) => None,
-            };
-            let true_side: ir::StatementBlock = match item.case_item.case_item_group0.as_ref() {
+            let body: ir::StatementBlock = match item.case_item.case_item_group0.as_ref() {
                 CaseItemGroup0::Statement(x) => Conv::conv(context, x.statement.as_ref())?,
                 CaseItemGroup0::StatementBlock(x) => {
                     Conv::conv(context, x.statement_block.as_ref())?
                 }
             };
-
-            let statements = if let Some(cond) = cond {
-                ir::StatementBlock(vec![ir::Statement::If(ir::IfStatement {
-                    cond,
-                    true_side: true_side.0,
-                    false_side: vec![],
-                    token: item.case_item.as_ref().into(),
-                })])
-            } else {
-                true_side
-            };
-
-            if ret.0.is_empty() {
-                ret = statements;
-            } else if let ir::Statement::If(x) = &mut ret.0[0] {
-                x.insert_leaf_false(statements.0);
+            match item.case_item.case_item_group.as_ref() {
+                CaseItemGroup::CaseCondition(x) => {
+                    let patterns = case_patterns(context, x.case_condition.as_ref())?;
+                    arms.push(ir::CaseArm {
+                        patterns,
+                        body: body.0,
+                        token: item.case_item.as_ref().into(),
+                    });
+                }
+                CaseItemGroup::Defaul(_) => {
+                    // Parser enforces at most one default; guard against
+                    // a malformed input by keeping the first occurrence.
+                    if default.is_empty() {
+                        default = body.0;
+                    }
+                }
             }
         }
 
-        Ok(ret)
+        if arms.is_empty() && default.is_empty() {
+            return Ok(ir::StatementBlock::default());
+        }
+
+        Ok(ir::StatementBlock(vec![ir::Statement::Case(
+            ir::CaseStatement {
+                arms,
+                default,
+                case_target: Box::new(tgt),
+                token: value.case.case_token.token.into(),
+            },
+        )]))
     }
 }
 
+// `switch` arms carry arbitrary boolean conditions with no shared
+// selector, so they stay as a nested if-else chain — only `case` is
+// lifted to `Statement::Case`.
 impl Conv<&SwitchStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &SwitchStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.switch.switch_token).into();

@@ -15,9 +15,9 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, AssignStatement, Component, Declaration, Expression, Factor, ForBound,
-    ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module, Statement,
-    VarIndex, VarSelect, Variable,
+    AssignDestination, AssignStatement, CaseStatement, Component, Declaration, Expression, Factor,
+    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module,
+    Statement, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use crate::value::ValueBigUint;
@@ -864,6 +864,7 @@ fn walk_stmt(stmt: &Statement, state: &mut DominanceState, ctx: &mut Context) {
     match stmt {
         Statement::Assign(a) => walk_assign(a, state, ctx),
         Statement::If(i) => walk_if(i, state, ctx),
+        Statement::Case(c) => walk_case(c, state, ctx),
         Statement::For(f) => walk_for(f, state, ctx),
         Statement::FunctionCall(c) => walk_function_call(c.as_ref(), state, ctx),
         // IfReset is always_ff-only; the rest have no LHS to track.
@@ -927,6 +928,75 @@ fn walk_if(stmt: &IfStatement, state: &mut DominanceState, ctx: &mut Context) {
     for (key, mask) in false_state.undom {
         *state.undom.entry(key).or_default() |= &mask;
     }
+}
+
+fn walk_case(stmt: &CaseStatement, state: &mut DominanceState, ctx: &mut Context) {
+    walk_expr(&stmt.case_target, state, ctx);
+    for arm in &stmt.arms {
+        for p in &arm.patterns {
+            match p {
+                crate::ir::CasePattern::Eq(e) => walk_expr(e, state, ctx),
+                crate::ir::CasePattern::Range { lo, hi, .. } => {
+                    walk_expr(lo, state, ctx);
+                    walk_expr(hi, state, ctx);
+                }
+            }
+        }
+    }
+
+    let saved_defs = state.defs.clone();
+    let saved_undom = state.undom.clone();
+
+    let mut branch_states: Vec<DominanceState> = Vec::with_capacity(stmt.arms.len() + 1);
+    for arm in &stmt.arms {
+        let mut s = DominanceState {
+            defs: saved_defs.clone(),
+            undom: saved_undom.clone(),
+        };
+        walk_block(&arm.body, &mut s, ctx);
+        branch_states.push(s);
+    }
+    // Empty default behaves as the saved state, modeling "no arm matched".
+    let mut default_state = DominanceState {
+        defs: saved_defs,
+        undom: saved_undom,
+    };
+    walk_block(&stmt.default, &mut default_state, ctx);
+    branch_states.push(default_state);
+
+    // defs = intersection across branches; undom = union.
+    let mut keys: HashSet<IdxKey> = HashSet::default();
+    for b in &branch_states {
+        for k in b.defs.keys() {
+            keys.insert(*k);
+        }
+    }
+    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
+    for key in keys {
+        let zero = BigUint::default();
+        let mut acc: Option<BigUint> = None;
+        for b in &branch_states {
+            let v = b.defs.get(&key).unwrap_or(&zero).clone();
+            acc = Some(match acc {
+                Some(a) => a & v,
+                None => v,
+            });
+        }
+        if let Some(merged) = acc
+            && merged != zero
+        {
+            merged_defs.insert(key, merged);
+        }
+    }
+    state.defs = merged_defs;
+
+    let mut merged_undom: HashMap<IdxKey, BigUint> = HashMap::default();
+    for b in branch_states {
+        for (key, mask) in b.undom {
+            *merged_undom.entry(key).or_default() |= &mask;
+        }
+    }
+    state.undom = merged_undom;
 }
 
 fn walk_for(stmt: &ForStatement, state: &mut DominanceState, ctx: &mut Context) {

@@ -411,6 +411,103 @@ impl AssignTable {
         }
     }
 
+    /// N-way uncovered-branch check across `branches` against `base_tables`.
+    ///
+    /// For each `(var, bit)`, computes the union mask over every branch
+    /// (augmented with the base) and emits one `uncovered_branch` error
+    /// where some branch falls short of the union.  Variables written via
+    /// `always_ff` / `always_comb` are exempt.
+    pub fn check_uncoverd_n_way(
+        context: &mut Context,
+        branches: &[&AssignTable],
+        base_tables: &[&AssignTable],
+    ) {
+        if branches.len() < 2 {
+            return;
+        }
+
+        let mut keys = HashSet::default();
+        for b in branches {
+            for k in b.table.keys() {
+                keys.insert(*k);
+            }
+        }
+
+        for key in &keys {
+            if branches
+                .iter()
+                .any(|b| b.table.get(key).map(|e| e.is_always()).unwrap_or(false))
+            {
+                continue;
+            }
+
+            let Some(sample) = branches.iter().find_map(|b| b.table.get(key)) else {
+                continue;
+            };
+            let Some(array) = sample.array.total() else {
+                continue;
+            };
+
+            let mut base_mask: Option<Vec<BigUint>> = None;
+            for x in base_tables {
+                if let Some(x) = x.table.get(key) {
+                    match &mut base_mask {
+                        Some(acc) => {
+                            for (a, b) in acc.iter_mut().zip(x.mask.iter()) {
+                                *a |= b;
+                            }
+                        }
+                        None => base_mask = Some(x.mask.clone()),
+                    }
+                }
+            }
+
+            let zero: BigUint = 0u32.into();
+            let mut per_branch: Vec<Vec<BigUint>> = Vec::with_capacity(branches.len());
+            let mut union_mask: Vec<BigUint> = vec![0u32.into(); array];
+            for b in branches {
+                let mut m: Vec<BigUint> = Vec::with_capacity(array);
+                for i in 0..array {
+                    let raw = b
+                        .table
+                        .get(key)
+                        .map(|e| &e.mask[i])
+                        .unwrap_or(&zero)
+                        .clone();
+                    let combined = if let Some(base) = &base_mask {
+                        &raw | &base[i]
+                    } else {
+                        raw
+                    };
+                    union_mask[i] |= &combined;
+                    m.push(combined);
+                }
+                per_branch.push(m);
+            }
+
+            let mut tokens: Vec<TokenRange> = Vec::new();
+            for b in branches {
+                if let Some(e) = b.table.get(key) {
+                    tokens.extend(e.tokens.iter().cloned());
+                }
+            }
+            if tokens.is_empty() {
+                continue;
+            }
+
+            for i in 0..array {
+                let target = &union_mask[i];
+                if per_branch.iter().any(|m| m[i] != *target) {
+                    context.insert_error(AnalyzerError::uncovered_branch(
+                        &sample.path.to_string(),
+                        &tokens[0],
+                        &tokens,
+                    ));
+                }
+            }
+        }
+    }
+
     pub fn check_missing_reset(&self, context: &mut Context, false_side: &AssignTable) {
         for (key, tgt_val) in &false_side.table {
             // skip variables defined in always_ff
