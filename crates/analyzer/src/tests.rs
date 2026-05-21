@@ -2,7 +2,7 @@ use crate::conv::Context;
 use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
 use std::thread;
-use veryl_metadata::Metadata;
+use veryl_metadata::{Lint, Metadata};
 use veryl_parser::Parser;
 
 #[track_caller]
@@ -11,6 +11,27 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     attribute_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(&code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
+}
+
+#[track_caller]
+fn analyze_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.lint = lint;
     let parser = Parser::parse(&code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
@@ -12966,4 +12987,105 @@ fn missing_member_struct_constructor() {
 
     let errors = analyze_with_ir(code);
     assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+}
+
+#[test]
+fn local_var_in_always_ff_uses_var_naming() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        o_x  : output logic,
+    ) {
+        always_ff {
+            if_reset {
+                o_x = 1'b0;
+            } else {
+                var tmp: logic;
+                tmp = 1'b1;
+                o_x = tmp;
+            }
+        }
+    }
+    "#;
+
+    let mut lint = Lint::default();
+    lint.naming.prefix_reg = Some("r_".to_string());
+    lint.naming.prefix_var = Some("v_".to_string());
+
+    let errors = analyze_with_lint(code, lint);
+
+    let invalid: Vec<_> = errors
+        .iter()
+        .filter_map(|e| match e {
+            AnalyzerError::InvalidIdentifier {
+                identifier, rule, ..
+            } => Some((identifier.as_str(), rule.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        invalid
+            .iter()
+            .any(|(id, rule)| *id == "tmp" && rule.contains("v_")),
+        "expected `tmp` to be flagged by the var rule (`v_`), got: {invalid:?}"
+    );
+    assert!(
+        !invalid
+            .iter()
+            .any(|(id, rule)| *id == "tmp" && rule.contains("r_")),
+        "`tmp` should not be flagged by the reg rule (`r_`), got: {invalid:?}"
+    );
+    assert!(
+        invalid
+            .iter()
+            .any(|(id, rule)| *id == "o_x" && rule.contains("r_")),
+        "expected `o_x` to keep the reg rule (`r_`), got: {invalid:?}"
+    );
+}
+
+#[test]
+fn local_var_in_always_comb_uses_var_naming() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        always_comb {
+            var tmp: logic;
+            tmp = i_a;
+            o_x = tmp;
+        }
+    }
+    "#;
+
+    let mut lint = Lint::default();
+    lint.naming.prefix_wire = Some("w_".to_string());
+    lint.naming.prefix_var = Some("v_".to_string());
+
+    let errors = analyze_with_lint(code, lint);
+
+    let invalid: Vec<_> = errors
+        .iter()
+        .filter_map(|e| match e {
+            AnalyzerError::InvalidIdentifier {
+                identifier, rule, ..
+            } => Some((identifier.as_str(), rule.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        invalid
+            .iter()
+            .any(|(id, rule)| *id == "tmp" && rule.contains("v_")),
+        "expected `tmp` to be flagged by the var rule (`v_`), got: {invalid:?}"
+    );
+    assert!(
+        !invalid
+            .iter()
+            .any(|(id, rule)| *id == "tmp" && rule.contains("w_")),
+        "`tmp` should not be flagged by the wire rule (`w_`), got: {invalid:?}"
+    );
 }
