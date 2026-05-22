@@ -914,11 +914,11 @@ fn testbench_fst_clock_reset_waveform() {
 
         // Find clk and rst variables
         let clk_var = hier
-            .iter_vars()
+            .all_vars()
             .find(|v| v.name(hier) == "clk")
             .expect("clk not found in FST");
         let rst_var = hier
-            .iter_vars()
+            .all_vars()
             .find(|v| v.name(hier) == "rst")
             .expect("rst not found in FST");
         let clk_ref = clk_var.signal_ref();
@@ -935,8 +935,10 @@ fn testbench_fst_clock_reset_waveform() {
         for (i, &t) in time_table.iter().enumerate() {
             if let Some(offset) = clk_signal.get_offset(i as u32) {
                 let val = clk_signal.get_value_at(&offset, 0);
-                if let wellen::SignalValue::Binary(bits, _) = val {
-                    clk_values.push((t, bits[0]));
+                if let wellen::SignalValueRef::BitVec(bv) = val
+                    && let Some(bytes) = bv.be_bytes()
+                {
+                    clk_values.push((t, bytes[0]));
                 }
             }
         }
@@ -964,8 +966,10 @@ fn testbench_fst_clock_reset_waveform() {
         for (i, &t) in time_table.iter().enumerate() {
             if let Some(offset) = rst_signal.get_offset(i as u32) {
                 let val = rst_signal.get_value_at(&offset, 0);
-                if let wellen::SignalValue::Binary(bits, _) = val {
-                    rst_values.push((t, bits[0]));
+                if let wellen::SignalValueRef::BitVec(bv) = val
+                    && let Some(bytes) = bv.be_bytes()
+                {
+                    rst_values.push((t, bytes[0]));
                 }
             }
         }
