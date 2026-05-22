@@ -11,10 +11,7 @@ module combinational_loop_inst (
 ) {
     var x: logic<8>;
     var y: logic<8>;
-    inst u: combinational_loop_inst_buf (
-        i: x,
-        o: y,
-    );
+    inst u: combinational_loop_inst_buf ( i: x, o: y );
     assign x = y;
     assign b = y;
 }

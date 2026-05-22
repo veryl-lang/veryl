@@ -97,25 +97,9 @@ pub module async_handshake::<S: synchronizer> #(
     //--------------------------------------------------------------
     //  Synchronizers
     //--------------------------------------------------------------
-    inst u_s_to_d: S #(
-        WIDTH : 1     ,
-        STAGES: STAGES,
-    ) (
-        i_clk: id_clk     ,
-        i_rst: drst       ,
-        i_d  : src_state_s,
-        o_d  : src_state_d,
-    );
+    inst u_s_to_d: S #( WIDTH: 1, STAGES: STAGES ) ( i_clk: id_clk, i_rst: drst, i_d: src_state_s, o_d: src_state_d );
 
-    inst u_d_to_s: S #(
-        WIDTH : 1     ,
-        STAGES: STAGES,
-    ) (
-        i_clk: is_clk     ,
-        i_rst: srst       ,
-        i_d  : dst_state_d,
-        o_d  : dst_state_s,
-    );
+    inst u_d_to_s: S #( WIDTH: 1, STAGES: STAGES ) ( i_clk: is_clk, i_rst: srst, i_d: dst_state_d, o_d: dst_state_s );
 
     //--------------------------------------------------------------
     //  Destination Side

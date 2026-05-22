@@ -57,17 +57,7 @@ pub module gray_counter #(
         o_wrap_around                ,
     );
 
-    inst u_gray_cur: gray_encoder #(
-        WIDTH  ,
-    ) (
-        i_bin : bin_count,
-        o_gray: o_count  ,
-    );
-    inst u_gray_next: gray_encoder #(
-        WIDTH  ,
-    ) (
-        i_bin : bin_count_next,
-        o_gray: o_count_next  ,
-    );
+    inst u_gray_cur : gray_encoder #( WIDTH ) ( i_bin: bin_count, o_gray: o_count );
+    inst u_gray_next: gray_encoder #( WIDTH ) ( i_bin: bin_count_next, o_gray: o_count_next );
 
 }

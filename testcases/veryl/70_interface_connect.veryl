@@ -20,11 +20,7 @@ module Module70 (
     inst a: Interface70A;
     inst b: Interface70B::<8>;
 
-    inst u: Module70A (
-        a: a,
-        b: b,
-        c: c,
-    );
+    inst u: Module70A ( a: a, b: b, c: c );
 }
 
 module Module70A (

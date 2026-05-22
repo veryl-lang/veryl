@@ -1,7 +1,5 @@
 module sv_with_implicit_reset {
     let rst: reset = 1;
 
-    inst u: $sv::Module (
-        rst  ,
-    );
+    inst u: $sv::Module ( rst );
 }

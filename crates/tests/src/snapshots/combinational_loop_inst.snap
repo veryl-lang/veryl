@@ -5,18 +5,18 @@ expression: out
 combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
 
   × combinational loop detected on "x"
-    ╭─[../../testcases/error/combinational_loop_inst.veryl:18:12]
- 17 │     );
- 18 │     assign x = y;
+    ╭─[../../testcases/error/combinational_loop_inst.veryl:15:12]
+ 14 │     inst u: combinational_loop_inst_buf ( i: x, o: y );
+ 15 │     assign x = y;
     ·            ┬
     ·            ╰── Error location
- 19 │     assign b = y;
+ 16 │     assign b = y;
     ╰────
-    ╭─[../../testcases/error/combinational_loop_inst.veryl:16:12]
- 15 │         i: x,
- 16 │         o: y,
-    ·            ┬
-    ·            ╰── involved in loop
- 17 │     );
+    ╭─[../../testcases/error/combinational_loop_inst.veryl:14:52]
+ 13 │     var y: logic<8>;
+ 14 │     inst u: combinational_loop_inst_buf ( i: x, o: y );
+    ·                                                    ┬
+    ·                                                    ╰── involved in loop
+ 15 │     assign x = y;
     ╰────
   help:

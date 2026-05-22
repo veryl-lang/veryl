@@ -10,14 +10,7 @@ module Module14 {
     inst x: Module14B;
 
     // module instantiation with parameter and port
-    inst xx: Module14C #(
-        X    ,
-        Y: 10,
-    ) (
-        a        ,
-        bb  : aa ,
-        bbbb: bbb,
-    );
+    inst xx: Module14C #( X, Y: 10 ) ( a, bb: aa, bbbb: bbb );
 
     // interface instantiation
     inst y: InterfaceA;

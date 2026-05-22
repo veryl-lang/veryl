@@ -63,8 +63,5 @@ module Module81B {
         }
     }
 
-    inst u: Module81A (
-        m_if: a_if,
-        s_if: b_if,
-    );
+    inst u: Module81A ( m_if: a_if, s_if: b_if );
 }

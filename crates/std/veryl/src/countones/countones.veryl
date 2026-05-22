@@ -18,18 +18,8 @@ pub module countones #(
         var   ones_bot: logic<CLOGWBOT>;
         var   ones_top: logic<CLOGWTOP>;
 
-        inst u_bot: countones #(
-            W: WBOT,
-        ) (
-            i_data: data_bot,
-            o_ones: ones_bot,
-        );
-        inst u_top: countones #(
-            W: WTOP,
-        ) (
-            i_data: data_top,
-            o_ones: ones_top,
-        );
+        inst u_bot: countones #( W: WBOT ) ( i_data: data_bot, o_ones: ones_bot );
+        inst u_top: countones #( W: WTOP ) ( i_data: data_top, o_ones: ones_top );
         assign o_ones = {1'b0 repeat (W - WTOP), ones_top} + {1'b0 repeat (W - WBOT), ones_bot};
         // initial {
         //     $monitor("i_data: %b, data_top: %b, data_bot: %b\n", i_data, data_top, data_bot, "o_ones: %d, ones_top: %d, ones_bot: %d\n", o_ones, ones_top, ones_bot);

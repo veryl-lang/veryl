@@ -134,7 +134,16 @@ pub package axi4_config {
 }
 
 ///### AXI4 bus package
-pub package axi4_pkg::<ADDR_W: u32, DATA_W_BYTES: u32, ID_W: u32, AWUSER_W: u32, WUSER_W: u32, BUSER_W: u32, ARUSER_W: u32, RUSER_W: u32> for axi4_prototype {
+pub package axi4_pkg::<
+    ADDR_W      : u32,
+    DATA_W_BYTES: u32,
+    ID_W        : u32,
+    AWUSER_W    : u32,
+    WUSER_W     : u32,
+    BUSER_W     : u32,
+    ARUSER_W    : u32,
+    RUSER_W     : u32,
+> for axi4_prototype {
     const ADDRESS_WIDTH   : u32 = ADDR_W;
     const DATA_WIDTH_BYTES: u32 = DATA_W_BYTES;
     const NUM_BURSTS_LEN  : u32 = 8;

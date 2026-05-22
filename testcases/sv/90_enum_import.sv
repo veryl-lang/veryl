@@ -45,7 +45,9 @@ module veryl_testcase_Module90C
 
     veryl_testcase_Package90::EnumPkg a  ;
     always_comb a   = veryl_testcase_Package90::EnumPkg_P;
-    always_comb o_d = ((a) inside {veryl_testcase_Package90::EnumPkg_P, veryl_testcase_Package90::EnumPkg_Q, veryl_testcase_Package90::EnumPkg_R});
+    always_comb o_d = ((a) inside {
+        veryl_testcase_Package90::EnumPkg_P, veryl_testcase_Package90::EnumPkg_Q, veryl_testcase_Package90::EnumPkg_R
+    });
 endmodule
 
 module veryl_testcase_Module90D;

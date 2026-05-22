@@ -1,15 +1,14 @@
 ---
 source: crates/tests/src/lib.rs
-assertion_line: 317
 expression: out
 ---
 unsupported_description
 
   × unsupported description
-   ╭─[../../testcases/error/recursive_function.veryl:6:16]
- 5 │     function recurse(x: input logic<32>) -> logic<32> {
- 6 │         return recurse(x);
+   ╭─[../../testcases/error/recursive_function.veryl:8:16]
+ 7 │     ) -> logic<32> {
+ 8 │         return recurse(x);
    ·                ───┬───
    ·                   ╰── this description is not supported by the simulator
- 7 │     }
+ 9 │     }
    ╰────

@@ -18,9 +18,5 @@ module Module73B {
 
     inst u0: Module73A::<0>;
     inst u1: Module73A::<1>;
-    inst u2: Module73A::<1> (
-        i_a: 0 ,
-        i_b: 0 ,
-        o_d: _d,
-    );
+    inst u2: Module73A::<1> ( i_a: 0, i_b: 0, o_d: _d );
 }

@@ -7,17 +7,7 @@ module Module42 (
     const a: u32 = $sv::pkg::paramA;
     //const b: u32 = pkg::paramA;
 
-    inst u0: $sv::delay (
-        i_clk    ,
-        i_rst_n  ,
-        i_d      ,
-        o_d      ,
-    );
+    inst u0: $sv::delay ( i_clk, i_rst_n, i_d, o_d );
 
-    inst u1: $sv::delay (
-        i_clk    ,
-        i_rst_n  ,
-        i_d      ,
-        o_d      ,
-    );
+    inst u1: $sv::delay ( i_clk, i_rst_n, i_d, o_d );
 }

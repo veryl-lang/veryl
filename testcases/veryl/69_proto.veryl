@@ -1,11 +1,6 @@
 module Module69::<T: Proto69> {
     inst i: Interface69;
-    inst u: T (
-        a: 0,
-        b: 0,
-        c: _,
-        d: i,
-    );
+    inst u: T ( a: 0, b: 0, c: _, d: i );
 }
 
 proto module Proto69 #(

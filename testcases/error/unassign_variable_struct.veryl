@@ -10,5 +10,5 @@ module unassign_variable_struct (
 
     assign a.x = 0;
     // Read a.y so the unassigned field is not treated as dead.
-    assign o   = a.y;
+    assign o = a.y;
 }

@@ -16,15 +16,11 @@ module IgnoredCounter (
 #[ignore]
 module test_ignored_counter {
     inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen(clk);
+    inst rst: $tb::reset_gen ( clk );
 
     var cnt: logic<32>;
 
-    inst dut: IgnoredCounter (
-        clk: clk,
-        rst: rst,
-        cnt: cnt,
-    );
+    inst dut: IgnoredCounter ( clk: clk, rst: rst, cnt: cnt );
 
     initial {
         rst.assert();

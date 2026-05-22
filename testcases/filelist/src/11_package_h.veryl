@@ -1,5 +1,5 @@
 package PackageH {
-  struct StructH {
-    H: PackageG::G,
-  }
+    struct StructH {
+        H: PackageG::G,
+    }
 }

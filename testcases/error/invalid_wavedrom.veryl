@@ -7,10 +7,10 @@
 /// ]}
 /// ```
 module invalid_wavedrom (
-    i_clk : input  clock,
-    i_rst : input  reset,
-    i_dat : input  logic,
-    o_dat : output logic,
+    i_clk: input  clock,
+    i_rst: input  reset,
+    i_dat: input  logic,
+    o_dat: output logic,
 ) {
     assign o_dat = i_dat;
 }

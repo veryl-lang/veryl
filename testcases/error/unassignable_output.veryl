@@ -1,7 +1,5 @@
 module unassignable_output {
-    inst u: unassignable_output2 (
-        a: 1,
-    );
+    inst u: unassignable_output2 ( a: 1 );
 }
 
 module unassignable_output2 (

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use veryl_parser::resource_table::TokenId;
 use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -35,38 +34,84 @@ impl From<Token> for Location {
     }
 }
 
+/// When the renderer should emit an alignment-padding entry. The
+/// aligner computes the padding *width*; this enum picks *when* it
+/// becomes visible (and whether it counts toward `fits_flat`).
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+pub enum PadKind {
+    /// Always emit; contributes `width` to `fits_flat`.
+    #[default]
+    Always,
+    /// Emit only when the enclosing layout group breaks; 0 in `fits_flat`.
+    IfBreak,
+    /// Emit only when the enclosing layout group is flat; contributes
+    /// `width` so an overflow can force a break.
+    IfFlat,
+}
+
+impl PadKind {
+    /// `Always` wins so the padding can never be silently dropped under
+    /// some layout decision.
+    pub fn merge(self, other: PadKind) -> PadKind {
+        match (self, other) {
+            (PadKind::Always, _) | (_, PadKind::Always) => PadKind::Always,
+            (PadKind::IfBreak, PadKind::IfBreak) => PadKind::IfBreak,
+            (PadKind::IfFlat, PadKind::IfFlat) => PadKind::IfFlat,
+            (PadKind::IfBreak, PadKind::IfFlat) | (PadKind::IfFlat, PadKind::IfBreak) => {
+                PadKind::Always
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Align {
     enable: bool,
+    /// Pad kind for the currently-open item; reset to `Always` on finish.
+    pad_kind: PadKind,
     index: usize,
     max_width: u32,
     width: u32,
     line: u32,
-    rest: Vec<(Location, u32)>,
-    additions: HashMap<Location, u32>,
+    /// Whether this kind participated in the current statement. Lets
+    /// `note_statement_end` advance `self.line` only for kinds that
+    /// actually emitted, so intermediate non-participating statements
+    /// still produce a natural group split.
+    had_item_in_statement: bool,
+    rest: Vec<(Location, u32, PadKind)>,
+    additions: HashMap<Location, (u32, PadKind)>,
     disable_auto_finish: bool,
     pub last_location: Option<Location>,
 }
 
 impl Align {
     fn finish_group(&mut self) {
-        for (loc, width) in &self.rest {
-            self.additions.insert(*loc, self.max_width - width);
+        for (loc, width, kind) in &self.rest {
+            self.additions.insert(*loc, (self.max_width - width, *kind));
         }
         self.rest.clear();
         self.max_width = 0;
     }
 
+    /// Clear the per-kind statement-participation flag. Use after an
+    /// explicit `finish_group` that abandons the current statement
+    /// context without going through `note_statement_end`.
+    pub fn clear_had_item_in_statement(&mut self) {
+        self.had_item_in_statement = false;
+    }
+
     pub fn finish_item(&mut self) {
         if self.enable {
             self.enable = false;
+            let kind = self.pad_kind;
+            self.pad_kind = PadKind::default();
             if let Some(loc) = self.last_location {
                 if !self.disable_auto_finish && (self.line > loc.line || loc.line - self.line > 1) {
                     self.finish_group();
                 }
                 self.max_width = u32::max(self.max_width, self.width);
                 self.line = loc.line;
-                self.rest.push((loc, self.width));
+                self.rest.push((loc, self.width, kind));
 
                 self.width = 0;
                 self.index += 1;
@@ -78,6 +123,41 @@ impl Align {
         if !self.enable {
             self.enable = true;
             self.width = 0;
+            self.pad_kind = PadKind::Always;
+            self.had_item_in_statement = true;
+        }
+    }
+
+    /// `start_item` with `PadKind::IfBreak` — padding visible only in
+    /// the broken layout.
+    pub fn start_item_break_gated(&mut self) {
+        if !self.enable {
+            self.enable = true;
+            self.width = 0;
+            self.pad_kind = PadKind::IfBreak;
+            self.had_item_in_statement = true;
+        }
+    }
+
+    /// `start_item` with `PadKind::IfFlat` — padding visible only in
+    /// the flat layout, and counted in `fits_flat`.
+    pub fn start_item_flat_gated(&mut self) {
+        if !self.enable {
+            self.enable = true;
+            self.width = 0;
+            self.pad_kind = PadKind::IfFlat;
+            self.had_item_in_statement = true;
+        }
+    }
+
+    /// Carry `self.line` forward to the statement's end line, but
+    /// only if this kind participated in the statement.
+    pub fn note_statement_end(&mut self, line: u32) {
+        if self.had_item_in_statement {
+            if line > self.line {
+                self.line = line;
+            }
+            self.had_item_in_statement = false;
         }
     }
 
@@ -91,14 +171,12 @@ impl Align {
 
     pub fn dummy_location(&mut self, x: Location) {
         if self.enable {
-            self.width += 0; // 0 length token
             self.last_location = Some(x);
         }
     }
 
     pub fn dummy_token(&mut self, x: &VerylToken) {
         if self.enable {
-            self.width += 0; // 0 length token
             let loc: Location = x.token.into();
             self.last_location = Some(loc);
         }
@@ -138,12 +216,42 @@ pub mod align_kind {
     pub const CLOCK_DOMAIN: usize = 8;
     pub const NUMBER: usize = 9;
     pub const VAR_KEYWORD: usize = 10;
+    /// Identifier column inside `::<...>` generic parameter / argument
+    /// lists. Kept distinct from the outer IDENTIFIER kind so a
+    /// nested generic doesn't merge into the surrounding column group.
+    pub const GENERIC_IDENTIFIER: usize = 11;
+    /// Type column inside `::<...>` generic parameter lists.
+    pub const GENERIC_TYPE: usize = 12;
+    /// Expression column inside `::<...>` generic parameter / argument
+    /// lists.
+    pub const GENERIC_EXPRESSION: usize = 13;
+    /// Identifier column inside an inst's `#(...)` parameter list or
+    /// `(...)` port list — isolated from the outer cross-inst column.
+    pub const INST_ITEM_IDENTIFIER: usize = 14;
+    /// Expression / value column inside an inst's `#(...)` or `(...)`.
+    pub const INST_ITEM_EXPRESSION: usize = 15;
+    /// The inst name's column. Distinct from `IDENTIFIER` because
+    /// `inst` declarations interleave in the same scope as var/let/const
+    /// but carry a wider leading keyword; sharing the kind would push
+    /// shorter siblings' identifier columns out unexpectedly.
+    pub const INST_NAME_IDENTIFIER: usize = 16;
+    /// LHS column for `assign` / `connect` statements. Isolated from
+    /// `IDENTIFIER` for the same reason as `INST_NAME_IDENTIFIER`.
+    pub const ASSIGN_DECL_IDENTIFIER: usize = 17;
+    /// Total number of alignment kinds. Used to size `Aligner::aligns`;
+    /// keep in sync when adding a new kind.
+    pub const COUNT: usize = 18;
 }
 
 #[derive(Default)]
 pub struct Aligner {
-    pub additions: HashMap<Location, u32>,
-    pub aligns: [Align; 11],
+    /// Per-token column padding to insert after the token; see
+    /// `PadKind` for emit semantics.
+    pub additions: HashMap<Location, (u32, PadKind)>,
+    pub aligns: [Align; align_kind::COUNT],
+    /// Latest source line observed by `token` / `duplicated_token`,
+    /// consumed by `note_statement_end`.
+    latest_observed_line: u32,
 }
 
 impl Aligner {
@@ -151,15 +259,32 @@ impl Aligner {
         Default::default()
     }
 
+    fn observe_line(&mut self, line: u32) {
+        if line > self.latest_observed_line {
+            self.latest_observed_line = line;
+        }
+    }
+
     pub fn token(&mut self, x: &VerylToken) {
+        self.observe_line(x.token.line);
         for i in 0..self.aligns.len() {
             self.aligns[i].token(x);
         }
     }
 
     pub fn duplicated_token(&mut self, x: &VerylToken, idx: usize) {
+        self.observe_line(x.token.line);
         for i in 0..self.aligns.len() {
             self.aligns[i].duplicated_token(x, idx);
+        }
+    }
+
+    /// Signal the end of a statement. Carries every participating
+    /// kind's reference line forward to `latest_observed_line`.
+    pub fn note_statement_end(&mut self) {
+        let line = self.latest_observed_line;
+        for align in &mut self.aligns {
+            align.note_statement_end(line);
         }
     }
 
@@ -181,13 +306,25 @@ impl Aligner {
         }
     }
 
+    /// Clear every kind's statement-participation flag. The auto-finish
+    /// path inside `finish_item` deliberately leaves the flag set —
+    /// only explicit alignment-context discards should call this.
+    pub fn clear_had_item_in_statement(&mut self) {
+        for align in &mut self.aligns {
+            align.clear_had_item_in_statement();
+        }
+    }
+
     pub fn gather_additions(&mut self) {
         for align in &self.aligns {
-            for (x, y) in &align.additions {
+            for (loc, (width, kind)) in &align.additions {
                 self.additions
-                    .entry(*x)
-                    .and_modify(|val| *val += *y)
-                    .or_insert(*y);
+                    .entry(*loc)
+                    .and_modify(|(val, kd)| {
+                        *val += *width;
+                        *kd = kd.merge(*kind);
+                    })
+                    .or_insert((*width, *kind));
             }
         }
     }
@@ -204,34 +341,18 @@ impl Aligner {
         }
     }
 
+    pub fn enable_auto_finish_for(&mut self, kind: usize) {
+        self.aligns[kind].disable_auto_finish = false;
+    }
+
+    /// Suppress the source-line-gap-based auto split for one kind.
+    /// Required when grouping must stay structural (idempotent) — see
+    /// `case_expression`.
+    pub fn disable_auto_finish_for(&mut self, kind: usize) {
+        self.aligns[kind].disable_auto_finish = true;
+    }
+
     pub fn any_enabled(&self) -> bool {
         self.aligns.iter().any(|x| x.enable)
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Measure {
-    widths: Vec<u32>,
-    table: HashMap<TokenId, u32>,
-}
-
-impl Measure {
-    pub fn start(&mut self) {
-        self.widths.push(0);
-    }
-
-    pub fn finish(&mut self, id: TokenId) {
-        let width = self.widths.pop().unwrap();
-        self.table.insert(id, width);
-    }
-
-    pub fn add(&mut self, value: u32) {
-        for w in &mut self.widths {
-            *w += value;
-        }
-    }
-
-    pub fn get(&mut self, id: TokenId) -> Option<u32> {
-        self.table.get(&id).copied()
     }
 }

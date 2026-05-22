@@ -13,10 +13,6 @@ module Module61B (
     o_dat: output 'b logic,
 ) {
     unsafe (cdc) {
-        inst u_sync: $sv::Synchronizer (
-            c: i_clk,
-            d: i_dat,
-            q: o_dat,
-        );
+        inst u_sync: $sv::Synchronizer ( c: i_clk, d: i_dat, q: o_dat );
     }
 }

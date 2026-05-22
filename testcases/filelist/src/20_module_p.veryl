@@ -1,5 +1,5 @@
 module ModuleP::<N_PKG: ProtoPackageN> {
-    function func_p() -> u32 {
+    function func_p () -> u32 {
         return PackageO::<N_PKG>::func_o();
     }
     let _p: u32 = func_p();

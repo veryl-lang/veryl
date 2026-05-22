@@ -24,7 +24,7 @@ module veryl_testcase___Module73A__1 (
 endmodule
 
 module veryl_testcase_Module73B;
-    logic _d ;
+    logic _d;
 
     veryl_testcase___Module73A__0 u0 (
         .i_a (veryl_testcase_Package73::A),

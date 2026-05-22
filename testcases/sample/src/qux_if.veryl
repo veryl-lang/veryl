@@ -1,6 +1,6 @@
 pub interface qux_if::<T: type> {
-  var qux: T;
-  modport mp {
-    qux: input,
-  }
+    var qux: T;
+    modport mp {
+        qux: input,
+    }
 }

@@ -15,10 +15,7 @@ module Module87B::<A: u32, B: u32, C: u32> {
     var a: logic<W>;
     var b: T       ;
 
-    inst u: Module87A::<W, T> (
-        a  ,
-        b  ,
-    );
+    inst u: Module87A::<W, T> ( a, b );
 }
 
 module Module87C {

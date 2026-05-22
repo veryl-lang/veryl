@@ -29,7 +29,7 @@ package Package28C {
 }
 
 module ModuleB {
-    var a  : Package28A::<Package28B::B>::StructA;
+    var a: Package28A::<Package28B::B>::StructA;
     assign a.a = 0;
 
     let _w: logic = a[msb];

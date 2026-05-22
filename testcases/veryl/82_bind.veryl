@@ -28,17 +28,7 @@ module Module82B::<W: u32> (
 ) {}
 
 module Module82C {
-    bind Module82A::<32> <- u0: Module82B::<32> (
-        a         ,
-        b    : b.b,
-        i_clk     ,
-        i_rst     ,
-    );
+    bind Module82A::<32> <- u0: Module82B::<32> ( a, b: b.b, i_clk, i_rst );
 }
 
-bind Module82A::<32> <- u1: Module82B::<32> (
-    a         ,
-    b    : b.b,
-    i_clk     ,
-    i_rst     ,
-);
+bind Module82A::<32> <- u1: Module82B::<32> ( a, b: b.b, i_clk, i_rst );

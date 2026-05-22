@@ -4,17 +4,11 @@ module Module79 {
         bb: logic<10>,
     }
 
-    let _a: StructA = StructA'{
-        a : 10000,
-        bb: 10   ,
-    };
+    let _a: StructA = StructA'{a: 10000, bb: 10,};
 
-    let _b: StructA = StructA'{
-        a : 10,
-        ..default(0)
-    };
+    let _b: StructA = StructA'{a: 10, ..default(0)};
 
-    let _c: StructA = StructA'{a : 10, bb: 10};
+    let _c: StructA = StructA'{a: 10, bb: 10};
 
     union UnionA {
         dd      : logic  <20>,
@@ -25,9 +19,5 @@ module Module79 {
         uu: UnionA,
     }
 
-    let _e: StructWithUnion = StructWithUnion'{
-        uu: StructA'{
-            a : 5, bb: 5
-        },
-    };
+    let _e: StructWithUnion = StructWithUnion'{uu: StructA'{a: 5, bb: 5},};
 }
