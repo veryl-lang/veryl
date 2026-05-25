@@ -54,3 +54,8 @@ veryl-synthesizer   = {version = "0.20.0", path = "../synthesizer"}
 veryl-path          = {version = "0.20.0", path = "../path"}
 veryl-sourcemap     = {version = "0.20.0", path = "../sourcemap"}
 veryl-translator    = {version = "0.20.0", path = "../translator"}
+
+[features]
+# Forwards to the simulator's profile feature and enables the per-test
+# build-vs-run split report in `cmd_test` (PROFILE_SPLIT line).
+profile = ["veryl-simulator/profile"]

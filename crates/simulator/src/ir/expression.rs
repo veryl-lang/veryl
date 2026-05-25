@@ -2123,8 +2123,17 @@ impl ProtoExpression {
                     };
                     (x_payload, x_mask_xz) =
                         expand_sign(width, x.width(), x_payload, x_mask_xz, builder);
-                    (y_payload, y_mask_xz) =
-                        expand_sign(width, y.width(), y_payload, y_mask_xz, builder);
+                    // The shift count `y` is an unsigned magnitude, so it must
+                    // not be sign-extended: a narrow count with its MSB set
+                    // would become a huge value, and the shift masks the count
+                    // modulo the operand width, yielding the wrong amount.
+                    if !matches!(
+                        op,
+                        Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR
+                    ) {
+                        (y_payload, y_mask_xz) =
+                            expand_sign(width, y.width(), y_payload, y_mask_xz, builder);
+                    }
                 }
 
                 let payload = match op {
