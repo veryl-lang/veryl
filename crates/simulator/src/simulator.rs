@@ -282,7 +282,48 @@ impl Simulator {
             ptr
         };
 
-        if !stmts_ptr.is_null() {
+        // AOT-C: if this event was lowered to a gcc-compiled FF-next +
+        // write-log function, invoke it instead of the per-stmt Cranelift
+        // dispatch.  The function reads ff/comb current values and pushes
+        // WriteLogEntries into the buffer (3rd arg), exactly as the Cranelift
+        // event JIT does; `ff_commit_from_log` below applies them.
+        #[cfg(not(target_family = "wasm"))]
+        let aot_event_func = self
+            .ir
+            .aot_c_event_evals
+            .get(event)
+            .and_then(|cell| cell.get())
+            .map(|m| m.func);
+        #[cfg(target_family = "wasm")]
+        let aot_event_func: Option<crate::FuncPtr> = None;
+
+        if let Some(func) = aot_event_func {
+            let ff_ptr = self.ir.ff_values.as_ptr();
+            let comb_ptr = self.ir.comb_values.as_ptr();
+            let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
+
+            // VERYL_AOT_C_VALIDATE=1: run BOTH the AOT-C event function and the
+            // Cranelift per-stmt dispatch on the same inputs and compare the
+            // WriteLogEntries they push plus any direct ff/comb writes; panic
+            // on first divergence so the broken event stmt can be identified.
+            // (Mirrors settle_comb's comb-side validate.)  Default-off.
+            #[cfg(not(target_family = "wasm"))]
+            let validate = self.ir.aot_c_validate;
+            #[cfg(target_family = "wasm")]
+            let validate = false;
+
+            if !validate {
+                // SAFETY: pointers valid for the call; emitted code only reads
+                // ff/comb and pushes into the WriteLogBuffer.
+                unsafe {
+                    func(ff_ptr, comb_ptr, log_ptr);
+                }
+            } else {
+                // `validate` is always false on wasm (the method is non-wasm).
+                #[cfg(not(target_family = "wasm"))]
+                self.validate_event_aot(func, stmts_ptr);
+            }
+        } else if !stmts_ptr.is_null() {
             // SAFETY: event_statements is never mutated after Ir construction.
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             for x in statements {
@@ -323,6 +364,87 @@ impl Simulator {
         self.comb_dirty = true;
 
         self.dump_variables();
+    }
+
+    /// VERYL_AOT_C_VALIDATE event-path check: run the AOT-C event function and
+    /// the Cranelift per-stmt dispatch on identical inputs, compare the
+    /// WriteLogEntries they push plus any direct ff/comb writes, and panic on
+    /// first divergence.  Leaves the Cranelift result live (ground truth).
+    /// Slow (clones ff/comb each event) — diagnostics only.
+    #[cfg(not(target_family = "wasm"))]
+    fn validate_event_aot(&mut self, func: crate::FuncPtr, stmts_ptr: *const Vec<Statement>) {
+        let ff_ptr = self.ir.ff_values.as_ptr();
+        let comb_ptr = self.ir.comb_values.as_ptr();
+        let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
+
+        let ff_snap = self.ir.ff_values.to_vec();
+        let comb_snap = self.ir.comb_values.to_vec();
+        let count_before = self.ir.write_log_buffer.narrow_count as usize;
+
+        // AOT-C event, then capture its pushed entries + ff/comb.
+        unsafe { func(ff_ptr, comb_ptr, log_ptr) };
+        // The committed FF effect is `ff_commit_from_log`'s last-write-wins per
+        // offset, so compare offset -> (width_class, last payload) maps, not the
+        // raw entry order or the pre-commit ff_values (the dual-slot "next slot"
+        // direct writes are vestigial — ff_commit applies the *log* to the
+        // current slots, so those transient writes don't affect correctness).
+        let lww_map = |buf: &crate::ir::write_log::WriteLogBuffer, lo: usize, hi: usize| {
+            let mut m: std::collections::HashMap<u32, (u16, u64)> = Default::default();
+            for e in &buf.narrow_entries_slice()[lo..hi] {
+                m.insert(e.offset, (e.width_class, e.payload));
+            }
+            m
+        };
+        let aot_count = self.ir.write_log_buffer.narrow_count as usize;
+        let aot_map = lww_map(&self.ir.write_log_buffer, count_before, aot_count);
+
+        // Restore inputs + log count, then run the Cranelift event.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                ff_snap.as_ptr(),
+                self.ir.ff_values.as_ptr() as *mut u8,
+                ff_snap.len(),
+            );
+            std::ptr::copy_nonoverlapping(
+                comb_snap.as_ptr(),
+                self.ir.comb_values.as_ptr() as *mut u8,
+                comb_snap.len(),
+            );
+        }
+        self.ir.write_log_buffer.narrow_count = count_before as u32;
+        if !stmts_ptr.is_null() {
+            let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
+            for x in statements {
+                dispatch_stmt_fast(x, &mut self.mask_cache);
+            }
+        }
+        let cr_count = self.ir.write_log_buffer.narrow_count as usize;
+        let cr_map = lww_map(&self.ir.write_log_buffer, count_before, cr_count);
+
+        if aot_map != cr_map {
+            eprintln!(
+                "[aot_event_validate] DIVERGENCE event={:?}: committed-FF maps differ (aot {} offsets, cranelift {} offsets)",
+                self.last_event,
+                aot_map.len(),
+                cr_map.len(),
+            );
+            // Offsets present in only one side, or with differing value.
+            for (off, av) in &aot_map {
+                match cr_map.get(off) {
+                    None => eprintln!("  off={off:#x}: aot={av:?} cranelift=<absent>"),
+                    Some(cv) if cv != av => {
+                        eprintln!("  off={off:#x}: aot={av:?} cranelift={cv:?}")
+                    }
+                    _ => {}
+                }
+            }
+            for off in cr_map.keys() {
+                if !aot_map.contains_key(off) {
+                    eprintln!("  off={off:#x}: aot=<absent> cranelift={:?}", cr_map[off]);
+                }
+            }
+            panic!("AOT-C event validate divergence (see above)");
+        }
     }
 
     /// Set a variable value by VarId. Used to write clock/reset signal values

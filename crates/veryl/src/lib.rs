@@ -197,9 +197,13 @@ pub struct OptTest {
     #[arg(long)]
     pub wave: bool,
 
-    /// Disable JIT compilation for native tests
+    /// Native-simulator code-generation backend (default: cc)
+    #[arg(long, value_enum, default_value = "cc")]
+    pub backend: Backend,
+
+    /// Dual-run the `cc` backend against Cranelift and panic on divergence
     #[arg(long)]
-    pub disable_jit: bool,
+    pub backend_validate: bool,
 
     /// Disable FF classification optimization (force all always_ff variables to FF)
     #[arg(long)]
@@ -217,6 +221,22 @@ pub struct OptTest {
     /// Merged with `[test].defines` from Veryl.toml.
     #[arg(short = 'D', long = "define", value_name = "NAME")]
     pub define: Vec<String>,
+}
+
+/// Native-simulator code-generation backend selected by `veryl test --backend`.
+/// Named by codegen mechanism rather than jit/aot (both `cranelift` and `cc`
+/// compile to native code at run time, so the meaningful axis is *which*
+/// compiler, not jit-vs-aot).
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+pub enum Backend {
+    /// Walk the IR statement tree each cycle (no codegen).
+    Interpret,
+    /// In-process Cranelift JIT.
+    Cranelift,
+    /// Emit C and compile via an external C compiler (comb + event + async),
+    /// falling back to Cranelift for uncovered stmts / when no `cc` is present.
+    #[default]
+    Cc,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

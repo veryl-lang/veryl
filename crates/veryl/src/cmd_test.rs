@@ -159,12 +159,36 @@ impl CmdTest {
             metadata.test.simulator
         };
 
+        // `cc` keeps use_jit=true so Cranelift covers stmts it can't emit;
+        // --backend-validate forces the synchronous dual-run.
+        use crate::Backend;
+        let validate = self.opt.backend_validate;
+        let (use_jit, aot_c) = match self.opt.backend {
+            Backend::Interpret => (false, false),
+            Backend::Cranelift => (true, false),
+            Backend::Cc => (true, true),
+        };
         let mut config = Config {
-            use_jit: !self.opt.disable_jit,
+            use_jit,
             disable_ff_opt: self.opt.disable_ff_opt,
+            aot_c,
+            aot_c_event: aot_c,
+            aot_c_async: aot_c && !validate,
+            aot_c_validate: aot_c && validate,
+            // Skip cc for tiny modules: per-module external compiles flood the
+            // host across the fast suite.  Overridable via VERYL_AOT_C_MIN_STMTS.
+            aot_c_min_stmts: if aot_c { 256 } else { 0 },
             ..Config::default()
         };
         config.apply_env();
+        // Warn once if cc is requested but absent; the fallback is otherwise silent.
+        #[cfg(not(target_family = "wasm"))]
+        if config.aot_c && !veryl_simulator::ir::cc_available() {
+            warn!(
+                "--backend cc: no C compiler found (set VERYL_AOT_CC, or install cc/gcc); \
+                 falling back to the Cranelift JIT backend"
+            );
+        }
         let mut proto_cache = ProtoModuleCache::default();
 
         let mut success = 0;
@@ -220,6 +244,14 @@ impl CmdTest {
                                 let pending = queue.lock().unwrap().next();
                                 let Some(pending) = pending else { break };
                                 output_buffer::enable();
+                                // With the `profile` feature, report the build
+                                // (IR build + conv/AOT/dlopen) vs run (Simulator::new
+                                // + hex + cycle sim) split.  The run boundary matches
+                                // what a warm Verilator binary re-runs (model build
+                                // mtime-skipped), so the two are comparable.  Zero
+                                // overhead when the feature is off.
+                                #[cfg(feature = "profile")]
+                                let t_build = std::time::Instant::now();
                                 let build_result = prepare_native_test(
                                     ir_ref,
                                     &pending.test_name,
@@ -230,6 +262,10 @@ impl CmdTest {
                                     config_ref,
                                     &mut thread_cache,
                                 );
+                                #[cfg(feature = "profile")]
+                                let build_el = t_build.elapsed();
+                                #[cfg(feature = "profile")]
+                                let t_run = std::time::Instant::now();
                                 let run_result = match build_result {
                                     Ok(job) => {
                                         let wave_path =
@@ -239,6 +275,16 @@ impl CmdTest {
                                     }
                                     Err(e) => Err(e),
                                 };
+                                #[cfg(feature = "profile")]
+                                {
+                                    let run_el = t_run.elapsed();
+                                    eprintln!(
+                                        "PROFILE_SPLIT test={} build_ms={:.1} run_ms={:.1}",
+                                        pending.test_name,
+                                        build_el.as_secs_f64() * 1e3,
+                                        run_el.as_secs_f64() * 1e3
+                                    );
+                                }
                                 let output = output_buffer::take();
                                 thread_results.push((pending.test_name, run_result, output));
                             }

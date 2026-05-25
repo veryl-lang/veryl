@@ -2,6 +2,8 @@ use crate::HashMap;
 use crate::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use crate::cranelift;
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::AotCell;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
 use crate::ir::inst_layout::InstLayout;
@@ -57,6 +59,15 @@ pub struct Module {
     /// value here is a duplication artifact in the simulator IR assembly.
     /// Exposed for regression tests.
     pub nontrivial_comb_scc: usize,
+    /// AOT-C comb eval (see `AotCell`): replaces the per-chunk Cranelift
+    /// dispatch in `Ir::settle_comb` when `Some`.  Built in `ProtoModule::conv`
+    /// when `Config::aot_c` is set and every comb stmt is covered.
+    #[cfg(not(target_family = "wasm"))]
+    pub aot_c_eval: Option<AotCell>,
+    /// AOT-C: per-event gcc-compiled FF-next + write-log functions
+    /// (when `Config::aot_c_event` is set).  Empty when disabled / uncovered.
+    #[cfg(not(target_family = "wasm"))]
+    pub aot_c_event_evals: HashMap<Event, AotCell>,
 }
 
 pub struct ProtoModule {
@@ -81,6 +92,15 @@ pub struct ProtoModule {
     pub comb_schedule: IrSchedule,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
+    /// AOT-C: see `Module::aot_c_eval`.  Built in `conv()` and
+    /// shared (via `Arc::clone`) with every `Module` produced by
+    /// `instantiate()`.
+    #[cfg(not(target_family = "wasm"))]
+    pub aot_c_eval: Option<AotCell>,
+    /// AOT-C: see `Module::aot_c_event_evals`.  Built in `conv()`,
+    /// shared (Arc::clone) with every `Module` from `instantiate()`.
+    #[cfg(not(target_family = "wasm"))]
+    pub aot_c_event_evals: HashMap<Event, AotCell>,
 }
 
 fn create_buffers(
@@ -278,6 +298,10 @@ impl ProtoModule {
             inst_layout: self.inst_layout.clone(),
             comb_schedule: self.comb_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
+            #[cfg(not(target_family = "wasm"))]
+            aot_c_eval: self.aot_c_eval.clone(),
+            #[cfg(not(target_family = "wasm"))]
+            aot_c_event_evals: self.aot_c_event_evals.clone(),
         }
     }
 
@@ -2207,7 +2231,15 @@ impl Conv<&air::Module> for ProtoModule {
         // in debug builds so any future regression that reintroduces this
         // class of bug surfaces immediately, and expose the count on
         // `Module`/`Ir` for test-local assertion.
-        let nontrivial_comb_scc = compute_scc_stats(&unified_sorted).0;
+        //
+        // Skip the (heavy: Tarjan + per-stmt I/O scan) computation in
+        // release-without-tests since the assert is a no-op there and the
+        // field is only consumed by tests.
+        let nontrivial_comb_scc = if cfg!(any(debug_assertions, test)) {
+            compute_scc_stats(&unified_sorted).0
+        } else {
+            0
+        };
         debug_assert_eq!(
             nontrivial_comb_scc, 0,
             "ProtoModule {:?}: {} nontrivial SCC(s) in unified_sorted. \
@@ -2429,6 +2461,38 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        // AOT-C event path: compile each event's FF-next + write-log to C,
+        // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
+        // so the map holds only fully-emittable events; the rest stay on
+        // Cranelift.  Built before `all_event_statements` is consumed below.
+        #[cfg(not(target_family = "wasm"))]
+        let aot_async = context.config.aot_c_async && !context.config.aot_c_validate;
+        // Only engage cc on big-enough modules — see Config::aot_c_min_stmts.
+        #[cfg(not(target_family = "wasm"))]
+        let aot_size_ok = {
+            let n = pre_jit_stmts.len()
+                + all_event_statements
+                    .values()
+                    .map(|v| v.len())
+                    .sum::<usize>();
+            n >= context.config.aot_c_min_stmts
+        };
+        #[cfg(not(target_family = "wasm"))]
+        let aot_c_event_evals: HashMap<Event, AotCell> = if context.config.use_4state
+            || !context.config.aot_c
+            || !context.config.aot_c_event
+            || !aot_size_ok
+        {
+            HashMap::default()
+        } else {
+            all_event_statements
+                .iter()
+                .filter_map(|(event, stmts)| {
+                    crate::aot_c::prepare_event(stmts, aot_async).map(|cell| (event.clone(), cell))
+                })
+                .collect()
+        };
+
         // Event statements preserve source order (no topological sorting).
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
@@ -2492,6 +2556,34 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(target_family = "wasm")]
         let comb_schedule = IrSchedule::empty();
 
+        // `cc` backend comb path: when Config::aot_c is set and the emitter
+        // covers every comb stmt, build a single gcc-O-compiled eval function;
+        // `prepare_comb` returns None on any miss and `Ir::settle_comb` falls
+        // through to Cranelift.  2-state only — use_4state needs mask_xz
+        // tracking the C emitter doesn't generate.
+        #[cfg(not(target_family = "wasm"))]
+        let aot_c_eval = if context.config.use_4state || !context.config.aot_c || !aot_size_ok {
+            None
+        } else {
+            crate::aot_c::prepare_comb(&pre_jit_stmts, aot_async)
+        };
+
+        // A comb bail silently drops the whole module to Cranelift — a perf
+        // regression with no other signal.  VERYL_AOT_C_DIAG surfaces it.
+        #[cfg(not(target_family = "wasm"))]
+        if context.config.aot_c
+            && !context.config.use_4state
+            && aot_size_ok
+            && aot_c_eval.is_none()
+            && crate::aot_c::diag_enabled()
+        {
+            eprintln!(
+                "[aot_comb] module {} fell back to Cranelift: {}",
+                src.name,
+                crate::aot_c::comb_fallback_reason(&pre_jit_stmts),
+            );
+        }
+
         Ok(ProtoModule {
             name: src.name,
             ports: src.ports.clone(),
@@ -2506,6 +2598,10 @@ impl Conv<&air::Module> for ProtoModule {
             inst_layout,
             comb_schedule,
             nontrivial_comb_scc,
+            #[cfg(not(target_family = "wasm"))]
+            aot_c_eval,
+            #[cfg(not(target_family = "wasm"))]
+            aot_c_event_evals,
         })
     }
 }
