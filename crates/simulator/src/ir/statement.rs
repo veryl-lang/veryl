@@ -3238,6 +3238,10 @@ fn collect_eq_chain(start: &ProtoIfStatement) -> Option<EqChain<'_>> {
     let mut arms: Vec<EqChainArm<'_>> = Vec::new();
     let mut selector: Option<&ProtoExpression> = None;
     let mut current = start;
+    // Else-chain once the eq-const prefix stops: the *last consumed* arm's
+    // false_side. A dirty break descends into a non-eq-const / different-selector
+    // node that must stay whole as the default, not be reduced to its false_side.
+    let mut default: &[ProtoStatement] = &[];
     loop {
         let cond = current.cond.as_ref()?;
         let (var_expr, const_val) = match extract_eq_const(cond) {
@@ -3264,6 +3268,7 @@ fn collect_eq_chain(start: &ProtoIfStatement) -> Option<EqChain<'_>> {
             value: const_val,
             body: &current.true_side,
         });
+        default = &current.false_side[..];
         if current.false_side.len() == 1
             && let ProtoStatement::If(next) = &current.false_side[0]
         {
@@ -3278,7 +3283,7 @@ fn collect_eq_chain(start: &ProtoIfStatement) -> Option<EqChain<'_>> {
     Some(EqChain {
         selector: selector?,
         arms,
-        default: &current.false_side[..],
+        default,
     })
 }
 
@@ -4408,4 +4413,124 @@ fn cold_if_true_enabled() -> bool {
     use std::sync::OnceLock;
     static V: OnceLock<bool> = OnceLock::new();
     *V.get_or_init(|| std::env::var("VERYL_COLD_IF_TRUE").ok().as_deref() != Some("0"))
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod eq_chain_tests {
+    use super::*;
+    use crate::ir::{ExpressionContext, VarOffset};
+    use veryl_analyzer::ir::Op;
+    use veryl_analyzer::value::ValueU64;
+
+    fn ctx(width: usize) -> ExpressionContext {
+        ExpressionContext {
+            width,
+            signed: false,
+        }
+    }
+    fn var_expr(off: isize, width: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width: width,
+            expr_context: ctx(width),
+        }
+    }
+    fn const_expr(payload: u64) -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload,
+                mask_xz: 0,
+                width: 8,
+                signed: false,
+            }),
+            width: 8,
+            expr_context: ctx(8),
+        }
+    }
+    fn cmp(off: isize, op: Op, val: u64) -> ProtoExpression {
+        ProtoExpression::Binary {
+            x: Box::new(var_expr(off, 8)),
+            op,
+            y: Box::new(const_expr(val)),
+            width: 1,
+            expr_context: ctx(1),
+        }
+    }
+    fn if_node(
+        cond: ProtoExpression,
+        t: Vec<ProtoStatement>,
+        f: Vec<ProtoStatement>,
+    ) -> ProtoIfStatement {
+        ProtoIfStatement {
+            cond: Some(cond),
+            true_side: t,
+            false_side: f,
+        }
+    }
+    fn eq_prefix(sel: isize, tail: Vec<ProtoStatement>) -> ProtoIfStatement {
+        let mut chain = tail;
+        for v in (0..4u64).rev() {
+            chain = vec![ProtoStatement::If(if_node(
+                cmp(sel, Op::Eq, v),
+                vec![ProtoStatement::Break],
+                chain,
+            ))];
+        }
+        match chain.into_iter().next().unwrap() {
+            ProtoStatement::If(x) => x,
+            _ => unreachable!(),
+        }
+    }
+
+    // A node that ends the eq-const prefix because it tests a *different*
+    // selector must survive whole — its cond and true_side — inside the
+    // chain default.
+    #[test]
+    fn dirty_break_keeps_node_in_default_selector_mismatch() {
+        let dirty = ProtoStatement::If(if_node(
+            cmp(0x20, Op::Eq, 5),
+            vec![ProtoStatement::Break],
+            vec![ProtoStatement::Break],
+        ));
+        let head = eq_prefix(0x10, vec![dirty]);
+        let chain = collect_eq_chain(&head).expect("4-arm eq chain");
+        assert_eq!(
+            chain.arms.iter().map(|a| a.value).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+        assert_eq!(chain.default.len(), 1);
+        assert!(
+            matches!(chain.default[0], ProtoStatement::If(_)),
+            "default must retain the whole different-selector node"
+        );
+    }
+
+    // Same, but the prefix ends on a non-Eq operator (extract_eq_const fails).
+    #[test]
+    fn dirty_break_keeps_node_in_default_non_eq_op() {
+        let dirty = ProtoStatement::If(if_node(
+            cmp(0x10, Op::Less, 4),
+            vec![ProtoStatement::Break],
+            vec![ProtoStatement::Break],
+        ));
+        let head = eq_prefix(0x10, vec![dirty]);
+        let chain = collect_eq_chain(&head).expect("4-arm eq chain");
+        assert_eq!(chain.arms.len(), 4);
+        assert_eq!(chain.default.len(), 1);
+        assert!(matches!(chain.default[0], ProtoStatement::If(_)));
+    }
+
+    // A clean chain whose final else is plain statements keeps that else as
+    // the default (regression guard for the common case).
+    #[test]
+    fn clean_chain_default_is_final_else() {
+        let head = eq_prefix(0x10, vec![ProtoStatement::Break]);
+        let chain = collect_eq_chain(&head).expect("4-arm eq chain");
+        assert_eq!(chain.arms.len(), 4);
+        assert_eq!(chain.default.len(), 1);
+        assert!(matches!(chain.default[0], ProtoStatement::Break));
+    }
 }
