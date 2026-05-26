@@ -294,52 +294,58 @@ impl Formatter {
                     }
                 }
 
-                // Trailing comments are emitted as a single `Doc::Comments`
-                // node, optionally wrapped in `+1` indent when the next
-                // thing produced will be a `{` followed by a `newline_push`.
-                if !x.comments.is_empty() {
-                    let mut cs: Vec<CommentDoc> = Vec::with_capacity(x.comments.len());
-                    let mut prev_line = self.line;
-                    for c in &x.comments {
-                        let raw = resource_table::get_str_value(c.text).unwrap();
-                        let is_line_comment = raw.ends_with('\n');
-                        let trimmed: String = if is_line_comment {
-                            raw.trim_end().to_string()
-                        } else {
-                            raw.clone()
-                        };
-                        let leading_newlines = c.line.saturating_sub(prev_line);
-                        cs.push(CommentDoc {
-                            text: Rc::<str>::from(trimmed.as_str()),
-                            leading_newlines,
-                            is_line_comment,
-                            src_line: 0,
-                            src_column: 0,
-                        });
-                        // Advance our notion of the source line. For line
-                        // comments the trailing `\n` is consumed; for block
-                        // comments we add any embedded newlines from the
-                        // body.
-                        let raw_nls = raw.matches('\n').count() as u32;
-                        let trailing = if is_line_comment {
-                            raw_nls.saturating_sub(1)
-                        } else {
-                            raw_nls
-                        };
-                        prev_line = c.line + trailing;
-                    }
-                    self.line = prev_line;
-                    let mut node = doc::comments(cs);
-                    if will_push {
-                        node = doc::indent_by(1, node);
-                    }
-                    self.emit_doc(node);
-                }
+                self.emit_trailing_comments(x, will_push);
             }
             Mode::Align => {
                 self.aligner.token(x);
             }
         }
+    }
+
+    /// `wrap_indent` adds `+1` indent for the case where the next emitted
+    /// thing will be a `{` immediately followed by a `newline_push`.
+    fn emit_trailing_comments(&mut self, x: &VerylToken, wrap_indent: bool) {
+        if !matches!(self.mode, Mode::Emit) {
+            return;
+        }
+        if x.comments.is_empty() {
+            return;
+        }
+        let mut cs: Vec<CommentDoc> = Vec::with_capacity(x.comments.len());
+        let mut prev_line = self.line;
+        for c in &x.comments {
+            let raw = resource_table::get_str_value(c.text).unwrap();
+            let is_line_comment = raw.ends_with('\n');
+            let trimmed: String = if is_line_comment {
+                raw.trim_end().to_string()
+            } else {
+                raw.clone()
+            };
+            let leading_newlines = c.line.saturating_sub(prev_line);
+            cs.push(CommentDoc {
+                text: Rc::<str>::from(trimmed.as_str()),
+                leading_newlines,
+                is_line_comment,
+                src_line: 0,
+                src_column: 0,
+            });
+            // Advance our notion of the source line. For line comments
+            // the trailing `\n` is consumed; for block comments we add
+            // any embedded newlines from the body.
+            let raw_nls = raw.matches('\n').count() as u32;
+            let trailing = if is_line_comment {
+                raw_nls.saturating_sub(1)
+            } else {
+                raw_nls
+            };
+            prev_line = c.line + trailing;
+        }
+        self.line = prev_line;
+        let mut node = doc::comments(cs);
+        if wrap_indent {
+            node = doc::indent_by(1, node);
+        }
+        self.emit_doc(node);
     }
 
     fn token(&mut self, x: &VerylToken) {
@@ -922,12 +928,14 @@ impl VerylWalker for Formatter {
             }
             self.argument_item(&x.argument_item);
         }
-        // Trailing comma only when the surrounding group breaks, so a
-        // collapsed flat call doesn't end up with `func(a, b,)`. The
-        // grammar's `argument_list_opt` (source trailing comma) is
-        // intentionally ignored — `if_break` decides based on layout.
-        let _ = &arg.argument_list_opt;
+        // `if_break(",")` keeps the trailing comma flat-only (so a
+        // collapsed call isn't `func(a, b,)`). The source comma's
+        // trailing comments are emitted separately so a `// ...`
+        // between the last item and the closing delimiter survives.
         self.emit_doc(doc::if_break(","));
+        if let Some(ref x) = arg.argument_list_opt {
+            self.emit_trailing_comments(&x.comma.comma_token, false);
+        }
     }
 
     /// Semantic action for non-terminal 'ArgumentItem'
@@ -2202,9 +2210,10 @@ impl VerylWalker for Formatter {
             self.soft_line();
             self.inst_parameter_group(&x.inst_parameter_group);
         }
-        // Trailing comma is decided by `if_break(",")` based on layout.
-        let _ = &arg.inst_parameter_list_opt;
         self.emit_doc(doc::if_break(","));
+        if let Some(ref x) = arg.inst_parameter_list_opt {
+            self.emit_trailing_comments(&x.comma.comma_token, false);
+        }
     }
 
     /// Semantic action for non-terminal 'InstParameterGroup'
@@ -2244,8 +2253,10 @@ impl VerylWalker for Formatter {
             self.soft_line();
             self.inst_port_group(&x.inst_port_group);
         }
-        let _ = &arg.inst_port_list_opt;
         self.emit_doc(doc::if_break(","));
+        if let Some(ref x) = arg.inst_port_list_opt {
+            self.emit_trailing_comments(&x.comma.comma_token, false);
+        }
     }
 
     /// Semantic action for non-terminal 'InstPortGroup'
@@ -2410,8 +2421,10 @@ impl VerylWalker for Formatter {
             self.soft_line();
             self.with_generic_parameter_item(&x.with_generic_parameter_item);
         }
-        let _ = &arg.with_generic_parameter_list_opt;
         self.emit_doc(doc::if_break(","));
+        if let Some(ref x) = arg.with_generic_parameter_list_opt {
+            self.emit_trailing_comments(&x.comma.comma_token, false);
+        }
     }
 
     /// Semantic action for non-terminal 'WithGenericParameterItem'
@@ -2461,8 +2474,10 @@ impl VerylWalker for Formatter {
             self.soft_line();
             self.with_generic_argument_item(&x.with_generic_argument_item);
         }
-        let _ = &arg.with_generic_argument_list_opt;
         self.emit_doc(doc::if_break(","));
+        if let Some(ref x) = arg.with_generic_argument_list_opt {
+            self.emit_trailing_comments(&x.comma.comma_token, false);
+        }
     }
 
     /// Semantic action for non-terminal 'WithGenericArgumentItem'

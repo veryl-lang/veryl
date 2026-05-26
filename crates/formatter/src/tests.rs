@@ -950,3 +950,74 @@ fn format_is_idempotent_for_inst_param_next_to_var() {
         "format is not idempotent:\nfirst:\n{first}\nsecond:\n{second}"
     );
 }
+
+#[test]
+fn preserves_trailing_line_comment_after_trailing_comma() {
+    // A `//` between the last item and the closing delimiter is
+    // attached to the source's trailing comma, which the list walker
+    // skips for layout reasons.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module ModuleA {
+    inst u: SubModule (
+        a: 1,
+        // trailing comment
+    );
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, code);
+
+    let code = r#"module ModuleA {
+    inst u: SubModule #(
+        P: 1,
+        // trailing on parameter list
+    ) (
+        a: 1,
+    );
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, code);
+
+    let code = r#"module ModuleA {
+    let _x: u32 = Func(
+        1,
+        2,
+        // trailing on argument list
+    );
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, code);
+
+    let code = r#"module ModuleA::<
+    A: a_type,
+    AA: u32,
+    // trailing on generic parameter list
+> {}
+"#;
+    let expect = r#"module ModuleA::<
+    A : a_type,
+    AA: u32   ,
+    // trailing on generic parameter list
+> {}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+
+    let code = r#"alias module ModuleB = ModuleC::<
+    8,
+    16,
+    // trailing on generic argument list
+>;
+"#;
+    let expect = r#"alias module ModuleB = ModuleC::<
+    8 ,
+    16,
+    // trailing on generic argument list
+>;
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+}
