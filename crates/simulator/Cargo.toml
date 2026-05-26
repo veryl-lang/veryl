@@ -31,7 +31,7 @@ veryl-path     = {version = "0.20.0", path = "../path"}
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 cranelift      = "0.132.0"
-libloading     = "0.8"
+libloading     = "0.9"
 memmap2        = "0.9.9"
 target-lexicon = "0.13.4"
 
