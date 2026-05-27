@@ -1,21 +1,14 @@
-mod context;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) mod dead_var_dce;
-mod declaration;
-#[cfg(not(target_family = "wasm"))]
-mod dup_assign_dce;
+pub(crate) mod context;
+pub(crate) mod declaration;
 mod event;
 mod expression;
 pub(crate) mod inst_layout;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) mod load_cache_lookahead;
 mod module;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) mod multi_write_analysis;
+pub(crate) mod opt;
 pub mod schedule;
 pub(crate) mod site_table;
 mod statement;
-mod variable;
+pub(crate) mod variable;
 pub(crate) mod write_log;
 
 pub use context::{Context, Conv};
@@ -24,10 +17,11 @@ pub use event::Event;
 pub use expression::{Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression};
 pub use module::{Module, ProtoModule};
 pub use statement::{
-    CompiledBlockStatement, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoForBound,
-    ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement, ProtoStatementBlock,
-    ProtoStatements, ProtoSystemFunctionCall, RuntimeForBound, RuntimeForRange, Statement,
-    SystemFunctionCall, TbMethodKind, format_assert_message, parse_hex_content, patch_stmt_log_buf,
+    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ProtoAssignDynamicStatement,
+    ProtoAssignStatement, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
+    ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RuntimeForBound,
+    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
+    parse_hex_content, patch_stmt_log_buf,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
@@ -38,30 +32,15 @@ pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
 
 use crate::HashMap;
-#[cfg(not(target_family = "wasm"))]
-use crate::aot_c::EmittedModule;
+use crate::backend::{self, BackendRegistry, CompiledWhole, DispatchOutcome};
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
-#[cfg(not(target_family = "wasm"))]
-use memmap2::Mmap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
-
-/// Lazily-published handle to a compiled AOT-C `.so`.  `cell.get()` is `None`
-/// while the background compile is still running and `Some` once the module is
-/// ready; callers fall back to Cranelift until then.  Shared via `Arc` so the
-/// `Ir` instances built from one cached `ProtoModule` reference the same `.so`.
-#[cfg(not(target_family = "wasm"))]
-pub type AotCell = Arc<OnceLock<EmittedModule>>;
-
-#[cfg(not(target_family = "wasm"))]
-type BinaryStorage = Mmap;
-#[cfg(target_family = "wasm")]
-type BinaryStorage = ();
 
 pub struct Ir {
     pub name: StrId,
@@ -93,7 +72,7 @@ pub struct Ir {
     ///
     /// Heap-allocated (`Box`) so the buffer's address is stable across
     /// moves of the surrounding `Ir`/`Simulator` — JIT code holds a raw
-    /// pointer baked into each `Statement::Binary` at construction.
+    /// pointer baked into each `Statement::Compiled` at construction.
     pub write_log_buffer: Box<write_log::WriteLogBuffer>,
     /// Whether FF classification optimization is disabled.
     pub disable_ff_opt: bool,
@@ -110,43 +89,25 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
-    /// AOT-C comb dispatch handle (see `AotCell`).  `Some` once
-    /// `ProtoModule::conv` attempts the cc backend — `Config::aot_c` set and
-    /// every comb stmt covered; `None` keeps `settle_comb` on the per-chunk
-    /// Cranelift loop.
-    #[cfg(not(target_family = "wasm"))]
-    pub aot_c_eval: Option<AotCell>,
+    /// Whole-comb dispatch handle.  `Some` when a backend (today:
+    /// AOT-C) committed to a one-function compile via
+    /// `Backend::compile_whole_comb`; `settle_comb` invokes its
+    /// `try_dispatch` in place of per-chunk Cranelift.  `None` keeps
+    /// the per-chunk loop.
+    pub whole_comb: Option<Arc<dyn CompiledWhole>>,
     /// Snapshotted from `Config::aot_c_validate`: when set, `settle_comb` /
     /// `step` dual-run the AOT-C and Cranelift paths and panic on divergence.
     pub aot_c_validate: bool,
-    /// AOT-C event-path dispatch handles, keyed by `Event`.  When the
-    /// current event's `cell.get()` is ready, `step()` invokes the
-    /// gcc-compiled FF-next + write-log function instead of the per-stmt
-    /// Cranelift dispatch.  Built in `ProtoModule::conv` when
-    /// `Config::aot_c_event` is set and the emitter covered every event stmt.
-    #[cfg(not(target_family = "wasm"))]
-    pub aot_c_event_evals: crate::HashMap<Event, AotCell>,
-    /// Keeps JIT-compiled code alive. Wrapped in `Arc` so that multiple `Ir`
-    /// instances created from the same cached `ProtoModule` can share the binary.
-    _binary: Arc<Vec<BinaryStorage>>,
+    /// Per-event whole-event dispatch handles.  When the current
+    /// event's `try_dispatch` succeeds, `step()` invokes it instead of
+    /// the per-stmt Cranelift dispatch.  Built in `ProtoModule::conv`
+    /// when `Config::aot_c_event` is set and the emitter covered every
+    /// event stmt.
+    pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
 }
 
 impl Ir {
-    pub fn from_module(
-        module: Module,
-        binary: Vec<BinaryStorage>,
-        config: &Config,
-        token: TokenRange,
-    ) -> Ir {
-        Ir::from_module_arc(module, Arc::new(binary), config, token)
-    }
-
-    pub fn from_module_arc(
-        module: Module,
-        binary: Arc<Vec<BinaryStorage>>,
-        config: &Config,
-        token: TokenRange,
-    ) -> Ir {
+    pub fn from_module(module: Module, config: &Config, token: TokenRange) -> Ir {
         let mut ir = Ir {
             name: module.name,
             token,
@@ -170,26 +131,23 @@ impl Ir {
             comb_schedule: module.comb_schedule,
             use_seeded_worklist: config.use_seeded_worklist,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
-            #[cfg(not(target_family = "wasm"))]
-            aot_c_eval: module.aot_c_eval,
+            whole_comb: module.whole_comb,
             aot_c_validate: config.aot_c_validate,
-            #[cfg(not(target_family = "wasm"))]
-            aot_c_event_evals: module.aot_c_event_evals,
-            _binary: binary,
+            whole_events: module.whole_events,
         };
         // Bake the WriteLogBuffer's heap-stable address into every
-        // JIT-dispatched Binary/BinaryBatch so emitted code can perform
+        // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
         ir
     }
 
     /// Walk every event/comb statement tree and overwrite the placeholder
-    /// `log_buf` field in `Statement::Binary` / `Statement::BinaryBatch`
+    /// `log_buf` field in `Statement::Compiled` / `Statement::CompiledBatch`
     /// with the actual heap address of `self.write_log_buffer`.
     ///
-    /// Called once at the end of `from_module_arc`.  The address is
-    /// stable for `self`'s lifetime because the buffer lives on the heap
+    /// Called once at the end of `from_module`.  The address is stable
+    /// for `self`'s lifetime because the buffer lives on the heap
     /// inside a `Box`.
     fn install_write_log_ptr(&mut self) {
         let log_buf =
@@ -223,15 +181,14 @@ impl Ir {
         }
         let _ = profile; // suppress unused warning when profile feature is off
 
-        // Dispatch: when AOT-C built a comb eval function and
-        // VERYL_AOT_C_VALIDATE is unset, swap in the gcc-compiled
-        // function in place of per-chunk Cranelift dispatch.  When
-        // VERYL_AOT_C_VALIDATE=1 we additionally run BOTH backends and
-        // panic on first divergence so the broken stmt can be
-        // identified.  Both paths fall through to Cranelift if
-        // `aot_c_eval` is None.
-        #[cfg(not(target_family = "wasm"))]
-        if let Some(aot) = self.aot_c_eval.as_ref().and_then(|c| c.get()) {
+        // Dispatch: when a whole-comb backend (today: AOT-C) is ready,
+        // invoke it in place of per-chunk Cranelift dispatch.  When
+        // VERYL_AOT_C_VALIDATE=1 (`self.aot_c_validate`) we additionally
+        // dual-run the whole-comb and the per-chunk path and panic on
+        // first divergence.  Both paths fall through to Cranelift if
+        // the whole-comb backend declines (`whole_comb == None`) or
+        // returns `NotReady` (async compile pending).
+        if let Some(whole) = self.whole_comb.as_ref() {
             // Cache env var lookups in a process-static OnceLock: settle_comb
             // runs once per cycle, so a per-cycle `std::env::var`/getenv would
             // be a hot-path cost.
@@ -252,200 +209,41 @@ impl Ir {
             let passes = env_passes.unwrap_or(self.required_comb_passes).max(1);
 
             if !validate {
-                // Common case: passes == 1 (no SCC backward edges).  The
-                // compiler cannot const-fold `passes` since it comes from a
-                // runtime field, so without this specialization we pay the
-                // loop counter+branch overhead on every cycle.
-                if passes == 1 {
-                    unsafe {
-                        (aot.func)(ff_ptr, comb_ptr as *const u8, log_ptr);
-                    }
-                } else {
-                    for _ in 0..passes {
-                        unsafe {
-                            (aot.func)(ff_ptr, comb_ptr as *const u8, log_ptr);
+                // Common case: passes == 1 (no SCC backward edges).
+                for _ in 0..passes {
+                    match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
+                        DispatchOutcome::Done => {}
+                        DispatchOutcome::NotReady => {
+                            // Async compile not finished yet — drop to
+                            // Cranelift for this cycle.
+                            self.run_chunked_settle(mask_cache, snapshot_buf, profile);
+                            return;
                         }
                     }
                 }
                 return;
             }
 
-            // Validate path: snapshot inputs, run AOT-C, snapshot AOT-C
-            // outputs, restore inputs, fall through to Cranelift, compare.
-            let ff_snap_in: Vec<u8> = self.ff_values.to_vec();
-            let comb_snap_in: Vec<u8> = self.comb_values.to_vec();
-            let count_snap_in: u64 = self.write_log_buffer.count() as u64;
-
-            for _ in 0..passes {
-                unsafe {
-                    (aot.func)(ff_ptr, comb_ptr as *const u8, log_ptr);
-                }
-            }
-
-            let ff_aot_out: Vec<u8> = self.ff_values.to_vec();
-            let comb_aot_out: Vec<u8> = self.comb_values.to_vec();
-            let count_aot_out: u64 = self.write_log_buffer.count() as u64;
-
-            // Restore inputs so the JIT path runs on the same starting state.
-            // Both AOT-C and Cranelift mutate buffers via raw pointers, so
-            // mirroring that pattern keeps the borrow rules consistent.
-            unsafe {
-                let ff_dst = self.ff_values.as_ptr() as *mut u8;
-                std::ptr::copy_nonoverlapping(ff_snap_in.as_ptr(), ff_dst, ff_snap_in.len());
-                let comb_dst = self.comb_values.as_ptr() as *mut u8;
-                std::ptr::copy_nonoverlapping(comb_snap_in.as_ptr(), comb_dst, comb_snap_in.len());
-            }
-            // AOT-C comb eval does not write the log, so its entry count
-            // is unchanged from the snapshot; no count restore needed.
-            let _ = count_snap_in;
-
-            // Run the JIT path on the restored inputs, then diff its result
-            // against the AOT-C snapshot and panic on any mismatch.
-            self.run_cranelift_settle(mask_cache, snapshot_buf, profile);
-
-            let ff_jit_out: &[u8] = &self.ff_values;
-            let comb_jit_out: &[u8] = &self.comb_values;
-            let count_jit_out: u64 = self.write_log_buffer.count() as u64;
-
-            let mut diverged = false;
-            if comb_aot_out.as_slice() != comb_jit_out {
-                let off = comb_aot_out
-                    .iter()
-                    .zip(comb_jit_out.iter())
-                    .position(|(a, b)| a != b)
-                    .unwrap_or(usize::MAX);
-                let var_info = lookup_comb_offset(&self.module_variables, comb_ptr, off);
-                // Print the input snapshot bytes around the diverging
-                // offset in 4-byte words so we can compare what the
-                // upstream stmts read.  Both backends started from
-                // `comb_snap_in`, so this is the shared input state.
-                let dump_word = |snap: &[u8], byte_off: isize, name: &str| {
-                    let abs = (off as isize + byte_off) as usize;
-                    if abs + 4 <= snap.len() {
-                        let w = u32::from_le_bytes(snap[abs..abs + 4].try_into().unwrap_or([0; 4]));
-                        eprintln!("  snap[{:+}] ({}) = 0x{:08x} (u32)", byte_off, name, w,);
-                    }
-                };
-                eprintln!(
-                    "VERYL_AOT_C_VALIDATE: comb_values diverge at offset {} \
-                     (AOT-C={:#x}, JIT={:#x}, len={}) var={}",
-                    off,
-                    comb_aot_out.get(off).copied().unwrap_or(0),
-                    comb_jit_out.get(off).copied().unwrap_or(0),
-                    comb_aot_out.len(),
-                    var_info,
-                );
-                // Generic input dump: ±64 bytes around the divergence, in
-                // 4-byte words.
-                eprintln!("  input snapshot (relative to diverge byte):");
-                for delta in (-64..=64).step_by(4) {
-                    dump_word(&comb_snap_in, delta as isize, "comb");
-                }
-                eprintln!("  AOT-C output around diverge byte:");
-                for delta in (-64..=64).step_by(4) {
-                    dump_word(&comb_aot_out, delta as isize, "aot");
-                }
-                eprintln!("  JIT output around diverge byte:");
-                for delta in (-64..=64).step_by(4) {
-                    let w = comb_jit_out
-                        .get(
-                            ((off as isize + delta) as usize)
-                                ..((off as isize + delta + 4) as usize),
-                        )
-                        .map(|s| u32::from_le_bytes(s.try_into().unwrap_or([0; 4])))
-                        .unwrap_or(0);
-                    eprintln!("  out[{:+}] (jit) = 0x{:08x} (u32)", delta, w);
-                }
-                // ALL diverging bytes (not just the first), grouped
-                // by contiguous run.  Helps when the first byte is
-                // a downstream effect of an earlier divergence.
-                eprintln!("  ALL diverging byte ranges:");
-                let mut run_start: Option<usize> = None;
-                let mut count = 0usize;
-                let max_runs = 32usize;
-                let pairs: Vec<(usize, u8, u8)> = comb_aot_out
-                    .iter()
-                    .zip(comb_jit_out.iter())
-                    .enumerate()
-                    .filter_map(|(i, (a, b))| if a != b { Some((i, *a, *b)) } else { None })
-                    .collect();
-                for (i, &(idx, a, b)) in pairs.iter().enumerate() {
-                    let is_contig = run_start.is_some() && i > 0 && pairs[i - 1].0 + 1 == idx;
-                    if !is_contig {
-                        if let Some(start) = run_start {
-                            let end = pairs[i - 1].0;
-                            let info = lookup_comb_offset(&self.module_variables, comb_ptr, start);
-                            eprintln!(
-                                "    [{}-{}] ({}B) at var={}",
-                                start,
-                                end,
-                                end - start + 1,
-                                info,
-                            );
-                            count += 1;
-                            if count >= max_runs {
-                                eprintln!(
-                                    "    ... ({} more diverging bytes total)",
-                                    pairs.len() - (i)
-                                );
-                                break;
-                            }
-                        }
-                        run_start = Some(idx);
-                    }
-                    let _ = (a, b);
-                }
-                if let Some(start) = run_start
-                    && count < max_runs
-                    && let Some(&(end, _, _)) = pairs.last()
-                {
-                    let info = lookup_comb_offset(&self.module_variables, comb_ptr, start);
-                    eprintln!(
-                        "    [{}-{}] ({}B) at var={}",
-                        start,
-                        end,
-                        end - start + 1,
-                        info,
-                    );
-                }
-                diverged = true;
-            }
-            if ff_aot_out.as_slice() != ff_jit_out {
-                let off = ff_aot_out
-                    .iter()
-                    .zip(ff_jit_out.iter())
-                    .position(|(a, b)| a != b)
-                    .unwrap_or(usize::MAX);
-                eprintln!(
-                    "VERYL_AOT_C_VALIDATE: ff_values diverge at offset {} \
-                     (AOT-C={:#x}, JIT={:#x}, len={})",
-                    off,
-                    ff_aot_out.get(off).copied().unwrap_or(0),
-                    ff_jit_out.get(off).copied().unwrap_or(0),
-                    ff_aot_out.len(),
-                );
-                diverged = true;
-            }
-            if count_aot_out != count_jit_out {
-                eprintln!(
-                    "VERYL_AOT_C_VALIDATE: write_log count diverges \
-                     (AOT-C={}, JIT={})",
-                    count_aot_out, count_jit_out,
-                );
-                diverged = true;
-            }
-            if diverged {
-                panic!("AOT-C / Cranelift divergence in settle_comb");
-            }
+            // Validate path: delegate to backend::validate, which
+            // snapshots inputs, runs whole-comb, restores, runs
+            // Cranelift, and diffs.  Panics on divergence.
+            backend::validate::settle_comb(
+                self,
+                whole.as_ref(),
+                passes,
+                mask_cache,
+                snapshot_buf,
+                profile,
+            );
             return;
         }
 
-        self.run_cranelift_settle(mask_cache, snapshot_buf, profile);
+        self.run_chunked_settle(mask_cache, snapshot_buf, profile);
     }
 
     /// Cranelift-only settle path, factored out so the validate mode can
     /// invoke it after AOT-C eval has run and the buffers have been restored.
-    fn run_cranelift_settle(
+    pub(crate) fn run_chunked_settle(
         &self,
         mask_cache: &mut MaskCache,
         snapshot_buf: &mut Vec<u8>,
@@ -525,11 +323,11 @@ impl Ir {
             profile.comb_eval_count += 1;
         }
 
-        let mut dirty: SmallVec<[crate::ir::schedule::StmtId; 32]> = SmallVec::new();
+        let mut dirty: SmallVec<[schedule::StmtId; 32]> = SmallVec::new();
         sched.compute_dirty_from_diff(
             &snapshot_buf[..],
             &self.comb_values[..],
-            0..n as crate::ir::schedule::StmtId,
+            0..n as schedule::StmtId,
             &mut dirty,
         );
 
@@ -558,18 +356,17 @@ impl Ir {
                 profile.comb_eval_count += 1;
                 profile.extra_pass_count += 1;
             }
-            let diff_ids: Box<dyn Iterator<Item = crate::ir::schedule::StmtId>> =
-                if fallback_fullpass {
-                    Box::new(0..n as crate::ir::schedule::StmtId)
-                } else {
-                    Box::new(
-                        current_dirty
-                            .iter()
-                            .copied()
-                            .collect::<Vec<_>>()
-                            .into_iter(),
-                    )
-                };
+            let diff_ids: Box<dyn Iterator<Item = schedule::StmtId>> = if fallback_fullpass {
+                Box::new(0..n as schedule::StmtId)
+            } else {
+                Box::new(
+                    current_dirty
+                        .iter()
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .into_iter(),
+                )
+            };
             sched.compute_dirty_from_diff(
                 &snapshot_buf[..],
                 &self.comb_values[..],
@@ -612,7 +409,7 @@ impl Ir {
             sched.compute_dirty_from_diff(
                 &snapshot_buf[..],
                 &self.comb_values[..],
-                0..n as crate::ir::schedule::StmtId,
+                0..n as schedule::StmtId,
                 &mut dirty,
             );
             let mut safety_iter = 0;
@@ -693,7 +490,7 @@ impl Ir {
         let mut total = 0;
         for s in &self.comb_statements {
             total += 1;
-            if s.is_binary() {
+            if s.is_compiled() {
                 binary += 1;
             } else {
                 interp += 1;
@@ -713,14 +510,14 @@ impl Ir {
         for stmts in self.event_statements.values() {
             for s in stmts {
                 total += 1;
-                if s.is_binary() {
+                if s.is_compiled() {
                     jit += 1;
                 }
             }
         }
         for s in &self.comb_statements {
             total += 1;
-            if s.is_binary() {
+            if s.is_compiled() {
                 jit += 1;
             }
         }
@@ -734,7 +531,7 @@ impl Ir {
         let mut event_jit = 0;
         let mut event_interp = 0;
         for s in &self.comb_statements {
-            if s.is_binary() {
+            if s.is_compiled() {
                 comb_jit += 1;
             } else {
                 comb_interp += 1;
@@ -742,7 +539,7 @@ impl Ir {
         }
         for stmts in self.event_statements.values() {
             for s in stmts {
-                if s.is_binary() {
+                if s.is_compiled() {
                     event_jit += 1;
                 } else {
                     event_interp += 1;
@@ -772,7 +569,7 @@ fn worklist_verify() -> bool {
 }
 
 /// Inline-friendly dispatch for the per-cycle hot loop.  Handles the
-/// common JIT cases (Binary / BinaryBatch) with a direct indirect call
+/// common JIT cases (Compiled / CompiledBatch) with a direct indirect call
 /// and falls back to `Statement::eval_step` for the interpreter path.
 ///
 /// Inlining at the call site removes the (otherwise non-inlined)
@@ -781,14 +578,13 @@ fn worklist_verify() -> bool {
 #[inline(always)]
 pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
     match s {
-        Statement::Binary(func, ff, comb, log_buf) => unsafe {
-            func(*ff, *comb, *log_buf);
+        Statement::Compiled(c) => unsafe {
+            (c.artifact.func)(c.ff, c.comb, c.log_buf);
         },
-        Statement::BinaryBatch(func, log_buf, args) => unsafe {
-            let f = *func;
-            let lb = *log_buf;
-            for &(ff, comb) in args {
-                f(ff, comb, lb);
+        Statement::CompiledBatch(c) => unsafe {
+            let f = c.artifact.func;
+            for &(ff, comb) in &c.args {
+                f(ff, comb, c.log_buf);
             }
         },
         _ => {
@@ -799,7 +595,8 @@ pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
 
 // SAFETY: Each Ir exclusively owns its ff_values/comb_values buffers.
 // Raw pointers in Statements point into these buffers — no cross-Ir aliasing.
-// _binary (Arc<Vec<BinaryStorage>>) keeps JIT code pages alive.
+// `Arc<ChunkArtifact>` handles inside `Statement::Compiled` / `CompiledBlockStatement`
+// keep JIT code pages alive (via the artifact's keepalive field).
 // NOTE: Ir is intentionally NOT Sync. Sharing &Ir across threads would allow
 // concurrent mutation of ff_values/comb_values via interior raw pointers.
 unsafe impl Send for Ir {}
@@ -841,11 +638,12 @@ pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, Simulat
             let token = x.token;
             let mut context = context::Context {
                 config: config.clone(),
+                backends: BackendRegistry::for_config(config),
                 ..Default::default()
             };
             let proto: ProtoModule = Conv::conv(&mut context, x)?;
             let module = proto.instantiate();
-            return Ok(Ir::from_module(module, context.binary, config, token));
+            return Ok(Ir::from_module(module, config, token));
         }
     }
     Err(SimulatorError::TopModuleNotFound {
@@ -855,16 +653,16 @@ pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, Simulat
 
 struct CacheEntry {
     proto: ProtoModule,
-    binary: Arc<Vec<BinaryStorage>>,
     token: TokenRange,
 }
 
-/// Cache for `ProtoModule` and JIT binaries keyed by top module name.
+/// Cache for `ProtoModule` keyed by top module name.  JIT binaries are
+/// kept alive via shared `Arc<ChunkArtifact>` handles embedded in the
+/// cached `ProtoModule`'s `CompiledBlock` statements, so the cache no
+/// longer needs a separate keepalive vector.
 #[derive(Default)]
 pub struct ProtoModuleCache {
     entries: HashMap<StrId, CacheEntry>,
-    /// Keeps JIT binary pages alive for the cached ProtoModules.
-    shared_binaries: Vec<Arc<Vec<BinaryStorage>>>,
 }
 
 pub fn build_ir_cached(
@@ -876,12 +674,7 @@ pub fn build_ir_cached(
     // Cache hit: reuse ProtoModule, just instantiate with fresh buffers
     if let Some(entry) = cache.entries.get(&top) {
         let module = entry.proto.instantiate();
-        return Ok(Ir::from_module_arc(
-            module,
-            Arc::clone(&entry.binary),
-            config,
-            entry.token,
-        ));
+        return Ok(Ir::from_module(module, config, entry.token));
     }
 
     // Cache miss: run Conv::conv
@@ -892,25 +685,16 @@ pub fn build_ir_cached(
             let token = x.token;
             let mut context = context::Context {
                 config: config.clone(),
+                backends: BackendRegistry::for_config(config),
                 ..Default::default()
             };
 
             let proto: ProtoModule = Conv::conv(&mut context, x)?;
             let module = proto.instantiate();
-            let binary = Arc::new(context.binary);
 
-            let result = Ir::from_module_arc(module, Arc::clone(&binary), config, token);
+            let result = Ir::from_module(module, config, token);
 
-            cache.shared_binaries.push(Arc::clone(&binary));
-
-            cache.entries.insert(
-                top,
-                CacheEntry {
-                    proto,
-                    binary,
-                    token,
-                },
-            );
+            cache.entries.insert(top, CacheEntry { proto, token });
 
             return Ok(result);
         }
@@ -996,30 +780,24 @@ impl Config {
     }
 }
 
-/// Whether an external C compiler is available (probes `cc --version`, honoring
-/// `VERYL_AOT_CC`).  Used to skip the `cc` backend in `Config::all()` test
-/// matrices on hosts without a compiler.
-#[cfg(not(target_family = "wasm"))]
-pub fn cc_available() -> bool {
-    let cc = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
-    std::process::Command::new(cc)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+// `cc_available()` has moved to `crate::backend::aot_c`.
 
 impl Config {
     pub fn all() -> Vec<Config> {
         let mut ret = vec![];
 
-        #[cfg(not(target_family = "wasm"))]
-        let jit_options = [false, true];
-        #[cfg(target_family = "wasm")]
-        let jit_options = [false];
+        // `use_jit = true` is meaningful only when the Cranelift backend
+        // is built in; wasm has no chunk backend, so dropping the `true`
+        // arm is purely an optimization (Config::default() already sets
+        // use_jit = false).
+        let jit_options: &[bool] = if cfg!(target_family = "wasm") {
+            &[false]
+        } else {
+            &[false, true]
+        };
 
         for use_4state in [false, true] {
-            for use_jit in jit_options {
+            for &use_jit in jit_options {
                 for disable_ff_opt in [false, true] {
                     ret.push(Config {
                         use_4state,
@@ -1036,7 +814,7 @@ impl Config {
         // with timing, but tests must dual-check cc deterministically vs the
         // golden output.  Gated on cc_available so cc-less hosts still run.
         #[cfg(not(target_family = "wasm"))]
-        if cc_available() {
+        if backend::aot_c::cc_available() {
             for disable_ff_opt in [false, true] {
                 ret.push(Config {
                     use_4state: false,
@@ -1054,77 +832,4 @@ impl Config {
     }
 }
 
-/// Walk the variable hierarchy looking for the variable element whose
-/// `current_values[i]` raw pointer is `comb_base + offset`.  Returns a
-/// human-readable description of `var.path[i]` (or `?` when no element
-/// matches).  Used by `VERYL_AOT_C_VALIDATE` to map a divergence offset
-/// back to a variable name without depending on `VariableMeta`'s offset
-/// table being threaded into `Ir`.
-#[cfg(not(target_family = "wasm"))]
-fn lookup_comb_offset(vars: &ModuleVariables, comb_base: *const u8, target: usize) -> String {
-    // Collect ALL matches whose byte range covers `target`, plus any
-    // var whose start is within ±64 bytes of target (gives layout context
-    // when the strict-cover check returns nothing or returns the wrong
-    // entry).  Returns the first cover-hit as the primary name and
-    // appends nearby vars for diagnostics.
-    fn walk(
-        vars: &ModuleVariables,
-        target_addr: usize,
-        cover: &mut Vec<String>,
-        nearby: &mut Vec<(isize, String)>,
-    ) {
-        for var in vars.variables.values() {
-            for (i, &ptr) in var.current_values.iter().enumerate() {
-                let addr = ptr as usize;
-                let end = addr + var.native_bytes;
-                if (target_addr >= addr) && (target_addr < end) {
-                    cover.push(format!(
-                        "{}[{}]+{} (w={}, nb={})",
-                        var.path,
-                        i,
-                        target_addr - addr,
-                        var.width,
-                        var.native_bytes,
-                    ));
-                }
-                let delta = addr as isize - target_addr as isize;
-                if delta.unsigned_abs() <= 64 {
-                    nearby.push((
-                        delta,
-                        format!(
-                            "{}[{}]@{:+} (w={}, nb={})",
-                            var.path, i, delta, var.width, var.native_bytes,
-                        ),
-                    ));
-                }
-            }
-        }
-        for child in &vars.children {
-            walk(child, target_addr, cover, nearby);
-        }
-    }
-    let target_addr = comb_base as usize + target;
-    let mut cover: Vec<String> = Vec::new();
-    let mut nearby: Vec<(isize, String)> = Vec::new();
-    walk(vars, target_addr, &mut cover, &mut nearby);
-    if cover.is_empty() && nearby.is_empty() {
-        return "?".to_string();
-    }
-    nearby.sort_by_key(|(d, _)| d.abs());
-    let primary = cover.first().cloned().unwrap_or_else(|| "?".to_string());
-    let cover_n = cover.len();
-    let cover_extra = if cover_n > 1 {
-        format!(
-            " [+{} other covers: {}]",
-            cover_n - 1,
-            cover[1..].join("; ")
-        )
-    } else {
-        String::new()
-    };
-    let nearby_str: Vec<String> = nearby.iter().take(16).map(|(_, s)| s.clone()).collect();
-    format!(
-        "{primary}{cover_extra} | nearby: [{}]",
-        nearby_str.join(", "),
-    )
-}
+// `lookup_comb_offset` has moved to `backend::validate`.

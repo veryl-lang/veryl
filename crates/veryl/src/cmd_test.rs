@@ -183,7 +183,7 @@ impl CmdTest {
         config.apply_env();
         // Warn once if cc is requested but absent; the fallback is otherwise silent.
         #[cfg(not(target_family = "wasm"))]
-        if config.aot_c && !veryl_simulator::ir::cc_available() {
+        if config.aot_c && !veryl_simulator::backend::aot_c::cc_available() {
             warn!(
                 "--backend cc: no C compiler found (set VERYL_AOT_CC, or install cc/gcc); \
                  falling back to the Cranelift JIT backend"

@@ -1,7 +1,5 @@
-use crate::ir::Context as ConvContext;
-use crate::ir::ProtoStatement;
-use crate::ir::VarOffset;
-use crate::ir::load_cache_lookahead::{FutureReads, compute_read_positions};
+use crate::ir::opt::load_cache_lookahead::{FutureReads, compute_read_positions};
+use crate::ir::{Config, ProtoStatement, VarOffset};
 use crate::{HashMap, HashSet};
 use cranelift::codegen::control::ControlPlane;
 use cranelift::codegen::ir::{AbiParam, Function, SigRef, Signature, StackSlotData, UserFuncName};
@@ -15,18 +13,18 @@ use target_lexicon::Triple;
 
 pub use crate::FuncPtr;
 
-/// Signature kinds for helper function calls via call_indirect.
+/// Signature kinds for `call_indirect` helper calls.
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub enum HelperSig {
-    /// (I64, I64, I64, I32) -> void  [binary ops, shifts: dst, a, b/amount, nb]
+    /// `(dst, a, b/amount, nb) -> ()` — binary ops, shifts.
     BinaryOp,
-    /// (I64, I64, I32) -> void  [unary ops, copy: dst, a, nb]
+    /// `(dst, a, nb) -> ()` — unary ops, copy.
     UnaryOp,
-    /// (I64, I64, I32) -> I64  [comparisons: a, b, nb -> result]
+    /// `(a, b, nb) -> i64` — comparisons.
     Compare,
-    /// (I64, I32) -> I64  [reductions: a, nb -> result]
+    /// `(a, nb) -> i64` — reductions.
     Reduce,
-    /// (I32, I64, I32) -> void  [write-log push: offset, payload, width_class]
+    /// `(offset, payload, width_class) -> ()` — write-log push.
     WriteLogPushStatic,
 }
 
@@ -34,39 +32,29 @@ pub struct Context {
     pub use_4state: bool,
     pub ff_values: Value,
     pub comb_values: Value,
-    /// Pointer to the per-Ir `WriteLogBuffer` (3rd JIT arg).  Used by
-    /// `emit_inline_write_log_push` to perform inline log entry stores.
+    /// Per-Ir `WriteLogBuffer` pointer (3rd JIT arg).
     pub log_buf: Value,
     pub zero: Value,
     pub zero_128: Value,
-    /// Load CSE cache: VarOffset → (payload, mask_xz)
+    /// Load CSE cache: VarOffset → (payload, mask_xz).
     pub load_cache: HashMap<VarOffset, (Value, Option<Value>)>,
-    /// Comb offsets where stores can be skipped (value forwarded via load_cache only).
+    /// Offsets where stores can be skipped (forwarded via load_cache only).
     pub store_elim_offsets: HashSet<VarOffset>,
-    /// Whether store elimination is active (disabled inside If blocks).
+    /// Disabled inside If blocks.
     pub store_elim_enabled: bool,
-    /// Helper function signatures (cached per arity/return type).
     pub helper_sigs: HashMap<HelperSig, SigRef>,
-    /// Calling convention for helper functions.
     pub call_conv: CallConv,
-    /// Disable load_cache: every access emits a fresh load instruction.
-    /// Used for unified comb where helper functions may modify values
-    /// between cached loads.
+    /// Force a fresh load on every access.  Set when the chunk contains
+    /// CompiledBlock helpers that may mutate values between loads.
     pub disable_load_cache: bool,
-    /// Look-ahead load_cache eviction (default-on, opt-out via
-    /// VERYL_STAGE7_LOOKAHEAD=0).
-    /// Pre-computed per-VarOffset future read positions across the
-    /// chunk's top-level statement sequence.  After each stmt, the
-    /// main loop evicts cached entries by Belady-optimal policy
-    /// (farthest next-read first) when size exceeds capacity.
-    /// `None` when eviction is disabled (load_cache off or env opt-out).
+    /// Pre-computed future read positions for Belady-optimal cache
+    /// eviction.  `None` when eviction is disabled.
     pub future_reads: Option<FutureReads>,
-    /// Belady eviction trigger.  Cache size <= capacity → no evict.
-    /// Default ~physical GPR budget after ABI-reserved regs.
+    /// Eviction trigger; cache size ≤ capacity → no evict.  Defaults
+    /// to ~physical GPR budget after ABI-reserved regs.
     pub lookahead_capacity: usize,
 }
 
-/// Get or create a SigRef for the given helper signature kind.
 pub fn get_or_create_sig(
     context: &mut Context,
     builder: &mut FunctionBuilder,
@@ -112,7 +100,6 @@ pub fn get_or_create_sig(
     sig_ref
 }
 
-/// Call a helper function that returns void.
 pub fn call_helper_void(
     context: &mut Context,
     builder: &mut FunctionBuilder,
@@ -125,7 +112,6 @@ pub fn call_helper_void(
     builder.ins().call_indirect(sig_ref, ptr, args);
 }
 
-/// Call a helper function that returns an I64 value.
 pub fn call_helper_ret(
     context: &mut Context,
     builder: &mut FunctionBuilder,
@@ -139,22 +125,9 @@ pub fn call_helper_ret(
     builder.inst_results(call)[0]
 }
 
-/// Emit an inline write-log push: direct loads/stores to the
-/// `WriteLogBuffer` whose pointer is passed as the 3rd JIT arg
-/// (`context.log_buf`).
-///
-/// Layout (mirrors `write_log::WriteLogBuffer`):
-///   offset 0 : entries_ptr (*mut WriteLogEntry)  — `i64` load
-///   offset 8 : count       (u32)                 — `i32` load + store
-/// Entry layout (16 B):
-///   offset 0 : offset      (u32)
-///   offset 4 : mask_xz     (u16) — store 0
-///   offset 6 : width_class (u16) — caller passes I32, truncate to I16
-///   offset 8 : payload     (u64)
-///
-/// Asm sequence: load count, increment, store count (back), load entries_ptr,
-/// compute entry slot = ptr + count*16, store offset/mask_xz/width_class/
-/// payload.  ~8 instructions vs ~30+ via helper call.
+/// Inline write-log push: direct loads/stores into the `WriteLogBuffer`
+/// at `context.log_buf` (mirrors `write_log::WriteLogBuffer` layout).
+/// ~8 instructions vs ~30+ via helper call.
 pub fn emit_inline_write_log_push(
     context: &Context,
     builder: &mut FunctionBuilder,
@@ -208,11 +181,9 @@ pub fn emit_inline_write_log_push(
         .store(flags, payload, entry_slot, WRITE_LOG_ENTRY_OFFSET_PAYLOAD);
 }
 
-/// Batched variant of `emit_inline_write_log_push` for wide FFs.
-/// Emit an inline write-log push for a wide FF.  Writes a single 64-byte
-/// `WriteLogWideEntry` containing the canonical FF offset, the byte
-/// count, and `nb` bytes copied from `payload_ptr`.  `nb` must satisfy
-/// `nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES` (= 56).
+/// Inline write-log push for a wide FF: writes a single `WriteLogWideEntry`
+/// with offset, byte count, and `nb` bytes copied from `payload_ptr`.
+/// Requires `nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES` (= 56).
 pub fn emit_inline_write_log_push_wide(
     context: &Context,
     builder: &mut FunctionBuilder,
@@ -229,7 +200,6 @@ pub fn emit_inline_write_log_push_wide(
     let log_buf = context.log_buf;
     let flags = MemFlags::trusted();
 
-    // Reserve one wide slot and advance the count.
     let count = builder
         .ins()
         .load(I32, flags, log_buf, WRITE_LOG_WIDE_OFFSET_COUNT);
@@ -246,7 +216,6 @@ pub fn emit_inline_write_log_push_wide(
     let byte_offset = builder.ins().imul(count_i64, entry_size);
     let entry_slot = builder.ins().iadd(entries_ptr, byte_offset);
 
-    // Write the canonical offset and the payload byte-count.
     builder.ins().store(
         flags,
         offset,
@@ -258,7 +227,6 @@ pub fn emit_inline_write_log_push_wide(
         .ins()
         .istore8(flags, nb_val, entry_slot, WRITE_LOG_WIDE_ENTRY_OFFSET_NB);
 
-    // Copy the payload in i64 chunks, then any trailing 4 / 2 / 1 bytes.
     let payload_dst_base = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD;
     let mut i: usize = 0;
     while i + 8 <= nb {
@@ -293,7 +261,7 @@ pub fn emit_inline_write_log_push_wide(
     }
 }
 
-/// Allocate a stack slot of `nb` bytes and return its address as an I64 value.
+/// Stack slot of `nb` bytes; returns its address as I64.
 pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
@@ -303,22 +271,25 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     builder.ins().stack_addr(I64, slot, 0)
 }
 
-pub fn build_binary(context: &mut ConvContext, proto: Vec<ProtoStatement>) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, HashSet::default(), false)
-}
-
-/// Build a JIT function with load_cache disabled.
-/// Used for unified comb where helper functions (CompiledBlocks) may
-/// modify comb values between cached loads within the same JIT function.
-pub fn build_binary_no_cache(
-    context: &mut ConvContext,
+/// Compile a chunk into a native function.  Returns `(func, mmap)`;
+/// the caller must keep `mmap` alive for as long as `func` is callable
+/// (typically by wrapping both in `ChunkArtifact`).
+pub fn build_binary(
+    config: &Config,
     proto: Vec<ProtoStatement>,
-) -> Option<FuncPtr> {
-    build_binary_inner(context, proto, HashSet::default(), true)
+) -> Option<(FuncPtr, memmap2::Mmap)> {
+    build_binary_inner(config, proto, HashSet::default(), false)
 }
 
-/// Recursively check whether the chunk contains any `CompiledBlock`
-/// (interpreted helper) statement.
+/// [`build_binary`] with load_cache disabled, for chunks containing
+/// CompiledBlock helpers that may mutate comb values between loads.
+pub fn build_binary_no_cache(
+    config: &Config,
+    proto: Vec<ProtoStatement>,
+) -> Option<(FuncPtr, memmap2::Mmap)> {
+    build_binary_inner(config, proto, HashSet::default(), true)
+}
+
 fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
     stmts.iter().any(|s| match s {
         ProtoStatement::CompiledBlock(_) => true,
@@ -333,23 +304,18 @@ fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
 }
 
 fn build_binary_inner(
-    context: &mut ConvContext,
+    config: &Config,
     proto: Vec<ProtoStatement>,
     store_elim: HashSet<VarOffset>,
     disable_load_cache: bool,
-) -> Option<FuncPtr> {
-    let config = &context.config;
-
+) -> Option<(FuncPtr, memmap2::Mmap)> {
     let mut settings_builder = settings::builder();
     settings_builder.set("opt_level", "speed").unwrap();
     if !config.dump_cranelift {
         settings_builder.set("enable_verifier", "false").unwrap();
     }
-    // `disable_load_cache` is only required when the chunk contains an
-    // interpreted CompiledBlock — those helpers can mutate comb storage
-    // between cached loads, breaking the IR-level load CSE in
-    // `expression.rs::build_binary`.  Fully-JIT chunks are safe, so the
-    // cache (and Cranelift's alias analysis) can stay on.
+    // disable_load_cache only matters when the chunk contains a
+    // CompiledBlock; fully-JIT chunks keep alias analysis on.
     let chunk_has_compiled_block = proto_contains_compiled_block(&proto);
     let force_disable_load_cache = std::env::var("VERYL_FORCE_DISABLE_LOAD_CACHE")
         .ok()
@@ -410,11 +376,9 @@ fn build_binary_inner(
         lookahead_capacity: 0,
     };
 
-    // Pre-compute future-read positions for Belady-optimal load_cache
-    // eviction (default-on; opt-out via VERYL_STAGE7_LOOKAHEAD=0).
-    // Cap each chunk's resident cache entry count at `lookahead_capacity`
-    // to bound SSA Value live range to ~physical GPR budget and prevent
-    // regalloc spill cascade.  See ir/load_cache_lookahead.rs.
+    // Belady-optimal load_cache eviction (opt-out via VERYL_STAGE7_LOOKAHEAD=0).
+    // Caps resident entries to bound SSA live ranges and prevent regalloc
+    // spill cascade.  See ir/load_cache_lookahead.rs.
     if !effective_disable_load_cache
         && std::env::var("VERYL_STAGE7_LOOKAHEAD").as_deref() != Ok("0")
     {
@@ -430,9 +394,8 @@ fn build_binary_inner(
         let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
 
-        // Belady-optimal eviction after each top-level stmt.  While
-        // cache size > capacity, evict the entry whose next read is
-        // farthest in the future (None = never used again, evicted first).
+        // Belady: while over capacity, evict the entry whose next read
+        // is farthest in the future (None = never read again).
         if let Some(future) = cranelift_context.future_reads.take() {
             let cap = cranelift_context.lookahead_capacity;
             while cranelift_context.load_cache.len() > cap {
@@ -497,7 +460,5 @@ fn build_binary_inner(
 
     let func_ptr: FuncPtr = unsafe { std::mem::transmute(buffer.as_ptr()) };
 
-    context.binary.push(buffer);
-
-    Some(func_ptr)
+    Some((func_ptr, buffer))
 }

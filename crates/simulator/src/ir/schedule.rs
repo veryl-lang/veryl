@@ -217,6 +217,7 @@ fn collect_offset_sizes_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::Op;
 
     fn off_comb(v: isize) -> VarOffset {
         VarOffset::Comb(v)
@@ -281,7 +282,7 @@ mod tests {
         };
         let mk_bin = |a: ProtoExpression, b: ProtoExpression| ProtoExpression::Binary {
             x: Box::new(a),
-            op: crate::ir::Op::Add,
+            op: Op::Add,
             y: Box::new(b),
             width: 32,
             expr_context: ExpressionContext {
@@ -357,7 +358,7 @@ mod tests {
             rhs_select: None,
             expr: ProtoExpression::Binary {
                 x: Box::new(var(8)),
-                op: crate::ir::Op::Add,
+                op: Op::Add,
                 y: Box::new(var(8)),
                 width: 32,
                 expr_context: ExpressionContext {

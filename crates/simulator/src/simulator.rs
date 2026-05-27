@@ -1,4 +1,7 @@
-use crate::ir::write_log::{clear_event_write_log, ff_commit_from_log, set_event_write_log};
+use crate::backend::CompiledWhole;
+use crate::ir::write_log::{
+    WriteLogBuffer, clear_event_write_log, ff_commit_from_log, set_event_write_log,
+};
 use crate::ir::{
     Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
     read_native_value, write_native_value,
@@ -282,48 +285,41 @@ impl Simulator {
             ptr
         };
 
-        // AOT-C: if this event was lowered to a gcc-compiled FF-next +
-        // write-log function, invoke it instead of the per-stmt Cranelift
-        // dispatch.  The function reads ff/comb current values and pushes
-        // WriteLogEntries into the buffer (3rd arg), exactly as the Cranelift
-        // event JIT does; `ff_commit_from_log` below applies them.
-        #[cfg(not(target_family = "wasm"))]
-        let aot_event_func = self
-            .ir
-            .aot_c_event_evals
-            .get(event)
-            .and_then(|cell| cell.get())
-            .map(|m| m.func);
-        #[cfg(target_family = "wasm")]
-        let aot_event_func: Option<crate::FuncPtr> = None;
-
-        if let Some(func) = aot_event_func {
+        // Whole-event backend (today: AOT-C): if a backend committed to
+        // a one-function compile for this event, invoke it in place of
+        // the per-stmt Cranelift dispatch.  The function reads ff/comb
+        // current values and pushes WriteLogEntries into the buffer
+        // (3rd arg), exactly as the Cranelift event JIT does;
+        // `ff_commit_from_log` below applies them.
+        use crate::backend::DispatchOutcome;
+        let whole_event = self.ir.whole_events.get(event).cloned();
+        let dispatched = if let Some(whole) = whole_event {
             let ff_ptr = self.ir.ff_values.as_ptr();
-            let comb_ptr = self.ir.comb_values.as_ptr();
+            let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
             let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
 
-            // VERYL_AOT_C_VALIDATE=1: run BOTH the AOT-C event function and the
-            // Cranelift per-stmt dispatch on the same inputs and compare the
-            // WriteLogEntries they push plus any direct ff/comb writes; panic
-            // on first divergence so the broken event stmt can be identified.
-            // (Mirrors settle_comb's comb-side validate.)  Default-off.
-            #[cfg(not(target_family = "wasm"))]
+            // VERYL_AOT_C_VALIDATE=1: dual-run paths and diff.  Default-off.
             let validate = self.ir.aot_c_validate;
-            #[cfg(target_family = "wasm")]
-            let validate = false;
 
             if !validate {
-                // SAFETY: pointers valid for the call; emitted code only reads
-                // ff/comb and pushes into the WriteLogBuffer.
-                unsafe {
-                    func(ff_ptr, comb_ptr, log_ptr);
-                }
+                matches!(
+                    whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
+                    DispatchOutcome::Done,
+                )
             } else {
-                // `validate` is always false on wasm (the method is non-wasm).
-                #[cfg(not(target_family = "wasm"))]
-                self.validate_event_aot(func, stmts_ptr);
+                // For validate, the wrapper compares the whole-event
+                // dispatch against the per-stmt Cranelift path and panics
+                // on divergence.  The whole-event backend only exists on
+                // native (BackendRegistry stays empty on wasm), so this
+                // branch is effectively native-only at runtime.
+                self.validate_event_aot(whole.as_ref(), stmts_ptr);
+                true
             }
-        } else if !stmts_ptr.is_null() {
+        } else {
+            false
+        };
+
+        if !dispatched && !stmts_ptr.is_null() {
             // SAFETY: event_statements is never mutated after Ir construction.
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             for x in statements {
@@ -370,25 +366,25 @@ impl Simulator {
     /// the Cranelift per-stmt dispatch on identical inputs, compare the
     /// WriteLogEntries they push plus any direct ff/comb writes, and panic on
     /// first divergence.  Leaves the Cranelift result live (ground truth).
-    /// Slow (clones ff/comb each event) — diagnostics only.
-    #[cfg(not(target_family = "wasm"))]
-    fn validate_event_aot(&mut self, func: crate::FuncPtr, stmts_ptr: *const Vec<Statement>) {
+    /// Slow (clones ff/comb each event) — diagnostics only.  Unreachable on
+    /// wasm since no whole-event backend ever registers there.
+    fn validate_event_aot(&mut self, whole: &dyn CompiledWhole, stmts_ptr: *const Vec<Statement>) {
         let ff_ptr = self.ir.ff_values.as_ptr();
-        let comb_ptr = self.ir.comb_values.as_ptr();
+        let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
         let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
 
         let ff_snap = self.ir.ff_values.to_vec();
         let comb_snap = self.ir.comb_values.to_vec();
         let count_before = self.ir.write_log_buffer.narrow_count as usize;
 
-        // AOT-C event, then capture its pushed entries + ff/comb.
-        unsafe { func(ff_ptr, comb_ptr, log_ptr) };
+        // Whole-event backend, then capture its pushed entries + ff/comb.
+        let _ = whole.try_dispatch(ff_ptr, comb_ptr, log_ptr);
         // The committed FF effect is `ff_commit_from_log`'s last-write-wins per
         // offset, so compare offset -> (width_class, last payload) maps, not the
         // raw entry order or the pre-commit ff_values (the dual-slot "next slot"
         // direct writes are vestigial — ff_commit applies the *log* to the
         // current slots, so those transient writes don't affect correctness).
-        let lww_map = |buf: &crate::ir::write_log::WriteLogBuffer, lo: usize, hi: usize| {
+        let lww_map = |buf: &WriteLogBuffer, lo: usize, hi: usize| {
             let mut m: std::collections::HashMap<u32, (u16, u64)> = Default::default();
             for e in &buf.narrow_entries_slice()[lo..hi] {
                 m.insert(e.offset, (e.width_class, e.payload));

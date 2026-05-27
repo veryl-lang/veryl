@@ -82,91 +82,51 @@ pub struct WriteLogBuffer {
 // single thread (Ir is Send but not Sync).
 unsafe impl Send for WriteLogBuffer {}
 
-/// Layout offsets baked into JIT codegen.  Any change here requires
-/// matching updates in `cranelift.rs::emit_inline_write_log_*`.
-/// Only meaningful on 64-bit native targets where the JIT is enabled;
-/// on wasm32 the pointer-size-dependent offsets differ and the JIT is
-/// disabled, so the constants and the static layout assertions are
-/// gated out.
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR: i32 = 0;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_NARROW_OFFSET_COUNT: i32 = 8;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR: i32 = 16;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_WIDE_OFFSET_COUNT: i32 = 24;
+/// Layout offsets / sizes used by JIT-emitted inline write-log push code
+/// (Cranelift `emit_inline_write_log_*` and cc/AOT-C `emit_log_push`).
+/// Computed from the actual `#[repr(C)]` layout via `offset_of!` so a
+/// field reorder propagates to the codegen automatically, and so the
+/// constants stay correct on every target (pointer-sized fields differ
+/// between 64-bit native and wasm32).  `allow(dead_code)` because
+/// none of the codegen sites are reachable on wasm.
+#[allow(dead_code)]
+pub const WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR: i32 =
+    std::mem::offset_of!(WriteLogBuffer, narrow_entries_ptr) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_NARROW_OFFSET_COUNT: i32 =
+    std::mem::offset_of!(WriteLogBuffer, narrow_count) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR: i32 =
+    std::mem::offset_of!(WriteLogBuffer, wide_entries_ptr) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_OFFSET_COUNT: i32 =
+    std::mem::offset_of!(WriteLogBuffer, wide_count) as i32;
 
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_ENTRY_SIZE: i32 = 16;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_ENTRY_OFFSET_OFFSET: i32 = 0;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_ENTRY_OFFSET_MASK_XZ: i32 = 4;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS: i32 = 6;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_ENTRY_OFFSET_PAYLOAD: i32 = 8;
+#[allow(dead_code)]
+pub const WRITE_LOG_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogEntry>() as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_ENTRY_OFFSET_OFFSET: i32 = std::mem::offset_of!(WriteLogEntry, offset) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_ENTRY_OFFSET_MASK_XZ: i32 = std::mem::offset_of!(WriteLogEntry, mask_xz) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS: i32 =
+    std::mem::offset_of!(WriteLogEntry, width_class) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_ENTRY_OFFSET_PAYLOAD: i32 = std::mem::offset_of!(WriteLogEntry, payload) as i32;
 
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_WIDE_ENTRY_SIZE: i32 = 64;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET: i32 = 0;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_WIDE_ENTRY_OFFSET_NB: i32 = 4;
-#[cfg(not(target_family = "wasm"))]
-pub const WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD: i32 = 8;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogWideEntry>() as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET: i32 =
+    std::mem::offset_of!(WriteLogWideEntry, offset) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_ENTRY_OFFSET_NB: i32 =
+    std::mem::offset_of!(WriteLogWideEntry, native_bytes) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD: i32 =
+    std::mem::offset_of!(WriteLogWideEntry, payload) as i32;
 /// Maximum payload bytes a single wide entry can hold.
 pub const WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES: usize = 56;
-
-// These tie the public WRITE_LOG_* offset constants — the single source the
-// Cranelift (`emit_inline_write_log_push`) and cc/AOT-C (`emit_log_push`)
-// codegen both read — to the actual `#[repr(C)]` field layout.  A field
-// reorder makes one of these fail at compile time; bumping the const to match
-// then propagates to both codegen sites automatically.
-#[cfg(not(target_family = "wasm"))]
-const _: () = {
-    assert!(
-        std::mem::offset_of!(WriteLogBuffer, narrow_entries_ptr)
-            == WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogBuffer, narrow_count)
-            == WRITE_LOG_NARROW_OFFSET_COUNT as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogBuffer, wide_entries_ptr)
-            == WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogBuffer, wide_count) == WRITE_LOG_WIDE_OFFSET_COUNT as usize
-    );
-    assert!(std::mem::offset_of!(WriteLogEntry, offset) == WRITE_LOG_ENTRY_OFFSET_OFFSET as usize);
-    assert!(
-        std::mem::offset_of!(WriteLogEntry, mask_xz) == WRITE_LOG_ENTRY_OFFSET_MASK_XZ as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogEntry, width_class)
-            == WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogEntry, payload) == WRITE_LOG_ENTRY_OFFSET_PAYLOAD as usize
-    );
-    assert!(std::mem::size_of::<WriteLogEntry>() == WRITE_LOG_ENTRY_SIZE as usize);
-    assert!(
-        std::mem::offset_of!(WriteLogWideEntry, offset)
-            == WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogWideEntry, native_bytes)
-            == WRITE_LOG_WIDE_ENTRY_OFFSET_NB as usize
-    );
-    assert!(
-        std::mem::offset_of!(WriteLogWideEntry, payload)
-            == WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD as usize
-    );
-    assert!(std::mem::size_of::<WriteLogWideEntry>() == WRITE_LOG_WIDE_ENTRY_SIZE as usize);
-};
 
 impl Default for WriteLogBuffer {
     fn default() -> Self {

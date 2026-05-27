@@ -4,7 +4,7 @@
 // sequential (last-write-wins) semantics the earlier value is
 // unobservable.
 
-use super::ProtoStatement;
+use crate::ir::ProtoStatement;
 use crate::ir::variable::VarOffset;
 
 /// Drop an earlier ProtoStatement::Assign whose dst is overwritten by a

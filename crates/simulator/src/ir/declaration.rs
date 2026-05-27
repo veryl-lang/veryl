@@ -1,60 +1,17 @@
-use crate::HashMap;
-use crate::HashSet;
-#[cfg(not(target_family = "wasm"))]
-use crate::cranelift;
+use crate::backend::inst::try_compile_inst_chunks;
 use crate::ir::context::{Context, Conv, ScopeContext};
-#[cfg(not(target_family = "wasm"))]
-use crate::ir::context::{JitCacheEntry, JitCachedFunc};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
-#[cfg(not(target_family = "wasm"))]
-use crate::ir::multi_write_analysis::analyze_multi_write;
-#[cfg(not(target_family = "wasm"))]
-use crate::ir::statement::CompiledBlockStatement;
+use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::statement::ProtoAssignStatement;
-use crate::ir::variable::{ModuleVariableMeta, VarOffset, create_variable_meta};
+use crate::ir::variable::{
+    ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
+};
 use crate::ir::{Event, ProtoExpression, ProtoStatement};
 use crate::simulator_error::SimulatorError;
+use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
-#[cfg(not(target_family = "wasm"))]
-use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
-
-/// Collect variable offsets from statements, filtering out internal variables
-/// (those that appear in both inputs and outputs) to avoid dependency cycles
-/// when the compiled block is used in analyze_dependency.
-#[cfg(not(target_family = "wasm"))]
-type VarOffsets = Vec<VarOffset>;
-
-/// Collect canonical (current) FF offsets written by these statements.
-#[cfg(not(target_family = "wasm"))]
-fn gather_ff_canonical(stmts: &[ProtoStatement]) -> Vec<isize> {
-    let mut result = HashSet::default();
-    for s in stmts {
-        result.extend(s.gather_ff_canonical_offsets());
-    }
-    result.into_iter().collect()
-}
-
-#[cfg(not(target_family = "wasm"))]
-fn gather_external_offsets(stmts: &[ProtoStatement]) -> (VarOffsets, VarOffsets) {
-    let mut all_inputs = vec![];
-    let mut all_outputs = vec![];
-    for s in stmts {
-        s.gather_variable_offsets(&mut all_inputs, &mut all_outputs);
-    }
-
-    let input_set: HashSet<VarOffset> = all_inputs.iter().cloned().collect();
-    let output_set: HashSet<VarOffset> = all_outputs.iter().cloned().collect();
-    // Remove internal variables (both read and written) from inputs only.
-    // Outputs are kept so dependent blocks see the dependency edge.
-    let internal: HashSet<VarOffset> = input_set.intersection(&output_set).cloned().collect();
-    all_inputs.retain(|x| !internal.contains(x));
-    all_inputs.dedup();
-    all_outputs.dedup();
-
-    (all_inputs, all_outputs)
-}
 
 /// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
 ///
@@ -336,22 +293,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let child_decls: &[air::Declaration] = &hoisted_child_decls;
 
         let mut ff_start = context.ff_total_bytes as isize;
-        if crate::ir::variable::ff_cacheline_pad_enabled() {
-            ff_start = crate::ir::variable::align_up_64(ff_start);
+        if ff_cacheline_pad_enabled() {
+            ff_start = align_up_64(ff_start);
             context.ff_total_bytes = ff_start as usize;
         }
         let comb_start = context.comb_total_bytes as isize;
 
         // Analyzer-IR pre-pass to identify multi-RMW FFs.  Same as
         // ProtoModule::conv but for child module.
-        #[cfg(not(target_family = "wasm"))]
         let multi_rmw_set = analyze_multi_write(
             child_decls,
             &mut child_analyzer_context,
             context.config.disable_ff_opt,
         );
-        #[cfg(target_family = "wasm")]
-        let multi_rmw_set = crate::HashSet::default();
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
@@ -507,199 +461,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         context.scope_contexts.pop();
 
-        // JIT cache: reuse compiled code across instances of the same module type.
-        // ff_start and comb_start are already byte offsets.
-        //
-        // The pre-JIT originals are preserved inside each CompiledBlock's
-        // `original_stmts` field, and `analyze_dependency` Phase 2 expands
-        // CBs from there when fine-grained ordering is needed.  Avoiding
-        // a parallel copy outside the CB is what keeps the parent's
-        // `unified` list free of duplicate ProtoStatements (which would
-        // otherwise show up as false 2-stmt SCCs).
-        #[cfg(not(target_family = "wasm"))]
-        if context.config.use_jit {
-            let ff_start_bytes = ff_start;
-            let comb_start_bytes = comb_start;
-            let component_key: *const air::Component = Arc::as_ptr(&src.component);
-
-            // When input-port aliasing is on, the compiled chunk bakes
-            // parent-specific offsets, so the cache (keyed only by the
-            // child component) cannot be shared across instances.
-            let cache_lookup = if alias_enabled {
-                None
-            } else {
-                context.jit_cache.get(&component_key)
-            };
-            if let Some(cache_entry) = cache_lookup {
-                // Cache hit: replace internal logic with CompiledBlocks using delta
-                let ff_delta = ff_start_bytes - cache_entry.ref_ff_start_bytes;
-                let comb_delta = comb_start_bytes - cache_entry.ref_comb_start_bytes;
-
-                let adjust = |offsets: &[VarOffset]| -> Vec<VarOffset> {
-                    offsets
-                        .iter()
-                        .map(|off| off.adjust(ff_delta, comb_delta))
-                        .collect()
-                };
-
-                let adjust_stmts = |stmts: &[ProtoStatement]| -> Vec<ProtoStatement> {
-                    let mut adjusted = stmts.to_vec();
-                    for s in &mut adjusted {
-                        s.adjust_offsets(ff_delta, comb_delta);
-                    }
-                    adjusted
-                };
-
-                for (event, stmts) in all_event_statements.iter_mut() {
-                    if let Some(cached) = cache_entry.event_funcs.get(event) {
-                        let adjusted_canonical: Vec<isize> = cached
-                            .ff_canonical_offsets
-                            .iter()
-                            .map(|off| off + ff_delta)
-                            .collect();
-                        *stmts = vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
-                            func: cached.func,
-                            ff_delta_bytes: ff_delta,
-                            comb_delta_bytes: comb_delta,
-                            input_offsets: adjust(&cached.input_offsets),
-                            output_offsets: adjust(&cached.output_offsets),
-                            ff_canonical_offsets: adjusted_canonical,
-                            stmt_deps: vec![],
-                            original_stmts: adjust_stmts(&cached.original_stmts),
-                        })];
-                    }
-                }
-
-                if let Some(cached) = &cache_entry.comb_func {
-                    let adjusted_deps: Vec<_> = cached
-                        .stmt_deps
-                        .iter()
-                        .map(|(ins, outs)| (adjust(ins), adjust(outs)))
-                        .collect();
-                    all_comb_statements =
-                        vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
-                            func: cached.func,
-                            ff_delta_bytes: ff_delta,
-                            comb_delta_bytes: comb_delta,
-                            input_offsets: adjust(&cached.input_offsets),
-                            output_offsets: adjust(&cached.output_offsets),
-                            ff_canonical_offsets: vec![],
-                            stmt_deps: adjusted_deps,
-                            original_stmts: adjust_stmts(&cached.original_stmts),
-                        })];
-                }
-            } else {
-                // Cache miss: compile events individually
-                let mut event_funcs = HashMap::default();
-                for (event, stmts) in all_event_statements.iter_mut() {
-                    if stmts.iter().all(|s| s.can_build_binary())
-                        && !stmts.is_empty()
-                        && let Some(func) = cranelift::build_binary(context, stmts.clone())
-                    {
-                        // Event blocks use NBA semantics, so a variable
-                        // that is both read and written is not purely
-                        // internal; keep all inputs so sort_ff_event sees
-                        // the dependency.
-                        let mut all_inputs = vec![];
-                        let mut all_outputs = vec![];
-                        for s in stmts.iter() {
-                            s.gather_variable_offsets(&mut all_inputs, &mut all_outputs);
-                        }
-                        all_inputs.dedup();
-                        all_outputs.dedup();
-                        let (input_offsets, output_offsets) = (all_inputs, all_outputs);
-                        let ff_canonical = gather_ff_canonical(stmts);
-
-                        let event_original = stmts.clone();
-                        event_funcs.insert(
-                            event.clone(),
-                            JitCachedFunc {
-                                func,
-                                input_offsets: input_offsets.clone(),
-                                output_offsets: output_offsets.clone(),
-                                ff_canonical_offsets: ff_canonical.clone(),
-                                stmt_deps: vec![],
-                                original_stmts: event_original.clone(),
-                            },
-                        );
-
-                        *stmts = vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
-                            func,
-                            ff_delta_bytes: 0,
-                            comb_delta_bytes: 0,
-                            input_offsets,
-                            output_offsets,
-                            ff_canonical_offsets: ff_canonical,
-                            stmt_deps: vec![],
-                            original_stmts: event_original,
-                        })];
-                    }
-                }
-
-                // Compile comb individually
-                let all_can_build = all_comb_statements.iter().all(|s| s.can_build_binary());
-                let comb_func = if all_can_build && !all_comb_statements.is_empty() {
-                    // Sort statements topologically (RAW dependencies) so that
-                    // output port connections run before assigns that read them.
-                    let sorted_comb_for_func = stable_topo_sort(all_comb_statements.clone());
-
-                    if let Some(func) =
-                        cranelift::build_binary(context, sorted_comb_for_func.clone())
-                    {
-                        let (input_offsets, output_offsets) =
-                            gather_external_offsets(&sorted_comb_for_func);
-
-                        let stmt_deps: Vec<_> = sorted_comb_for_func
-                            .iter()
-                            .map(|s| {
-                                let mut ins = vec![];
-                                let mut outs = vec![];
-                                s.gather_variable_offsets(&mut ins, &mut outs);
-                                (ins, outs)
-                            })
-                            .collect();
-
-                        let original_stmts = sorted_comb_for_func.clone();
-                        all_comb_statements =
-                            vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
-                                func,
-                                ff_delta_bytes: 0,
-                                comb_delta_bytes: 0,
-                                input_offsets: input_offsets.clone(),
-                                output_offsets: output_offsets.clone(),
-                                ff_canonical_offsets: vec![],
-                                stmt_deps: stmt_deps.clone(),
-                                original_stmts,
-                            })];
-
-                        Some(JitCachedFunc {
-                            func,
-                            input_offsets,
-                            output_offsets,
-                            ff_canonical_offsets: vec![],
-                            stmt_deps,
-                            original_stmts: sorted_comb_for_func,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if !alias_enabled {
-                    context.jit_cache.insert(
-                        component_key,
-                        JitCacheEntry {
-                            ref_ff_start_bytes: ff_start_bytes,
-                            ref_comb_start_bytes: comb_start_bytes,
-                            event_funcs,
-                            comb_func,
-                        },
-                    );
-                }
-            }
-        }
+        try_compile_inst_chunks(
+            context,
+            src,
+            ff_start,
+            comb_start,
+            alias_enabled,
+            &mut all_event_statements,
+            &mut all_comb_statements,
+        );
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {

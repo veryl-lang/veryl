@@ -1,23 +1,16 @@
-//! `cc` backend: emit a Module's comb network and per-event FF-next logic as
-//! C, compile it with an external C compiler (gcc/clang `-O3`) to a `.so`, and
-//! dispatch the loaded function instead of the per-chunk Cranelift JIT.
+//! Emit a Module's comb network and per-event FF-next logic as C,
+//! compile with `cc -O3` to a `.so`, and dispatch the loaded function
+//! instead of per-chunk Cranelift.  One big C function lets the host
+//! compiler keep values in registers across statements, closing the
+//! codegen gap vs Cranelift's per-chunk spill/reload.
 //!
-//! # Why
-//! Cranelift splits a Module into many JIT chunks; each spills all live values
-//! to memory at its boundary and the next reloads them.  Emitting one big C
-//! function lets gcc -O3 keep values in registers across all statements,
-//! closing the codegen gap vs Cranelift.
-//!
-//! Coverage gaps return `None` from the emitters, so any unsupported construct
-//! falls back to Cranelift (per-module for comb, per-event for events).  This
-//! is the default backend; pick another with `veryl test --backend`.
-
-#![cfg(not(target_family = "wasm"))]
+//! Uncovered constructs return `None` from the emitters and fall back
+//! to Cranelift (per-module for comb, per-event for events).
 
 use crate::FuncPtr;
 use crate::ir::{
-    AotCell, ProtoExpression, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement,
-    VarOffset, native_bytes,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression, ProtoForBound,
+    ProtoForRange, ProtoForStatement, ProtoStatement, VarOffset, native_bytes,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -25,16 +18,15 @@ use std::sync::{Arc, OnceLock};
 use veryl_analyzer::ir::Op;
 use veryl_analyzer::value::Value;
 
-// ---------------------------------------------------------------------------
-// Event-path AOT-C
-//
-// Clock/Reset event statements compute FF *next* values into the per-Ir
-// WriteLogBuffer (ff_commit_from_log applies them at cycle end) rather than
-// writing ff_values directly.  In C, FF-target assigns push a narrow
-// WriteLogEntry inline through the `write_log` arg the comb path leaves unused
-// (see emit_log_push and the WRITE_LOG_* consts in write_log.rs).  2-state
-// only; wide (>64-bit) / 4-state / non-packed FFs bail to Cranelift.
-// ---------------------------------------------------------------------------
+/// Lazily-published compiled `.so`.  `None` while the background
+/// compile runs; callers fall back to Cranelift until then.  Shared
+/// via `Arc` across `Ir`s built from one `ProtoModule`.
+pub type AotCell = Arc<OnceLock<EmittedModule>>;
+
+// Event-path: FF-target assigns push a WriteLogEntry inline through
+// the `write_log` arg the comb path leaves unused; ff_commit_from_log
+// applies them at cycle end.  2-state narrow packed FFs only;
+// everything else bails to Cranelift.
 use std::cell::Cell;
 thread_local! {
     static EVENT_MODE: Cell<bool> = const { Cell::new(false) };
@@ -46,12 +38,11 @@ fn set_event_mode(on: bool) {
     EVENT_MODE.with(|c| c.set(on));
 }
 
-/// Emit an inline narrow WriteLogEntry push.  `offset_expr` / `payload_expr`
-/// are C expressions; `wc` is the width class (native bytes ∈ {1,2,4,8}).
+/// Inline narrow WriteLogEntry push.  `offset_expr` / `payload_expr`
+/// are C expressions; `wc` is native bytes ∈ {1,2,4,8}.
 fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
-    // Offsets come from the single source of truth in write_log.rs (the same
-    // consts the Cranelift push uses and the #[repr(C)] static asserts check),
-    // so a WriteLogEntry/Buffer layout change can't silently desync this C.
+    // Offsets shared with the Cranelift push via write_log.rs consts,
+    // so a layout change can't silently desync this emitted C.
     use crate::ir::write_log::{
         WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
         WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
@@ -79,15 +70,13 @@ fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
     )
 }
 
-/// Whether AOT-C fallback diagnostics are enabled.  `VERYL_AOT_C_DIAG=1`
-/// turns on both the comb (`conv`) and event diagnostics; the older
-/// `VERYL_AOT_C_EVENT_DIAG=1` still enables just the event one.
+/// AOT-C fallback diagnostics gate (`VERYL_AOT_C_DIAG=1` covers both
+/// comb and event; legacy `VERYL_AOT_C_EVENT_DIAG=1` is event-only).
 pub fn diag_enabled() -> bool {
     std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1")
 }
 
-/// Capped diagnostic for event-FF emit bail reasons (`VERYL_AOT_C_EVENT_DIAG=1`
-/// or `VERYL_AOT_C_DIAG=1`).
+/// Capped event-FF bail-reason diagnostic.
 fn ev_diag(msg: &str) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static N: AtomicUsize = AtomicUsize::new(0);
@@ -98,9 +87,8 @@ fn ev_diag(msg: &str) {
     }
 }
 
-/// The comb network bailed to Cranelift (`emit_function` returned None).
-/// Returns a short description of the first uncovered statement for
-/// `VERYL_AOT_C_DIAG`.  Re-runs the emit, so call only when already bailing.
+/// Short description of the first uncovered statement after a comb
+/// bail.  Re-runs the emit, so call only when already bailing.
 pub fn comb_fallback_reason(stmts: &[ProtoStatement]) -> String {
     for s in stmts {
         if emit_stmt(s).is_none() {
@@ -110,9 +98,8 @@ pub fn comb_fallback_reason(stmts: &[ProtoStatement]) -> String {
     "no single stmt isolated".to_string()
 }
 
-/// Diagnostic: given a ProtoStatement that `emit_stmt` rejects, descend into
-/// CompiledBlock/If/SequentialBlock to name the first failing leaf.  Pure
-/// (re-runs emit_stmt/emit_expr); event_mode must already be set by caller.
+/// Descend into a rejected statement to name the first failing leaf.
+/// Re-runs emit; event_mode must already be set by the caller.
 fn diag_find_fail(stmt: &ProtoStatement) -> String {
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
@@ -171,8 +158,7 @@ fn diag_find_fail(stmt: &ProtoStatement) -> String {
     }
 }
 
-/// Apply `rhs_select` extraction to an emitted rhs expression (mirrors
-/// AssignStatement::eval_step's `value.select(beg, end)`).
+/// Mirror of `AssignStatement::eval_step`'s `value.select(beg, end)`.
 fn apply_rhs_select(rhs: String, rhs_select: Option<(usize, usize)>) -> Option<String> {
     match rhs_select {
         None => Some(rhs),
@@ -192,7 +178,7 @@ fn apply_rhs_select(rhs: String, rhs_select: Option<(usize, usize)>) -> Option<S
     }
 }
 
-/// Mask helper: 0x..ULL covering the low `width` bits (width ≤ 64).
+/// Low-`width` bitmask (width ≤ 64).
 fn width_mask(width: usize) -> u64 {
     if width >= 64 {
         u64::MAX
@@ -201,11 +187,9 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
-/// Event-path FF write (static dst).  Records a WriteLogEntry at the FF's
-/// canonical current offset instead of a direct store.  Handles 2-state,
-/// narrow (≤64-bit), **packed** FFs (dst offset == canonical current offset —
-/// the write-log model); anything else bails to Cranelift.
-fn emit_event_ff_assign(a: &crate::ir::ProtoAssignStatement) -> Option<String> {
+/// Event-path FF write (static dst): pushes a WriteLogEntry at the
+/// canonical current offset.  2-state narrow packed FFs only.
+fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
     if a.dst_width == 0 || a.dst_width > 64 {
         ev_diag(&format!("static FF: width={} (wide/zero)", a.dst_width));
         return None; // wide → per-word split; out of scope
@@ -319,11 +303,10 @@ fn emit_event_ff_assign(a: &crate::ir::ProtoAssignStatement) -> Option<String> {
     }
 }
 
-/// Event-path FF write (dynamic / runtime-indexed array, e.g. the register
-/// file).  Mirrors AssignDynamicStatement::eval_step: write the element slot
-/// directly *and* push a WriteLogEntry at `current_base + stride*idx`.
+/// Event-path FF write to a dynamic-indexed array.  Writes the element
+/// slot and pushes a WriteLogEntry at `current_base + stride*idx`.
 /// 2-state, narrow, no select/dynamic_select; else bails.
-fn emit_event_ff_assign_dynamic(a: &crate::ir::ProtoAssignDynamicStatement) -> Option<String> {
+fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> {
     if a.select.is_some() || a.dynamic_select.is_some() {
         ev_diag(&format!(
             "dyn FF: select={:?} dynsel={}",
@@ -416,16 +399,15 @@ pub fn prepare_comb(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCel
     Some(compile_or_spawn(src, async_mode))
 }
 
-/// Prepare an event AOT-C eval handle.  See `prepare_comb`; gated on
-/// `Config::aot_c && Config::aot_c_event` by the caller.
+/// Event-path `prepare_comb`.  Caller gates on `Config::aot_c_event`.
 pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCell> {
     let src = emit_event_function(stmts)?;
     Some(compile_or_spawn(src, async_mode))
 }
 
-/// Emit the C source for an event statement sequence as a single
-/// `veryl_aot_eval` function.  FF-target assigns push WriteLogEntries via the
-/// `write_log` arg (used here, unlike the comb path).
+/// Emit one `veryl_aot_eval` function for an event statement sequence.
+/// FF-target assigns push WriteLogEntries via `write_log` (unused in
+/// the comb path).
 fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
     set_event_mode(true);
@@ -509,21 +491,16 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     Some(src)
 }
 
-/// Compile a C source string to a shared library and dlopen it,
-/// returning a handle that owns the library and exposes the
-/// `veryl_aot_eval` symbol.
+/// Compile C source to a `.so`, dlopen it, return a handle owning the
+/// library and exposing `veryl_aot_eval`.
 ///
-/// Caches under `$XDG_CACHE_HOME/veryl/aot_c/` (or `$HOME/.cache/veryl/aot_c/`,
-/// or `VERYL_AOT_CACHE_DIR`) so repeated invocations skip the cc call.
+/// Caches under `$XDG_CACHE_HOME/veryl/aot_c/` (overridable via
+/// `VERYL_AOT_CACHE_DIR`).  Cache key is FNV-1a over `src` plus
+/// everything that changes the produced code (simulator version,
+/// compiler, flags, target arch/OS).
 ///
-/// The cache key is an FNV-1a hash over not just the emitted C `src` but also
-/// everything that changes the produced machine code: the veryl-simulator
-/// version, compiler name (`VERYL_AOT_CC`), full flag list (fixed +
-/// `VERYL_AOT_CFLAGS`), and target arch/OS — so it never reuses a `.so` built
-/// with a different compiler/flags/host.
-///
-/// Compile failures, dlopen failures, and missing symbols all return `Err`;
-/// `compile_or_spawn` discards it so callers fall back to Cranelift.
+/// Any failure (compile / dlopen / missing symbol) returns `Err`;
+/// `compile_or_spawn` discards it to fall back to Cranelift.
 pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
     let cache_dir = aot_c_cache_dir().map_err(|e| format!("cache dir: {e}"))?;
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
@@ -612,12 +589,8 @@ fn aot_c_cache_dir() -> Result<PathBuf, String> {
     Ok(base.join("veryl").join("aot_c"))
 }
 
-/// FNV-1a 64-bit hash (hex-encoded) over several parts, with a 0xFF separator
-/// hashed between each so that, e.g., `["ab","c"]` and `["a","bc"]` produce
-/// different digests.  Cheap and good enough to key a content-addressed cache:
-/// collisions are catastrophic only if two distinct key tuples hash
-/// identically, which is vanishingly rare; the alternative (re-running `cc`
-/// on every invocation) makes accepting FNV's collision risk the right tradeoff.
+/// FNV-1a 64-bit (hex), with a 0xFF separator between parts so e.g.
+/// `["ab","c"]` and `["a","bc"]` differ.
 fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -634,12 +607,10 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
     format!("{h:016x}")
 }
 
-/// Emit the full C source (signature + body) for a statement sequence;
-/// `None` if any stmt can't be emitted.  The signature matches the Cranelift
-/// FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t *comb, uint64_t *log)`
-/// (SysV x86_64 == Rust's `extern "system"` on non-Windows).  Comb-target
-/// writes store directly; FF-target writes (rare in comb, placed there by the
-/// is_ff refinement) push WriteLogEntries like the event path.
+/// Full C source for a comb statement sequence.  Signature matches the
+/// Cranelift FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t
+/// *comb, uint64_t *log)`.  Comb-target writes store directly;
+/// FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // Splitting the monolithic body into ~chunk_size-stmt static functions
     // gives gcc -O3 smaller register-allocation and stack-frame scopes per
@@ -713,9 +684,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     Some(body)
 }
 
-/// Emit a single ProtoStatement as a complete C statement (terminated).
-/// Returns `None` if the variant or its substructures aren't emittable
-/// (the caller then falls back to Cranelift).
+/// One terminated C statement from a `ProtoStatement`.  `None` if
+/// the variant or its substructures aren't emittable.
 pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
@@ -954,14 +924,8 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     }
 }
 
-/// Emit a ProtoStatement::For as a C `for` loop.  Limits:
-///
-/// - Both bounds must be `ProtoForBound::Const` (no Dynamic).
-/// - Range must be Forward (Reverse / Stepped fall back).
-/// - Loop variable width must fit in a u64 native type (≤ 64 bits).
-///
-/// The body is emitted recursively; if any sub-stmt is unsupported
-/// the whole For falls back to Cranelift.
+/// `ProtoStatement::For` → C `for` loop.  Requires constant Forward
+/// range with loop var ≤ 64 bits; falls back otherwise.
 fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     let (start, end_excl, step) = match &for_stmt.range {
         ProtoForRange::Forward {
@@ -1018,9 +982,8 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     ))
 }
 
-/// Emit a flat sequence of ProtoStatements as one C-source body
-/// fragment.  Each stmt must succeed; a single None propagates so the
-/// caller falls back to Cranelift dispatch.
+/// Flat statement sequence → one C-source body.  A single failure
+/// propagates `None`.
 fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
     let mut s = String::new();
     for st in stmts {
@@ -1030,11 +993,9 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
     Some(s)
 }
 
-/// Emit a ProtoExpression as a C expression string (parenthesized).
-/// Returns `None` if the variant or operator is not yet supported.
-///
-/// All values are emitted as `uint64_t`-typed expressions; width
-/// truncation is applied at store time by the dst type cast.
+/// `ProtoExpression` → parenthesized C expression (typed `uint64_t`;
+/// width truncation happens at store time via the dst cast).  `None`
+/// if the variant or operator isn't supported.
 pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
     match expr {
         ProtoExpression::Value {
@@ -1691,9 +1652,7 @@ fn native_c_type(nb: usize) -> Option<&'static str> {
     }
 }
 
-/// Returns the C type used to materialize an expression of the given
-/// result width: `uint64_t` for ≤64 and `__uint128_t` for 65-128.
-/// Wider values aren't supported yet.
+/// `uint64_t` for ≤64, `__uint128_t` for 65-128.  Wider unsupported.
 fn expr_c_type(width: usize) -> Option<&'static str> {
     if width == 0 || width <= 64 {
         Some("uint64_t")
@@ -1707,7 +1666,8 @@ fn expr_c_type(width: usize) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ExpressionContext, ProtoAssignStatement};
+    use crate::backend::ChunkArtifact;
+    use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoSystemFunctionCall};
     use veryl_analyzer::value::ValueU64;
     use veryl_parser::token_range::TokenRange;
 
@@ -1754,7 +1714,7 @@ mod tests {
         // VERYL_AOT_C_DIAG reason helper should name the offending stmt kind
         // rather than the generic "nothing isolated" message.
         let stmts = vec![ProtoStatement::SystemFunctionCall(
-            crate::ir::ProtoSystemFunctionCall::Finish,
+            ProtoSystemFunctionCall::Finish,
         )];
         assert!(emit_function(&stmts).is_none()); // confirms the comb bails
         assert_eq!(comb_fallback_reason(&stmts), "SysFn");
@@ -2295,7 +2255,7 @@ mod tests {
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
-            func: bogus_func(),
+            artifact: bogus_artifact(),
             ff_delta_bytes: 0,
             comb_delta_bytes: 0,
             input_offsets: vec![],
@@ -2327,7 +2287,7 @@ mod tests {
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
-            func: bogus_func(),
+            artifact: bogus_artifact(),
             ff_delta_bytes: 0,
             comb_delta_bytes: 0x100,
             input_offsets: vec![],
@@ -2341,12 +2301,15 @@ mod tests {
         assert!(!s.contains("comb_values + 0x10 ")); // base shouldn't appear unshifted
     }
 
-    fn bogus_func() -> FuncPtr {
+    fn bogus_artifact() -> Arc<ChunkArtifact> {
         // Never actually called — emit_stmt for CompiledBlock bypasses
-        // the FuncPtr entirely.  We just need a valid pointer for the
+        // the artifact entirely.  We just need a valid handle for the
         // struct field.
         unsafe extern "system" fn stub(_: *const u8, _: *const u8, _: *mut u8) {}
-        stub
+        Arc::new(ChunkArtifact {
+            func: stub,
+            keepalive: None,
+        })
     }
 
     #[test]
@@ -2442,13 +2405,9 @@ mod tests {
         assert!(src.contains("comb_values + 0x10"));
     }
 
-    /// Compile `src` via the cc backend for an end-to-end test, returning
-    /// `None` (so the caller skips) when the freshly built shared object
-    /// cannot be loaded on this host.  This happens when the only available
-    /// `cc` targets a different architecture than the test process — e.g. on
-    /// Windows-on-ARM, where `cc` is an emulated x86_64 MinGW gcc whose
-    /// x86_64 `.so` cannot load into the native aarch64 process.  A genuine
-    /// compile failure (broken emitted C) still panics so regressions are caught.
+    /// Compile `src` end-to-end; return `None` when the built `.so`
+    /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
+    /// Genuine compile failures still panic.
     fn compile_for_test(src: &str, what: &str) -> Option<EmittedModule> {
         match compile_source(src) {
             Ok(m) => Some(m),
