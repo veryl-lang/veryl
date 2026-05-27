@@ -1,8 +1,5 @@
-#[cfg(not(target_family = "wasm"))]
-pub mod aot_c;
 pub mod assert_buffer;
-#[cfg(not(target_family = "wasm"))]
-pub mod cranelift;
+pub mod backend;
 pub mod ir;
 pub mod output_buffer;
 pub mod simulator;

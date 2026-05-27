@@ -1,29 +1,28 @@
-use crate::HashMap;
-use crate::HashSet;
-#[cfg(not(target_family = "wasm"))]
-use crate::cranelift;
-#[cfg(not(target_family = "wasm"))]
-use crate::ir::AotCell;
+use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
 use crate::ir::inst_layout::InstLayout;
-#[cfg(not(target_family = "wasm"))]
-use crate::ir::multi_write_analysis::analyze_multi_write;
+use crate::ir::opt::dead_var_dce;
+use crate::ir::opt::dup_assign_dce::dce_aggressive;
+use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::schedule::IrSchedule;
+use crate::ir::schedule::StmtId;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 use crate::ir::variable::{
-    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, create_variable_meta, value_size,
-    write_native_value,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, align_up_64, create_variable_meta,
+    ff_cacheline_pad_enabled, value_size, write_native_value,
 };
 use crate::ir::{
-    Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement,
-    VarId, VarPath,
+    CompiledBatchStmt, Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock,
+    ProtoStatements, Statement, VarId, VarPath,
 };
 use crate::simulator_error::SimulatorError;
+use crate::{HashMap, HashSet};
 use daggy::Dag;
 use daggy::petgraph::Direction::Outgoing;
 use daggy::petgraph::algo;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
 
@@ -59,15 +58,14 @@ pub struct Module {
     /// value here is a duplication artifact in the simulator IR assembly.
     /// Exposed for regression tests.
     pub nontrivial_comb_scc: usize,
-    /// AOT-C comb eval (see `AotCell`): replaces the per-chunk Cranelift
-    /// dispatch in `Ir::settle_comb` when `Some`.  Built in `ProtoModule::conv`
-    /// when `Config::aot_c` is set and every comb stmt is covered.
-    #[cfg(not(target_family = "wasm"))]
-    pub aot_c_eval: Option<AotCell>,
-    /// AOT-C: per-event gcc-compiled FF-next + write-log functions
-    /// (when `Config::aot_c_event` is set).  Empty when disabled / uncovered.
-    #[cfg(not(target_family = "wasm"))]
-    pub aot_c_event_evals: HashMap<Event, AotCell>,
+    /// Whole-comb dispatch handle, populated when a backend committed
+    /// to a one-function compile via `Backend::compile_whole_comb`.
+    /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
+    pub whole_comb: Option<Arc<dyn CompiledWhole>>,
+    /// Per-event whole-event dispatch handles (today populated by AOT-C
+    /// when `Config::aot_c_event` is set).  Empty when no backend
+    /// covered the event.
+    pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
 }
 
 pub struct ProtoModule {
@@ -92,15 +90,12 @@ pub struct ProtoModule {
     pub comb_schedule: IrSchedule,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
-    /// AOT-C: see `Module::aot_c_eval`.  Built in `conv()` and
-    /// shared (via `Arc::clone`) with every `Module` produced by
-    /// `instantiate()`.
-    #[cfg(not(target_family = "wasm"))]
-    pub aot_c_eval: Option<AotCell>,
-    /// AOT-C: see `Module::aot_c_event_evals`.  Built in `conv()`,
-    /// shared (Arc::clone) with every `Module` from `instantiate()`.
-    #[cfg(not(target_family = "wasm"))]
-    pub aot_c_event_evals: HashMap<Event, AotCell>,
+    /// See `Module::whole_comb`.  Built in `conv()` and shared
+    /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
+    pub whole_comb: Option<Arc<dyn CompiledWhole>>,
+    /// See `Module::whole_events`.  Built in `conv()`, shared
+    /// (`Arc::clone`) with every `Module` from `instantiate()`.
+    pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
 }
 
 fn create_buffers(
@@ -269,11 +264,11 @@ impl ProtoModule {
             .iter()
             .map(|(event, stmts)| {
                 let s = stmts.to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
-                (event.clone(), batch_binary_statements(s))
+                (event.clone(), batch_compiled_statements(s))
             })
             .collect();
 
-        let comb_statements = batch_binary_statements(self.comb_statements.to_statements(
+        let comb_statements = batch_compiled_statements(self.comb_statements.to_statements(
             ff_ptr,
             ff_len,
             comb_ptr,
@@ -298,10 +293,8 @@ impl ProtoModule {
             inst_layout: self.inst_layout.clone(),
             comb_schedule: self.comb_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
-            #[cfg(not(target_family = "wasm"))]
-            aot_c_eval: self.aot_c_eval.clone(),
-            #[cfg(not(target_family = "wasm"))]
-            aot_c_event_evals: self.aot_c_event_evals.clone(),
+            whole_comb: self.whole_comb.clone(),
+            whole_events: self.whole_events.clone(),
         }
     }
 
@@ -368,7 +361,7 @@ fn validate_meta_offsets(
     use_4state: bool,
 ) {
     for (id, var_meta) in &meta.variable_meta {
-        let vs = crate::ir::variable::value_size(var_meta.native_bytes, use_4state);
+        let vs = value_size(var_meta.native_bytes, use_4state);
         for (i, elem) in var_meta.elements.iter().enumerate() {
             let off = elem.current_offset() as usize;
             if elem.is_ff() {
@@ -527,7 +520,7 @@ fn build_aligned_schedule(
         stmt_inputs: per_stmt_inputs,
         stmt_outputs: per_stmt_outputs,
         output_to_readers: crate::HashMap::default(),
-        topo_rank: (0..n as crate::ir::schedule::StmtId).collect(),
+        topo_rank: (0..n as StmtId).collect(),
         offset_sizes: crate::HashMap::default(),
     };
     sched.rebuild_fanout();
@@ -535,147 +528,55 @@ fn build_aligned_schedule(
     sched
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn try_jit_group(
-    context: &mut Context,
-    blocks: &mut Vec<ProtoStatementBlock>,
-    group: Vec<ProtoStatement>,
-) {
-    // Split large groups into chunks to avoid regalloc2 O(N^2) scaling
-    if group.len() <= jit_chunk_size() {
-        match cranelift::build_binary(context, group.clone()) {
-            Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-            None => blocks.push(ProtoStatementBlock::Interpreted(group)),
-        }
-    } else {
-        for chunk in group.chunks(jit_chunk_size()) {
-            let chunk = chunk.to_vec();
-            match cranelift::build_binary(context, chunk.clone()) {
-                Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
-            }
-        }
-    }
-}
-
-#[cfg(target_family = "wasm")]
-fn try_jit(_context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)])
-}
-
-#[cfg(not(target_family = "wasm"))]
+/// Per-event JIT path: load_cache CSE enabled, no nested CompiledBlocks
+/// expected.
 fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    if !context.config.use_jit {
-        return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
-    }
-
-    // Group consecutive statements by can_build_binary() result
-    let mut blocks: Vec<ProtoStatementBlock> = Vec::new();
-    let mut current_jittable: Option<bool> = None;
-    let mut current_group: Vec<ProtoStatement> = Vec::new();
-
-    for stmt in proto {
-        let jittable = stmt.can_build_binary();
-
-        if current_jittable == Some(jittable) {
-            current_group.push(stmt);
-        } else {
-            if let Some(was_jittable) = current_jittable {
-                let group = std::mem::take(&mut current_group);
-                if was_jittable {
-                    try_jit_group(context, &mut blocks, group);
-                } else {
-                    blocks.push(ProtoStatementBlock::Interpreted(group));
-                }
-            }
-            current_jittable = Some(jittable);
-            current_group.push(stmt);
-        }
-    }
-
-    // Flush the last group
-    if let Some(was_jittable) = current_jittable {
-        if was_jittable {
-            try_jit_group(context, &mut blocks, current_group);
-        } else {
-            blocks.push(ProtoStatementBlock::Interpreted(current_group));
-        }
-    }
-
-    ProtoStatements(blocks)
+    build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
 }
 
-/// JIT with load_cache disabled for unified comb.
-/// CompiledBlocks (child comb functions) may modify comb values between
-/// cached loads, so load_cache must be disabled for correctness.
-#[cfg(target_family = "wasm")]
-fn try_jit_no_cache(_context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)])
-}
-
-#[cfg(not(target_family = "wasm"))]
+/// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
+/// between loads, so load_cache CSE is disabled in the emitted chunks.
 fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    if !context.config.use_jit {
+    build_chunked_via_registry(context, proto, /* contains_compiled_block= */ true)
+}
+
+/// Shared chunk-building helper.  Asks `context.backends` to group
+/// `proto` into chunks; jittable groups become `Compiled`, others stay
+/// `Interpreted`.  Empty registry → fully interpreted (wasm /
+/// `use_jit=false` paths arrive here with zero backends registered).
+fn build_chunked_via_registry(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    contains_compiled_block: bool,
+) -> ProtoStatements {
+    if context.backends.is_empty() {
         return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
     }
 
-    let mut blocks: Vec<ProtoStatementBlock> = Vec::new();
-    let mut current_jittable: Option<bool> = None;
-    let mut current_group: Vec<ProtoStatement> = Vec::new();
+    // CompileCtx borrows from `context.config` (shared), while
+    // `build_chunked` also needs `&mut context.backends` — distinct fields,
+    // so Rust's split borrow permits both.
+    let max_chunk_size = jit_chunk_size();
+    let outputs = {
+        let ctx = CompileCtx {
+            config: &context.config,
+            use_4state: context.config.use_4state,
+            contains_compiled_block,
+        };
+        context.backends.build_chunked(&ctx, proto, max_chunk_size)
+    };
 
-    for stmt in proto {
-        let jittable = stmt.can_build_binary();
-        if current_jittable == Some(jittable) {
-            current_group.push(stmt);
-        } else {
-            if let Some(was_jittable) = current_jittable {
-                let group = std::mem::take(&mut current_group);
-                if was_jittable {
-                    // Use no_cache build for unified comb safety
-                    if group.len() <= jit_chunk_size() {
-                        match cranelift::build_binary_no_cache(context, group.clone()) {
-                            Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                            None => blocks.push(ProtoStatementBlock::Interpreted(group)),
-                        }
-                    } else {
-                        for chunk in group.chunks(jit_chunk_size()) {
-                            let chunk = chunk.to_vec();
-                            match cranelift::build_binary_no_cache(context, chunk.clone()) {
-                                Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                                None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
-                            }
-                        }
-                    }
-                } else {
-                    blocks.push(ProtoStatementBlock::Interpreted(group));
-                }
+    let mut blocks = Vec::with_capacity(outputs.len());
+    for out in outputs {
+        match out {
+            ChunkOutput::Compiled(artifact) => {
+                blocks.push(ProtoStatementBlock::Compiled(artifact));
             }
-            current_jittable = Some(jittable);
-            current_group.push(stmt);
+            ChunkOutput::Interpreted(stmts) => {
+                blocks.push(ProtoStatementBlock::Interpreted(stmts));
+            }
         }
     }
-
-    if let Some(was_jittable) = current_jittable {
-        if was_jittable {
-            if current_group.len() <= jit_chunk_size() {
-                match cranelift::build_binary_no_cache(context, current_group.clone()) {
-                    Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                    None => blocks.push(ProtoStatementBlock::Interpreted(current_group)),
-                }
-            } else {
-                for chunk in current_group.chunks(jit_chunk_size()) {
-                    let chunk = chunk.to_vec();
-                    match cranelift::build_binary_no_cache(context, chunk.clone()) {
-                        Some(func) => blocks.push(ProtoStatementBlock::Compiled(func)),
-                        None => blocks.push(ProtoStatementBlock::Interpreted(chunk)),
-                    }
-                }
-            }
-        } else {
-            blocks.push(ProtoStatementBlock::Interpreted(current_group));
-        }
-    }
-
     ProtoStatements(blocks)
 }
 
@@ -2068,38 +1969,30 @@ fn cond_hoist_transform(stmts: &mut Vec<ProtoStatement>, context: &mut Context) 
     }
 }
 
-/// Merge consecutive Binary statements with the same function pointer into BinaryBatch.
-fn batch_binary_statements(stmts: Vec<Statement>) -> Vec<Statement> {
+/// Merge consecutive Compiled statements with the same artifact into CompiledBatch.
+fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
     let mut result: Vec<Statement> = Vec::with_capacity(stmts.len());
 
     for stmt in stmts {
         match stmt {
-            Statement::Binary(func, ff, comb, log_buf) => {
-                let func_addr = func as usize;
-                match result.last_mut() {
-                    Some(Statement::BinaryBatch(batch_func, _, args))
-                        if *batch_func as usize == func_addr =>
-                    {
-                        args.push((ff, comb));
-                    }
-                    Some(Statement::Binary(prev_func, prev_ff, prev_comb, prev_log_buf))
-                        if *prev_func as usize == func_addr =>
-                    {
-                        let prev_ff = *prev_ff;
-                        let prev_comb = *prev_comb;
-                        let prev_func = *prev_func;
-                        let prev_log_buf = *prev_log_buf;
-                        *result.last_mut().unwrap() = Statement::BinaryBatch(
-                            prev_func,
-                            prev_log_buf,
-                            vec![(prev_ff, prev_comb), (ff, comb)],
-                        );
-                    }
-                    _ => {
-                        result.push(Statement::Binary(func, ff, comb, log_buf));
-                    }
+            Statement::Compiled(c) => match result.last_mut() {
+                Some(Statement::CompiledBatch(batch))
+                    if Arc::ptr_eq(&batch.artifact, &c.artifact) =>
+                {
+                    batch.args.push((c.ff, c.comb));
                 }
-            }
+                Some(Statement::Compiled(prev)) if Arc::ptr_eq(&prev.artifact, &c.artifact) => {
+                    let batch = CompiledBatchStmt {
+                        artifact: Arc::clone(&prev.artifact),
+                        log_buf: prev.log_buf,
+                        args: vec![(prev.ff, prev.comb), (c.ff, c.comb)],
+                    };
+                    *result.last_mut().unwrap() = Statement::CompiledBatch(batch);
+                }
+                _ => {
+                    result.push(Statement::Compiled(c));
+                }
+            },
             other => result.push(other),
         }
     }
@@ -2145,8 +2038,8 @@ impl Conv<&air::Module> for ProtoModule {
         }
         let declarations: &[air::Declaration] = &hoisted_declarations;
 
-        if crate::ir::variable::ff_cacheline_pad_enabled() {
-            let aligned = crate::ir::variable::align_up_64(context.ff_total_bytes as isize);
+        if ff_cacheline_pad_enabled() {
+            let aligned = align_up_64(context.ff_total_bytes as isize);
             context.ff_total_bytes = aligned as usize;
         }
         let ff_start = context.ff_total_bytes as isize;
@@ -2157,14 +2050,11 @@ impl Conv<&air::Module> for ProtoModule {
         // receive ≥2 writes per event need dual-slot storage (multi-RMW
         // chain forwarding), all others use packed single-slot layout
         // (dead next bytes eliminated, ff_values shrunk).
-        #[cfg(not(target_family = "wasm"))]
         let multi_rmw_set = analyze_multi_write(
             declarations,
             &mut analyzer_context,
             context.config.disable_ff_opt,
         );
-        #[cfg(target_family = "wasm")]
-        let multi_rmw_set = crate::HashSet::default();
 
         let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
@@ -2248,8 +2138,7 @@ impl Conv<&air::Module> for ProtoModule {
             src.name, nontrivial_comb_scc,
         );
 
-        #[cfg(not(target_family = "wasm"))]
-        let unified_sorted = super::dup_assign_dce::dce_aggressive(unified_sorted);
+        let unified_sorted = dce_aggressive(unified_sorted);
 
         // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
         // consumers anywhere in this module's pre-JIT comb stmts and every
@@ -2259,8 +2148,7 @@ impl Conv<&air::Module> for ProtoModule {
         // the original comb-side Variable dead once the FF consumes the
         // hoisted expression.  Env-gated by `VERYL_DEAD_VAR_DCE`, default
         // ON; opt out with `VERYL_DEAD_VAR_DCE=0`.
-        #[cfg(not(target_family = "wasm"))]
-        let unified_sorted = if super::dead_var_dce::enabled() {
+        let unified_sorted = if dead_var_dce::enabled() {
             // Protect every offset that doesn't back a let-bound local.
             // `comb_to_ff_hoist` only rewrites VarKind::Let, so the dead
             // residue we want DCE to drop is always Let-kind.  User-
@@ -2295,7 +2183,7 @@ impl Conv<&air::Module> for ProtoModule {
                 for stmts in all_event_statements.values() {
                     slices.push(stmts.as_slice());
                 }
-                let mut dead = super::dead_var_dce::collect_dead_offsets(&slices);
+                let mut dead = dead_var_dce::collect_dead_offsets(&slices);
                 for p in &protect {
                     dead.remove(p);
                 }
@@ -2303,13 +2191,12 @@ impl Conv<&air::Module> for ProtoModule {
                     break;
                 }
                 pass += 1;
-                let (rewritten, dropped_here) =
-                    super::dead_var_dce::apply_counting(unified_sorted, &dead);
+                let (rewritten, dropped_here) = dead_var_dce::apply_counting(unified_sorted, &dead);
                 unified_sorted = rewritten;
                 let mut total_dropped_here = dropped_here;
                 for stmts in all_event_statements.values_mut() {
                     let taken = std::mem::take(stmts);
-                    let (new_stmts, d) = super::dead_var_dce::apply_counting(taken, &dead);
+                    let (new_stmts, d) = dead_var_dce::apply_counting(taken, &dead);
                     *stmts = new_stmts;
                     total_dropped_here += d;
                 }
@@ -2465,10 +2352,9 @@ impl Conv<&air::Module> for ProtoModule {
         // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
         // so the map holds only fully-emittable events; the rest stay on
         // Cranelift.  Built before `all_event_statements` is consumed below.
-        #[cfg(not(target_family = "wasm"))]
-        let aot_async = context.config.aot_c_async && !context.config.aot_c_validate;
-        // Only engage cc on big-enough modules — see Config::aot_c_min_stmts.
-        #[cfg(not(target_family = "wasm"))]
+        // Only engage whole-module backends on big-enough modules — see
+        // Config::aot_c_min_stmts.  Below threshold, per-chunk Cranelift
+        // wins on compile latency.
         let aot_size_ok = {
             let n = pre_jit_stmts.len()
                 + all_event_statements
@@ -2477,20 +2363,21 @@ impl Conv<&air::Module> for ProtoModule {
                     .sum::<usize>();
             n >= context.config.aot_c_min_stmts
         };
-        #[cfg(not(target_family = "wasm"))]
-        let aot_c_event_evals: HashMap<Event, AotCell> = if context.config.use_4state
-            || !context.config.aot_c
-            || !context.config.aot_c_event
-            || !aot_size_ok
-        {
+        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !aot_size_ok {
             HashMap::default()
         } else {
-            all_event_statements
-                .iter()
-                .filter_map(|(event, stmts)| {
-                    crate::aot_c::prepare_event(stmts, aot_async).map(|cell| (event.clone(), cell))
-                })
-                .collect()
+            let ctx = CompileCtx {
+                config: &context.config,
+                use_4state: context.config.use_4state,
+                contains_compiled_block: false,
+            };
+            let mut map = HashMap::default();
+            for (event, stmts) in all_event_statements.iter() {
+                if let Some(whole) = context.backends.try_compile_whole_event(&ctx, event, stmts) {
+                    map.insert(event.clone(), whole);
+                }
+            }
+            map
         };
 
         // Event statements preserve source order (no topological sorting).
@@ -2556,31 +2443,36 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(target_family = "wasm")]
         let comb_schedule = IrSchedule::empty();
 
-        // `cc` backend comb path: when Config::aot_c is set and the emitter
-        // covers every comb stmt, build a single gcc-O-compiled eval function;
-        // `prepare_comb` returns None on any miss and `Ir::settle_comb` falls
-        // through to Cranelift.  2-state only — use_4state needs mask_xz
-        // tracking the C emitter doesn't generate.
-        #[cfg(not(target_family = "wasm"))]
-        let aot_c_eval = if context.config.use_4state || !context.config.aot_c || !aot_size_ok {
+        // Whole-comb backend (today: AOT-C) — when registered + size_ok,
+        // try compile_whole_comb; backends that decline (4-state,
+        // unsupported construct) return None and Ir::settle_comb stays
+        // on the per-chunk Cranelift loop.
+        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !aot_size_ok {
             None
         } else {
-            crate::aot_c::prepare_comb(&pre_jit_stmts, aot_async)
+            let ctx = CompileCtx {
+                config: &context.config,
+                use_4state: context.config.use_4state,
+                contains_compiled_block: false,
+            };
+            context
+                .backends
+                .try_compile_whole_comb(&ctx, &pre_jit_stmts)
         };
 
-        // A comb bail silently drops the whole module to Cranelift — a perf
-        // regression with no other signal.  VERYL_AOT_C_DIAG surfaces it.
-        #[cfg(not(target_family = "wasm"))]
-        if context.config.aot_c
-            && !context.config.use_4state
-            && aot_size_ok
-            && aot_c_eval.is_none()
-            && crate::aot_c::diag_enabled()
+        // A whole-comb bail silently drops the whole module to per-chunk
+        // dispatch — a perf regression with no other signal.  Each backend
+        // exposes its own diagnostic gate (today: VERYL_AOT_C_DIAG); the
+        // registry returns the first non-None diagnostic.
+        if aot_size_ok
+            && whole_comb.is_none()
+            && let Some(reason) = context
+                .backends
+                .diagnose_whole_comb_fallback(&pre_jit_stmts)
         {
             eprintln!(
-                "[aot_comb] module {} fell back to Cranelift: {}",
-                src.name,
-                crate::aot_c::comb_fallback_reason(&pre_jit_stmts),
+                "[whole_comb] module {} fell back to per-chunk dispatch: {}",
+                src.name, reason,
             );
         }
 
@@ -2598,10 +2490,8 @@ impl Conv<&air::Module> for ProtoModule {
             inst_layout,
             comb_schedule,
             nontrivial_comb_scc,
-            #[cfg(not(target_family = "wasm"))]
-            aot_c_eval,
-            #[cfg(not(target_family = "wasm"))]
-            aot_c_event_evals,
+            whole_comb,
+            whole_events,
         })
     }
 }

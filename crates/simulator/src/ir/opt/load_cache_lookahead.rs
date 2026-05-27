@@ -29,12 +29,10 @@
 //                                (default 12 ≈ x86_64 GPR budget after
 //                                ABI-reserved regs)
 
-#![cfg(not(target_family = "wasm"))]
-
-use super::expression::ProtoExpression;
-use super::statement::{ProtoForBound, ProtoForRange, ProtoStatement};
-use super::variable::VarOffset;
 use crate::HashMap;
+use crate::ir::expression::ProtoExpression;
+use crate::ir::statement::{ProtoForBound, ProtoForRange, ProtoStatement};
+use crate::ir::variable::VarOffset;
 
 /// Map from VarOffset to sorted list of top-level stmt indices where
 /// the offset is read.  Indices may repeat if the same offset is read

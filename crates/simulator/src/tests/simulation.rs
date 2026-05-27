@@ -1790,14 +1790,14 @@ fn partial_jit() {
     }
     "#;
 
-    // JIT disabled: no Binary statements
+    // JIT disabled: no Compiled statements
     let config_no_jit = Config {
         use_jit: false,
         ..Default::default()
     };
     let ir = analyze(code, &config_no_jit);
     assert!(
-        ir.comb_statements.iter().all(|s| !s.is_binary()),
+        ir.comb_statements.iter().all(|s| !s.is_compiled()),
         "JIT disabled: all statements should be interpreted"
     );
 
@@ -1807,8 +1807,8 @@ fn partial_jit() {
         ..Default::default()
     };
     let ir = analyze(code, &config_jit);
-    let has_binary = ir.comb_statements.iter().any(|s| s.is_binary());
-    assert!(has_binary, "partial JIT should compile some statements");
+    let has_compiled = ir.comb_statements.iter().any(|s| s.is_compiled());
+    assert!(has_compiled, "partial JIT should compile some statements");
 
     // Verify simulation results are correct regardless of JIT mode
     for config in Config::all() {
