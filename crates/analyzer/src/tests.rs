@@ -4,11 +4,13 @@ use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
 use std::thread;
 use veryl_metadata::{Lint, Metadata};
 use veryl_parser::Parser;
+use veryl_parser::doc_comment_table;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
+    doc_comment_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
@@ -29,6 +31,7 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
 fn analyze_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
+    doc_comment_table::clear();
 
     let mut metadata = Metadata::create_default("prj").unwrap();
     metadata.lint = lint;
@@ -50,6 +53,7 @@ fn analyze_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
 fn analyze_multiple_inputs(inputs: &[&str]) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
+    doc_comment_table::clear();
 
     let prj_name = "prj";
     let metadata = Metadata::create_default(prj_name).unwrap();
@@ -89,6 +93,7 @@ fn analyze_multiple_inputs(inputs: &[&str]) -> Vec<AnalyzerError> {
 fn analyze_with_ir(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
+    doc_comment_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
     let parser = Parser::parse(&code, &"").unwrap();
@@ -116,6 +121,7 @@ fn analyze_with_large_stack(code: &str) -> Vec<AnalyzerError> {
         .spawn(move || {
             symbol_table::clear();
             attribute_table::clear();
+            doc_comment_table::clear();
 
             let metadata = Metadata::create_default("prj").unwrap();
             let parser = Parser::parse(&code, &"").unwrap();
@@ -12735,6 +12741,48 @@ fn invalid_wavedrom() {
         .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
         .collect();
     assert!(wavedrom_errors.is_empty());
+}
+
+#[test]
+fn doc_comment_table_leak_across_analyses() {
+    // First source: a doc comment whose wavedrom block sits above ModuleA on line 9.
+    let code1 = r#"/// ```wavedrom
+/// { signal: [{ name: "Alfa", wave: "u" }] }
+/// ```
+///
+///
+///
+///
+///
+module ModuleA {
+}
+"#;
+    let _ = analyze(code1);
+
+    // Second source: clean code, ModuleB on the same line 9. If doc_comment_table
+    // is not cleared between analyses, ModuleB inherits the wavedrom doc comment
+    // and a bogus InvalidWavedrom error is reported.
+    let code2 = r#"package PackageB {
+    enum Color: logic<2> {
+        Red,
+        Green,
+        Blue,
+    }
+}
+
+module ModuleB {
+}
+"#;
+    let errors = analyze(code2);
+    let wavedrom_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::InvalidWavedrom { .. }))
+        .collect();
+    assert!(
+        wavedrom_errors.is_empty(),
+        "doc_comment_table leaked across analyses: {:?}",
+        wavedrom_errors
+    );
 }
 
 #[test]

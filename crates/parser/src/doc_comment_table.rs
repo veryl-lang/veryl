@@ -15,6 +15,10 @@ impl DocCommentTable {
     pub fn get(&self, path: PathId, line: u32) -> Option<StrId> {
         self.table.get(&(path, line)).cloned()
     }
+
+    pub fn clear(&mut self) {
+        self.table.clear();
+    }
 }
 
 thread_local!(static DOC_COMMENT_TABLE: RefCell<DocCommentTable> = RefCell::new(DocCommentTable::default()));
@@ -25,4 +29,8 @@ pub fn insert(path: PathId, line: u32, text: StrId) {
 
 pub fn get(path: PathId, line: u32) -> Option<StrId> {
     DOC_COMMENT_TABLE.with(|f| f.borrow().get(path, line))
+}
+
+pub fn clear() {
+    DOC_COMMENT_TABLE.with(|f| f.borrow_mut().clear())
 }
