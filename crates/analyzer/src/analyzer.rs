@@ -14,6 +14,7 @@ use crate::symbol::{DocComment, Symbol, SymbolKind};
 use crate::symbol_table;
 use crate::type_dag;
 use veryl_metadata::{Build, Lint, Metadata};
+use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -168,5 +169,6 @@ impl Analyzer {
         type_dag::clear();
         resolved_type_table::clear();
         generic_inference_table::clear();
+        doc_comment_table::clear();
     }
 }
