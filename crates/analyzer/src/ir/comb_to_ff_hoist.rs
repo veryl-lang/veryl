@@ -72,16 +72,21 @@ pub fn plan_hoists(
         if !ff_decls.contains_key(&ff_decl_idx) {
             continue;
         }
-        let var_kind = match variables.get(var_id) {
-            Some(v) => v.kind,
+        let var = match variables.get(var_id) {
+            Some(v) => v,
             None => continue,
         };
+        // Clock-typed lets must stay in comb scope: the simulator's
+        // derived-clock partial-settle re-runs them per step toggle.
+        if var.r#type.is_clock() {
+            continue;
+        }
         plans.push(HoistPlan {
             var_id: *var_id,
             var_index: *var_index,
             comb_decl_idx,
             ff_decl_idx,
-            var_kind,
+            var_kind: var.kind,
         });
     }
     plans

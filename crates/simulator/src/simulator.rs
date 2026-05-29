@@ -7,6 +7,7 @@ use crate::ir::{
     read_native_value, write_native_value,
 };
 use crate::wave_dumper::{DumpVar, WaveDumper};
+use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -47,6 +48,9 @@ pub struct Simulator {
     /// backend for `last_event`.  Points into `self.ir.whole_events`'s `Arc`,
     /// which is never mutated after `Ir` construction.
     last_whole_event: Option<*const dyn CompiledWhole>,
+    /// Previous-step derived-clock values (sampled at master=0).  Empty
+    /// when no derived clocks; otherwise used for 0→1 edge detection.
+    prev_derived_clock_values: Vec<u8>,
     /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
     /// commit path.  Accumulated across the run; `dump` is invoked
     /// automatically when the cycle counter crosses a logarithmic
@@ -94,6 +98,7 @@ impl WriteLogDiag {
 
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
+        let n_derived = ir.derived_clock_schedule.clocks.len();
         let mut ret = Self {
             ir,
             time: 0,
@@ -105,6 +110,7 @@ impl Simulator {
             last_event: None,
             last_event_stmts: std::ptr::null(),
             last_whole_event: None,
+            prev_derived_clock_values: vec![0u8; n_derived],
             write_log_diag: WriteLogDiag {
                 enabled: std::env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
                 next_print_cycle: 1_000_000,
@@ -116,7 +122,61 @@ impl Simulator {
             ret.setup_dump(dumper);
         }
 
+        // Seed prev values from the initial post-settle state.
+        if n_derived > 0 {
+            ret.do_settle_comb();
+            ret.comb_dirty = false;
+            for i in 0..n_derived {
+                let clk = &ret.ir.derived_clock_schedule.clocks[i];
+                ret.prev_derived_clock_values[i] = ret.read_derived_clock_bit(clk);
+            }
+        }
+
         ret
+    }
+
+    /// LSB of a 1-bit derived clock.  X/Z → 0 (matches posedge SV rule).
+    fn read_derived_clock_bit(&self, clk: &crate::ir::DerivedClock) -> u8 {
+        let raw = clk.current_offset.raw();
+        if raw < 0 {
+            return 0;
+        }
+        let off = raw as usize;
+        let buf: &[u8] = if clk.current_offset.is_ff() {
+            &self.ir.ff_values
+        } else {
+            &self.ir.comb_values
+        };
+        if off >= buf.len() {
+            return 0;
+        }
+        let payload_bit = buf[off] & 1;
+        if self.ir.use_4state {
+            let mask_off = off + clk.native_bytes;
+            if mask_off < buf.len() && (buf[mask_off] & 1) != 0 {
+                return 0;
+            }
+        }
+        payload_bit
+    }
+
+    fn set_input_clock_bit(&mut self, var_id: VarId, value: u8) {
+        if let Some(var) = self.ir.module_variables.variables.get(&var_id) {
+            let ptr = var.current_values[0];
+            if ptr.is_null() {
+                return;
+            }
+            // SAFETY: ptr is heap-stable for `self.ir`'s lifetime.
+            // Writes LSB only (clocks are 1-bit).
+            unsafe {
+                let v = if value != 0 { 1u8 } else { 0u8 };
+                *ptr = v;
+                if self.ir.use_4state {
+                    *ptr.add(var.native_bytes) = 0;
+                }
+            }
+            self.comb_dirty = true;
+        }
     }
 
     fn do_settle_comb(&mut self) {
@@ -245,15 +305,19 @@ impl Simulator {
             self.profile.step_count += 1;
         }
 
-        // Install the per-Ir WriteLogBuffer before settle_comb so that
-        // comb-scope FF writes (which appear under `--disable-ff-opt`'s
-        // force_all_ff path and never go through the event scope) also
-        // emit log entries and get committed alongside event-scope writes
-        // at cycle end.  Without this install, settle_comb's FF stores
-        // hit `event_write_log_push_static`'s "no active log" branch and
-        // turn into no-ops, leaving the FF current slot stale.
-        // SAFETY: the buffer outlives the call to dispatch_stmt_fast and
-        // is cleared before this stack frame returns.
+        // Common case (no derived clocks) skips the edge-detect loop.
+        if self.ir.derived_clock_schedule.is_empty() {
+            self.step_legacy(event);
+        } else {
+            self.step_with_derived_clocks(event);
+        }
+    }
+
+    fn step_legacy(&mut self, event: &Event) {
+        // Install before settle_comb so comb-scope FF writes
+        // (`--disable-ff-opt` path) hit a live log.
+        // SAFETY: buffer outlives every dispatch_stmt_fast call below
+        // and is cleared before this frame returns.
         unsafe {
             set_event_write_log(&mut self.ir.write_log_buffer);
         }
@@ -271,6 +335,18 @@ impl Simulator {
             }
         }
 
+        self.step_event_inner(event);
+
+        clear_event_write_log();
+        self.comb_dirty = true;
+
+        self.dump_variables();
+    }
+
+    /// Fire `event_statements[event]` then `ff_commit_from_log`.  The
+    /// caller is responsible for `set_event_write_log`, `settle_comb`,
+    /// and `dump_variables`.
+    fn step_event_inner(&mut self, event: &Event) {
         #[cfg(feature = "profile")]
         let event_start = std::time::Instant::now();
 
@@ -351,7 +427,6 @@ impl Simulator {
 
         ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
 
-        clear_event_write_log();
         if self.write_log_diag.enabled {
             let n = self.ir.write_log_buffer.count();
             self.write_log_diag.total_cycles += 1;
@@ -370,9 +445,120 @@ impl Simulator {
         {
             self.profile.ff_swap_ns += ff_start.elapsed().as_nanos() as u64;
         }
+    }
 
+    /// Toggles master 0→1, fires the event + chained derived-clock
+    /// events, then restores master=0 so `prev_derived_clock_values`
+    /// samples on a consistent baseline.
+    fn step_with_derived_clocks(&mut self, event: &Event) {
+        // SAFETY: same as `step_legacy`; one install covers settle_comb
+        // plus every step_event_inner fire in this step.
+        unsafe {
+            set_event_write_log(&mut self.ir.write_log_buffer);
+        }
+
+        // Subsequent partial_settle only refreshes the dep subset, so
+        // the rest of the design must already be settled.
+        if self.comb_dirty {
+            self.do_settle_comb();
+            self.comb_dirty = false;
+        }
+
+        let master_id_opt = match event {
+            Event::Clock(id) | Event::Reset(id) => {
+                let id = *id;
+                let is_master = self
+                    .ir
+                    .derived_clock_schedule
+                    .master_input_clocks
+                    .contains(&id);
+                if is_master { Some(id) } else { None }
+            }
+            _ => None,
+        };
+
+        let has_eval_chunk = !self.ir.derived_clock_eval_stmts.is_empty();
+
+        // Master high → gated-clock exprs see the rising edge.
+        if let Some(id) = master_id_opt {
+            self.set_input_clock_bit(id, 1);
+            if has_eval_chunk {
+                self.ir.partial_settle(&mut self.mask_cache);
+            }
+        }
+
+        self.step_event_inner(event);
+
+        // ff_commit may have advanced FF-driven derived clocks
+        // (`let div_copy = ff_div_clk;`); refresh before edge detect.
+        if has_eval_chunk {
+            self.ir.partial_settle(&mut self.mask_cache);
+        }
+
+        // Detect 0→1 edges and chain-fire one at a time, re-evaluating
+        // after each fire so NBA glitch suppression works (a transient
+        // edge cancelled by a same-cycle FF write must not trigger).
+        // Convergence: each clock fires at most once (`fired_mask`) and
+        // `analyze_dependency` rejects comb cycles, so n+1 iterations
+        // suffice; the debug_assert catches bookkeeping regressions.
+        let n = self.ir.derived_clock_schedule.clocks.len();
+        let mut new_values: SmallVec<[u8; 8]> = SmallVec::new();
+        new_values.resize(n, 0);
+        let mut fired_mask: Vec<bool> = vec![false; n];
+        let max_iters = n + 1;
+        let mut iters = 0;
+        loop {
+            if has_eval_chunk {
+                self.ir.partial_settle(&mut self.mask_cache);
+            }
+            for i in 0..n {
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                new_values[i] = self.read_derived_clock_bit(clk);
+            }
+
+            // Earliest unfired clock with a real 0→1 edge.
+            let mut next_fire: Option<usize> = None;
+            for i in 0..n {
+                if fired_mask[i] {
+                    continue;
+                }
+                if self.prev_derived_clock_values[i] == 0 && new_values[i] == 1 {
+                    next_fire = Some(i);
+                    break;
+                }
+            }
+
+            match next_fire {
+                Some(i) => {
+                    iters += 1;
+                    debug_assert!(
+                        iters <= max_iters,
+                        "derived clock fixpoint exceeded n+1 iterations (n={n})",
+                    );
+                    let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                    self.step_event_inner(&Event::Clock(vid));
+                    fired_mask[i] = true;
+                }
+                None => break,
+            }
+        }
+
+        // master=0 + resettle so the prev snapshot matches the next
+        // step's starting baseline.
+        if let Some(id) = master_id_opt {
+            self.set_input_clock_bit(id, 0);
+            if has_eval_chunk {
+                self.ir.partial_settle(&mut self.mask_cache);
+            }
+        }
+
+        for i in 0..n {
+            let clk = &self.ir.derived_clock_schedule.clocks[i];
+            self.prev_derived_clock_values[i] = self.read_derived_clock_bit(clk);
+        }
+
+        clear_event_write_log();
         self.comb_dirty = true;
-
         self.dump_variables();
     }
 

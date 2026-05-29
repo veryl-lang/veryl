@@ -378,6 +378,7 @@ where
     }
 }
 
+mod derived_clock;
 mod error;
 mod simulation;
 mod testbench;
