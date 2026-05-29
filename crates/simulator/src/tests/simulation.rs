@@ -12252,3 +12252,144 @@ fn local_var_in_always_ff_is_not_register() {
         assert_eq!(sim.get("o_x").unwrap(), Value::new(1, 1, false));
     }
 }
+
+// Regression: width-growing op results (Add/Sub/Mul, left shifts) fed to a
+// comparison must be masked to width; the cranelift/aot_c backends left dirty
+// high bits and diverged from the interpreter.
+#[test]
+fn binary_result_masked_to_width() {
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        c_add: output logic,
+        c_mul: output logic,
+        c_shl: output logic,
+    ) {
+        // (0xf + 0x3) = 0x12; truncated to 4 bits = 0x2
+        assign c_add = (a + b) == 4'h2;
+        // (0x5 * 0xd) = 0x41; truncated to 4 bits = 0x1
+        assign c_mul = (a * b) == 4'h1;
+        // (0x5 <<< 2) = 0x14; truncated to 4 bits = 0x4
+        assign c_shl = (a <<< 2) == 4'h4;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // c_add: a=0xf, b=0x3
+        sim.set("a", Value::new(0xf, 4, false));
+        sim.set("b", Value::new(0x3, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_add").unwrap()),
+            "1'b1",
+            "add: JIT={} 4st={} aot={}",
+            config.use_jit,
+            config.use_4state,
+            config.aot_c,
+        );
+
+        // c_mul: a=0x5, b=0xd
+        sim.set("a", Value::new(0x5, 4, false));
+        sim.set("b", Value::new(0xd, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_mul").unwrap()),
+            "1'b1",
+            "mul: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        // c_shl: a=0x5
+        sim.set("a", Value::new(0x5, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_shl").unwrap()),
+            "1'b1",
+            "shl: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+// Regression: a >64-bit result from <=64-bit operands was truncated by the
+// aot_c backend's 64-bit C arithmetic (now bailed to cranelift), diverging
+// from cranelift/interpreter.
+#[test]
+fn wide_result_from_narrow_operands() {
+    let code = r#"
+    module Top (
+        a: input  logic<40>,
+        b: input  logic<40>,
+        p: output logic<80>,
+    ) {
+        assign p = a * b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // (2^40 - 1)^2 = 0xfffffffffe0000000001 (80 bits)
+        sim.set("a", Value::from_str("40'hffffffffff").unwrap());
+        sim.set("b", Value::from_str("40'hffffffffff").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("p").unwrap()),
+            "80'hfffffffffe0000000001",
+            "wide mul: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+// Regression: dup_assign_dce dropped a live store to an interior array
+// element across a dynamic read `arr[idx]` (the base+last read encoding hid
+// it). Needs length >= 3 so elem 1 is neither base nor last.
+#[test]
+fn dup_assign_dce_dynamic_array_read() {
+    let code = r#"
+    module Top (
+        idx: input  logic<2>,
+        y:   output logic<8>,
+        a1:  output logic<8>,
+    ) {
+        var arr: logic<8> [3];
+        always_comb {
+            arr[0] = 8'h00;
+            arr[1] = 8'haa;   // live: the dynamic read below may select it
+            arr[2] = 8'h00;
+            y = arr[idx];     // with idx==1 must observe 0xaa
+            arr[1] = 8'hbb;   // later overwrite must NOT kill the 0xaa store
+        }
+        assign a1 = arr[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("idx", Value::new(1, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0xaa, 8, false),
+            "y should read arr[1]==0xaa at the read point: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        // The final value of arr[1] is the last write.
+        assert_eq!(sim.get("a1").unwrap(), Value::new(0xbb, 8, false));
+    }
+}

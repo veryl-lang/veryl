@@ -1214,6 +1214,37 @@ pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
                 _ => None,
             };
             if let Some(c_op) = direct {
+                // A >64-bit result from a <=64-bit operand truncates: the
+                // operand loads as uint64_t, so C runs the op mod 2^64 before
+                // widening to the 128-bit result type. Bail to Cranelift
+                // (which widens operands to I128 first) for width-growing ops.
+                // Both operands already >64 bits load as __uint128_t and are
+                // fine, so only narrow operands need the bail.
+                if expr_context.width > 64
+                    && matches!(
+                        op,
+                        Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
+                    )
+                    && (x.width() <= 64 || y.width() <= 64)
+                {
+                    return None;
+                }
+                // Width-growing op results can set bits at/above the width;
+                // harmless once stored (the store masks) but corrupt an
+                // inlined comparison. Mask to width. (width==64 needs no mask;
+                // width>64 already bailed above.)
+                let wmask = |s: String| -> String {
+                    if expr_context.width < 64
+                        && matches!(
+                            op,
+                            Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
+                        )
+                    {
+                        format!("(({}) & 0x{:x}ULL)", s, (1u64 << expr_context.width) - 1)
+                    } else {
+                        s
+                    }
+                };
                 // Verilog binary ops widen operands to result width before
                 // applying.  When signed, narrow operands must be sign-
                 // extended to expr_context.width so e.g. signed `8'shf2 +
@@ -1256,9 +1287,9 @@ pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
                             xe, tmask, ye,
                         ));
                     }
-                    return Some(format!("(({}) {} ({}))", xe, c_op, ye));
+                    return Some(wmask(format!("(({}) {} ({}))", xe, c_op, ye)));
                 }
-                return Some(format!("(({}) {} ({}))", xs, c_op, ys));
+                return Some(wmask(format!("(({}) {} ({}))", xs, c_op, ys)));
             }
             match op {
                 Op::ArithShiftR => {

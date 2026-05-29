@@ -6079,6 +6079,7 @@ dependencies = [
  "log",
  "memmap2",
  "miette",
+ "num-bigint",
  "num-traits",
  "pprof",
  "serde_json",

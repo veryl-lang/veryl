@@ -233,13 +233,23 @@ impl WaveDumper {
         for x in module_vars.variables.values() {
             let name = sanitize_wave_name(&x.path.to_string());
             let width = x.width as u32;
-            let handle = self.add_wire(width, &name);
-            dump_vars.push(DumpVar {
-                handle,
-                ptr: x.current_values[0],
-                native_bytes: x.native_bytes,
-                width: x.width,
-            });
+            // One pointer per array element (scalar = one). Dump a `name[i]`
+            // wire per element, not just element [0].
+            let num_elements = x.current_values.len();
+            for (i, &ptr) in x.current_values.iter().enumerate() {
+                let elem_name = if num_elements > 1 {
+                    format!("{name}[{i}]")
+                } else {
+                    name.clone()
+                };
+                let handle = self.add_wire(width, &elem_name);
+                dump_vars.push(DumpVar {
+                    handle,
+                    ptr,
+                    native_bytes: x.native_bytes,
+                    width: x.width,
+                });
+            }
         }
 
         for child in &module_vars.children {

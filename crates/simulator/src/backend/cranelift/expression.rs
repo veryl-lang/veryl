@@ -713,7 +713,7 @@ impl ProtoExpression {
                     }
                 }
 
-                let payload = match op {
+                let mut payload = match op {
                     Op::Add => builder.ins().iadd(x_payload, y_payload),
                     Op::Sub => builder.ins().isub(x_payload, y_payload),
                     Op::Mul => builder.ins().imul(x_payload, y_payload),
@@ -1003,6 +1003,28 @@ impl ProtoExpression {
                     }
                     _ => return None,
                 };
+
+                // Width-growing op results can leave dirty bits at/above the
+                // width; harmless once stored but corrupt an in-register
+                // consumer (icmp, expand_sign's MSB probe). The interpreter
+                // masks these, so match it. Pow is excluded — the interpreter
+                // does NOT mask Pow, so masking here would diverge instead.
+                if matches!(
+                    op,
+                    Op::Add
+                        | Op::Sub
+                        | Op::Mul
+                        | Op::LogicShiftL
+                        | Op::ArithShiftL
+                        | Op::ArithShiftR
+                ) {
+                    payload = band_const(
+                        builder,
+                        payload,
+                        gen_mask_for_width(expr_context.width),
+                        needs_wide,
+                    );
+                }
 
                 match op {
                     Op::Add

@@ -1,6 +1,7 @@
 use crate::ir::{Event, Value, VarId};
 use crate::simulator::Simulator;
 use crate::testbench::TestResult;
+use num_bigint::BigUint;
 use veryl_analyzer::wavedrom::preprocess_json5;
 pub use veryl_analyzer::wavedrom::strip_port_prefix;
 
@@ -152,17 +153,18 @@ fn expand_wave(wave_str: &str) -> Result<Vec<WaveChar>, String> {
     Ok(result)
 }
 
-/// Parse a data value string (hex/bin/dec) to u64.
-fn parse_data_value(s: &str) -> Result<u64, String> {
+/// Parse a data value string (hex/bin/dec) to a BigUint, so literals for
+/// buses wider than 64 bits keep their high bits.
+fn parse_data_value(s: &str) -> Result<BigUint, String> {
     let s = s.trim();
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u64::from_str_radix(hex, 16).map_err(|e| format!("invalid hex value '{s}': {e}"))
+    let (digits, radix) = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        (hex, 16)
     } else if let Some(bin) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-        u64::from_str_radix(bin, 2).map_err(|e| format!("invalid binary value '{s}': {e}"))
+        (bin, 2)
     } else {
-        s.parse::<u64>()
-            .map_err(|e| format!("invalid decimal value '{s}': {e}"))
-    }
+        (s, 10)
+    };
+    BigUint::parse_bytes(digits.as_bytes(), radix).ok_or_else(|| format!("invalid value '{s}'"))
 }
 
 fn wave_value(wc: &WaveChar, data: &[String], width: usize) -> Result<Option<Value>, String> {
@@ -174,7 +176,7 @@ fn wave_value(wc: &WaveChar, data: &[String], width: usize) -> Result<Option<Val
         WaveChar::Data(idx) => {
             if *idx < data.len() {
                 let val = parse_data_value(&data[*idx])?;
-                Ok(Some(Value::new(val, width, false)))
+                Ok(Some(Value::new_biguint(val, width, false)))
             } else {
                 Err(format!(
                     "data index {idx} out of range (only {} data values)",
@@ -296,12 +298,15 @@ pub fn run_wavedrom_test(
                 Ok(Some(expected)) => {
                     let actual = sim.get(&signal.name);
                     if let Some(actual) = actual {
-                        if actual.payload_u64() != expected.payload_u64() {
+                        // Full-value compare (payload + X/Z mask): a u64
+                        // truncation would miss a high-bit-only mismatch on a
+                        // wide bus and falsely PASS.
+                        if actual.payload() != expected.payload()
+                            || actual.mask_xz() != expected.mask_xz()
+                        {
                             return TestResult::Fail(format!(
-                                "cycle {t}: signal '{}' expected {} but got {}",
-                                signal.name,
-                                expected.payload_u64(),
-                                actual.payload_u64(),
+                                "cycle {t}: signal '{}' expected {:x} but got {:x}",
+                                signal.name, expected, actual,
                             ));
                         }
                     } else {
@@ -431,9 +436,14 @@ mod tests {
         assert_eq!(scenario.signals[0].wave[0], WaveChar::Data(0));
         assert_eq!(scenario.signals[0].wave[2], WaveChar::Data(1));
         assert_eq!(scenario.signals[0].wave[4], WaveChar::Data(2));
-        assert_eq!(parse_data_value("0xFF").unwrap(), 255);
-        assert_eq!(parse_data_value("0b1010").unwrap(), 10);
-        assert_eq!(parse_data_value("42").unwrap(), 42);
+        assert_eq!(parse_data_value("0xFF").unwrap(), BigUint::from(255u32));
+        assert_eq!(parse_data_value("0b1010").unwrap(), BigUint::from(10u32));
+        assert_eq!(parse_data_value("42").unwrap(), BigUint::from(42u32));
+        // A value wider than 64 bits must keep its high bits (not truncate).
+        assert_eq!(
+            parse_data_value("0x10000000000000000").unwrap(),
+            BigUint::from(1u128) << 64,
+        );
     }
 
     #[test]

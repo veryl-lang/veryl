@@ -649,6 +649,20 @@ impl ProtoForRange {
         };
         matches!(s, ProtoForBound::Const(_)) && matches!(e, ProtoForBound::Const(_))
     }
+
+    /// The dynamic (runtime) start/end bound expressions, if any; the
+    /// variables they read are inputs of the enclosing statement.
+    pub(crate) fn dynamic_bounds(&self) -> impl Iterator<Item = &ProtoExpression> {
+        let (s, e) = match self {
+            ProtoForRange::Forward { start, end, .. }
+            | ProtoForRange::Reverse { start, end, .. }
+            | ProtoForRange::Stepped { start, end, .. } => (start, end),
+        };
+        [s, e].into_iter().filter_map(|b| match b {
+            ProtoForBound::Dynamic(e) => Some(e),
+            ProtoForBound::Const(_) => None,
+        })
+    }
 }
 
 impl ProtoForBound {
@@ -915,6 +929,10 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::For(x) => {
+                // Dynamic loop bounds are reads of the enclosing statement.
+                for e in x.range.dynamic_bounds() {
+                    e.gather_variable_offsets(inputs);
+                }
                 for s in &x.body {
                     s.gather_variable_offsets(inputs, outputs);
                 }
@@ -992,8 +1010,15 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } => {}
-                ProtoSystemFunctionCall::Assert { condition, .. } => {
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
                     condition.gather_variable_offsets_expanded(inputs);
+                    // Assert message args are also reads (mirror the
+                    // non-expanded variant).
+                    for arg in args {
+                        arg.gather_variable_offsets_expanded(inputs);
+                    }
                 }
                 ProtoSystemFunctionCall::Finish => {}
             },
@@ -1025,6 +1050,9 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::For(x) => {
+                for e in x.range.dynamic_bounds() {
+                    e.gather_variable_offsets_expanded(inputs);
+                }
                 for s in &x.body {
                     s.gather_variable_offsets_expanded(inputs, outputs);
                 }

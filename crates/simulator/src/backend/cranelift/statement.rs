@@ -384,9 +384,24 @@ impl ProtoForStatement {
             let step_c = builder.ins().iconst(I64, step_val as i64);
             let new_i = match &self.range {
                 ProtoForRange::Stepped { op, .. } => match op {
+                    // Mirror `Op::eval` (op.rs): the counter is unsigned, so
+                    // right shifts and div/rem are unsigned. Bail (None) for
+                    // any unmodeled op instead of silently doing `i + step`.
+                    air::Op::Add => builder.ins().iadd(i_cur, step_c),
+                    air::Op::Sub => builder.ins().isub(i_cur, step_c),
                     air::Op::Mul => builder.ins().imul(i_cur, step_c),
-                    air::Op::LogicShiftL => builder.ins().ishl(i_cur, step_c),
-                    _ => builder.ins().iadd(i_cur, step_c),
+                    air::Op::Div => builder.ins().udiv(i_cur, step_c),
+                    air::Op::Rem => builder.ins().urem(i_cur, step_c),
+                    air::Op::BitAnd => builder.ins().band(i_cur, step_c),
+                    air::Op::BitOr => builder.ins().bor(i_cur, step_c),
+                    air::Op::BitXor => builder.ins().bxor(i_cur, step_c),
+                    air::Op::LogicShiftL | air::Op::ArithShiftL => {
+                        builder.ins().ishl(i_cur, step_c)
+                    }
+                    air::Op::LogicShiftR | air::Op::ArithShiftR => {
+                        builder.ins().ushr(i_cur, step_c)
+                    }
+                    _ => return None,
                 },
                 _ => builder.ins().iadd(i_cur, step_c),
             };
