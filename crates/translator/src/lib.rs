@@ -1,13 +1,13 @@
 pub mod convert;
 pub mod writer;
 
+use miette::{Diagnostic, NamedSource, SourceSpan};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use sv_parser::{Defines, parse_sv_str};
 use thiserror::Error;
 use veryl_metadata::NewlineStyle;
-
-pub use convert::UnsupportedReport;
 
 #[derive(Debug, Error)]
 pub enum TranslateError {
@@ -15,9 +15,28 @@ pub enum TranslateError {
     Parse(String),
 }
 
+/// A SystemVerilog construct that has no Veryl equivalent (yet). Rendered by
+/// miette as a graphical warning that underlines the offending source span and
+/// shows the reason as the `help` line — mirroring how `veryl-analyzer` emits
+/// its diagnostics.
+#[derive(Debug, Clone, Error, Diagnostic)]
+#[error("unsupported {kind}")]
+#[diagnostic(severity(Warning), code(translate::unsupported))]
+pub struct UnsupportedConstruct {
+    pub kind: String,
+    #[help]
+    pub reason: String,
+    /// Shared across all constructs from the same file so the source text is
+    /// stored once rather than cloned per diagnostic.
+    #[source_code]
+    pub src: Arc<NamedSource<String>>,
+    #[label("cannot be translated to Veryl")]
+    pub span: SourceSpan,
+}
+
 pub struct TranslateOutput {
     pub veryl: String,
-    pub unsupported: Vec<UnsupportedReport>,
+    pub unsupported: Vec<UnsupportedConstruct>,
 }
 
 /// Translate SystemVerilog source to Veryl source. If `format` is true the
@@ -38,7 +57,22 @@ pub fn translate_str(
 
     let newline = newline_style.newline_str(src);
     let conv = convert::Converter::new(&tree, src, newline);
-    let (raw, unsupported) = conv.run();
+    let (raw, reports) = conv.run();
+
+    let name = path.as_ref().to_string_lossy().into_owned();
+    // No `with_language` hint for now: miette's syntect highlighter is not
+    // enabled and ships no SystemVerilog grammar, so a language tag would be a
+    // no-op. Syntax highlighting is left for a follow-up.
+    let shared_src = Arc::new(NamedSource::new(name, src.to_string()));
+    let unsupported = reports
+        .into_iter()
+        .map(|r| UnsupportedConstruct {
+            kind: r.kind,
+            reason: r.reason,
+            src: Arc::clone(&shared_src),
+            span: (r.offset, r.len).into(),
+        })
+        .collect();
 
     let veryl = if format { format_veryl(&raw) } else { raw };
     Ok(TranslateOutput { veryl, unsupported })

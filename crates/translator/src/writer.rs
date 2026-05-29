@@ -63,11 +63,12 @@ impl Writer {
         }
     }
 
-    /// Emit an unsupported-construct comment block. Original SV source for the
-    /// node is included as `// > ` quoted lines so the user can hand-edit it.
-    pub fn unsupported(&mut self, kind: &str, line: usize, src: &str) {
+    /// Emit an unsupported-construct comment block. The reason is included on
+    /// the header line and the original SV source for the node is quoted as
+    /// `// > ` lines so the user can hand-edit it.
+    pub fn unsupported(&mut self, kind: &str, reason: &str, line: usize, src: &str) {
         self.str(&format!(
-            "// TODO(translate): unsupported {kind} at line {line}"
+            "// TODO(translate): unsupported {kind} at line {line}: {reason}"
         ));
         self.newline();
         for l in src.lines() {

@@ -40,3 +40,16 @@ pub(crate) fn node_line(node: &RefNode) -> usize {
     }
     0
 }
+
+/// Return the byte span `(offset, len)` of the first `Locate` descendant —
+/// i.e. the leading token of the construct. This keeps the diagnostic label
+/// pointed at the keyword (`initial`, `for`, ...) rather than underlining the
+/// whole multi-line construct. Returns `(0, 0)` when no `Locate` is found.
+pub(crate) fn node_span(node: &RefNode) -> (usize, usize) {
+    for n in node.clone().into_iter() {
+        if let RefNode::Locate(loc) = n {
+            return (loc.offset, loc.len);
+        }
+    }
+    (0, 0)
+}

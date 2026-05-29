@@ -28,4 +28,42 @@ fn check_fixture(name: &str) {
     assert_eq!(out.veryl, expected, "{name}: output mismatch");
 }
 
+#[test]
+fn unsupported_construct_has_span_reason_and_source() {
+    use miette::{Diagnostic, SourceCode};
+
+    let src = "module top;\n  initial begin\n    x = 0;\n  end\nendmodule\n";
+    let out = veryl_translator::translate_str(
+        src,
+        "inline.sv",
+        false,
+        veryl_metadata::NewlineStyle::Auto,
+    )
+    .expect("translate");
+
+    let c = out
+        .unsupported
+        .iter()
+        .find(|c| c.kind == "initial block")
+        .expect("initial block should be reported as unsupported");
+
+    // The span must point at the `initial` keyword.
+    let initial_off = src.find("initial").unwrap();
+    assert_eq!(c.span.offset(), initial_off);
+    assert_eq!(c.span.len(), "initial".len());
+
+    // miette plumbing: a help line (the reason) and an attached source.
+    assert!(!c.reason.is_empty(), "reason should be populated");
+    assert!(c.help().is_some(), "reason should surface as the help line");
+    let span_src = c
+        .src
+        .read_span(&c.span, 0, 0)
+        .expect("span must resolve against the attached source");
+    assert_eq!(
+        std::str::from_utf8(span_src.data()).unwrap(),
+        "initial",
+        "the attached source span must cover the `initial` keyword"
+    );
+}
+
 include!(concat!(env!("OUT_DIR"), "/translate_cases.rs"));

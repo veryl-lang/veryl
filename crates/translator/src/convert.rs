@@ -43,10 +43,16 @@ where
     }
 }
 
+/// A source-light record of one unsupported construct, kept free of miette
+/// types so the converter can collect them during the walk without cloning the
+/// source. `lib.rs` turns each into a [`crate::UnsupportedConstruct`] diagnostic.
 #[derive(Debug, Clone)]
 pub struct UnsupportedReport {
     pub kind: String,
-    pub line: usize,
+    pub reason: String,
+    /// Byte span of the construct's leading token in the SV source.
+    pub offset: usize,
+    pub len: usize,
 }
 
 pub struct Converter<'a> {
@@ -103,10 +109,11 @@ impl<'a> Converter<'a> {
                     Walk::Skip
                 }
                 RefNode::ModuleDeclarationNonansi(_) => {
-                    let line = self.node_line(n);
-                    let src = self.node_text(n).to_string();
-                    self.report("non-ANSI module", line);
-                    self.w.unsupported("non-ANSI module", line, &src);
+                    self.unsupported(
+                        "non-ANSI module",
+                        "non-ANSI module headers are not supported; rewrite with an ANSI-style port list",
+                        n,
+                    );
                     self.w.newline();
                     Walk::Skip
                 }
@@ -128,11 +135,20 @@ impl<'a> Converter<'a> {
         (self.w.into_string(), self.reports)
     }
 
-    fn report(&mut self, kind: &str, line: usize) {
+    /// Record an unsupported construct: collect a structured report for the
+    /// CLI diagnostics and emit a `// TODO(translate)` block (with the original
+    /// SystemVerilog quoted) into the output so the user can hand-edit it.
+    fn unsupported(&mut self, kind: &str, reason: &str, node: &RefNode) {
+        let line = self.node_line(node);
+        let (offset, len) = util::node_span(node);
+        let src = self.node_text(node).trim().to_string();
         self.reports.push(UnsupportedReport {
             kind: kind.to_string(),
-            line,
+            reason: reason.to_string(),
+            offset,
+            len,
         });
+        self.w.unsupported(kind, reason, line, &src);
     }
 
     fn node_text(&self, node: &RefNode) -> &'a str {
@@ -312,6 +328,16 @@ impl<'a> Converter<'a> {
                 RefNode::ParameterDeclaration(_) | RefNode::LocalParameterDeclaration(_) => {
                     self.emit_standalone_param(n)
                 }
+                RefNode::InitialConstruct(_) => self.unsupported(
+                    "initial block",
+                    "`initial` blocks have no Veryl equivalent and are simulation-only",
+                    n,
+                ),
+                RefNode::FinalConstruct(_) => self.unsupported(
+                    "final block",
+                    "`final` blocks have no Veryl equivalent and are simulation-only",
+                    n,
+                ),
                 _ => return Walk::Continue,
             }
             Walk::Skip
@@ -334,8 +360,6 @@ impl<'a> Converter<'a> {
         let kw = unwrap_node!(node.clone(), AlwaysKeyword)
             .map(|i| self.node_text(&i).trim().to_string())
             .unwrap_or_else(|| "always".to_string());
-
-        let line = self.node_line(node);
 
         match kw.as_str() {
             "always_comb" => {
@@ -367,9 +391,10 @@ impl<'a> Converter<'a> {
             }
             other => {
                 let kind = format!("{other} block");
-                self.report(&kind, line);
-                let src = self.node_text(node).to_string();
-                self.w.unsupported(&kind, line, &src);
+                let reason = format!(
+                    "`{other}` blocks have no Veryl equivalent; only always_ff/always_comb are translatable"
+                );
+                self.unsupported(&kind, &reason, node);
             }
         }
         self.w.newline();
@@ -436,10 +461,11 @@ impl<'a> Converter<'a> {
     }
 
     fn emit_unsupported_stmt(&mut self, node: &RefNode, kind: &str) {
-        let line = self.node_line(node);
-        let src = self.node_text(node).to_string();
-        self.report(kind, line);
-        self.w.unsupported(kind, line, &src);
+        self.unsupported(
+            kind,
+            "this statement form has no Veryl equivalent yet",
+            node,
+        );
     }
 
     fn emit_seq_block(&mut self, node: &RefNode<'a>) {
@@ -729,7 +755,6 @@ impl<'a> Converter<'a> {
     }
 
     fn emit_typedef(&mut self, node: &RefNode<'a>) {
-        let line = self.node_line(node);
         let name = unwrap_node!(node.clone(), TypeIdentifier)
             .map(|i| self.node_text(&i).trim().to_string())
             .unwrap_or_else(|| "T".to_string());
@@ -807,9 +832,11 @@ impl<'a> Converter<'a> {
             self.w.str(";");
             self.w.newline();
         } else {
-            self.report("typedef", line);
-            let src = self.node_text(node).to_string();
-            self.w.unsupported("typedef", line, &src);
+            self.unsupported(
+                "typedef",
+                "this typedef form cannot be mapped to a Veryl `type` alias",
+                node,
+            );
         }
     }
 
@@ -825,7 +852,6 @@ impl<'a> Converter<'a> {
 
     fn emit_jump(&mut self, node: &RefNode<'a>) {
         // return [expr];  →  return expr;
-        let line = self.node_line(node);
         let txt = self.node_text(node).trim();
         if let Some(rest) = txt.strip_prefix("return") {
             let rest = rest.trim().trim_end_matches(';').trim();
@@ -837,15 +863,15 @@ impl<'a> Converter<'a> {
             self.w.str(";");
             self.w.newline();
         } else {
-            self.report("jump", line);
-            self.w.unsupported("jump", line, txt);
+            self.unsupported(
+                "jump",
+                "only `return` jump statements are supported (break/continue/disable are not)",
+                node,
+            );
         }
     }
 
     fn emit_loop(&mut self, node: &RefNode<'a>) {
-        let line = self.node_line(node);
-        let src = self.node_text(node);
-
         let var_init = self.extract_for_init(node);
         let limit = self.extract_for_limit(node);
 
@@ -870,8 +896,11 @@ impl<'a> Converter<'a> {
             return;
         }
 
-        self.report("loop", line);
-        self.w.unsupported("loop", line, src);
+        self.unsupported(
+            "loop",
+            "only counting `for (i = a; i < b; i++)` loops are supported",
+            node,
+        );
     }
 
     /// Extract variable name and initial value from a for-loop's initialization.
