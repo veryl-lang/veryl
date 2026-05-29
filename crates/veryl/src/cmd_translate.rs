@@ -45,14 +45,17 @@ impl CmdTranslate {
         let out = veryl_translator::translate_str(&src, input, !self.opt.no_format, newline_style)
             .map_err(|e| miette::miette!("{e}"))?;
 
-        if !out.unsupported.is_empty() {
-            for r in &out.unsupported {
-                warn!("unsupported {} at line {}", r.kind, r.line);
+        let unsupported_count = out.unsupported.len();
+        if unsupported_count > 0 {
+            // Render each unsupported construct as a graphical miette warning
+            // (source span underlined, reason shown as help), the same way
+            // `veryl check` presents analyzer diagnostics.
+            for c in out.unsupported {
+                eprintln!("{:?}", miette::Report::new(c));
             }
             warn!(
-                "{}: {} unsupported construct(s)",
+                "{}: {unsupported_count} unsupported construct(s)",
                 input.to_string_lossy(),
-                out.unsupported.len()
             );
         }
 
@@ -66,7 +69,7 @@ impl CmdTranslate {
             info!("Wrote ({})", dest.to_string_lossy());
         }
 
-        if self.opt.strict && !out.unsupported.is_empty() {
+        if self.opt.strict && unsupported_count > 0 {
             Ok(false)
         } else {
             Ok(true)

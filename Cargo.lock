@@ -6152,6 +6152,7 @@ dependencies = [
 name = "veryl-translator"
 version = "0.20.0"
 dependencies = [
+ "miette",
  "sv-parser",
  "thiserror",
  "veryl-formatter",

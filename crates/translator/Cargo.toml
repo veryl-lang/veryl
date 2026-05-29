@@ -11,6 +11,7 @@ description           = "SystemVerilog to Veryl translator"
 edition.workspace     = true
 
 [dependencies]
+miette          = {workspace = true}
 sv-parser       = "0.13"
 thiserror       = {workspace = true}
 veryl-formatter = {version = "0.20.0", path = "../formatter"}
