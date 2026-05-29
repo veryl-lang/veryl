@@ -7,7 +7,7 @@ use crate::ir::expression::{
     build_linear_index_expr,
 };
 use crate::ir::variable::{
-    VarOffset, native_bytes_for as calc_native_bytes_for, read_native_value, write_native_value,
+    VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
 use crate::ir::write_log::{
     WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, event_write_log_push_static, event_write_log_push_wide,
@@ -960,10 +960,10 @@ impl ProtoStatement {
     }
 
     /// Same as `gather_variable_offsets` but fully expands dynamic reads
-    /// and writes to every element offset. Used by the seeded-worklist
-    /// schedule (`IrSchedule`) to capture per-element dependencies so
-    /// diff-based dirty propagation can see writes to any element.
-    /// `analyze_dependency` keeps using the base+last encoding.
+    /// and writes to every element offset. Used by dead-store elimination
+    /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it
+    /// could touch alive. `analyze_dependency` keeps using the base+last
+    /// encoding.
     pub fn gather_variable_offsets_expanded(
         &self,
         inputs: &mut Vec<VarOffset>,
@@ -1060,11 +1060,10 @@ impl ProtoStatement {
             ProtoStatement::SequentialBlock(body) => {
                 // No "internal" filter here: a `SequentialBlock` that writes
                 // to an array it also reads would silently drop its outside
-                // read dependency under the intersection filter, hiding the
-                // cross-block fanout needed by the seeded worklist.  For
-                // schedule fanout purposes extra local-temp entries are
-                // harmless (they just have no external readers), so we keep
-                // the full input/output sets.
+                // read dependency under the intersection filter, hiding a
+                // genuine read.  Extra local-temp entries are harmless (they
+                // just have no external readers), so we keep the full
+                // input/output sets.
                 for s in body {
                     s.gather_variable_offsets_expanded(inputs, outputs);
                 }
@@ -1146,7 +1145,7 @@ impl ProtoStatement {
                     use_4state,
                 )),
                 ProtoStatement::AssignDynamic(x) => {
-                    let nb = calc_native_bytes_for(x.dst_width, x.dst_base.is_ff());
+                    let nb = calc_native_bytes(x.dst_width);
                     let dst_base_ptr = if x.dst_base.is_ff() {
                         ff_values_ptr.offset(x.dst_base.raw())
                     } else {
@@ -1237,11 +1236,7 @@ impl ProtoStatement {
                         elements,
                         width,
                     } => {
-                        // All elements in a Readmemh come from a single
-                        // VariableMeta (uniform is_ff per array), so it's safe
-                        // to derive nb from the first element.
-                        let is_ff = elements.first().is_some_and(|e| e.current.is_ff());
-                        let nb = calc_native_bytes_for(*width, is_ff);
+                        let nb = calc_native_bytes(*width);
                         let resolved: Vec<_> = elements
                             .iter()
                             .map(|elem| {
@@ -1737,7 +1732,7 @@ impl ProtoAssignStatement {
         use_4state: bool,
     ) -> AssignStatement {
         unsafe {
-            let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
+            let nb = calc_native_bytes(self.dst_width);
             let _vs = if use_4state { nb * 2 } else { nb };
             let dst = if self.dst.is_ff() {
                 #[cfg(debug_assertions)]
@@ -2475,7 +2470,7 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
             ProtoStatement::Assign(a) if a.dst.is_ff() => {
                 // FF layout: [current][next] contiguously, each calc_native_bytes wide.
                 // next_offset = current_offset + native_bytes.
-                let nb = calc_native_bytes_for(a.dst_width, true) as isize;
+                let nb = calc_native_bytes(a.dst_width) as isize;
                 let next_offset = a.dst_ff_current_offset + nb;
                 extras.push(ProtoStatement::Assign(ProtoAssignStatement {
                     dst: VarOffset::Ff(next_offset),
@@ -2484,7 +2479,7 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
             }
             ProtoStatement::AssignDynamic(a) if a.dst_base.is_ff() => {
                 // For dynamic index FF: base_next = base_current + native_bytes
-                let nb = calc_native_bytes_for(a.dst_width, true) as isize;
+                let nb = calc_native_bytes(a.dst_width) as isize;
                 let next_base = a.dst_ff_current_base_offset + nb;
                 extras.push(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
                     dst_base: VarOffset::Ff(next_base),

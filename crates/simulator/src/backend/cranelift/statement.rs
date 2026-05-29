@@ -5,7 +5,7 @@ use super::helpers::*;
 use super::runtime::{
     Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
 };
-use crate::ir::variable::native_bytes_for as calc_native_bytes_for;
+use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression, ProtoForRange,
     ProtoForStatement, ProtoIfStatement, ProtoStatement,
@@ -37,7 +37,7 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes_for(self.dst_width, self.dst_base.is_ff());
+        let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
         if let Some((beg, end)) = self.rhs_select {
@@ -557,7 +557,7 @@ impl ProtoAssignStatement {
         let wide = self.dst_width > 64;
 
         let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
+        let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
         // Widen expression result to I128 for a 128-bit destination,
@@ -1079,7 +1079,7 @@ impl ProtoAssignStatement {
 
         let expr_width = self.expr.width();
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
+        let nb = calc_native_bytes(self.dst_width);
         let n_words = nb / 8;
         let flags = MemFlags::trusted();
 

@@ -35,9 +35,6 @@ pub struct Simulator {
     dump_vars: Vec<DumpVar>,
     pub mask_cache: MaskCache,
     comb_dirty: bool,
-    /// Scratch buffer used only by the worklist (`eval_comb_worklist`)
-    /// evaluation path; the default settle_comb path does not touch it.
-    comb_snapshot_buf: Vec<u8>,
     pub profile: SimProfile,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
@@ -88,7 +85,6 @@ impl WriteLogDiag {
 
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
-        let comb_snapshot_buf = vec![0u8; ir.comb_values.len()];
         let mut ret = Self {
             ir,
             time: 0,
@@ -96,7 +92,6 @@ impl Simulator {
             dump_vars: Vec::new(),
             mask_cache: MaskCache::default(),
             comb_dirty: true,
-            comb_snapshot_buf,
             profile: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
@@ -115,11 +110,7 @@ impl Simulator {
     }
 
     fn do_settle_comb(&mut self) {
-        self.ir.settle_comb(
-            &mut self.mask_cache,
-            &mut self.comb_snapshot_buf,
-            &mut self.profile,
-        );
+        self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
     }
 
     pub fn set(&mut self, port: &str, value: Value) {

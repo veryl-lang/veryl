@@ -7,9 +7,7 @@ use super::helpers::{WideOperandPair, wide_fn_addrs};
 use super::runtime::{
     Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
 };
-use crate::ir::variable::{
-    native_bytes as calc_native_bytes, native_bytes_for as calc_native_bytes_for,
-};
+use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{Op, ProtoExpression, Value};
 use crate::wide_ops;
 use cranelift::codegen::ir::BlockArg;
@@ -130,7 +128,7 @@ impl ProtoExpression {
             } => {
                 // Wide path: >128-bit variable → return memory pointer
                 if is_wide_ptr(*var_full_width) {
-                    let nb = calc_native_bytes_for(*var_full_width, var_offset.is_ff());
+                    let nb = calc_native_bytes(*var_full_width);
                     let base_addr = if var_offset.is_ff() {
                         context.ff_values
                     } else {
@@ -164,7 +162,7 @@ impl ProtoExpression {
                         None => std::cmp::max(*var_full_width, *width),
                     }
                 };
-                let nb = calc_native_bytes_for(read_width, var_offset.is_ff());
+                let nb = calc_native_bytes(read_width);
                 let offset = var_offset.raw() as i32;
                 let cache_key = *var_offset;
                 let wide = read_width > 64;
