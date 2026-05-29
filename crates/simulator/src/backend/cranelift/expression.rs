@@ -117,6 +117,27 @@ impl ProtoExpression {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        self.build_binary_inner(context, builder, false)
+    }
+
+    /// Like `build_binary`, but skips the producer-side width mask on the
+    /// root width-growing op.  Only the root op is affected — operand
+    /// recursion still masks.  Safe only when the consumer re-masks to
+    /// dst_width (plain store); see `ProtoAssignStatement::build_binary`.
+    pub fn build_binary_root(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        self.build_binary_inner(context, builder, true)
+    }
+
+    fn build_binary_inner(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        skip_root_mask: bool,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
         match self {
             ProtoExpression::Variable {
                 var_offset,
@@ -1007,15 +1028,19 @@ impl ProtoExpression {
                 // consumer (icmp, expand_sign's MSB probe). The interpreter
                 // masks these, so match it. Pow is excluded — the interpreter
                 // does NOT mask Pow, so masking here would diverge instead.
-                if matches!(
-                    op,
-                    Op::Add
-                        | Op::Sub
-                        | Op::Mul
-                        | Op::LogicShiftL
-                        | Op::ArithShiftL
-                        | Op::ArithShiftR
-                ) {
+                // `skip_root_mask` elides this when the consumer is a plain
+                // store, which re-masks to dst_width anyway.
+                if !skip_root_mask
+                    && matches!(
+                        op,
+                        Op::Add
+                            | Op::Sub
+                            | Op::Mul
+                            | Op::LogicShiftL
+                            | Op::ArithShiftL
+                            | Op::ArithShiftR
+                    )
+                {
                     payload = band_const(
                         builder,
                         payload,

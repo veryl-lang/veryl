@@ -36,7 +36,18 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
-        let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
+        // Plain store re-masks the payload to dst_width (istoreN truncation
+        // or the non-native band below), so the producer-side root mask is
+        // redundant; select/dynamic_select shift the payload and need it.
+        // Unlike the static `ProtoAssignStatement` path, no `dst_width <= 64`
+        // guard is needed: a wide non-native dst bails (`return None`) below
+        // and this dynamic path has no load-cache forwarding that could
+        // observe an unmasked payload.
+        let (mut payload, mut mask_xz) = if self.select.is_none() && self.dynamic_select.is_none() {
+            self.expr.build_binary_root(context, builder)?
+        } else {
+            self.expr.build_binary(context, builder)?
+        };
         let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
@@ -556,7 +567,18 @@ impl ProtoAssignStatement {
         let known_bits = self.expr.effective_bits();
         let wide = self.dst_width > 64;
 
-        let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
+        // Plain store re-masks the payload to dst_width (istoreN truncation,
+        // fwd_p, or the non-native band below), so the producer-side root
+        // mask is redundant; select/dynamic_select shift it and need it.
+        // Restricted to dst_width <= 64: wider dsts forward the unmasked
+        // payload to the load cache (fwd_p only masks when dst_width < 64).
+        let plain_root =
+            self.select.is_none() && self.dynamic_select.is_none() && self.dst_width <= 64;
+        let (mut payload, mut mask_xz) = if plain_root {
+            self.expr.build_binary_root(context, builder)?
+        } else {
+            self.expr.build_binary(context, builder)?
+        };
         let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 

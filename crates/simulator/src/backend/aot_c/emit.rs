@@ -211,7 +211,7 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
     let log_off = format!("{:#x}", cur_off);
     let dst_off = format!("{:#x}", dst_raw);
     let dwmask = width_mask(a.dst_width);
-    let rhs = apply_rhs_select(emit_expr(&a.expr)?, a.rhs_select)?;
+    let rhs = apply_rhs_select(emit_expr_root(&a.expr)?, a.rhs_select)?;
     // Runtime-indexed bit-slice write into a packed FF (`ff[dyn_idx] <= v`):
     // RMW with a runtime shift = idx*elem_width.  Mirrors the dynamic_select
     // arm of AssignStatement::eval_step.
@@ -332,7 +332,7 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
     if cur_base < 0 || dst_base_raw < 0 {
         return None;
     }
-    let rhs = apply_rhs_select(emit_expr(&a.expr)?, a.rhs_select)?;
+    let rhs = apply_rhs_select(emit_expr_root(&a.expr)?, a.rhs_select)?;
     let idx = emit_expr(&a.dst_index_expr)?;
     let max_idx = a.dst_num_elements.saturating_sub(1);
     let dwmask = width_mask(a.dst_width);
@@ -707,7 +707,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             let cty = native_c_type(nb)?;
             // Compute the rhs after rhs_select extraction (mirrors
             // AssignStatement::eval_step's `value.select(beg, end)`).
-            let rhs_unselected = emit_expr(&a.expr)?;
+            let rhs_unselected = emit_expr_root(&a.expr)?;
             let rhs_str = match a.rhs_select {
                 None => rhs_unselected,
                 Some((rhs_hi, rhs_lo)) => {
@@ -762,12 +762,22 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 // bits above the declared width set, whereas Cranelift masks
                 // to declared bits before storing.
                 let native_bits = nb * 8;
-                if a.dst_width < native_bits && a.dst_width > 0 {
-                    let mask = if a.dst_width >= 64 {
-                        u64::MAX
-                    } else {
-                        (1u64 << a.dst_width) - 1
-                    };
+                if a.dst_width > 64 && a.dst_width < native_bits {
+                    // Wide (65-127 bit) dst: mask in 128-bit arithmetic; a
+                    // (uint64_t) cast here would drop the high bits.
+                    let mask: u128 = (1u128 << a.dst_width) - 1;
+                    Some(format!(
+                        "*(({ct}*)({b} + {o:#x})) = ({ct})(((__uint128_t)({rhs})) \
+                         & (((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL));",
+                        ct = cty,
+                        b = buf,
+                        o = store_off,
+                        rhs = rhs_str,
+                        hi = (mask >> 64) as u64,
+                        lo = mask as u64,
+                    ))
+                } else if a.dst_width < native_bits && a.dst_width > 0 {
+                    let mask = (1u64 << a.dst_width) - 1;
                     Some(format!(
                         "*(({ct}*)({b} + {o:#x})) = ({ct})(((uint64_t)({rhs})) & 0x{m:x}ULL);",
                         ct = cty,
@@ -837,7 +847,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 VarOffset::Comb(o) => o,
                 VarOffset::Ff(_) => unreachable!(),
             };
-            let rhs = apply_rhs_select(emit_expr(&a.expr)?, a.rhs_select)?;
+            let rhs = apply_rhs_select(emit_expr_root(&a.expr)?, a.rhs_select)?;
             let idx_str = emit_expr(&a.dst_index_expr)?;
             let max_idx = a.dst_num_elements.saturating_sub(1);
             let addr = format!(
@@ -997,6 +1007,20 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
 /// width truncation happens at store time via the dst cast).  `None`
 /// if the variant or operator isn't supported.
 pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
+    emit_expr_inner(expr, true)
+}
+
+/// Like `emit_expr`, but the caller guarantees it ignores result bits at or
+/// above the expression's declared width (a store that re-masks to dst_width,
+/// or a sign-extension that discards them).  Lets the producer-side width
+/// mask be elided.  `needs_clean` then propagates down: a width-growing op's
+/// result mask is emitted only when some consumer actually reads those high
+/// bits (comparison, shift, concat, …).  See `binary_result_masked_to_width`.
+pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
+    emit_expr_inner(expr, false)
+}
+
+fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
     match expr {
         ProtoExpression::Value {
             value,
@@ -1120,8 +1144,6 @@ pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
             expr_context,
             ..
         } => {
-            let xs = emit_expr(x)?;
-            let ys = emit_expr(y)?;
             // Signedness fix-ups: comparisons and Div / Rem need both
             // operands sign-extended to a signed integer wider than
             // their declared width so the C-level operator picks up
@@ -1138,6 +1160,27 @@ pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
             // outer expression — heliodor's div/rem are all
             // expr_context.signed when both operands are signed.
             let is_signed_divrem = expr_context.signed && matches!(op, Op::Div | Op::Rem);
+            // Operands need pre-masking only where this op reads their high
+            // bits. Add/Sub/Mul (low bits suffice; the result mask cleans the
+            // rest) and signed compare/div/rem (operands sign-extended below)
+            // don't; bitwise propagates `needs_clean`; the rest (unsigned
+            // compare, shift, &&/||) need clean operands.
+            let operand_needs_clean = if is_signed_cmp || is_signed_divrem {
+                false
+            } else {
+                match op {
+                    Op::Add | Op::Sub | Op::Mul => false,
+                    Op::BitAnd
+                    | Op::BitOr
+                    | Op::BitXor
+                    | Op::BitNand
+                    | Op::BitNor
+                    | Op::BitXnor => needs_clean,
+                    _ => true,
+                }
+            };
+            let xs = emit_expr_inner(x, operand_needs_clean)?;
+            let ys = emit_expr_inner(y, operand_needs_clean)?;
             if is_signed_cmp || is_signed_divrem {
                 let x_w = x.width();
                 let y_w = y.width();
@@ -1214,33 +1257,74 @@ pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
                 _ => None,
             };
             if let Some(c_op) = direct {
-                // A >64-bit result from a <=64-bit operand truncates: the
-                // operand loads as uint64_t, so C runs the op mod 2^64 before
-                // widening to the 128-bit result type. Bail to Cranelift
-                // (which widens operands to I128 first) for width-growing ops.
-                // Both operands already >64 bits load as __uint128_t and are
-                // fine, so only narrow operands need the bail.
-                if expr_context.width > 64
-                    && matches!(
-                        op,
-                        Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
-                    )
-                    && (x.width() <= 64 || y.width() <= 64)
-                {
+                // A >64-bit result computed in 64-bit C truncates. C promotes a
+                // uint64_t Add/Sub/Mul operand to __uint128_t when the other is
+                // already 128-bit, so only both-narrow truncate; a left shift
+                // follows its left operand alone. Bail those (and signed wide,
+                // which the block below can't sign-extend to 128) to Cranelift.
+                let wide_truncates = match op {
+                    Op::Add | Op::Sub | Op::Mul => x.width() <= 64 && y.width() <= 64,
+                    Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
+                    _ => false,
+                };
+                if expr_context.width > 64 && (wide_truncates || expr_context.signed) {
                     return None;
                 }
-                // Width-growing op results can set bits at/above the width;
-                // harmless once stored (the store masks) but corrupt an
-                // inlined comparison. Mask to width. (width==64 needs no mask;
-                // width>64 already bailed above.)
+                // Operand-derived overflow predicate, computable in parallel
+                // with the op. When it proves no carry past `width` the mask is
+                // a no-op. Built here (not in `wmask`) so the closure doesn't
+                // borrow `xs`/`ys`. Unsigned only (signed operands are
+                // sign-extended, so a high bit no longer means large).
+                let overflow_cond: Option<String> =
+                    if expr_context.signed || expr_context.width == 0 || expr_context.width >= 64 {
+                        None
+                    } else {
+                        // Shift by W-1 (not `& (1<<(W-1))`) so any operand bit at or
+                        // above W-1 trips the predicate — this stays sound even when
+                        // an operand is itself an unmasked (dirty) width-growing op
+                        // whose bits ≥ W are nonzero.
+                        let sh = expr_context.width - 1;
+                        let w = expr_context.width;
+                        match op {
+                            // a|b has no bit ≥ W-1 ⇒ a,b < 2^(W-1) ⇒ a+b < 2^W.
+                            Op::Add => Some(format!("((({xs}) | ({ys})) >> {sh})")),
+                            // additionally a-b borrows (dirty) unless a >= b.
+                            Op::Sub => Some(format!(
+                                "(((({xs}) | ({ys})) >> {sh}) != 0 || ({xs}) < ({ys}))"
+                            )),
+                            // `x << n` overflows iff n reaches W or x has a bit ≥
+                            // W-n; `n >= W` is tested first so `W - n` never
+                            // underflows. (Mul has no cheap operand-only predicate,
+                            // so it keeps the unconditional mask.)
+                            Op::LogicShiftL | Op::ArithShiftL => Some(format!(
+                                "(({ys}) >= {w} || ((({xs}) >> ({w} - ({ys}))) != 0))"
+                            )),
+                            _ => None,
+                        }
+                    };
+                // Width-growing results can set bits ≥ width — harmless once
+                // stored (the store re-masks) but they corrupt an inlined
+                // comparison, so mask to width. With an operand-derived
+                // predicate, gate the mask behind a rarely-taken branch to keep
+                // it off the critical path; the `volatile` asm stops gcc from
+                // if-converting it back to an unconditional `& mask`.
                 let wmask = |s: String| -> String {
-                    if expr_context.width < 64
+                    if needs_clean
+                        && expr_context.width < 64
                         && matches!(
                             op,
                             Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
                         )
                     {
-                        format!("(({}) & 0x{:x}ULL)", s, (1u64 << expr_context.width) - 1)
+                        let mask = (1u64 << expr_context.width) - 1;
+                        match &overflow_cond {
+                            Some(cond) => format!(
+                                "({{ uint64_t _t = ({s}); \
+                                 if (__builtin_expect(({cond}) != 0, 0)) {{ _t &= 0x{mask:x}ULL; \
+                                 __asm__ volatile(\"\" : \"+r\"(_t)); }} _t; }})"
+                            ),
+                            None => format!("(({s}) & 0x{mask:x}ULL)"),
+                        }
                     } else {
                         s
                     }
@@ -1343,9 +1427,12 @@ pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
             false_expr,
             ..
         } => {
+            // The condition is a truthy test, so its high bits must be clean;
+            // the selected branch becomes this result, so the branches inherit
+            // `needs_clean`.
             let c = emit_expr(cond)?;
-            let t = emit_expr(true_expr)?;
-            let f = emit_expr(false_expr)?;
+            let t = emit_expr_inner(true_expr, needs_clean)?;
+            let f = emit_expr_inner(false_expr, needs_clean)?;
             Some(format!("(({}) ? ({}) : ({}))", c, t, f))
         }
         ProtoExpression::Concatenation {
