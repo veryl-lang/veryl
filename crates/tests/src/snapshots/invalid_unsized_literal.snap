@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_unsized_literal (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_unsized_literal)
+
+  × unsized literal can't be used in a self-determined context
+   ╭─[../../testcases/error/invalid_unsized_literal.veryl:2:25]
+ 1 │ module invalid_unsized_literal {
+ 2 │     let _a: logic<8> = {'1, 4'b0};
+   ·                         ─┬
+   ·                          ╰── Error location
+ 3 │ }
+   ╰────
+  help: give the literal an explicit width (e.g. `1'b0`)

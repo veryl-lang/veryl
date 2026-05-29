@@ -473,6 +473,12 @@ impl Op {
         let mut is_global = true;
         let mut kind = TypeKind::Bit;
         for (expr, repeat) in x {
+            // Concatenation operands and the replication count are
+            // self-determined; an unbased unsized literal can't be sized here.
+            expr.check_self_determined_unsized(context);
+            if let Some(repeat) = repeat {
+                repeat.check_self_determined_unsized(context);
+            }
             let expr_context = expr.gather_context(context);
             expr.apply_context(context, expr_context);
             let expr = expr.comptime();
