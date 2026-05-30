@@ -9,6 +9,7 @@ use crate::ir::{
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
+use std::sync::Arc;
 use veryl_analyzer::value::MaskCache;
 
 #[cfg(feature = "profile")]
@@ -39,6 +40,13 @@ pub struct Simulator {
     pub profile: SimProfile,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
+    /// Whole-event AOT-C handle for `last_event`, cached alongside
+    /// `last_event_stmts` (same predicate, same post-construction-immutable
+    /// `whole_events` invariant) so the hot path skips a per-cycle
+    /// `whole_events` HashMap probe + `Arc` clone.  `None` = no whole-event
+    /// backend for `last_event`.  Points into `self.ir.whole_events`'s `Arc`,
+    /// which is never mutated after `Ir` construction.
+    last_whole_event: Option<*const dyn CompiledWhole>,
     /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
     /// commit path.  Accumulated across the run; `dump` is invoked
     /// automatically when the cycle counter crosses a logarithmic
@@ -96,6 +104,7 @@ impl Simulator {
             profile: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
+            last_whole_event: None,
             write_log_diag: WriteLogDiag {
                 enabled: std::env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
                 next_print_cycle: 1_000_000,
@@ -265,16 +274,25 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let event_start = std::time::Instant::now();
 
-        let stmts_ptr = if self.last_event.as_ref() == Some(event) {
-            self.last_event_stmts
+        // Cache both the per-stmt list AND the whole-event AOT-C handle for
+        // the current event, keyed on `last_event`.  `event_statements` and
+        // `whole_events` are both immutable after `Ir` construction, so the
+        // raw pointers stay valid; this turns the per-cycle `whole_events`
+        // HashMap probe + `Arc` clone into a single predicate check that the
+        // per-stmt cache already pays for.
+        let (stmts_ptr, whole_event_ptr) = if self.last_event.as_ref() == Some(event) {
+            (self.last_event_stmts, self.last_whole_event)
         } else {
             let ptr: *const Vec<Statement> = match self.ir.event_statements.get(event) {
                 Some(v) => v as *const _,
                 None => std::ptr::null(),
             };
+            let wptr: Option<*const dyn CompiledWhole> =
+                self.ir.whole_events.get(event).map(Arc::as_ptr);
             self.last_event = Some(event.clone());
             self.last_event_stmts = ptr;
-            ptr
+            self.last_whole_event = wptr;
+            (ptr, wptr)
         };
 
         // Whole-event backend (today: AOT-C): if a backend committed to
@@ -284,8 +302,12 @@ impl Simulator {
         // (3rd arg), exactly as the Cranelift event JIT does;
         // `ff_commit_from_log` below applies them.
         use crate::backend::DispatchOutcome;
-        let whole_event = self.ir.whole_events.get(event).cloned();
-        let dispatched = if let Some(whole) = whole_event {
+        let dispatched = if let Some(wptr) = whole_event_ptr {
+            // SAFETY: `wptr` = `Arc::as_ptr` of an `Arc` owned by
+            // `self.ir.whole_events`, which is never mutated after `Ir`
+            // construction, so the pointee outlives this call.  Same
+            // invariant the `last_event_stmts` raw pointer relies on.
+            let whole: &dyn CompiledWhole = unsafe { &*wptr };
             let ff_ptr = self.ir.ff_values.as_ptr();
             let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
             let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
@@ -304,7 +326,7 @@ impl Simulator {
                 // on divergence.  The whole-event backend only exists on
                 // native (BackendRegistry stays empty on wasm), so this
                 // branch is effectively native-only at runtime.
-                self.validate_event_aot(whole.as_ref(), stmts_ptr);
+                self.validate_event_aot(whole, stmts_ptr);
                 true
             }
         } else {
