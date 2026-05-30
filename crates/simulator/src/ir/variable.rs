@@ -58,45 +58,6 @@ pub fn native_bytes(width: usize) -> usize {
     }
 }
 
-/// Comb-only packed-storage native width (1-8 -> 1, 9-16 -> 2, 17-32 -> 4,
-/// 33-64 -> 8, 65-128 -> 16, >128 -> 8-byte aligned).  Reduces the working
-/// set for narrow comb signals; FF storage stays at the unpacked sizing so
-/// ff_swap / ff_commit SIMD layouts are unaffected.
-#[inline]
-pub fn native_bytes_packed(width: usize) -> usize {
-    if width <= 8 {
-        1
-    } else if width <= 16 {
-        2
-    } else if width <= 32 {
-        4
-    } else if width <= 64 {
-        8
-    } else if width <= 128 {
-        16
-    } else {
-        width.div_ceil(64) * 8
-    }
-}
-
-/// Storage-context native width selector.  `is_ff = true` -> always
-/// `native_bytes(width)`.  `is_ff = false` and `VERYL_NATIVE_U8_COMB=1` ->
-/// `native_bytes_packed(width)`; otherwise the same as `native_bytes(width)`.
-/// All callers that compute a storage byte width for a variable load/store
-/// must use this; op-level intermediate widths keep using `native_bytes`.
-#[inline]
-pub fn native_bytes_for(width: usize, is_ff: bool) -> usize {
-    use std::sync::OnceLock;
-    static COMB_PACKED: OnceLock<bool> = OnceLock::new();
-    let comb_packed = *COMB_PACKED
-        .get_or_init(|| std::env::var("VERYL_NATIVE_U8_COMB").ok().as_deref() == Some("1"));
-    if !is_ff && comb_packed {
-        native_bytes_packed(width)
-    } else {
-        native_bytes(width)
-    }
-}
-
 /// Inst-boundary cache-line padding for FF storage.  When
 /// `VERYL_FF_CACHELINE_PAD=1`, each child module's FF allocation is
 /// rounded up to the next 64-byte boundary, eliminating false sharing
@@ -389,14 +350,14 @@ pub fn create_variable_meta(
         let force_ff = any_ff && total_array > 1;
 
         // Per-Variable storage destination is uniform: arrays via force_ff,
-        // scalars via the single is_ff query.  This drives the storage-side
-        // native width selection (comb-only packed under VERYL_NATIVE_U8_COMB).
+        // scalars via the single is_ff query.  This drives the FF single/dual
+        // slot selection below (`packed_ff`).
         let is_ff_var = if total_array > 1 {
             force_ff
         } else {
             ff_table.is_ff(v.id, 0)
         };
-        let nb = native_bytes_for(width, is_ff_var);
+        let nb = native_bytes(width);
         let vs = value_size(nb, use_4state);
 
         // Packed FF allocation.  All-or-nothing per-array — if any

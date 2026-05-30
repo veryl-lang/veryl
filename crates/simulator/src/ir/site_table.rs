@@ -15,7 +15,7 @@
 //! WriteLogBuffer sizing) and by env-gated diag checks.
 
 use super::ProtoStatement;
-use super::variable::native_bytes_for;
+use super::variable::native_bytes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiteKind {
@@ -111,7 +111,7 @@ impl SiteTable {
 fn visit(stmt: &ProtoStatement, table: &mut SiteTable) {
     match stmt {
         ProtoStatement::Assign(a) if a.dst.is_ff() => {
-            let nb = native_bytes_for(a.dst_width, true);
+            let nb = native_bytes(a.dst_width);
             let width = a.dst_width as u32;
             let cur = a.dst_ff_current_offset as u32;
             if a.dst_width > 64 {
@@ -121,7 +121,7 @@ fn visit(stmt: &ProtoStatement, table: &mut SiteTable) {
             }
         }
         ProtoStatement::AssignDynamic(a) if a.dst_base.is_ff() => {
-            let nb = native_bytes_for(a.dst_width, true);
+            let nb = native_bytes(a.dst_width);
             let width = a.dst_width as u32;
             let base = a.dst_ff_current_base_offset as u32;
             table.add_dynamic(base, width, nb as u8);

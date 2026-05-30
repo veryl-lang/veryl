@@ -53,8 +53,17 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         let mut outs = Vec::new();
         s.gather_variable_offsets(&mut ins, &mut outs);
 
+        // `gather_variable_offsets` encodes a dynamic array read as only
+        // base+last, hiding interior elements — unsafe here, since a dynamic
+        // read may select an interior element whose pending write must be
+        // kept alive. Use the expanded read set; it only adds keys removed
+        // from `pending` (the safe direction). `outs` stays on base+last.
+        let mut ins_expanded = Vec::new();
+        let mut outs_expanded = Vec::new();
+        s.gather_variable_offsets_expanded(&mut ins_expanded, &mut outs_expanded);
+
         // A read of a pending dst commits it (the earlier write is live).
-        for r in &ins {
+        for r in ins.iter().chain(ins_expanded.iter()) {
             pending.remove(r);
         }
 

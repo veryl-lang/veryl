@@ -5,7 +5,7 @@ use super::helpers::*;
 use super::runtime::{
     Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
 };
-use crate::ir::variable::native_bytes_for as calc_native_bytes_for;
+use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression, ProtoForRange,
     ProtoForStatement, ProtoIfStatement, ProtoStatement,
@@ -36,8 +36,19 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
-        let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes_for(self.dst_width, self.dst_base.is_ff());
+        // Plain store re-masks the payload to dst_width (istoreN truncation
+        // or the non-native band below), so the producer-side root mask is
+        // redundant; select/dynamic_select shift the payload and need it.
+        // Unlike the static `ProtoAssignStatement` path, no `dst_width <= 64`
+        // guard is needed: a wide non-native dst bails (`return None`) below
+        // and this dynamic path has no load-cache forwarding that could
+        // observe an unmasked payload.
+        let (mut payload, mut mask_xz) = if self.select.is_none() && self.dynamic_select.is_none() {
+            self.expr.build_binary_root(context, builder)?
+        } else {
+            self.expr.build_binary(context, builder)?
+        };
+        let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
         if let Some((beg, end)) = self.rhs_select {
@@ -384,9 +395,24 @@ impl ProtoForStatement {
             let step_c = builder.ins().iconst(I64, step_val as i64);
             let new_i = match &self.range {
                 ProtoForRange::Stepped { op, .. } => match op {
+                    // Mirror `Op::eval` (op.rs): the counter is unsigned, so
+                    // right shifts and div/rem are unsigned. Bail (None) for
+                    // any unmodeled op instead of silently doing `i + step`.
+                    air::Op::Add => builder.ins().iadd(i_cur, step_c),
+                    air::Op::Sub => builder.ins().isub(i_cur, step_c),
                     air::Op::Mul => builder.ins().imul(i_cur, step_c),
-                    air::Op::LogicShiftL => builder.ins().ishl(i_cur, step_c),
-                    _ => builder.ins().iadd(i_cur, step_c),
+                    air::Op::Div => builder.ins().udiv(i_cur, step_c),
+                    air::Op::Rem => builder.ins().urem(i_cur, step_c),
+                    air::Op::BitAnd => builder.ins().band(i_cur, step_c),
+                    air::Op::BitOr => builder.ins().bor(i_cur, step_c),
+                    air::Op::BitXor => builder.ins().bxor(i_cur, step_c),
+                    air::Op::LogicShiftL | air::Op::ArithShiftL => {
+                        builder.ins().ishl(i_cur, step_c)
+                    }
+                    air::Op::LogicShiftR | air::Op::ArithShiftR => {
+                        builder.ins().ushr(i_cur, step_c)
+                    }
+                    _ => return None,
                 },
                 _ => builder.ins().iadd(i_cur, step_c),
             };
@@ -541,8 +567,19 @@ impl ProtoAssignStatement {
         let known_bits = self.expr.effective_bits();
         let wide = self.dst_width > 64;
 
-        let (mut payload, mut mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
+        // Plain store re-masks the payload to dst_width (istoreN truncation,
+        // fwd_p, or the non-native band below), so the producer-side root
+        // mask is redundant; select/dynamic_select shift it and need it.
+        // Restricted to dst_width <= 64: wider dsts forward the unmasked
+        // payload to the load cache (fwd_p only masks when dst_width < 64).
+        let plain_root =
+            self.select.is_none() && self.dynamic_select.is_none() && self.dst_width <= 64;
+        let (mut payload, mut mask_xz) = if plain_root {
+            self.expr.build_binary_root(context, builder)?
+        } else {
+            self.expr.build_binary(context, builder)?
+        };
+        let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
         // Widen expression result to I128 for a 128-bit destination,
@@ -1064,7 +1101,7 @@ impl ProtoAssignStatement {
 
         let expr_width = self.expr.width();
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
-        let nb = calc_native_bytes_for(self.dst_width, self.dst.is_ff());
+        let nb = calc_native_bytes(self.dst_width);
         let n_words = nb / 8;
         let flags = MemFlags::trusted();
 

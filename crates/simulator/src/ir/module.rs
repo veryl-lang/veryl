@@ -5,8 +5,6 @@ use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
-use crate::ir::schedule::IrSchedule;
-use crate::ir::schedule::StmtId;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, align_up_64, create_variable_meta,
@@ -48,10 +46,6 @@ pub struct Module {
     /// cache-line aligned padding between Inst FF blocks and per-Inst
     /// independent commit.
     pub inst_layout: InstLayout,
-    /// Sensitivity-fanout + topological-rank index for the seeded-worklist
-    /// scheduler. Populated from the topologically-sorted comb list;
-    /// `eval_comb_worklist` uses it when `Config::use_seeded_worklist` is on.
-    pub comb_schedule: IrSchedule,
     /// Diagnostic: number of non-trivial strongly-connected components in
     /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
     /// loops are rejected up-front by `analyze_dependency`, so any non-zero
@@ -86,8 +80,6 @@ pub struct ProtoModule {
     pub site_table: SiteTable,
     /// See `Module::inst_layout`.
     pub inst_layout: InstLayout,
-    /// See `Module::comb_schedule`.
-    pub comb_schedule: IrSchedule,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -291,7 +283,6 @@ impl ProtoModule {
             required_comb_passes: self.required_comb_passes,
             site_table: self.site_table.clone(),
             inst_layout: self.inst_layout.clone(),
-            comb_schedule: self.comb_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
             whole_comb: self.whole_comb.clone(),
             whole_events: self.whole_events.clone(),
@@ -412,120 +403,6 @@ fn jit_chunk_size() -> usize {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(JIT_CHUNK_SIZE_DEFAULT)
-}
-
-/// Build an IrSchedule whose stmt ids align 1:1 with the post-JIT
-/// `comb_statements` slice. Mirrors the chunking logic of
-/// `try_jit_no_cache` so each post-JIT Statement index maps to a
-/// contiguous [start..end) range of pre-JIT ProtoStatements, and
-/// aggregates gather_variable_offsets across that range.
-#[cfg(not(target_family = "wasm"))]
-fn build_aligned_schedule(
-    pre_jit_stmts: &[ProtoStatement],
-    use_jit: bool,
-    meta: &ModuleVariableMeta,
-    use_4state: bool,
-) -> IrSchedule {
-    use smallvec::SmallVec;
-    let mut per_stmt_inputs: Vec<SmallVec<[VarOffset; 4]>> = Vec::new();
-    let mut per_stmt_outputs: Vec<SmallVec<[VarOffset; 4]>> = Vec::new();
-
-    let emit_chunk = |chunk: &[ProtoStatement],
-                      per_in: &mut Vec<SmallVec<[VarOffset; 4]>>,
-                      per_out: &mut Vec<SmallVec<[VarOffset; 4]>>| {
-        let mut ins_all: Vec<VarOffset> = Vec::new();
-        let mut outs_all: Vec<VarOffset> = Vec::new();
-        for s in chunk {
-            s.gather_variable_offsets_expanded(&mut ins_all, &mut outs_all);
-        }
-        let mut ins: SmallVec<[VarOffset; 4]> = SmallVec::new();
-        for off in ins_all {
-            if !ins.contains(&off) {
-                ins.push(off);
-            }
-        }
-        let mut outs: SmallVec<[VarOffset; 4]> = SmallVec::new();
-        for off in outs_all {
-            if !outs.contains(&off) {
-                outs.push(off);
-            }
-        }
-        per_in.push(ins);
-        per_out.push(outs);
-    };
-
-    if !use_jit {
-        // JIT-off: try_jit_no_cache returns a single Interpreted block
-        // holding all pre-JIT stmts — one aligned slot covers everything.
-        emit_chunk(pre_jit_stmts, &mut per_stmt_inputs, &mut per_stmt_outputs);
-    } else {
-        // Mirror try_jit_no_cache: contiguous groups of same can_build_binary,
-        // jittable groups further split by JIT_CHUNK_SIZE.
-        let mut current_jittable: Option<bool> = None;
-        let mut group_start: usize = 0;
-
-        let flush = |group_start: usize,
-                     group_end: usize,
-                     was_jittable: bool,
-                     per_in: &mut Vec<SmallVec<[VarOffset; 4]>>,
-                     per_out: &mut Vec<SmallVec<[VarOffset; 4]>>| {
-            let group = &pre_jit_stmts[group_start..group_end];
-            let chunk_size = jit_chunk_size();
-            if was_jittable && group.len() > chunk_size {
-                for chunk in group.chunks(chunk_size) {
-                    emit_chunk(chunk, per_in, per_out);
-                }
-            } else {
-                emit_chunk(group, per_in, per_out);
-            }
-        };
-
-        for (i, stmt) in pre_jit_stmts.iter().enumerate() {
-            let jittable = stmt.can_build_binary();
-            match current_jittable {
-                None => {
-                    current_jittable = Some(jittable);
-                    group_start = i;
-                }
-                Some(prev) if prev == jittable => {}
-                Some(prev) => {
-                    flush(
-                        group_start,
-                        i,
-                        prev,
-                        &mut per_stmt_inputs,
-                        &mut per_stmt_outputs,
-                    );
-                    current_jittable = Some(jittable);
-                    group_start = i;
-                }
-            }
-        }
-        if let Some(prev) = current_jittable
-            && group_start < pre_jit_stmts.len()
-        {
-            flush(
-                group_start,
-                pre_jit_stmts.len(),
-                prev,
-                &mut per_stmt_inputs,
-                &mut per_stmt_outputs,
-            );
-        }
-    }
-
-    let n = per_stmt_inputs.len();
-    let mut sched = IrSchedule {
-        n_stmts: n as u32,
-        stmt_inputs: per_stmt_inputs,
-        stmt_outputs: per_stmt_outputs,
-        output_to_readers: crate::HashMap::default(),
-        topo_rank: (0..n as StmtId).collect(),
-        offset_sizes: crate::HashMap::default(),
-    };
-    sched.rebuild_fanout();
-    sched.attach_offset_sizes(meta, use_4state);
-    sched
 }
 
 /// Per-event JIT path: load_cache CSE enabled, no nested CompiledBlocks
@@ -2225,10 +2102,8 @@ impl Conv<&air::Module> for ProtoModule {
             unified_sorted
         };
 
-        // Snapshot unified_sorted before JIT consumes it: the worklist
-        // schedule (built below) needs to walk the pre-JIT ProtoStatement
-        // list because JIT CompiledBlocks don't expose stmt-level I/O to
-        // `gather_variable_offsets`.
+        // Snapshot before JIT consumes it: the whole-comb backend below needs
+        // the pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
         let pre_jit_stmts = unified_sorted.clone();
         let comb_statements = try_jit_no_cache(context, unified_sorted);
 
@@ -2423,26 +2298,6 @@ impl Conv<&air::Module> for ProtoModule {
             trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
         }
 
-        // Build an IrSchedule whose stmt ids align with the post-JIT
-        // comb_statements.  Only build it when the worklist is actually
-        // enabled — the build walks `gather_variable_offsets_expanded`,
-        // which emits per-element offsets for DynamicVariable/AssignDynamic,
-        // and for designs with large memory arrays (multi-MB DRAMs) this
-        // costs seconds per ProtoModule even when the worklist is disabled.
-        #[cfg(not(target_family = "wasm"))]
-        let comb_schedule = if context.config.use_seeded_worklist {
-            build_aligned_schedule(
-                &pre_jit_stmts,
-                context.config.use_jit,
-                &module_variable_meta,
-                context.config.use_4state,
-            )
-        } else {
-            IrSchedule::empty()
-        };
-        #[cfg(target_family = "wasm")]
-        let comb_schedule = IrSchedule::empty();
-
         // Whole-comb backend (today: AOT-C) — when registered + size_ok,
         // try compile_whole_comb; backends that decline (4-state,
         // unsupported construct) return None and Ir::settle_comb stays
@@ -2488,7 +2343,6 @@ impl Conv<&air::Module> for ProtoModule {
             required_comb_passes,
             site_table,
             inst_layout,
-            comb_schedule,
             nontrivial_comb_scc,
             whole_comb,
             whole_events,

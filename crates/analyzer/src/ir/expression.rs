@@ -1,3 +1,4 @@
+use crate::AnalyzerError;
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
@@ -90,6 +91,24 @@ impl Expression {
         }
     }
 
+    /// Token range when this expression is a bare unbased unsized literal
+    /// Term (`'0`/`'1`/`'x`/`'z`); nested under an operator it is `None`.
+    pub fn unbased_unsized_literal_token(&self) -> Option<&TokenRange> {
+        match self {
+            Expression::Term(x) => x.unbased_unsized_literal_token(),
+            _ => None,
+        }
+    }
+
+    /// Error if this is a bare unbased unsized literal in a self-determined
+    /// position (concat operand, replication count, shift amount, logical
+    /// operand, ternary condition), where it has no determinable width.
+    pub(crate) fn check_self_determined_unsized(&self, context: &mut Context) {
+        if let Some(token) = self.unbased_unsized_literal_token() {
+            context.insert_error(AnalyzerError::invalid_unsized_literal(token));
+        }
+    }
+
     pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
         match self {
             Expression::Term(x) => x.gather_context(context),
@@ -109,6 +128,7 @@ impl Expression {
                     (expr_context, expr_context)
                 } else {
                     let x = if op.binary_x_self_determined() {
+                        x.check_self_determined_unsized(context);
                         let expr_context = x.gather_context(context);
                         x.apply_context(context, expr_context);
                         x.comptime().expr_context
@@ -117,6 +137,7 @@ impl Expression {
                     };
 
                     let y = if op.binary_y_self_determined() {
+                        y.check_self_determined_unsized(context);
                         let expr_context = y.gather_context(context);
                         y.apply_context(context, expr_context);
                         y.comptime().expr_context
@@ -134,6 +155,7 @@ impl Expression {
             }
             Expression::Ternary(x, y, z, comptime) => {
                 // x is self-determined
+                x.check_self_determined_unsized(context);
                 let expr_context = x.gather_context(context);
                 x.apply_context(context, expr_context);
                 let x = x.comptime();
@@ -719,6 +741,25 @@ impl Factor {
                 x.expr_context = expr_context;
                 x.evaluated = true;
             }
+        }
+    }
+
+    /// Token range when this factor is an unbased unsized literal
+    /// (`'0`/`'1`/`'x`/`'z`): a width-0 Numeric of Bit/Logic kind. The
+    /// Bit/Logic guard excludes an empty string `""` (also width-0 Numeric,
+    /// but `TypeKind::String`).
+    pub fn unbased_unsized_literal_token(&self) -> Option<&TokenRange> {
+        match self {
+            Factor::Value(comptime) => match &comptime.value {
+                ValueVariant::Numeric(v)
+                    if v.width() == 0
+                        && matches!(comptime.r#type.kind, TypeKind::Bit | TypeKind::Logic) =>
+                {
+                    Some(&comptime.token)
+                }
+                _ => None,
+            },
+            _ => None,
         }
     }
 

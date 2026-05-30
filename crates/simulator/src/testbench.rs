@@ -462,7 +462,9 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             let n = if let Some(expr) = count {
                 sim.ensure_comb_updated();
                 let val = expr.eval(&mut sim.mask_cache);
-                val.payload_u64().max(1)
+                // count 0 must advance 0 cycles (SV `repeat(0)`); don't clamp.
+                // The no-arg form is the `else` branch below.
+                val.payload_u64()
             } else {
                 1
             };

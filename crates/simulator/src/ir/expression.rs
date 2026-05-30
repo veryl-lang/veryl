@@ -1,7 +1,5 @@
 use crate::ir::context::{Context, Conv};
-use crate::ir::variable::{
-    VarOffset, native_bytes_for as calc_native_bytes_for, read_native_value,
-};
+use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes, read_native_value};
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use veryl_analyzer::ir as air;
@@ -340,10 +338,10 @@ impl ProtoExpression {
     }
 
     /// Same as `gather_variable_offsets` but fully expands DynamicVariable
-    /// reads to every element offset. Used by the seeded-worklist schedule
-    /// so diff-based dirty propagation can see writes to any element. Not
-    /// used by `analyze_dependency` (which keeps the O(N²)-avoiding
-    /// base+last encoding).
+    /// reads to every element offset. Used by dead-store elimination
+    /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it
+    /// could touch alive. Not used by `analyze_dependency` (which keeps the
+    /// O(N²)-avoiding base+last encoding).
     pub fn gather_variable_offsets_expanded(&self, inputs: &mut Vec<VarOffset>) {
         match self {
             ProtoExpression::Variable {
@@ -758,7 +756,7 @@ impl ProtoExpression {
                             None => std::cmp::max(*var_full_width, *width),
                         }
                     };
-                    let nb = calc_native_bytes_for(read_width, var_offset.is_ff());
+                    let nb = calc_native_bytes(read_width);
                     let _vs = if use_4state { nb * 2 } else { nb };
                     let value = if var_offset.is_ff() {
                         #[cfg(debug_assertions)]

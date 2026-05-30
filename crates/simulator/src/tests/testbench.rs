@@ -300,6 +300,78 @@ fn tb_integration_counter() {
     }
 }
 
+// Regression: `clk.next(0)` ran one cycle instead of zero (the count was
+// clamped with `.max(1)`); SV `repeat(0)` advances zero cycles.
+#[test]
+fn tb_clock_next_zero_count() {
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(test_counter)]
+    module test_counter {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<32>;
+
+        inst dut: Counter (
+            clk: clk,
+            rst: rst,
+            cnt: cnt,
+        );
+
+        initial {
+            rst.assert();
+            clk.next(5);
+            clk.next(0); // must add 0 cycles, not 1
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_counter");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+
+        let mut sim = Simulator::new(ir, None);
+
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+            let cnt = sim
+                .get_var("dut.cnt")
+                .or_else(|| sim.get_var("cnt"))
+                .expect("cnt variable not found");
+            assert_eq!(
+                cnt,
+                Value::new(5, 32, false),
+                "clk.next(0) must not advance the clock (jit={}, 4state={})",
+                config.use_jit,
+                config.use_4state,
+            );
+        } else {
+            panic!("No initial block found");
+        }
+    }
+}
+
 /// Reproduce veryl-test read-only cache issue via testbench path
 #[test]
 fn tb_readonly_cache_fill() {
@@ -997,6 +1069,121 @@ fn testbench_fst_clock_reset_waveform() {
     }
 }
 
+// Regression: the wave dumper emitted only element [0] of an array variable;
+// every element must be dumped as its own `name[i]` signal.
+#[test]
+fn testbench_fst_dumps_all_array_elements() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        o:   output logic<8>,
+    ) {
+        var arr: logic<8> [3];
+        always_ff {
+            if_reset {
+                arr[0] = 8'h11;
+                arr[1] = 8'h22;
+                arr[2] = 8'h33;
+            }
+        }
+        // Keep every element observable so none is eliminated.
+        assign o = arr[0] ^ arr[1] ^ arr[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        let fst_path = format!(
+            "{}/fst_array_{}_{}.fst",
+            std::env::temp_dir().display(),
+            config.use_jit,
+            config.use_4state,
+        );
+
+        use crate::wave_dumper::WaveDumper;
+        let dumper = WaveDumper::new_fst(&fst_path);
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        let stmts = vec![
+            TestbenchStatement::ResetAssert {
+                reset: rst.clone(),
+                clock: clk.clone(),
+                duration: 2,
+                high_time: 1,
+                low_time: 1,
+            },
+            TestbenchStatement::ClockNext {
+                clock: clk.clone(),
+                count: None,
+                high_time: 1,
+                low_time: 1,
+            },
+        ];
+        let result = run_testbench(&mut sim, &stmts);
+        assert_eq!(result, TestResult::Pass);
+        drop(sim);
+
+        let mut wave = wellen::simple::read(&fst_path).expect("failed to read FST");
+
+        // Resolve the per-element signal refs first (immutable hierarchy
+        // borrow), then load and inspect them (mutable borrow). Each array
+        // element is dumped as `arr[i]`; wellen exposes the index component,
+        // so match on the `[i]` suffix (robust to how the base is split).
+        let expected = [0x11u8, 0x22, 0x33];
+        let refs: Vec<_> = {
+            let hier = wave.hierarchy();
+            (0..expected.len())
+                .map(|i| {
+                    let suffix = format!("[{i}]");
+                    let var = hier
+                        .all_vars()
+                        .find(|v| v.name(hier).ends_with(&suffix))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "array element {suffix} not found in FST (jit={}, 4state={})",
+                                config.use_jit, config.use_4state
+                            )
+                        });
+                    var.signal_ref()
+                })
+                .collect()
+        };
+
+        wave.load_signals(&refs);
+        let n = wave.time_table().len();
+        for (i, sref) in refs.iter().enumerate() {
+            let signal = wave.get_signal(*sref).unwrap();
+            // Last recorded value of this element.
+            let mut last = None;
+            for t in 0..n {
+                if let Some(offset) = signal.get_offset(t as u32) {
+                    let val = signal.get_value_at(&offset, 0);
+                    if let wellen::SignalValueRef::BitVec(bv) = val
+                        && let Some(bytes) = bv.be_bytes()
+                    {
+                        last = Some(bytes[0]);
+                    }
+                }
+            }
+            assert_eq!(
+                last,
+                Some(expected[i]),
+                "arr[{i}] should hold {:#x} (jit={}, 4state={})",
+                expected[i],
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+
+        std::fs::remove_file(&fst_path).ok();
+    }
+}
+
 #[test]
 fn testbench_array_input_port() {
     let code = r#"
@@ -1585,5 +1772,100 @@ fn tb_assert_fatal_stops_execution() {
                 config.use_jit, config.use_4state,
             ),
         }
+    }
+}
+
+// Regression: a `for ... step <<<= 1` loop (un-unrolled in a test module,
+// JIT-compiled) was lowered with an `i + step` fallback for every step op
+// except Mul/LSL, so the JIT iterated 1,2,3,... instead of 1,2,4,8,16.
+#[test]
+fn tb_stepped_for_loop_shift_step() {
+    let code = r#"
+    #[test(test_step)]
+    module test_step {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var sum: u32;
+
+        initial {
+            rst.assert();
+            sum = 0;
+            // i = 1, 2, 4, 8, 16 (next is 32, not < 32) -> sum = 31
+            for i in 1..32 step <<<= 1 {
+                sum += i as 32;
+            }
+            $assert(sum == 31, "stepped for-loop with <<<= step computed wrong sum");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_step");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_stepped_for_loop_shift_step failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+// Regression: the WaveDrom output check compared via `payload_u64()`, so a
+// >64-bit mismatch in the high bits falsely PASSED; it now compares the full
+// value.
+#[test]
+fn wavedrom_wide_output_high_bit_mismatch_fails() {
+    use crate::wavedrom::{classify_signals, parse_wavedrom, run_wavedrom_test};
+
+    // o drives 2^64 (bit 64 set, low 64 bits all zero).
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        o:   output logic<72>,
+    ) {
+        assign o = 72'h1_0000_0000_0000_0000;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // Expect o == 0 each cycle. The actual value (2^64) differs from 0
+        // only in bit 64, so a u64-truncated compare would wrongly pass.
+        let json = r#"{
+            signal: [
+                {name: 'clk', wave: 'p..'},
+                {name: 'o', wave: '===', data: ['0x0', '0x0', '0x0']}
+            ]
+        }"#;
+        let mut scenario = parse_wavedrom(json).unwrap();
+        let ports = [
+            ("clk".to_string(), "input".to_string()),
+            ("o".to_string(), "output".to_string()),
+        ];
+        classify_signals(&mut scenario, &ports);
+
+        let clock_event = sim.get_clock("clk").unwrap();
+        let mut port_widths = std::collections::HashMap::new();
+        port_widths.insert("o".to_string(), 72usize);
+
+        let result = run_wavedrom_test(&mut sim, &scenario, &clock_event, &None, 3, &port_widths);
+        assert!(
+            matches!(result, TestResult::Fail(_)),
+            "high-bit-only mismatch must fail, not falsely pass (jit={} 4st={}): {:?}",
+            config.use_jit,
+            config.use_4state,
+            result,
+        );
     }
 }

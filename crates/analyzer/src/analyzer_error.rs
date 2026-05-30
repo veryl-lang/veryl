@@ -364,6 +364,21 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(invalid_unsized_literal),
+        help("give the literal an explicit width (e.g. `1'b0`)"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("unsized literal can't be used in a self-determined context")]
+    InvalidUnsizedLiteral {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(invalid_identifier),
         help("follow naming rule"),
@@ -1667,6 +1682,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
+            AnalyzerError::InvalidUnsizedLiteral { token_source, .. } => *token_source,
             AnalyzerError::InvalidLogicalOperand { token_source, .. } => *token_source,
             AnalyzerError::UnsignedArithShift { token_source, .. } => *token_source,
             AnalyzerError::InvalidLsb { token_source, .. } => *token_source,
@@ -1957,6 +1973,13 @@ impl AnalyzerError {
     }
     pub fn invalid_import(token: &TokenRange) -> Self {
         AnalyzerError::InvalidImport {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_unsized_literal(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidUnsizedLiteral {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

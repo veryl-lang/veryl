@@ -12252,3 +12252,265 @@ fn local_var_in_always_ff_is_not_register() {
         assert_eq!(sim.get("o_x").unwrap(), Value::new(1, 1, false));
     }
 }
+
+// Regression: width-growing op results (Add/Sub/Mul, left shifts) fed to a
+// comparison must be masked to width; the cranelift/aot_c backends left dirty
+// high bits and diverged from the interpreter.
+#[test]
+fn binary_result_masked_to_width() {
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        c_add: output logic,
+        c_mul: output logic,
+        c_shl: output logic,
+    ) {
+        // (0xf + 0x3) = 0x12; truncated to 4 bits = 0x2
+        assign c_add = (a + b) == 4'h2;
+        // (0x5 * 0xd) = 0x41; truncated to 4 bits = 0x1
+        assign c_mul = (a * b) == 4'h1;
+        // (0x5 <<< 2) = 0x14; truncated to 4 bits = 0x4
+        assign c_shl = (a <<< 2) == 4'h4;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // c_add: a=0xf, b=0x3
+        sim.set("a", Value::new(0xf, 4, false));
+        sim.set("b", Value::new(0x3, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_add").unwrap()),
+            "1'b1",
+            "add: JIT={} 4st={} aot={}",
+            config.use_jit,
+            config.use_4state,
+            config.aot_c,
+        );
+
+        // c_mul: a=0x5, b=0xd
+        sim.set("a", Value::new(0x5, 4, false));
+        sim.set("b", Value::new(0xd, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_mul").unwrap()),
+            "1'b1",
+            "mul: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        // c_shl: a=0x5
+        sim.set("a", Value::new(0x5, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_shl").unwrap()),
+            "1'b1",
+            "shl: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+// Regression: the aot_c width mask on a width-growing op feeding a comparison
+// is gated by an operand-derived overflow predicate. The predicate must use a
+// shift (`(x|y) >> (W-1)`), not `(x|y) & (1<<(W-1))`: an inner unmasked add
+// leaves dirty bits AT/ABOVE W, which the bit-test would miss, wrongly eliding
+// the mask. Here (a+b) overflows to bit 4 (bit 3 clear), so a bit-3 test would
+// skip the outer mask and read 0x10 instead of 0.
+#[test]
+fn nested_add_dirty_operand_masked() {
+    let code = r#"
+    module Top (
+        a:   input  logic<4>,
+        b:   input  logic<4>,
+        c:   input  logic<4>,
+        out: output logic,
+    ) {
+        assign out = ((a + b) + c) == 4'h0;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // a+b = 0xf+0x1 = 0x10 (bit 4 set, bit 3 clear); +0 stays 0x10.
+        // Masked to 4 bits = 0, so the comparison must be true.
+        sim.set("a", Value::new(0xf, 4, false));
+        sim.set("b", Value::new(0x1, 4, false));
+        sim.set("c", Value::new(0x0, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("out").unwrap()),
+            "1'b1",
+            "JIT={} 4st={} aot={}",
+            config.use_jit,
+            config.use_4state,
+            config.aot_c,
+        );
+    }
+}
+
+// Regression: the operand-derived overflow predicate gating the aot_c width
+// mask, for a variable left shift feeding a comparison. Exercises all three
+// arms: shift count >= width (always masks), runtime `width - n` shift skips
+// the mask when no bit reaches the top, and applies it when one does.
+#[test]
+fn shift_left_overflow_masked() {
+    let code = r#"
+    module Top (
+        a:   input  logic<8>,
+        sh:  input  logic<4>,
+        out: output logic,
+    ) {
+        assign out = (a << sh) == 8'h00;
+    }
+    "#;
+
+    // (a, sh, expected `out`): masked result == 0 ?
+    let cases = [
+        (0x80, 1, "1'b1"), // 0x80<<1 = 0x100 → masked 0x00 → ==0 true
+        (0x01, 2, "1'b0"), // 0x01<<2 = 0x04 → no overflow, skip → !=0 false
+        (0x01, 8, "1'b1"), // 0x01<<8 → all bits past width → masked 0 → true
+    ];
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a, sh, expected) in cases {
+            sim.set("a", Value::new(a, 8, false));
+            sim.set("sh", Value::new(sh, 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                format!("{:b}", sim.get("out").unwrap()),
+                expected,
+                "a={a:#x} sh={sh}: JIT={} 4st={} aot={}",
+                config.use_jit,
+                config.use_4state,
+                config.aot_c,
+            );
+        }
+    }
+}
+
+// Regression: a >64-bit result from <=64-bit operands was truncated by the
+// aot_c backend's 64-bit C arithmetic (now bailed to cranelift), diverging
+// from cranelift/interpreter.
+#[test]
+fn wide_result_from_narrow_operands() {
+    let code = r#"
+    module Top (
+        a: input  logic<40>,
+        b: input  logic<40>,
+        p: output logic<80>,
+    ) {
+        assign p = a * b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // (2^40 - 1)^2 = 0xfffffffffe0000000001 (80 bits)
+        sim.set("a", Value::from_str("40'hffffffffff").unwrap());
+        sim.set("b", Value::from_str("40'hffffffffff").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("p").unwrap()),
+            "80'hfffffffffe0000000001",
+            "wide mul: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+// Regression: a >64-bit Add/Sub/Mul with one operand already >64 bits must
+// NOT be bailed by the aot_c backend — C's usual arithmetic conversions
+// promote the narrow operand to __uint128_t, so the op is computed in 128
+// bits. Over-bailing here forced the whole comb block to cranelift (a large
+// heliodor linux-boot regression). Carry into bit 64 distinguishes a correct
+// 128-bit add from a truncated 64-bit one.
+#[test]
+fn wide_result_one_operand_wide() {
+    let code = r#"
+    module Top (
+        a: input  logic<64>,
+        b: input  logic<72>,
+        s: output logic<72>,
+    ) {
+        assign s = a + b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // (2^64 - 1) + 1 = 2^64: a 65-bit result a 64-bit add would wrap to 0.
+        sim.set("a", Value::from_str("64'hffffffffffffffff").unwrap());
+        sim.set("b", Value::from_str("72'h1").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("s").unwrap()),
+            "72'h010000000000000000",
+            "wide add (one wide operand): JIT={} 4st={} aot={}",
+            config.use_jit,
+            config.use_4state,
+            config.aot_c,
+        );
+    }
+}
+
+// Regression: dup_assign_dce dropped a live store to an interior array
+// element across a dynamic read `arr[idx]` (the base+last read encoding hid
+// it). Needs length >= 3 so elem 1 is neither base nor last.
+#[test]
+fn dup_assign_dce_dynamic_array_read() {
+    let code = r#"
+    module Top (
+        idx: input  logic<2>,
+        y:   output logic<8>,
+        a1:  output logic<8>,
+    ) {
+        var arr: logic<8> [3];
+        always_comb {
+            arr[0] = 8'h00;
+            arr[1] = 8'haa;   // live: the dynamic read below may select it
+            arr[2] = 8'h00;
+            y = arr[idx];     // with idx==1 must observe 0xaa
+            arr[1] = 8'hbb;   // later overwrite must NOT kill the 0xaa store
+        }
+        assign a1 = arr[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("idx", Value::new(1, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0xaa, 8, false),
+            "y should read arr[1]==0xaa at the read point: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        // The final value of arr[1] is the last write.
+        assert_eq!(sim.get("a1").unwrap(), Value::new(0xbb, 8, false));
+    }
+}

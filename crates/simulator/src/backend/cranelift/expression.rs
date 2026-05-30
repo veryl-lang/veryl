@@ -7,9 +7,7 @@ use super::helpers::{WideOperandPair, wide_fn_addrs};
 use super::runtime::{
     Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
 };
-use crate::ir::variable::{
-    native_bytes as calc_native_bytes, native_bytes_for as calc_native_bytes_for,
-};
+use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{Op, ProtoExpression, Value};
 use crate::wide_ops;
 use cranelift::codegen::ir::BlockArg;
@@ -119,6 +117,27 @@ impl ProtoExpression {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        self.build_binary_inner(context, builder, false)
+    }
+
+    /// Like `build_binary`, but skips the producer-side width mask on the
+    /// root width-growing op.  Only the root op is affected — operand
+    /// recursion still masks.  Safe only when the consumer re-masks to
+    /// dst_width (plain store); see `ProtoAssignStatement::build_binary`.
+    pub fn build_binary_root(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        self.build_binary_inner(context, builder, true)
+    }
+
+    fn build_binary_inner(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        skip_root_mask: bool,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
         match self {
             ProtoExpression::Variable {
                 var_offset,
@@ -130,7 +149,7 @@ impl ProtoExpression {
             } => {
                 // Wide path: >128-bit variable → return memory pointer
                 if is_wide_ptr(*var_full_width) {
-                    let nb = calc_native_bytes_for(*var_full_width, var_offset.is_ff());
+                    let nb = calc_native_bytes(*var_full_width);
                     let base_addr = if var_offset.is_ff() {
                         context.ff_values
                     } else {
@@ -164,7 +183,7 @@ impl ProtoExpression {
                         None => std::cmp::max(*var_full_width, *width),
                     }
                 };
-                let nb = calc_native_bytes_for(read_width, var_offset.is_ff());
+                let nb = calc_native_bytes(read_width);
                 let offset = var_offset.raw() as i32;
                 let cache_key = *var_offset;
                 let wide = read_width > 64;
@@ -713,7 +732,7 @@ impl ProtoExpression {
                     }
                 }
 
-                let payload = match op {
+                let mut payload = match op {
                     Op::Add => builder.ins().iadd(x_payload, y_payload),
                     Op::Sub => builder.ins().isub(x_payload, y_payload),
                     Op::Mul => builder.ins().imul(x_payload, y_payload),
@@ -1003,6 +1022,32 @@ impl ProtoExpression {
                     }
                     _ => return None,
                 };
+
+                // Width-growing op results can leave dirty bits at/above the
+                // width; harmless once stored but corrupt an in-register
+                // consumer (icmp, expand_sign's MSB probe). The interpreter
+                // masks these, so match it. Pow is excluded — the interpreter
+                // does NOT mask Pow, so masking here would diverge instead.
+                // `skip_root_mask` elides this when the consumer is a plain
+                // store, which re-masks to dst_width anyway.
+                if !skip_root_mask
+                    && matches!(
+                        op,
+                        Op::Add
+                            | Op::Sub
+                            | Op::Mul
+                            | Op::LogicShiftL
+                            | Op::ArithShiftL
+                            | Op::ArithShiftR
+                    )
+                {
+                    payload = band_const(
+                        builder,
+                        payload,
+                        gen_mask_for_width(expr_context.width),
+                        needs_wide,
+                    );
+                }
 
                 match op {
                     Op::Add

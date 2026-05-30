@@ -20,7 +20,6 @@ pub fn settle_comb(
     whole: &dyn CompiledWhole,
     passes: usize,
     mask_cache: &mut MaskCache,
-    snapshot_buf: &mut Vec<u8>,
     profile: &mut SimProfile,
 ) {
     let ff_ptr = ir.ff_values.as_ptr();
@@ -36,7 +35,7 @@ pub fn settle_comb(
         match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
             DispatchOutcome::Done => {}
             DispatchOutcome::NotReady => {
-                ir.run_chunked_settle(mask_cache, snapshot_buf, profile);
+                ir.run_chunked_settle(mask_cache, profile);
                 return;
             }
         }
@@ -55,7 +54,7 @@ pub fn settle_comb(
     }
     let _ = count_snap_in;
 
-    ir.run_chunked_settle(mask_cache, snapshot_buf, profile);
+    ir.run_chunked_settle(mask_cache, profile);
 
     let ff_jit_out: &[u8] = &ir.ff_values;
     let comb_jit_out: &[u8] = &ir.comb_values;
