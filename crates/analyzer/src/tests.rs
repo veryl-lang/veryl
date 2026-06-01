@@ -13539,3 +13539,38 @@ fn no_panic_on_oversized_based_literal() {
     "#;
     let _ = analyze(code);
 }
+
+#[test]
+fn no_panic_on_out_of_range_bit_select() {
+    // Regression: a const/expression bit-select with index >= 64 on a <=64-bit
+    // value previously panicked in ValueU64::select (u64 shift overflow) in
+    // debug/test builds. It must report the out-of-range diagnostic, not crash.
+    let code = r#"
+    module Top {
+        var a: logic<8>;
+        var b: logic;
+        always_comb {
+            b = a[64];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. }))
+    );
+
+    let code = r#"
+    module Top {
+        const A: logic<8> = 8'hFF;
+        const B: logic    = A[100];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. }))
+    );
+}
