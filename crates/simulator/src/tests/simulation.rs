@@ -141,6 +141,49 @@ fn ff_to_ff() {
 }
 
 #[test]
+fn ff_statement_after_if_reset() {
+    // Regression: statements placed after the `if_reset` block in an always_ff
+    // must still execute. They previously got dropped by the simulator IR
+    // conversion (only the if_reset itself was kept), so `b` stayed at its
+    // reset value instead of tracking `a`.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        b  : output logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff {
+            if_reset {
+                a = 0;
+            } else {
+                a += 1;
+            }
+            b = a + 1;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+
+        // Each clock edge: a <= a_old + 1 and b <= a_old + 1, so a == b == 5.
+        assert_eq!(sim.get("b").unwrap(), Value::new(5, 8, false));
+    }
+}
+
+#[test]
 fn short_bit() {
     let code = r#"
     module Top (
