@@ -3589,3 +3589,28 @@ fn elsif_else_attribute_guarded_in_statement_block() {
     assert!(ret.contains("`else"), "missing `else guard:\n{ret}");
     assert!(ret.contains("`endif"), "missing `endif guard:\n{ret}");
 }
+
+#[test]
+fn enum_with_conditional_member_emits_explicit_values() {
+    // Regression: a sequential enum with an `#[ifdef]` member emitted no
+    // explicit values, so SV renumbered later members when the define was off.
+    let code = r#"module Top {
+    enum E: logic<2> {
+        A,
+        #[ifdef(FOO)]
+        B,
+        C,
+    }
+    var o: logic<2>;
+    always_comb {
+        o = E::C;
+    }
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("E_C = 2'd2"),
+        "enum member C must keep explicit value 2:\n{ret}"
+    );
+}
