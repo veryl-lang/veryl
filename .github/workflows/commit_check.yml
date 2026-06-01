@@ -8,7 +8,7 @@ jobs:
     name: No AI co-authors
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Check commits for AI co-authors
