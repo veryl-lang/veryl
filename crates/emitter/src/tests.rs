@@ -3614,3 +3614,25 @@ fn enum_with_conditional_member_emits_explicit_values() {
         "enum member C must keep explicit value 2:\n{ret}"
     );
 }
+
+#[test]
+fn inferred_type_keeps_signed_qualifier() {
+    // Regression: a type-inferred `let` of a signed value must stay `signed` in
+    // the emitted SystemVerilog, otherwise later signed ops (`>>>`, `<:`, `*`)
+    // silently use unsigned semantics.
+    let code = r#"module top {
+    var o: signed logic<8>;
+    always_comb {
+        let a: signed logic<8> = 8'hF0;
+        let s = a;
+        o = s >>> 2;
+    }
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("logic signed [8-1:0] s"),
+        "inferred signed type lost the `signed` qualifier:\n{ret}"
+    );
+}
