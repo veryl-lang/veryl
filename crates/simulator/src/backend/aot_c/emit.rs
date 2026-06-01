@@ -9,14 +9,813 @@
 
 use crate::FuncPtr;
 use crate::ir::{
-    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression, ProtoForBound,
-    ProtoForRange, ProtoForStatement, ProtoStatement, VarOffset, native_bytes,
+    ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
+    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, VarOffset, native_bytes,
 };
+use std::collections::HashMap;
+use std::ffi::c_void;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use veryl_analyzer::ir::Op;
 use veryl_analyzer::value::Value;
+
+/// C declarations for the wide-op (>128-bit) helper function-pointer table.
+/// The emitted `.so` calls the SAME Rust `wide_ops::*` helpers Cranelift uses
+/// (via `call_indirect`), so AOT-C and Cranelift are bit-identical by
+/// construction.  The table is published once at dlopen via `veryl_set_wideops`
+/// (see `compile_source`).  Field order MUST match `WideOpsTable` below (a
+/// `#[repr(C)]` struct of `usize` is layout-compatible with this struct of
+/// same-sized function pointers).
+const WIDEOPS_C_DECLS: &str = "\
+typedef void (*veryl_wbin)(uint8_t*, const uint8_t*, const uint8_t*, uint32_t);\n\
+typedef void (*veryl_wun)(uint8_t*, const uint8_t*, uint32_t);\n\
+typedef void (*veryl_wshift)(uint8_t*, const uint8_t*, uint64_t, uint32_t);\n\
+typedef int64_t (*veryl_wcmp)(const uint8_t*, const uint8_t*, uint32_t);\n\
+typedef int64_t (*veryl_wred)(const uint8_t*, uint32_t);\n\
+typedef void (*veryl_wmask)(uint8_t*, const uint8_t*, uint32_t);\n\
+typedef struct {\n\
+  veryl_wbin band, bor, bxor, bxor_not, band_not, add, sub, mul;\n\
+  veryl_wun bnot, negate, copy;\n\
+  veryl_wshift shl, lshr, ashr;\n\
+  veryl_wcmp eq, ne, ucmp, scmp;\n\
+  veryl_wred is_nonzero, is_all_ones, popcnt_parity;\n\
+  veryl_wmask apply_mask, fill_ones;\n\
+} veryl_wideops_t;\n\
+__attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n\
+__attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) { veryl_wideops = *(const veryl_wideops_t*)t; }\n";
+
+/// Inline C implementations of the wide-op helpers, emitted into every AOT-C
+/// `.so` so the hot wide arithmetic compiles in-place (no `call_indirect`
+/// through the Rust binary).  Call sites emit `vw_<op>(...)` instead of the
+/// `veryl_wideops.<op>(...)` table call; with a compile-time-constant `nb` gcc inlines,
+/// fully unrolls the per-word loop, and auto-vectorizes the bitwise ops.  A
+/// bit-exact mirror of `wide_ops.rs` (the Cranelift path still calls those
+/// helpers, so
+/// `--backend-validate` differential-tests this C against them).  Unused
+/// `static inline` defs are dropped silently (no -Wunused for `static inline`).
+const WIDEOPS_C_INLINE: &str = r##"
+#define VW_RD(p,i) (((const veryl_u64_ua*)(p))[(i)])
+#define VW_WR(p,i,v) (((veryl_u64_ua*)(p))[(i)] = (v))
+static inline void vw_band(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & VW_RD(b,i)); }
+static inline void vw_bor(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) | VW_RD(b,i)); }
+static inline void vw_bxor(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) ^ VW_RD(b,i)); }
+static inline void vw_bxor_not(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, ~(VW_RD(a,i) ^ VW_RD(b,i))); }
+static inline void vw_band_not(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & ~VW_RD(b,i)); }
+static inline void vw_bnot(uint8_t* d,const uint8_t* a,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, ~VW_RD(a,i)); }
+static inline void vw_add(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; uint64_t carry=0;
+  for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
+    uint64_t s1=ai+bi; uint64_t c1=(s1<ai); uint64_t s2=s1+carry; uint64_t c2=(s2<s1);
+    VW_WR(d,i,s2); carry=c1+c2; } }
+static inline void vw_sub(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; uint64_t borrow=0;
+  for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
+    uint64_t d1=ai-bi; uint64_t b1=(ai<bi); uint64_t d2=d1-borrow; uint64_t b2=(d1<borrow);
+    VW_WR(d,i,d2); borrow=b1+b2; } }
+static inline void vw_mul(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i,0);
+  for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i); if(ai==0) continue; __uint128_t carry=0;
+    for(unsigned j=0;j<n;j++){ if(i+j>=n) break;
+      __uint128_t prod=(__uint128_t)ai*(__uint128_t)VW_RD(b,j)+(__uint128_t)VW_RD(d,i+j)+carry;
+      VW_WR(d,i+j,(uint64_t)prod); carry=prod>>64; } } }
+static inline void vw_negate(uint8_t* d,const uint8_t* a,uint32_t nb){
+  unsigned n=nb/8; uint64_t carry=1;
+  for(unsigned i=0;i<n;i++){ uint64_t t=~VW_RD(a,i); uint64_t s=t+carry; uint64_t c=(s<t);
+    VW_WR(d,i,s); carry=c; } }
+static inline void vw_copy(uint8_t* d,const uint8_t* s,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(s,i)); }
+static inline int64_t vw_eq(const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 0; } return 1; }
+static inline int64_t vw_ne(const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 1; } return 0; }
+static inline int64_t vw_ucmp(const uint8_t* a,const uint8_t* b,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=n;i-->0;){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
+    if(ai<bi) return -1; if(ai>bi) return 1; } return 0; }
+static inline int64_t vw_scmp(const uint8_t* a,const uint8_t* b,uint32_t packed){
+  uint32_t nb=packed&0xFFFF, width=packed>>16; if(width==0||nb==0) return 0;
+  unsigned sw=(width-1)/64, sb=(width-1)%64;
+  uint64_t as=(VW_RD(a,sw)>>sb)&1, bs=(VW_RD(b,sw)>>sb)&1;
+  if(as!=bs){ return as==1? -1 : 1; } return vw_ucmp(a,b,nb); }
+static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
+  unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
+  for(unsigned i=n;i-->0;){ long si=(long)i-(long)ws;
+    uint64_t lo = si>=0 ? VW_RD(a,(unsigned)si) : 0;
+    uint64_t hi = si>0 ? VW_RD(a,(unsigned)si-1) : 0;
+    VW_WR(d,i, bs==0 ? lo : (lo<<bs)|(hi>>(64-bs))); } }
+static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
+  unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
+  for(unsigned i=0;i<n;i++){ unsigned si=i+ws;
+    uint64_t lo = si<n ? VW_RD(a,si) : 0;
+    uint64_t hi = si+1<n ? VW_RD(a,si+1) : 0;
+    VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
+static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t packed){
+  uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0||width==0) return;
+  unsigned n=nb/8; unsigned sw=(width-1)/64, sb=(width-1)%64;
+  uint64_t sign=(VW_RD(a,sw)>>sb)&1;
+  vw_lshr(d,a,amount,nb);
+  if(sign==1 && amount>0){
+    unsigned fill_start = amount>=(uint64_t)width ? 0u : (unsigned)((uint64_t)width-amount);
+    for(unsigned bp=fill_start; bp<width; bp++){ unsigned w=bp/64, b=bp%64;
+      if(w<n) VW_WR(d,w, VW_RD(d,w) | ((uint64_t)1<<b)); } } }
+static inline int64_t vw_is_nonzero(const uint8_t* a,uint32_t nb){
+  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=0) return 1; } return 0; }
+static inline int64_t vw_is_all_ones(const uint8_t* a,uint32_t packed){
+  uint32_t width=packed>>16; if(width==0) return 1;
+  unsigned fw=width/64; uint32_t rem=width%64;
+  for(unsigned i=0;i<fw;i++){ if(VW_RD(a,i)!=~(uint64_t)0) return 0; }
+  if(rem>0){ uint64_t m=((uint64_t)1<<rem)-1; if((VW_RD(a,fw)&m)!=m) return 0; }
+  return 1; }
+static inline int64_t vw_popcnt_parity(const uint8_t* a,uint32_t nb){
+  unsigned n=nb/8; uint32_t total=0;
+  for(unsigned i=0;i<n;i++) total^=(uint32_t)__builtin_popcountll(VW_RD(a,i));
+  return total&1; }
+static inline void vw_apply_mask(uint8_t* d,const uint8_t* unused,uint32_t packed){
+  (void)unused; uint32_t nb=packed&0xFFFF, width=packed>>16; if(width==0||nb==0) return;
+  unsigned n=nb/8; unsigned fw=width/64; uint32_t rem=width%64;
+  if(rem>0 && fw<n){ uint64_t m=((uint64_t)1<<rem)-1; VW_WR(d,fw, VW_RD(d,fw)&m); }
+  for(unsigned i=fw+(rem>0?1u:0u); i<n; i++) VW_WR(d,i,0); }
+static inline void vw_fill_ones(uint8_t* d,const uint8_t* unused,uint32_t packed){
+  (void)unused; uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0) return;
+  unsigned n=nb/8; unsigned fw=width/64; uint32_t rem=width%64;
+  unsigned lim = fw<n?fw:n; for(unsigned i=0;i<lim;i++) VW_WR(d,i,~(uint64_t)0);
+  if(rem>0 && fw<n) VW_WR(d,fw, ((uint64_t)1<<rem)-1);
+  for(unsigned i=fw+(rem>0?1u:0u); i<n; i++) VW_WR(d,i,0); }
+"##;
+
+/// `#[repr(C)]` mirror of the emitted `veryl_wideops_t`.  Each field is the
+/// address of the corresponding `wide_ops::*` helper; the field ORDER must
+/// match `WIDEOPS_C_DECLS` exactly.
+#[repr(C)]
+struct WideOpsTable {
+    band: usize,
+    bor: usize,
+    bxor: usize,
+    bxor_not: usize,
+    band_not: usize,
+    add: usize,
+    sub: usize,
+    mul: usize,
+    bnot: usize,
+    negate: usize,
+    copy: usize,
+    shl: usize,
+    lshr: usize,
+    ashr: usize,
+    eq: usize,
+    ne: usize,
+    ucmp: usize,
+    scmp: usize,
+    is_nonzero: usize,
+    is_all_ones: usize,
+    popcnt_parity: usize,
+    apply_mask: usize,
+    fill_ones: usize,
+}
+
+fn wideops_table() -> WideOpsTable {
+    use crate::backend::cranelift::helpers::wide_fn_addrs as w;
+    WideOpsTable {
+        band: w::band(),
+        bor: w::bor(),
+        bxor: w::bxor(),
+        bxor_not: w::bxor_not(),
+        band_not: w::band_not(),
+        add: w::add(),
+        sub: w::sub(),
+        mul: w::mul(),
+        bnot: w::bnot(),
+        negate: w::negate(),
+        copy: w::copy(),
+        shl: w::shl(),
+        lshr: w::lshr(),
+        ashr: w::ashr(),
+        eq: w::eq(),
+        ne: w::ne(),
+        ucmp: w::ucmp(),
+        scmp: w::scmp(),
+        is_nonzero: w::is_nonzero(),
+        is_all_ones: w::is_all_ones(),
+        popcnt_parity: w::popcnt_parity(),
+        apply_mask: w::apply_mask(),
+        fill_ones: w::fill_ones(),
+    }
+}
+
+// ───────────────────── wide (>128-bit) value emission ─────────────────────
+//
+// AOT-C has no statement/prelude side-channel: `emit_expr` returns a single C
+// expression.  A wide value cannot be a C scalar, so it is materialized as a
+// C-local `uint64_t _wN[]` scratch (or, for a leaf read, a direct pointer
+// into a flat buffer).  `emit_wide_expr` appends scratch declarations and
+// `vw_*` calls to a flat `pre` buffer and returns a `WideRef`
+// naming the result pointer.  Consumers wrap `pre` in ONE block:
+//   * a wide store    → `{ <pre> vw_copy(buf+off, ref, nb); ... }`
+//   * a narrow result (compare/reduction over wide operands) → a GCC
+//     statement-expression `({ <pre> <i64 helper call>; })`.
+// Because every scratch is declared in the SAME flat block, all stay live for
+// the whole block — unlike nested statement-expressions, whose locals would
+// dangle once each inner `({...})` closes.  The 64-bit chunks are accessed
+// through `veryl_u64_ua` (1-byte-aligned alias) on the buffer side, since wide
+// values can land at 4-byte-aligned offsets; the helpers themselves access
+// memory unaligned.  2-state only; 4-state wide bails to None.
+
+thread_local! {
+    static WIDE_TMP_CTR: Cell<usize> = const { Cell::new(0) };
+}
+/// Fresh `_wN` index, unique within a function emit (monotonic; reset by
+/// `emit_function` / `emit_event_function` so emitted source is deterministic).
+fn next_wide_tmp() -> usize {
+    WIDE_TMP_CTR.with(|c| {
+        let v = c.get();
+        c.set(v + 1);
+        v
+    })
+}
+fn reset_wide_tmp() {
+    WIDE_TMP_CTR.with(|c| c.set(0));
+}
+
+/// Pack `nb` (byte count) into the low 16 bits and `width` (bit count) into
+/// the high 16 bits — the irregular ABI of `wide_ashr`/`wide_scmp`/
+/// `wide_apply_mask`/`wide_fill_ones`/`wide_is_all_ones`.  Mirrors
+/// `wide_ops::pack_nb_width`.
+fn wpack(nb: usize, width: usize) -> u32 {
+    (nb as u32 & 0xFFFF) | ((width as u32) << 16)
+}
+
+/// A wide (>128-bit) value materialized for the AOT-C path.  `addr` is a C
+/// expression of type `uint8_t*` pointing at `nb` little-endian u64 bytes
+/// (a flat-buffer address for a leaf read, or a `uint64_t _wN[]` scratch).
+struct WideRef {
+    addr: String,
+    nb: usize,
+    width: usize,
+}
+
+/// Materialize a wide constant into a fresh `_wN[]` scratch (2-state: payload
+/// digits only).  Mirrors the Cranelift `Value` wide arm (expression.rs
+/// 378-484): the unsized all-bit sentinel (`Value::U64{width==0}`) fills to
+/// `max(ctx_width, proto_width)`; otherwise the declared `proto_width`.
+fn emit_wide_const(
+    value: &Value,
+    proto_width: usize,
+    ctx_width: usize,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let (width, digits): (usize, Vec<u64>) = match value {
+        Value::U64(x) if x.width == 0 => {
+            let target = ctx_width.max(proto_width);
+            let count = native_bytes(target) / 8;
+            let d = if x.payload != 0 {
+                vec![u64::MAX; count]
+            } else {
+                vec![0u64; count]
+            };
+            (target, d)
+        }
+        Value::U64(x) => (proto_width, vec![x.payload]),
+        Value::BigUint(x) => (proto_width, x.payload.to_u64_digits()),
+    };
+    let nb = native_bytes(width);
+    let nw = nb / 8;
+    let t = next_wide_tmp();
+    let mut init = String::new();
+    for i in 0..nw {
+        if i > 0 {
+            init.push_str(", ");
+        }
+        init.push_str(&format!("0x{:x}ULL", digits.get(i).copied().unwrap_or(0)));
+    }
+    pre.push_str(&format!("uint64_t _w{t}[{nw}] = {{ {init} }}; "));
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{t})"),
+        nb,
+        width,
+    })
+}
+
+/// Recursively materialize a wide-result expression.  Called only when
+/// `expr.builds_wide_pointer()` is true (so it never sees a comparison/
+/// reduction, which produce a narrow register handled in `emit_expr_inner`).
+/// Returns `None` (→ module bails to Cranelift) for any uncovered shape.
+fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
+    match expr {
+        ProtoExpression::Value {
+            value,
+            width,
+            expr_context,
+        } => emit_wide_const(value, *width, expr_context.width, pre),
+        ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select,
+            var_full_width,
+            ..
+        } => {
+            // A plain wide leaf read aliases the buffer directly.  A wide
+            // select / dynamic-select is interpreter-only (build_binary
+            // returns a register for a ≤64 select; wider bails).
+            if select.is_some() || dynamic_select.is_some() {
+                return None;
+            }
+            let off = match var_offset {
+                VarOffset::Ff(o) | VarOffset::Comb(o) => *o,
+            };
+            if off < 0 {
+                return None;
+            }
+            let buf = match var_offset {
+                VarOffset::Ff(_) => "ff_values",
+                VarOffset::Comb(_) => "comb_values",
+            };
+            Some(WideRef {
+                addr: format!("((uint8_t*)({buf} + {off:#x}))"),
+                nb: native_bytes(*var_full_width),
+                width: *var_full_width,
+            })
+        }
+        ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            expr_context,
+            ..
+        } => emit_wide_binary(x, *op, y, expr_context.width, pre),
+        ProtoExpression::Unary {
+            op,
+            x,
+            expr_context,
+            ..
+        } => emit_wide_unary(*op, x, expr_context.width, pre),
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            expr_context,
+            ..
+        } => emit_wide_ternary(cond, true_expr, false_expr, expr_context.width, pre),
+        ProtoExpression::Concatenation {
+            elements,
+            expr_context,
+            ..
+        } => emit_wide_concat(elements, expr_context.width, pre),
+        // Wide (>16 native-byte) dynamic-array element, full read (no select):
+        // the element lives at `base + base_off + stride*idx`; alias it as the
+        // wide value pointer (read-only, so no copy).  Narrow/wide-result
+        // selects and dynamic bit-selects bail to the interpreter.
+        ProtoExpression::DynamicVariable {
+            base_offset,
+            stride,
+            element_native_bytes,
+            index_expr,
+            num_elements,
+            select,
+            dynamic_select,
+            ..
+        } => {
+            if select.is_some() || dynamic_select.is_some() || *num_elements == 0 {
+                return None;
+            }
+            let off = match base_offset {
+                VarOffset::Ff(o) | VarOffset::Comb(o) => *o,
+            };
+            if off < 0 {
+                return None;
+            }
+            let buf = match base_offset {
+                VarOffset::Ff(_) => "ff_values",
+                VarOffset::Comb(_) => "comb_values",
+            };
+            let idx = emit_expr(index_expr)?;
+            let max_idx = num_elements.saturating_sub(1);
+            let t = next_wide_tmp();
+            // Clamp the index once; the address below references `_wi{t}`,
+            // which lives in the same flat `pre` block.
+            pre.push_str(&format!(
+                "uint64_t _wi{t} = (uint64_t)({idx}); _wi{t} = _wi{t} < {max} ? _wi{t} : {max}; ",
+                max = max_idx,
+            ));
+            Some(WideRef {
+                addr: format!(
+                    "((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))"
+                ),
+                nb: *element_native_bytes,
+                width: expr.width(),
+            })
+        }
+    }
+}
+
+/// Produce a `WideRef` of exactly `target_nb` bytes for `expr`.  A wide
+/// operand is used directly (zero-extended into a larger scratch if its size
+/// class is smaller); a narrow (≤128) scalar operand is promoted into a
+/// zeroed scratch with its value at word 0 — matching Cranelift's
+/// `ensure_wide_ptr_val`.
+fn emit_wide_operand(
+    expr: &ProtoExpression,
+    target_nb: usize,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let tnw = target_nb / 8;
+    if expr.builds_wide_pointer() {
+        let r = emit_wide_expr(expr, pre)?;
+        if r.nb == target_nb {
+            return Some(r);
+        }
+        // Resize into a fresh target_nb scratch.  Copy only `min(r.nb,
+        // target_nb)` bytes: when r is narrower the high words stay zero
+        // (zero-extend); when r is WIDER (an operand size class above the
+        // result, e.g. `c192 = a256 + b256`) the extra words are dropped —
+        // a target_nb-byte copy of an r.nb-byte source would otherwise
+        // overflow the scratch.  Mirrors Cranelift storing only dst_nb words.
+        let snb = r.nb.min(target_nb);
+        let t = next_wide_tmp();
+        pre.push_str(&format!(
+            "uint64_t _w{t}[{tnw}] = {{0}}; vw_copy((uint8_t*)_w{t}, {src}, {snb}u); ",
+            src = r.addr,
+        ));
+        return Some(WideRef {
+            addr: format!("((uint8_t*)_w{t})"),
+            nb: target_nb,
+            width: r.width,
+        });
+    }
+    // `builds_wide_pointer(expr)` is false → emit_expr yields a ≤128-bit
+    // scalar register (it returns None for a genuinely >128-bit value that
+    // can't be a C scalar — that is the only real "can't represent" case).
+    // Do NOT gate on `expr.width()`: a node's `width` field can spuriously
+    // exceed its evaluation width (some IR shapes do), and emit_expr
+    // still produces a valid scalar — bailing on the field would force the
+    // whole comb module off the AOT-C fast path.  Promote via `__uint128_t`
+    // (lossless for both u64 and 65-128-bit scalars) into the zeroed slot.
+    let scalar = emit_expr(expr)?;
+    let t = next_wide_tmp();
+    if tnw >= 2 {
+        pre.push_str(&format!(
+            "uint64_t _w{t}[{tnw}] = {{0}}; __uint128_t _t{t} = (__uint128_t)({scalar}); \
+             _w{t}[0] = (uint64_t)_t{t}; _w{t}[1] = (uint64_t)(_t{t} >> 64); "
+        ));
+    } else {
+        pre.push_str(&format!(
+            "uint64_t _w{t}[{tnw}] = {{0}}; _w{t}[0] = (uint64_t)({scalar}); "
+        ));
+    }
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{t})"),
+        nb: target_nb,
+        width: expr.width(),
+    })
+}
+
+/// Shift amount: the low 64 bits of `y` (Cranelift loads word 0 of the
+/// promoted operand).  A narrow scalar IS that low word; a wide `y` reads
+/// word 0 of its buffer.
+fn wide_shift_amount(y: &ProtoExpression, pre: &mut String) -> Option<String> {
+    if y.builds_wide_pointer() {
+        let r = emit_wide_expr(y, pre)?;
+        Some(format!("((const veryl_u64_ua*)({}))[0]", r.addr))
+    } else {
+        emit_expr(y)
+    }
+}
+
+/// Wide binary op with a wide result (band/bor/bxor/bxor_not/add/sub/mul and
+/// the shifts).  Div/Rem/Pow → None (interpreter).  Mirrors
+/// `build_binary_wide_binary`'s non-comparison arm (expression.rs 2140-2241):
+/// width mask applied iff `result_nb == op_nb`.
+fn emit_wide_binary(
+    x: &ProtoExpression,
+    op: Op,
+    y: &ProtoExpression,
+    width: usize,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let result_nb = native_bytes(width);
+    let op_nb = native_bytes(width.max(x.width()).max(y.width()));
+    let nw = op_nb / 8;
+    let mask_pack = wpack(op_nb, width);
+    match op {
+        Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor | Op::Add | Op::Sub | Op::Mul => {
+            let x_ref = emit_wide_operand(x, op_nb, pre)?;
+            let y_ref = emit_wide_operand(y, op_nb, pre)?;
+            let fname = match op {
+                Op::BitAnd => "band",
+                Op::BitOr => "bor",
+                Op::BitXor => "bxor",
+                Op::BitXnor => "bxor_not",
+                Op::Add => "add",
+                Op::Sub => "sub",
+                Op::Mul => "mul",
+                _ => unreachable!(),
+            };
+            let t = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{t}[{nw}]; vw_{fname}((uint8_t*)_w{t}, {x}, {y}, {op_nb}u); ",
+                x = x_ref.addr,
+                y = y_ref.addr,
+            ));
+            if result_nb == op_nb {
+                pre.push_str(&format!(
+                    "vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask_pack}u); "
+                ));
+            }
+            Some(WideRef {
+                addr: format!("((uint8_t*)_w{t})"),
+                nb: op_nb,
+                width,
+            })
+        }
+        Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR | Op::ArithShiftR => {
+            let x_ref = emit_wide_operand(x, op_nb, pre)?;
+            let amount = wide_shift_amount(y, pre)?;
+            let fname = match op {
+                Op::LogicShiftL | Op::ArithShiftL => "shl",
+                Op::LogicShiftR => "lshr",
+                Op::ArithShiftR => "ashr",
+                _ => unreachable!(),
+            };
+            // shl/lshr take plain nb; ashr packs the OPERAND width.
+            let last = if matches!(op, Op::ArithShiftR) {
+                format!("{}u", wpack(op_nb, x.width()))
+            } else {
+                format!("{op_nb}u")
+            };
+            let t = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{t}[{nw}]; vw_{fname}((uint8_t*)_w{t}, {x}, (uint64_t)({amount}), {last}); ",
+                x = x_ref.addr,
+            ));
+            if result_nb == op_nb {
+                pre.push_str(&format!(
+                    "vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask_pack}u); "
+                ));
+            }
+            Some(WideRef {
+                addr: format!("((uint8_t*)_w{t})"),
+                nb: op_nb,
+                width,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Wide unary non-reduction (`Add` identity / `Sub` negate / `BitNot`).
+/// Mirrors `build_binary_wide_unary` (expression.rs 1925-1955): negate/bnot
+/// mask after the op; identity is unmasked.
+fn emit_wide_unary(op: Op, x: &ProtoExpression, width: usize, pre: &mut String) -> Option<WideRef> {
+    let nb = native_bytes(width);
+    let nw = nb / 8;
+    let x_ref = emit_wide_operand(x, nb, pre)?;
+    match op {
+        Op::Add => Some(WideRef {
+            addr: x_ref.addr,
+            nb,
+            width,
+        }),
+        Op::Sub | Op::BitNot => {
+            let fname = if matches!(op, Op::Sub) {
+                "negate"
+            } else {
+                "bnot"
+            };
+            let t = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{t}[{nw}]; vw_{fname}((uint8_t*)_w{t}, {x}, {nb}u); \
+                 vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {p}u); ",
+                x = x_ref.addr,
+                p = wpack(nb, width),
+            ));
+            Some(WideRef {
+                addr: format!("((uint8_t*)_w{t})"),
+                nb,
+                width,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Wide ternary: a narrow condition selects per-word between two wide arms
+/// (Cranelift `emit_wide_select`, expression.rs 287-299).
+fn emit_wide_ternary(
+    cond: &ProtoExpression,
+    true_expr: &ProtoExpression,
+    false_expr: &ProtoExpression,
+    width: usize,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let nb = native_bytes(width);
+    let nw = nb / 8;
+    let c = emit_expr(cond)?;
+    let t_ref = emit_wide_operand(true_expr, nb, pre)?;
+    let f_ref = emit_wide_operand(false_expr, nb, pre)?;
+    let t = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{t}[{nw}]; int _c{t} = (({c}) != 0); \
+         for (int _i{t} = 0; _i{t} < {nw}; _i{t}++) \
+         _w{t}[_i{t}] = _c{t} ? ((const veryl_u64_ua*)({tp}))[_i{t}] \
+                              : ((const veryl_u64_ua*)({fp}))[_i{t}]; ",
+        tp = t_ref.addr,
+        fp = f_ref.addr,
+    ));
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{t})"),
+        nb,
+        width,
+    })
+}
+
+/// Wide concatenation: high-to-low `acc = (acc << elem_width) | elem`, then a
+/// final width mask (Cranelift expression.rs 247-272).
+fn emit_wide_concat(
+    elements: &[(Box<ProtoExpression>, usize, usize)],
+    width: usize,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let nb = native_bytes(width);
+    let nw = nb / 8;
+    let acc = next_wide_tmp();
+    pre.push_str(&format!("uint64_t _w{acc}[{nw}] = {{0}}; "));
+    for (elem, repeat, elem_width) in elements {
+        let e_ref = emit_wide_operand(elem, nb, pre)?;
+        for _ in 0..*repeat {
+            let sh = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{sh}[{nw}]; vw_shl((uint8_t*)_w{sh}, (const uint8_t*)_w{acc}, {ew}ull, {nb}u); \
+                 vw_bor((uint8_t*)_w{acc}, (const uint8_t*)_w{sh}, {e}, {nb}u); ",
+                ew = elem_width,
+                e = e_ref.addr,
+            ));
+        }
+    }
+    pre.push_str(&format!(
+        "vw_apply_mask((uint8_t*)_w{acc}, (const uint8_t*)0, {p}u); ",
+        p = wpack(nb, width),
+    ));
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{acc})"),
+        nb,
+        width,
+    })
+}
+
+/// Wide comparison / logic over wide operands → a narrow `uint64_t` 0/1
+/// result, wrapped in a self-contained GCC statement-expression.  Mirrors the
+/// `is_cmp` arm of `build_binary_wide_binary` (expression.rs 2037-2138).
+fn emit_wide_cmp_binary(
+    x: &ProtoExpression,
+    op: Op,
+    y: &ProtoExpression,
+    expr_context: &ExpressionContext,
+) -> Option<String> {
+    let mut pre = String::new();
+    let op_nb = native_bytes(expr_context.width.max(x.width()).max(y.width()));
+    let x_ref = emit_wide_operand(x, op_nb, &mut pre)?;
+    let y_ref = emit_wide_operand(y, op_nb, &mut pre)?;
+    let a = x_ref.addr;
+    let b = y_ref.addr;
+    let result = match op {
+        Op::Eq | Op::EqWildcard => format!("(uint64_t)vw_eq({a}, {b}, {op_nb}u)"),
+        Op::Ne | Op::NeWildcard => format!("(uint64_t)vw_ne({a}, {b}, {op_nb}u)"),
+        Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
+            let cmp = if expr_context.signed {
+                format!(
+                    "vw_scmp({a}, {b}, {p}u)",
+                    p = wpack(op_nb, expr_context.width)
+                )
+            } else {
+                format!("vw_ucmp({a}, {b}, {op_nb}u)")
+            };
+            let test = match op {
+                Op::Greater => "> 0",
+                Op::GreaterEq => ">= 0",
+                Op::Less => "< 0",
+                Op::LessEq => "<= 0",
+                _ => unreachable!(),
+            };
+            format!("(uint64_t)(({cmp}) {test})")
+        }
+        Op::LogicAnd => format!(
+            "(uint64_t)((vw_is_nonzero({a}, {op_nb}u) != 0) && (vw_is_nonzero({b}, {op_nb}u) != 0))"
+        ),
+        Op::LogicOr => format!(
+            "(uint64_t)((vw_is_nonzero({a}, {op_nb}u) != 0) || (vw_is_nonzero({b}, {op_nb}u) != 0))"
+        ),
+        _ => return None,
+    };
+    Some(format!("({{ {pre}{result}; }})"))
+}
+
+/// Wide unary reduction over a wide operand → a narrow `uint64_t` 0/1 result.
+/// Mirrors `build_binary_wide_unary`'s reduction arm (expression.rs
+/// 1835-1922).  `is_all_ones` takes a packed (nb|width<<16) arg; the others
+/// take plain nb.
+fn emit_wide_reduce_unary(op: Op, x: &ProtoExpression) -> Option<String> {
+    let mut pre = String::new();
+    let x_nb = native_bytes(x.width());
+    let x_ref = emit_wide_operand(x, x_nb, &mut pre)?;
+    let a = x_ref.addr;
+    let packed = wpack(x_nb, x.width());
+    let result = match op {
+        Op::BitAnd => format!("(uint64_t)vw_is_all_ones({a}, {packed}u)"),
+        Op::BitNand => format!("(uint64_t)(vw_is_all_ones({a}, {packed}u) ^ 1)"),
+        Op::BitOr => format!("(uint64_t)vw_is_nonzero({a}, {x_nb}u)"),
+        Op::LogicNot | Op::BitNor => {
+            format!("(uint64_t)(vw_is_nonzero({a}, {x_nb}u) ^ 1)")
+        }
+        Op::BitXor => format!("(uint64_t)vw_popcnt_parity({a}, {x_nb}u)"),
+        Op::BitXnor => format!("(uint64_t)(vw_popcnt_parity({a}, {x_nb}u) ^ 1)"),
+        _ => return None,
+    };
+    Some(format!("({{ {pre}{result}; }})"))
+}
+
+/// Narrow (≤64-bit) bit-select READ of a WIDE (>128-bit) flat-buffer
+/// variable: funnel-shift + mask the `[lo .. lo+nbits)` range out of the
+/// little-endian u64 words at `buf + off`, producing a `uint64_t` C
+/// expression.  Mirrors Cranelift `emit_wide_bit_select_read_narrow`.
+/// Reads through `veryl_u64_ua` (the value can sit at a 4-byte-aligned
+/// offset).  `nbits` must be in 1..=64.
+fn emit_wide_var_select_read(buf: &str, off: isize, lo: usize, nbits: usize) -> String {
+    emit_wide_select_read_at(&format!("{buf} + {off:#x}"), lo, nbits)
+}
+
+/// As `emit_wide_var_select_read`, but reading from an arbitrary `uint8_t*`
+/// base-pointer C expression (used for dynamic-indexed wide array elements,
+/// where the base is `buf + base_off + stride*idx`).  `nbits` in 1..=64.
+fn emit_wide_select_read_at(base_ptr: &str, lo: usize, nbits: usize) -> String {
+    let word = lo / 64;
+    let bit = lo % 64;
+    let base = format!("((const veryl_u64_ua*)({base_ptr}))");
+    let mut e = if bit == 0 {
+        format!("{base}[{word}]")
+    } else {
+        format!("({base}[{word}] >> {bit})")
+    };
+    // Straddle into the next word (only when bit > 0, which holds whenever
+    // bit + nbits > 64 given nbits ≤ 64 — so `64 - bit` is in 1..=63, never
+    // an undefined `<< 64`).
+    if bit + nbits > 64 {
+        e = format!(
+            "({e} | ({base}[{w1}] << {sh}))",
+            w1 = word + 1,
+            sh = 64 - bit
+        );
+    }
+    if nbits < 64 {
+        let mask = (1u64 << nbits) - 1;
+        e = format!("({e} & 0x{mask:x}ULL)");
+    }
+    e
+}
+
+/// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
+/// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
+/// (a C expression).  Each entry holds ≤56 bytes; larger values chunk.
+/// Mirrors `event_write_log_push_wide` / `emit_wide_log_chunks`.
+fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
+    use crate::ir::write_log::{
+        WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
+        WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+    };
+    let cap = WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    let mut out = String::new();
+    let mut written = 0usize;
+    while written < nb {
+        let chunk = (nb - written).min(cap);
+        out.push_str(&format!(
+            "{{ unsigned char* _lb = (unsigned char*)write_log; \
+                unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
+                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+                *(unsigned int*)(_ls + {o_off}) = (unsigned int)(({base}) + {w}u); \
+                *(unsigned char*)(_ls + {o_nb}) = (unsigned char){chunk}u; \
+                __builtin_memcpy(_ls + {o_pay}, ({src}) + {w}u, {chunk}u); \
+                *(unsigned int*)(_lb + {cnt}) = _lc + 1u; }} ",
+            cnt = WRITE_LOG_WIDE_OFFSET_COUNT,
+            eptr = WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+            esz = WRITE_LOG_WIDE_ENTRY_SIZE,
+            o_off = WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+            o_nb = WRITE_LOG_WIDE_ENTRY_OFFSET_NB,
+            o_pay = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD,
+            base = base_off,
+            src = src_ptr,
+            w = written,
+        ));
+        written += chunk;
+    }
+    out
+}
 
 /// Lazily-published compiled `.so`.  `None` while the background
 /// compile runs; callers fall back to Cranelift until then.  Shared
@@ -96,6 +895,159 @@ pub fn comb_fallback_reason(stmts: &[ProtoStatement]) -> String {
         }
     }
     "no single stmt isolated".to_string()
+}
+
+/// Census of EVERY uncovered comb leaf statement (not just the first), so the
+/// `VERYL_AOT_C_DIAG` whole-comb fallback report shows all distinct reasons a
+/// module bails — guiding which wide constructs still need native coverage.
+pub fn comb_uncovered_census(stmts: &[ProtoStatement]) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in stmts {
+        collect_uncovered(s, &mut out);
+    }
+    out
+}
+
+fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
+    if emit_stmt(stmt).is_some() {
+        return;
+    }
+    match stmt {
+        ProtoStatement::CompiledBlock(cb) => {
+            for s in &cb.original_stmts {
+                let mut adj = s.clone();
+                adj.adjust_offsets(cb.ff_delta_bytes, cb.comb_delta_bytes);
+                collect_uncovered(&adj, out);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &x.cond
+                && emit_expr(c).is_none()
+            {
+                out.push("If-cond-expr".to_string());
+            }
+            for s in x.true_side.iter().chain(x.false_side.iter()) {
+                collect_uncovered(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                collect_uncovered(s, out);
+            }
+        }
+        ProtoStatement::For(f) => {
+            for s in &f.body {
+                collect_uncovered(s, out);
+            }
+        }
+        ProtoStatement::Assign(a) => {
+            let expr_ok = emit_expr(&a.expr).is_some();
+            let why = if expr_ok {
+                String::new()
+            } else {
+                format!(" rhs={}", classify_uncovered_expr(&a.expr))
+            };
+            out.push(format!(
+                "Assign(ff={},dw={},sel={},dynsel={},rhssel={},exprOK={}){why}",
+                a.dst.is_ff(),
+                a.dst_width,
+                a.select.is_some(),
+                a.dynamic_select.is_some(),
+                a.rhs_select.is_some(),
+                expr_ok,
+            ))
+        }
+        ProtoStatement::AssignDynamic(a) => out.push(format!(
+            "AssignDyn(ff={},dw={},sel={},dynsel={},idxOK={},exprOK={})",
+            a.dst_base.is_ff(),
+            a.dst_width,
+            a.select.is_some(),
+            a.dynamic_select.is_some(),
+            emit_expr(&a.dst_index_expr).is_some(),
+            emit_expr(&a.expr).is_some(),
+        )),
+        ProtoStatement::SystemFunctionCall(_) => out.push("SysFn".to_string()),
+        _ => out.push("leaf".to_string()),
+    }
+}
+
+/// Classify the first uncovered sub-EXPRESSION of `e` (the leaf where
+/// emit_expr first returns None), for the `VERYL_AOT_C_DIAG` census — so the
+/// `exprOK=false` comb bails name the exact wide construct still missing.
+fn classify_uncovered_expr(e: &ProtoExpression) -> String {
+    if emit_expr(e).is_some() {
+        return "(covered)".to_string();
+    }
+    match e {
+        ProtoExpression::Variable {
+            var_full_width,
+            select,
+            dynamic_select,
+            width,
+            ..
+        } => format!(
+            "Var(vfw={var_full_width},w={width},sel={},dynsel={})",
+            select.is_some(),
+            dynamic_select.is_some()
+        ),
+        ProtoExpression::Value { width, .. } => format!("Val(w={width})"),
+        ProtoExpression::Unary { op, x, width, .. } => {
+            if emit_expr(x).is_none() {
+                format!("Un({op:?})/{}", classify_uncovered_expr(x))
+            } else {
+                format!("Un({op:?},w={width},xw={})", x.width())
+            }
+        }
+        ProtoExpression::Binary {
+            op, x, y, width, ..
+        } => {
+            if emit_expr(x).is_none() {
+                format!("Bin({op:?})/x:{}", classify_uncovered_expr(x))
+            } else if emit_expr(y).is_none() {
+                format!("Bin({op:?})/y:{}", classify_uncovered_expr(y))
+            } else {
+                format!("Bin({op:?},w={width},xw={},yw={})", x.width(), y.width())
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            width,
+            ..
+        } => {
+            if emit_expr(cond).is_none() {
+                format!("Tern/c:{}", classify_uncovered_expr(cond))
+            } else if emit_expr(true_expr).is_none() {
+                format!("Tern/t:{}", classify_uncovered_expr(true_expr))
+            } else if emit_expr(false_expr).is_none() {
+                format!("Tern/f:{}", classify_uncovered_expr(false_expr))
+            } else {
+                format!("Tern(w={width})")
+            }
+        }
+        ProtoExpression::Concatenation {
+            width, elements, ..
+        } => {
+            for (el, _, _) in elements {
+                if emit_expr(el).is_none() {
+                    return format!("Concat/{}", classify_uncovered_expr(el));
+                }
+            }
+            format!("Concat(w={width},n={})", elements.len())
+        }
+        ProtoExpression::DynamicVariable {
+            width,
+            element_native_bytes,
+            select,
+            dynamic_select,
+            ..
+        } => format!(
+            "DynVar(w={width},enb={element_native_bytes},sel={},dynsel={})",
+            select.is_some(),
+            dynamic_select.is_some()
+        ),
+    }
 }
 
 /// Descend into a rejected statement to name the first failing leaf.
@@ -187,12 +1139,71 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
+/// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
+/// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
+/// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
+/// >128 bit (helper-table value).  Select / dynamic_select / rhs_select wide
+/// > FFs stay on Cranelift (the module bails).  2-state only.
+fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
+    if a.select.is_some() || a.dynamic_select.is_some() || a.rhs_select.is_some() {
+        ev_diag(&format!(
+            "wide FF: select={:?} dynsel={} rhssel={:?} width={}",
+            a.select,
+            a.dynamic_select.is_some(),
+            a.rhs_select,
+            a.dst_width
+        ));
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let nb = native_bytes(a.dst_width);
+    let nw = nb / 8;
+    let mut pre = String::new();
+    // Build the RHS to `nb` bytes, then copy into a fresh scratch and mask it
+    // there (the canonical FF slot must not be clobbered before commit; the
+    // source may alias a flat-buffer read).
+    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    let d = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
+         vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
+        src = r.addr,
+        p = wpack(nb, a.dst_width),
+    ));
+    // Dual-slot FF: mirror the narrow path by writing the next physical slot
+    // directly (vestigial — ff_commit applies the log — but kept for parity).
+    let store = if packed {
+        String::new()
+    } else {
+        format!(
+            "vw_copy((uint8_t*)(ff_values + {dst:#x}), (const uint8_t*)_w{d}, {nb}u); ",
+            dst = dst_raw,
+        )
+    };
+    let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb);
+    Some(format!("{{ {pre}{store}{push} }}"))
+}
+
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
 /// canonical current offset.  2-state narrow packed FFs only.
 fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
-    if a.dst_width == 0 || a.dst_width > 64 {
-        ev_diag(&format!("static FF: width={} (wide/zero)", a.dst_width));
-        return None; // wide → per-word split; out of scope
+    if a.dst_width == 0 {
+        ev_diag("static FF: width=0");
+        return None;
+    }
+    // Wide FF (>64): the narrow WriteLogEntry payload is u64-only, so any
+    // FF wider than 64 bits routes through the wide write-log pool (covers
+    // 65-128 via __uint128_t promotion and >128 via the helper table).
+    if a.dst_width > 64 {
+        return emit_event_ff_assign_wide(a);
     }
     let nb = native_bytes(a.dst_width);
     let cty = native_c_type(nb)?;
@@ -409,6 +1420,7 @@ pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCe
 /// FF-target assigns push WriteLogEntries via `write_log` (unused in
 /// the comb path).
 fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
+    reset_wide_tmp();
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
     set_event_mode(true);
     let body_res = (|| {
@@ -460,6 +1472,26 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
                             "[aot_event_diag] first bail at stmt#{i} kind={label} leaf={leaf} (total={})",
                             stmts.len()
                         );
+                        // Full census of ALL uncovered event stmts (event_mode
+                        // is set), so a single fix doesn't just surface the
+                        // next bail.  Mirrors the whole_comb census.
+                        let mut census: Vec<String> = Vec::new();
+                        for s in stmts {
+                            collect_uncovered(s, &mut census);
+                        }
+                        let mut counts: HashMap<String, usize> = Default::default();
+                        for c in census {
+                            *counts.entry(c).or_default() += 1;
+                        }
+                        let mut v: Vec<_> = counts.into_iter().collect();
+                        v.sort_by_key(|x| std::cmp::Reverse(x.1));
+                        eprintln!(
+                            "[aot_event_census] {} distinct uncovered event stmts:",
+                            v.len()
+                        );
+                        for (k, n) in v.iter().take(40) {
+                            eprintln!("  {n:6}x  {k}");
+                        }
                     }
                     return None;
                 }
@@ -482,7 +1514,12 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
         "// AOT-C event; do not edit.\n\
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
-         \n\
+         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n",
+    );
+    src.push_str(WIDEOPS_C_DECLS);
+    src.push_str(WIDEOPS_C_INLINE);
+    src.push_str(
+        "\n\
          __attribute__((visibility(\"default\")))\n\
          void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log) {\n",
     );
@@ -575,6 +1612,16 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
         *lib.get::<FuncPtr>(b"veryl_aot_eval\0")
             .map_err(|e| format!("dlsym veryl_aot_eval: {e}"))?
     };
+    // Publish the wide-op helper table into the .so so emitted wide-op calls
+    // dispatch to the same `wide_ops::*` Rust helpers Cranelift uses.  The
+    // setter is always present (decls emitted unconditionally) and copies the
+    // table into the .so's global; unused on narrow-only modules.
+    if let Ok(setter) =
+        unsafe { lib.get::<unsafe extern "C" fn(*const c_void)>(b"veryl_set_wideops\0") }
+    {
+        let table = wideops_table();
+        unsafe { setter(&table as *const WideOpsTable as *const c_void) };
+    }
     Ok(EmittedModule { func, _lib: lib })
 }
 
@@ -612,6 +1659,7 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
 /// *comb, uint64_t *log)`.  Comb-target writes store directly;
 /// FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
+    reset_wide_tmp();
     // Splitting the monolithic body into ~chunk_size-stmt static functions
     // gives gcc -O3 smaller register-allocation and stack-frame scopes per
     // chunk and bounds spill locality (the unsplit body regresses L1d
@@ -627,8 +1675,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         "// AOT-C generated; do not edit.\n\
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
-         \n",
+         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n",
     );
+    body.push_str(WIDEOPS_C_DECLS);
+    body.push_str(WIDEOPS_C_INLINE);
+    body.push('\n');
 
     // Emit each chunk's stmts now so we can fail fast on unsupported.
     let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
@@ -702,6 +1753,66 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             // emitted (FF targets were handled above); bail to Cranelift.
             if a.dynamic_select.is_some() {
                 return None;
+            }
+            // Wide (>128-bit) comb store via the wide-op helper table.  The
+            // 65-128 bit range is already handled by the `__uint128_t` path
+            // below; only >128 needs the flat-buffer pointer + helpers.
+            // Select / rhs_select wide stores stay on Cranelift (S1).
+            if a.dst_width > 128 {
+                // rhs_select on a wide store stays on Cranelift (rare);
+                // dynamic_select bailed above.
+                if a.rhs_select.is_some() {
+                    return None;
+                }
+                let VarOffset::Comb(store_off) = a.dst else {
+                    return None;
+                };
+                if store_off < 0 {
+                    return None;
+                }
+                let nb = native_bytes(a.dst_width);
+                let nw = nb / 8;
+                let mut pre = String::new();
+                let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
+                let dmask = wpack(nb, a.dst_width);
+                if let Some((hi, lo)) = a.select {
+                    // Wide bit-select WRITE (RMW, 2-state):
+                    //   new = (old & ~rangemask) | ((src << lo) & rangemask)
+                    // where rangemask = fill_ones(nbits) << lo.  `old` is read
+                    // from the destination BEFORE the final copy overwrites it.
+                    // Mirrors Cranelift emit_wide_select_rmw.
+                    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+                    let rmask = next_wide_tmp();
+                    let srcsh = next_wide_tmp();
+                    let newv = next_wide_tmp();
+                    pre.push_str(&format!(
+                        "uint64_t _w{rmask}[{nw}]; \
+                         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
+                         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
+                         uint64_t _w{srcsh}[{nw}]; \
+                         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
+                         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
+                         uint64_t _w{newv}[{nw}]; \
+                         vw_band_not((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{rmask}, {nb}u); \
+                         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); ",
+                        pkn = wpack(nb, nbits),
+                        src = r.addr,
+                        dst = dst,
+                    ));
+                    return Some(format!(
+                        "{{ {pre}vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); \
+                            vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}"
+                    ));
+                }
+                // No select: plain wide store.  Copy into the destination, then
+                // mask THERE (never the source, which may alias a flat-buffer
+                // variable read).
+                return Some(format!(
+                    "{{ {pre}vw_copy({dst}, {src}, {nb}u); \
+                        vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
+                    src = r.addr,
+                ));
             }
             let nb = native_bytes(a.dst_width);
             let cty = native_c_type(nb)?;
@@ -837,6 +1948,76 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             }
             if a.dst_base.is_ff() {
                 return None; // handled above in event mode; else out of scope
+            }
+            // Wide (>128-bit) dynamic-indexed comb store via the wide-op
+            // helper table.  A `var` array written by runtime index inside
+            // always_ff whose ff_log_base_current_offset is None maps to the
+            // comb buffer, so eval_step writes DIRECTLY to `base + stride*idx`
+            // with no write-log push.  Mirror that byte for byte (RMW for
+            // select, copy+mask for full).  The 65-128 range still bails below.
+            if a.dst_width > 128 {
+                if a.dynamic_select.is_some() || a.rhs_select.is_some() {
+                    return None;
+                }
+                let VarOffset::Comb(base_off) = a.dst_base else {
+                    return None;
+                };
+                if base_off < 0 || a.dst_num_elements == 0 {
+                    return None;
+                }
+                let nb = native_bytes(a.dst_width);
+                let nw = nb / 8;
+                let max_idx = a.dst_num_elements.saturating_sub(1);
+                let idx_str = emit_expr(&a.dst_index_expr)?;
+                let dmask = wpack(nb, a.dst_width);
+                let mut pre = String::new();
+                let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                // `_pa` is the element byte-address; declared in the block below
+                // before the wide ops reference it.  `pre` (the RHS scratch)
+                // does not reference `_pa`/`_idx`, so the ordering is sound.
+                let store = if let Some((hi, lo)) = a.select {
+                    // Runtime-addressed wide bit-select RMW (2-state):
+                    //   new = (old & ~rangemask) | ((src << lo) & rangemask)
+                    // Mirrors the static wide-store RMW (Cranelift parity).
+                    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+                    let rmask = next_wide_tmp();
+                    let srcsh = next_wide_tmp();
+                    let newv = next_wide_tmp();
+                    format!(
+                        "{pre}\
+                         uint64_t _w{rmask}[{nw}]; \
+                         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
+                         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
+                         uint64_t _w{srcsh}[{nw}]; \
+                         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
+                         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
+                         uint64_t _w{newv}[{nw}]; \
+                         vw_band_not((uint8_t*)_w{newv}, _pa, (const uint8_t*)_w{rmask}, {nb}u); \
+                         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); \
+                         vw_copy(_pa, (const uint8_t*)_w{newv}, {nb}u); \
+                         vw_apply_mask(_pa, (const uint8_t*)0, {dmask}u);",
+                        pkn = wpack(nb, nbits),
+                        src = r.addr,
+                    )
+                } else {
+                    // Full element write: copy then mask in the destination
+                    // (never the source, which may alias a flat-buffer read).
+                    format!(
+                        "{pre}vw_copy(_pa, {src}, {nb}u); \
+                         vw_apply_mask(_pa, (const uint8_t*)0, {dmask}u);",
+                        src = r.addr,
+                    )
+                };
+                return Some(format!(
+                    "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                        uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                        uint8_t* _pa = (uint8_t*)(comb_values + {base:#x} + (intptr_t){stride} * (intptr_t)_idx); \
+                        {store} }}",
+                    idx = idx_str,
+                    max = max_idx,
+                    base = base_off,
+                    stride = a.dst_stride,
+                ));
             }
             if a.dst_num_elements == 0 || a.dst_width == 0 || a.dst_width > 64 {
                 return None;
@@ -1081,6 +2262,27 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     mask = mask,
                 ));
             }
+            // Wide (>128-bit) underlying variable.  A static narrow (≤64-bit)
+            // bit-select extracts a scalar via a funnel-shift+mask read of the
+            // flat buffer; a no-select read (full wide value) or a wider-than-
+            // 64 select is not a C scalar here (handled by emit_wide_expr in a
+            // wide context, or bails).
+            if *var_full_width > 128 {
+                if let Some((hi, lo)) = select {
+                    let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                    if nbits <= 64 {
+                        let (buf, off) = match var_offset {
+                            VarOffset::Ff(o) => ("ff_values", *o),
+                            VarOffset::Comb(o) => ("comb_values", *o),
+                        };
+                        if off < 0 {
+                            return None;
+                        }
+                        return Some(emit_wide_var_select_read(buf, off, *lo, nbits));
+                    }
+                }
+                return None;
+            }
             // Bit-select reads must load enough bytes to cover the high
             // bit being extracted. Using `*width` (the select bit-count)
             // would cast at native_bytes(nbits) and miss high bytes when
@@ -1094,16 +2296,26 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             let load = emit_var_load(var_offset, load_width)?;
             if let Some((hi, lo)) = select {
                 let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
-                if nbits >= 64 {
-                    return None; // (full-width or wider)
+                if nbits > 64 {
+                    return None; // wider-than-64 select → wide result, not a scalar
                 }
-                let mask = (1u64 << nbits) - 1;
-                Some(format!(
-                    "((({load}) >> {lo}) & 0x{mask:x}ULL)",
-                    load = load,
-                    lo = lo,
-                    mask = mask,
-                ))
+                if nbits == 64 {
+                    // Exactly 64 bits: no mask (`1u64 << 64` overflows); the
+                    // shift drops the low `lo` bits and the cast keeps 64.
+                    Some(format!(
+                        "((uint64_t)(({load}) >> {lo}))",
+                        load = load,
+                        lo = lo
+                    ))
+                } else {
+                    let mask = (1u64 << nbits) - 1;
+                    Some(format!(
+                        "((({load}) >> {lo}) & 0x{mask:x}ULL)",
+                        load = load,
+                        lo = lo,
+                        mask = mask,
+                    ))
+                }
             } else {
                 Some(load)
             }
@@ -1114,6 +2326,14 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             expr_context,
             ..
         } => {
+            // Wide (>128-bit) operand: the only scalar-producing wide unary is
+            // a reduction (BitAnd/BitOr/BitXor/…/LogicNot → 1-bit).  A wide
+            // non-reduction (BitNot/Sub) yields a wide value that can't be a C
+            // scalar here, so emit_wide_reduce_unary returns None → the module
+            // bails to Cranelift (which handles it).
+            if x.width() > 128 {
+                return emit_wide_reduce_unary(*op, x);
+            }
             let xs = emit_expr(x)?;
             // A narrow signed operand loaded as uint64_t is zero-extended, so
             // `-`/`~` leave wrong high bits (e.g. `- 8'shf6` = -(-10) is
@@ -1144,6 +2364,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             expr_context,
             ..
         } => {
+            // Wide (>128-bit) operand: the only scalar-producing wide binary
+            // is a comparison/logic op (→ 1-bit).  A wide-result op (add/sub/
+            // mul/bitwise/shift) yields a wide value that can't be a C scalar
+            // here — emit_wide_cmp_binary returns None for those → bail to
+            // Cranelift.  (Wide-result ops are materialized by emit_wide_expr
+            // at the wide-store / wide-operand sites, never here.)
+            if x.width() > 128 || y.width() > 128 {
+                return emit_wide_cmp_binary(x, *op, y, expr_context);
+            }
             // Signedness fix-ups: comparisons and Div / Rem need both
             // operands sign-extended to a signed integer wider than
             // their declared width so the C-level operator picks up
@@ -1613,6 +2842,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
         ProtoExpression::DynamicVariable {
             base_offset,
             stride,
+            element_native_bytes,
             index_expr,
             num_elements,
             select,
@@ -1627,6 +2857,37 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // Falls back to Cranelift for a nested dynamic_select or width > 64.
             if dynamic_select.is_some() {
                 return None; // unsupported
+            }
+            // Wide (>16 native-byte) array element: a static narrow (≤64-bit)
+            // bit-select reads a field via funnel-shift+mask off the dynamic
+            // element address (`buf + base_off + stride*idx`).  A no-select /
+            // wide-result read is handled by emit_wide_expr (wide context).
+            if *element_native_bytes > 16 {
+                if *num_elements == 0 {
+                    return None;
+                }
+                if let Some((hi, lo)) = select {
+                    let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                    if nbits <= 64 {
+                        let (buf, base_off) = match base_offset {
+                            VarOffset::Ff(o) => ("ff_values", *o),
+                            VarOffset::Comb(o) => ("comb_values", *o),
+                        };
+                        let idx = emit_expr(index_expr)?;
+                        let max_idx = num_elements.saturating_sub(1);
+                        let addr = format!(
+                            "({buf} + {base_off:#x} + (intptr_t){stride} * (intptr_t)_idx)"
+                        );
+                        let read = emit_wide_select_read_at(&addr, *lo, nbits);
+                        return Some(format!(
+                            "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                                uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                                {read}; }})",
+                            max = max_idx,
+                        ));
+                    }
+                }
+                return None;
             }
             if *num_elements == 0 || *width == 0 || *width > 64 {
                 return None;
@@ -1804,6 +3065,67 @@ mod tests {
 
     fn dummy_token() -> TokenRange {
         TokenRange::default()
+    }
+
+    #[test]
+    fn wideops_table_abi_is_consistent() {
+        // The emitted C `veryl_wideops_t` struct, the `#[repr(C)] WideOpsTable`
+        // mirror, and `wideops_table()` must agree on field count and order.
+        // A reorder/insert in one but not the others silently dispatches wide
+        // ops to the wrong helper.  Size pins the count (23 fn pointers); the
+        // C decl lists exactly the same 23 names in the same order.
+        assert_eq!(
+            std::mem::size_of::<WideOpsTable>(),
+            23 * std::mem::size_of::<usize>(),
+            "WideOpsTable must be exactly 23 function pointers"
+        );
+        // Every slot must resolve to a real helper address (no zeroed field
+        // from a forgotten `wideops_table()` entry).
+        let t = wideops_table();
+        for (i, &addr) in [
+            t.band,
+            t.bor,
+            t.bxor,
+            t.bxor_not,
+            t.band_not,
+            t.add,
+            t.sub,
+            t.mul,
+            t.bnot,
+            t.negate,
+            t.copy,
+            t.shl,
+            t.lshr,
+            t.ashr,
+            t.eq,
+            t.ne,
+            t.ucmp,
+            t.scmp,
+            t.is_nonzero,
+            t.is_all_ones,
+            t.popcnt_parity,
+            t.apply_mask,
+            t.fill_ones,
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert_ne!(addr, 0, "wideops_table field {i} is null");
+        }
+        // The C struct declares the 23 fields in the documented order.
+        for name in [
+            "band, bor, bxor, bxor_not, band_not, add, sub, mul;",
+            "bnot, negate, copy;",
+            "shl, lshr, ashr;",
+            "eq, ne, ucmp, scmp;",
+            "is_nonzero, is_all_ones, popcnt_parity;",
+            "apply_mask, fill_ones;",
+        ] {
+            assert!(
+                WIDEOPS_C_DECLS.contains(name),
+                "WIDEOPS_C_DECLS missing field group `{name}`"
+            );
+        }
     }
 
     fn ctx(width: usize, signed: bool) -> ExpressionContext {
