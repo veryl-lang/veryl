@@ -13611,3 +13611,36 @@ fn no_panic_on_zero_step_for_loop() {
     "#;
     let _ = analyze(code);
 }
+
+
+
+#[test]
+fn no_panic_on_msb_after_unpacked_array_select() {
+    // Regression: `msb` applied after an unpacked-array select indexed past the
+    // packed-width Shape (the select dimension counts the unpacked array
+    // dimensions too), panicking with an out-of-bounds index.
+    let code = r#"
+    module M (
+        o: output logic,
+    ) {
+        var a: logic<8> [4];
+        always_comb {
+            a = '{0, 0, 0, 0};
+            o = a[0][msb];
+        }
+    }
+    "#;
+    let _ = analyze(code);
+
+    let code = r#"
+    package P {
+        const A: logic<8> [4] = '{0, 0, 0, 0};
+    }
+    module M (
+        o: output logic,
+    ) {
+        assign o = P::A[0][msb];
+    }
+    "#;
+    let _ = analyze(code);
+}
