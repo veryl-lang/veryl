@@ -3568,3 +3568,24 @@ fn msb_after_unpacked_array_select_dimension() {
         "msb on the unpacked dimension must use dimension 1:\n{ret}"
     );
 }
+
+#[test]
+fn elsif_else_attribute_guarded_in_statement_block() {
+    // Regression: `#[else]` / `#[elsif]` inside a statement block were dropped,
+    // emitting the guarded statement unconditionally with no `` `else ``/`` `endif ``.
+    let code = r#"module Top {
+    var a: logic;
+    always_comb {
+        #[ifdef(FOO)]
+        a = 0;
+        #[else]
+        a = 1;
+    }
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(ret.contains("`ifdef FOO"), "missing `ifdef:\n{ret}");
+    assert!(ret.contains("`else"), "missing `else guard:\n{ret}");
+    assert!(ret.contains("`endif"), "missing `endif guard:\n{ret}");
+}
