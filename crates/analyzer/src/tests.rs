@@ -13137,3 +13137,281 @@ fn local_var_in_always_comb_uses_var_naming() {
         "`tmp` should not be flagged by the wire rule (`w_`), got: {invalid:?}"
     );
 }
+
+#[test]
+fn regression_gray_enum_encoding() {
+    // Correct Gray-coded explicit values (0,1,3,2) must be accepted.
+    let code = r#"
+    module M {
+        #[enum_encoding(gray)]
+        enum E: logic<4> {
+            aa = 0,
+            bb = 1,
+            cc = 3,
+            dd = 2,
+        }
+        var x: E;
+        assign x = E::aa;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidEnumVariant { .. })),
+        "correct Gray values 0,1,3,2 should not be rejected: {errors:?}"
+    );
+
+    // A non-Gray explicit value (dd = 6 after cc = 3) must be rejected.
+    let code = r#"
+    module M {
+        #[enum_encoding(gray)]
+        enum E: logic<4> {
+            aa = 0,
+            bb = 1,
+            cc = 3,
+            dd = 6,
+        }
+        var x: E;
+        assign x = E::aa;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidEnumVariant { .. })),
+        "non-Gray value dd=6 should be rejected: {errors:?}"
+    );
+}
+
+#[test]
+fn regression_modport_inout_expand() {
+    // An inout modport member can't be expanded into top-level ports
+    // (it would be emitted as `output var`, dropping bidirectionality).
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        var b: logic;
+        var c: logic;
+        modport mp {
+            a: input,
+            b: output,
+            c: inout,
+        }
+    }
+
+    #[expand(modport)]
+    module ModuleA (
+        port: modport InterfaceA::mp,
+    ) {
+        assign port.b = port.a;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnexpandableModport { .. })),
+        "inout modport member under #[expand(modport)] should be rejected: {errors:?}"
+    );
+}
+
+#[test]
+fn regression_generic_function_statement_call() {
+    // A generic function called as a discarded-result statement must have
+    // its generic argument inferred (no false generic_inference_failed).
+    let code = r#"
+    module Top {
+        function f::<A: u32> (
+            a: input logic<A>,
+        ) {
+            let _t: logic<A> = a;
+        }
+        var aa: logic<5>;
+        always_comb {
+            f(aa);
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::GenericInferenceFailed { .. })),
+        "generic statement-call should infer its argument: {errors:?}"
+    );
+}
+
+#[test]
+fn regression_ambiguous_wildcard_import() {
+    // The same name wildcard-imported from two packages and used unqualified
+    // must be reported as ambiguous instead of silently bound to one.
+    let code = r#"
+    package PkgA {
+        const X: u32 = 3;
+    }
+    package PkgB {
+        const X: u32 = 7;
+    }
+    module Top {
+        import PkgA::*;
+        import PkgB::*;
+        var a: logic<32>;
+        always_comb {
+            a = X;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousIdentifier { .. })),
+        "ambiguous wildcard import should be reported: {errors:?}"
+    );
+
+    // A single wildcard import of the same name must still resolve cleanly.
+    let code = r#"
+    package PkgA {
+        const X: u32 = 3;
+    }
+    module Top {
+        import PkgA::*;
+        var a: logic<32>;
+        always_comb {
+            a = X;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousIdentifier { .. })),
+        "single wildcard import should not be ambiguous: {errors:?}"
+    );
+}
+
+#[test]
+fn regression_pow_overflow_no_panic() {
+    // Constant ** that overflows the host integer must not panic in debug
+    // builds (wrapping + width masking, like Op::Mul).
+    let code = r#"
+    module Top (
+        o0: output logic<32>,
+    ) {
+        always_comb {
+            o0 = 10 ** 20;
+        }
+    }
+    "#;
+    let _ = analyze(code);
+
+    let code = r#"
+    module Top (
+        o0: output logic<32>,
+    ) {
+        always_comb {
+            o0 = (-7) ** 23;
+        }
+    }
+    "#;
+    let _ = analyze(code);
+}
+
+#[test]
+fn regression_baseless_literal_overflow_no_panic() {
+    // A base-less decimal literal larger than u64::MAX must not panic.
+    let code = r#"
+    module Top {
+        const HUGE: u64 = 99999999999999999999;
+    }
+    "#;
+    let _ = analyze(code);
+}
+
+#[test]
+fn regression_allbit_width_overflow_no_panic() {
+    // An all-bit literal whose width prefix overflows usize must not panic.
+    let code = r#"
+    module Top {
+        let _a: logic = 999999999999999999999999999999'0;
+    }
+    "#;
+    let _ = analyze(code);
+}
+
+#[test]
+fn regression_rev_for_non_additive_step_rejected() {
+    // A reverse loop with a non-additive step cannot be inverted to descend
+    // toward the lower bound, so it must be rejected rather than emitted as a
+    // non-terminating SystemVerilog loop.
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in rev 1..100 step *= 2 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+        "rev for-loop with a non-additive step should be rejected: {errors:?}"
+    );
+
+    // A reverse loop with an additive step is fine.
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in rev 0..10 step += 2 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+        "rev for-loop with an additive step should be accepted: {errors:?}"
+    );
+
+    // A forward loop with a non-additive step is fine.
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in 1..100 step *= 2 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+        "forward for-loop with a non-additive step should be accepted: {errors:?}"
+    );
+}

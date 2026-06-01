@@ -183,7 +183,16 @@ impl ReferenceTable {
                     self.errors
                         .push(AnalyzerError::invisible_identifier(&name, token));
                 }
+                ResolveErrorCause::Ambiguous(ambiguous) => {
+                    let name = format!("{ambiguous}");
+                    self.errors
+                        .push(AnalyzerError::ambiguous_identifier(&name, token));
+                }
             }
+        } else if let ResolveErrorCause::Ambiguous(ambiguous) = err.cause {
+            let name = format!("{ambiguous}");
+            self.errors
+                .push(AnalyzerError::ambiguous_identifier(&name, token));
         } else if let ResolveErrorCause::NotFound(not_found) = err.cause {
             let name = format!("{not_found}");
             if let Some(generics_token) = generics_token {

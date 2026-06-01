@@ -26,6 +26,22 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(ambiguous_identifier),
+        help("disambiguate with an explicit scope or import"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" is ambiguous because it is imported from multiple packages")]
+    AmbiguousIdentifier {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(anonymous_identifier_usage),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1660,6 +1676,7 @@ impl AnalyzerError {
     pub fn token_source(&self) -> TokenSource {
         match self {
             AnalyzerError::AmbiguousElsif { token_source, .. } => *token_source,
+            AnalyzerError::AmbiguousIdentifier { token_source, .. } => *token_source,
             AnalyzerError::AnonymousIdentifierUsage { token_source, .. } => *token_source,
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
@@ -1762,6 +1779,14 @@ impl AnalyzerError {
     pub fn ambiguous_elsif(cause: &str, token: &TokenRange) -> Self {
         AnalyzerError::AmbiguousElsif {
             cause: cause.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn ambiguous_identifier(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::AmbiguousIdentifier {
+            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

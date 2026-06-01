@@ -1270,6 +1270,19 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 if expr_context.width > 64 && (wide_truncates || expr_context.signed) {
                     return None;
                 }
+                // For 65..128-bit shifts the C operator uses a mod-128 count on
+                // __uint128_t, so a runtime count >= width wrongly returns the
+                // operand instead of 0. Guard with a ternary matching the
+                // interpreter / SystemVerilog "count >= width => 0" semantics.
+                if expr_context.width > 64
+                    && expr_context.width <= 128
+                    && matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR)
+                {
+                    let w = expr_context.width;
+                    return Some(format!(
+                        "(((uint64_t)({ys})) >= {w} ? (__uint128_t)0 : (({xs}) {c_op} ({ys})))"
+                    ));
+                }
                 // Operand-derived overflow predicate, computable in parallel
                 // with the op. When it proves no carry past `width` the mask is
                 // a no-op. Built here (not in `wmask`) so the closure doesn't

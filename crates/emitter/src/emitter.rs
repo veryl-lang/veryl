@@ -2566,10 +2566,13 @@ impl VerylWalker for Emitter {
 
         if width.is_empty() {
             self.veryl_token(&arg.all_bit_token);
-        } else {
-            let width: usize = width.parse().unwrap();
+        } else if let Ok(width) = width.parse::<usize>() {
             let text = format!("{width}'b{}", tail.repeat(width));
             self.veryl_token(&arg.all_bit_token.replace(&text));
+        } else {
+            // Degenerate width that overflows usize: emit verbatim instead of
+            // panicking.
+            self.veryl_token(&arg.all_bit_token);
         }
     }
 
@@ -3208,7 +3211,11 @@ impl VerylWalker for Emitter {
                 CastingType::U8(_)
                 | CastingType::U16(_)
                 | CastingType::U32(_)
-                | CastingType::U64(_) => self.str("))"),
+                | CastingType::U64(_)
+                | CastingType::P8(_)
+                | CastingType::P16(_)
+                | CastingType::P32(_)
+                | CastingType::P64(_) => self.str("))"),
                 CastingType::I8(_)
                 | CastingType::I16(_)
                 | CastingType::I32(_)
@@ -3219,7 +3226,15 @@ impl VerylWalker for Emitter {
                 | CastingType::Based(_)
                 | CastingType::BaseLess(_) => self.str(")"),
                 CastingType::BBool(_) | CastingType::LBool(_) => self.str(") != 1'b0)"),
-                _ => (),
+                // casting to clock/reset emits no surrounding cast wrapper
+                CastingType::Clock(_)
+                | CastingType::ClockPosedge(_)
+                | CastingType::ClockNegedge(_)
+                | CastingType::Reset(_)
+                | CastingType::ResetAsyncHigh(_)
+                | CastingType::ResetAsyncLow(_)
+                | CastingType::ResetSyncHigh(_)
+                | CastingType::ResetSyncLow(_) => (),
             }
         }
     }
@@ -3981,7 +3996,19 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.for_statement_opt0 {
             self.identifier(&arg.identifier);
             self.space(1);
-            self.assignment_operator(&x.assignment_operator);
+            if ascending_order {
+                self.assignment_operator(&x.assignment_operator);
+            } else {
+                // A reverse loop starts at the high bound with a `>=` guard, so
+                // an additive step must be inverted to descend toward the bound;
+                // emitting it verbatim would produce a non-terminating loop.
+                let tok = &x.assignment_operator.assignment_operator_token;
+                match tok.to_string().as_str() {
+                    "+=" => self.token(&tok.replace("-=")),
+                    "-=" => self.token(&tok.replace("+=")),
+                    _ => self.assignment_operator(&x.assignment_operator),
+                }
+            }
             self.space(1);
             self.expression(&x.expression);
         } else {
@@ -4125,15 +4152,20 @@ impl VerylWalker for Emitter {
                 self.clear_adjust_line();
             }
             "sv" => {
-                if let Some(ref x) = arg.attribute_opt {
+                if let Some(ref x) = arg.attribute_opt
+                    && let AttributeItem::StringLiteral(x) = &*x.attribute_list.attribute_item
+                {
+                    // Flush any deferred blank-line newline before the `(*`
+                    // prefix so it does not land between `(*` and the text.
+                    self.consume_adjust_line(&x.string_literal.string_literal_token.token);
                     self.str("(*");
                     self.space(1);
-                    if let AttributeItem::StringLiteral(x) = &*x.attribute_list.attribute_item {
-                        let text = x.string_literal.string_literal_token.to_string();
-                        let text = &text[1..text.len() - 1];
-                        let text = text.replace("\\\"", "\"");
-                        self.token(&x.string_literal.string_literal_token.replace(&text));
-                    }
+                    // Decode all string-literal escapes via the shared decoder
+                    // (\\ \" \/ \b \f \n \r \t \uXXXX); a manual copy here
+                    // previously decoded only \", doubling backslashes.
+                    let raw = x.string_literal.string_literal_token.to_string();
+                    let text = veryl_analyzer::value::unescape_string_literal_to_string(&raw);
+                    self.token(&x.string_literal.string_literal_token.replace(&text));
                     self.space(1);
                     self.str("*)");
                     self.newline();
@@ -5772,7 +5804,19 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.generate_for_declaration_opt0 {
             self.identifier(&arg.identifier);
             self.space(1);
-            self.assignment_operator(&x.assignment_operator);
+            if ascending_order {
+                self.assignment_operator(&x.assignment_operator);
+            } else {
+                // A reverse loop starts at the high bound with a `>=` guard, so
+                // an additive step must be inverted to descend toward the bound;
+                // emitting it verbatim would produce a non-terminating loop.
+                let tok = &x.assignment_operator.assignment_operator_token;
+                match tok.to_string().as_str() {
+                    "+=" => self.token(&tok.replace("-=")),
+                    "-=" => self.token(&tok.replace("+=")),
+                    _ => self.assignment_operator(&x.assignment_operator),
+                }
+            }
             self.space(1);
             self.expression(&x.expression);
         } else {

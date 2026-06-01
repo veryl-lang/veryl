@@ -346,8 +346,11 @@ impl ProtoForStatement {
             }
         };
 
+        // Reverse mirrors the emitted SV `for (int i = hi - 1; i >= lo;
+        // i -= step)`. The signed `>= lo` guard makes underflow past `lo`
+        // terminate, matching the signed `int i`.
         let init_i = if is_reverse {
-            builder.ins().iconst(I64, end_val as i64)
+            builder.ins().iconst(I64, (end_val as i64) - 1)
         } else {
             builder.ins().iconst(I64, start_val as i64)
         };
@@ -362,10 +365,18 @@ impl ProtoForStatement {
         let i_val = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
 
         let cond = if is_reverse {
+            // Sign-extend the counter from its native width so an underflow
+            // below `lo` compares as negative, matching the signed `int i`.
+            let i_signed = if nb <= 4 {
+                let r = builder.ins().ireduce(I32, i_val);
+                builder.ins().sextend(I64, r)
+            } else {
+                i_val
+            };
             let start_const = builder.ins().iconst(I64, start_val as i64);
             builder
                 .ins()
-                .icmp(IntCC::UnsignedGreaterThan, i_val, start_const)
+                .icmp(IntCC::SignedGreaterThanOrEqual, i_signed, start_const)
         } else {
             let end_const = builder.ins().iconst(I64, end_val as i64);
             builder
@@ -379,21 +390,16 @@ impl ProtoForStatement {
         context.store_elim_enabled = false;
         builder.switch_to_block(body_block);
 
-        if is_reverse {
-            let i_cur = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
-            let step_c = builder.ins().iconst(I64, step_val as i64);
-            let new_i = builder.ins().isub(i_cur, step_c);
-            Self::store_counter(context, builder, new_i, base_addr, var_mem_offset, nb);
-        }
-
         for s in &self.body {
             s.build_binary(context, builder, false)?;
         }
 
-        if !is_reverse {
-            let i_cur = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
-            let step_c = builder.ins().iconst(I64, step_val as i64);
-            let new_i = match &self.range {
+        let i_cur = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
+        let step_c = builder.ins().iconst(I64, step_val as i64);
+        let new_i = if is_reverse {
+            builder.ins().isub(i_cur, step_c)
+        } else {
+            match &self.range {
                 ProtoForRange::Stepped { op, .. } => match op {
                     // Mirror `Op::eval` (op.rs): the counter is unsigned, so
                     // right shifts and div/rem are unsigned. Bail (None) for
@@ -415,9 +421,9 @@ impl ProtoForStatement {
                     _ => return None,
                 },
                 _ => builder.ins().iadd(i_cur, step_c),
-            };
-            Self::store_counter(context, builder, new_i, base_addr, var_mem_offset, nb);
-        }
+            }
+        };
+        Self::store_counter(context, builder, new_i, base_addr, var_mem_offset, nb);
 
         builder.ins().jump(header_block, &[]);
 

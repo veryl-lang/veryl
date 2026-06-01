@@ -983,12 +983,48 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     );
                     symbol_table::add_connect(connect);
                 }
-                if matches!(
-                    arg.identifier_statement_group.as_ref(),
-                    IdentifierStatementGroup::FunctionCall(_)
-                ) {
+                if let IdentifierStatementGroup::FunctionCall(fc) =
+                    arg.identifier_statement_group.as_ref()
+                {
                     let path: GenericSymbolPath = arg.expression_identifier.as_ref().into();
-                    self.reference_functions.push(path);
+                    self.reference_functions.push(path.clone());
+
+                    // Register generic-argument inference for a function called
+                    // as a discarded-result statement (e.g. `f(x);` in
+                    // always_comb). Without this it is only registered for calls
+                    // routed through identifier_factor, so a fully-inferable
+                    // statement call would wrongly raise generic_inference_failed.
+                    let has_generic_args = path
+                        .paths
+                        .last()
+                        .map(|p| !p.arguments.is_empty())
+                        .unwrap_or(false);
+                    if !has_generic_args {
+                        let arg_exprs: Vec<_> =
+                            if let Some(list) = &fc.function_call.function_call_opt {
+                                let items: Vec<&ArgumentItem> = list.argument_list.as_ref().into();
+                                items
+                                    .iter()
+                                    .filter(|item| item.argument_item_opt.is_none())
+                                    .map(|item| (*item.argument_expression.expression).clone())
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                        let call_token = arg
+                            .expression_identifier
+                            .scoped_identifier
+                            .identifier()
+                            .token;
+                        let namespace = self.namespace.clone();
+                        generic_inference_table::push_pending(PendingEntry {
+                            call_token_id: call_token.id,
+                            call_token,
+                            path,
+                            arg_exprs,
+                            namespace,
+                        });
+                    }
                 }
             }
             HandlerPoint::After => {

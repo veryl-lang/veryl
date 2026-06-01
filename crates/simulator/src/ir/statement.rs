@@ -306,12 +306,16 @@ impl Statement {
                     ControlFlow::Continue
                 };
                 if r.reverse {
-                    let mut i = end;
-                    while i > start {
-                        i -= r.step;
-                        if step_body(i) == ControlFlow::Break {
+                    // Mirror the emitted SV `for (int i = hi - 1; i >= lo;
+                    // i -= step)`; i64 makes underflow past lo terminate.
+                    let mut i = end as i64 - 1;
+                    let lo = start as i64;
+                    let step = r.step as i64;
+                    while i >= lo {
+                        if step_body(i as u64) == ControlFlow::Break {
                             break;
                         }
+                        i -= step;
                     }
                 } else if let Some(op) = &r.op {
                     let mut i = start;

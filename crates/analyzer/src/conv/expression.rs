@@ -119,11 +119,23 @@ fn prec_climb(
     if lo == hi {
         return Conv::conv(context, exprs[lo]);
     }
-    // find the lowest-precedence (leftmost if tied) operator in [lo..hi)
+    // Find the lowest-precedence operator in [lo..hi) to use as the subtree
+    // root. For left-associative operators pick the rightmost one at the
+    // minimum precedence (so `a - b - c` groups as `(a - b) - c`); for the
+    // right-associative power operator (precedence 11) pick the leftmost
+    // (so `a ** b ** c` groups as `a ** (b ** c)`, matching SystemVerilog).
     let mut min_idx = lo;
     let mut min_prec = ops[lo].1;
     for (i, op) in ops.iter().enumerate().take(hi).skip(lo + 1) {
-        if op.1 <= min_prec {
+        // `**` is the only right-associative operator; identify it by Op, not
+        // by its precedence number, so the rule survives precedence changes.
+        let right_assoc = matches!(op.0, Op::Pow);
+        let better = if right_assoc {
+            op.1 < min_prec
+        } else {
+            op.1 <= min_prec
+        };
+        if better {
             min_idx = i;
             min_prec = op.1;
         }

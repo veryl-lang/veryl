@@ -2,12 +2,28 @@ use crate::analyzer_error::AnalyzerError;
 use crate::conv::Context;
 use crate::symbol::SymbolKind;
 use crate::symbol_path::GenericSymbolPath;
-use crate::symbol_table;
+use crate::symbol_table::{self, ResolveErrorCause};
 use veryl_parser::veryl_grammar_trait::*;
 
 pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
     let path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
-    if let Ok(symbol) = symbol_table::resolve(&path) {
+    let symbol = match symbol_table::resolve(&path) {
+        Ok(symbol) => symbol,
+        Err(err) => {
+            // An ambiguous import path (the same package name reachable via two
+            // wildcard imports) would otherwise be dropped silently by
+            // apply_import; surface it here. Other causes are reported by the
+            // reference checker.
+            if let ResolveErrorCause::Ambiguous(name) = err.cause {
+                context.insert_error(AnalyzerError::ambiguous_identifier(
+                    &format!("{name}"),
+                    &value.scoped_identifier.as_ref().into(),
+                ));
+            }
+            return;
+        }
+    };
+    {
         let is_wildcard = value.import_declaration_opt.is_some();
         let is_valid_import = if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
             true
