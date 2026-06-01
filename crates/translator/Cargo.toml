@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-translator"
-version               = "0.20.0"
+version               = "0.20.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -14,6 +14,6 @@ edition.workspace     = true
 miette          = {workspace = true}
 sv-parser       = "0.13"
 thiserror       = {workspace = true}
-veryl-formatter = {version = "0.20.0", path = "../formatter"}
-veryl-metadata  = {version = "0.20.0", path = "../metadata"}
-veryl-parser    = {version = "0.20.0", path = "../parser"}
+veryl-formatter = {version = "0.20.1", path = "../formatter"}
+veryl-metadata  = {version = "0.20.1", path = "../metadata"}
+veryl-parser    = {version = "0.20.1", path = "../parser"}
