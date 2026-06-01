@@ -38,7 +38,7 @@ target-lexicon = "0.13.4"
 
 [dev-dependencies]
 criterion = {workspace = true}
-wellen    = "0.22.0"
+wellen    = "0.23.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pprof = {workspace = true}
