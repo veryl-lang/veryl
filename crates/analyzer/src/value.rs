@@ -718,9 +718,11 @@ impl ValueBigUint {
 
     pub fn to_value_u64(&self) -> Option<ValueU64> {
         if self.width <= 64 {
+            // width <=64 but the payload can need >64 bits (`1'h1ffffffffffffffff`);
+            // return None so it stays a BigUint and the too-large diagnostic fires.
             Some(ValueU64 {
-                payload: self.payload.to_u64().unwrap(),
-                mask_xz: self.mask_xz.to_u64().unwrap(),
+                payload: self.payload.to_u64()?,
+                mask_xz: self.mask_xz.to_u64()?,
                 width: self.width,
                 signed: self.signed,
             })
