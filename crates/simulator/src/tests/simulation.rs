@@ -13395,3 +13395,37 @@ fn wide_signed_compare_asymmetric_width_aot_c() {
         assert_eq!(sim.get("lt").unwrap(), elt);
     }
 }
+
+#[test]
+fn case_duplicate_value_first_match() {
+    // Regression: the Cranelift br_table lowering filled the jump table in arm
+    // order, so on a duplicate selector value the LAST arm won. SystemVerilog
+    // `case` is first-match, so sel==1 must select 20 (the first `8'd1` arm),
+    // not 77. Needs >=4 arms to exercise the br_table path.
+    let code = r#"
+    module Top (
+        sel   : input  logic<8>,
+        result: output logic<32>,
+    ) {
+        always_comb {
+            case sel {
+                8'd0: result = 32'd10;
+                8'd1: result = 32'd20;
+                8'd2: result = 32'd30;
+                8'd3: result = 32'd40;
+                8'd1: result = 32'd77;
+                default: result = 32'd99;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sel", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("result").unwrap(), Value::new(20, 32, false));
+    }
+}
