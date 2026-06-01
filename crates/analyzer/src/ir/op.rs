@@ -237,6 +237,10 @@ impl Op {
         } else {
             dst.r#type.kind = TypeKind::Logic;
         };
+
+        // Keep the operand's clock domain; otherwise the result defaults to
+        // None and laundering passes any downstream CDC check.
+        dst.clock_domain = x.clock_domain;
     }
 
     pub fn eval_type_binary(
@@ -290,6 +294,10 @@ impl Op {
         }
 
         check_clock_domain(context, x, y, &dst.token.beg);
+
+        // Carry the operands' clock domain so an operated value (e.g. `a_'a &
+        // b_'a`) still triggers a downstream CDC check.
+        dst.clock_domain = x.clock_domain.merge(&y.clock_domain);
 
         let x_width = x.r#type.total_width();
         let y_width = y.r#type.total_width();
@@ -444,6 +452,12 @@ impl Op {
 
         check_clock_domain(context, x, y, &dst.token.beg);
         check_clock_domain(context, x, z, &dst.token.beg);
+        // The branches merge into the result, so they must share a domain too
+        // (a const condition would let `cond ? a_'a : b_'b` slip past x-vs-y/z).
+        check_clock_domain(context, y, z, &dst.token.beg);
+
+        // Propagate the selected value's domain for downstream CDC checks.
+        dst.clock_domain = x.clock_domain.merge(&y.clock_domain).merge(&z.clock_domain);
 
         let y_width = y.r#type.total_width();
         let z_width = z.r#type.total_width();
@@ -490,7 +504,9 @@ impl Op {
             }
 
             check_clock_domain(context, dst, expr, &dst.token.beg);
-            dst.clock_domain = expr.clock_domain;
+            // Accumulate, don't overwrite: a trailing const ({a_'a, 1'b0}) would
+            // reset the domain to None and hide an earlier crossing.
+            dst.clock_domain = dst.clock_domain.merge(&expr.clock_domain);
 
             if expr.r#type.is_4state() {
                 kind = TypeKind::Logic;

@@ -10608,6 +10608,117 @@ fn clock_domain() {
         errors[0],
         AnalyzerError::MismatchClockDomain { .. }
     ));
+
+    // A clock domain must survive a binary operation. Previously the result of
+    // any binary/unary/ternary operation defaulted to ClockDomain::None, which
+    // is compatible with everything, so the crossing went undetected.
+    let code = r#"
+    module ModuleBinary (
+        i_dat0: input  'a logic<8>,
+        i_dat1: input  'a logic<8>,
+        o_dat : output 'b logic<8>,
+    ) {
+        assign o_dat = i_dat0 & i_dat1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleUnary (
+        i_dat: input  'a logic<8>,
+        o_dat: output 'b logic<8>,
+    ) {
+        assign o_dat = ~i_dat;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleTernary (
+        i_sel : input  'a logic,
+        i_dat0: input  'a logic<8>,
+        i_dat1: input  'a logic<8>,
+        o_dat : output 'b logic<8>,
+    ) {
+        assign o_dat = if i_sel ? i_dat0 : i_dat1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    // A trailing constant element must not launder the concatenation's domain.
+    let code = r#"
+    module ModuleConcatConst (
+        i_dat: input  'a logic<8>,
+        o_dat: output 'b logic<9>,
+    ) {
+        assign o_dat = {i_dat, 1'b0};
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    module ModuleArrayLit (
+        i_dat0: input  'a logic<8>,
+        i_dat1: input  'a logic<8>,
+        o_dat : output 'b logic<8> [2],
+    ) {
+        assign o_dat = '{i_dat0, i_dat1};
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    let code = r#"
+    package PkgStruct {
+        struct S {
+            x: logic<8>,
+        }
+    }
+    module ModuleStructCtor (
+        i_dat: input  'a logic<8>,
+        o_dat: output 'b PkgStruct::S,
+    ) {
+        assign o_dat = PkgStruct::S'{ x: i_dat };
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchClockDomain { .. }
+    ));
+
+    // Same-domain operations must NOT be flagged (no false positive).
+    let code = r#"
+    module ModuleSameDomain (
+        i_sel : input  'a logic,
+        i_dat0: input  'a logic<8>,
+        i_dat1: input  'a logic<8>,
+        o_dat : output 'a logic<8>,
+    ) {
+        assign o_dat = if i_sel ? (i_dat0 & i_dat1) : ~i_dat0;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
