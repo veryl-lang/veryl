@@ -1,0 +1,17 @@
+
+.affix {
+    font-weight: bold;
+    font-size: 1.8em;
+}
+
+.table_list {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+.table_list_item {
+    text-align: left;
+    border: unset;
+    background-color: var(--bg);
+}
+        
