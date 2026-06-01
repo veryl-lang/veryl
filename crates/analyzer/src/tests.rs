@@ -13663,3 +13663,25 @@ fn no_stack_overflow_on_cyclic_alias() {
         let _ = analyze(code);
     }
 }
+
+#[test]
+fn no_panic_on_for_step_shift_overflow() {
+    // Regression: a for-loop whose step shifts by >= the usize bit width
+    // (`step <<= 64`) overflowed the native shift in Op::eval and panicked the
+    // compiler during compile-time range evaluation.
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var acc: logic<32>;
+            acc = 0;
+            for i in 1..100 step <<= 64 {
+                acc += i;
+            }
+            o = acc;
+        }
+    }
+    "#;
+    let _ = analyze(code);
+}
