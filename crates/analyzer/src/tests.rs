@@ -13590,3 +13590,24 @@ fn no_panic_on_large_shift_amount() {
         let _ = analyze(code);
     }
 }
+
+#[test]
+fn no_panic_on_zero_step_for_loop() {
+    // Regression: a for-loop with `step += 0` never advances the induction
+    // variable, so compile-time unrolling looped forever and OOM-aborted.
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var acc: logic<32>;
+            acc = 0;
+            for i in 0..10 step += 0 {
+                acc += i;
+            }
+            o = acc;
+        }
+    }
+    "#;
+    let _ = analyze(code);
+}
