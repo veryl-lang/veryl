@@ -58,6 +58,10 @@ fn unescape_string_literal(s: &str) -> Vec<u8> {
     bytes
 }
 
+pub fn unescape_string_literal_to_string(s: &str) -> String {
+    String::from_utf8_lossy(&unescape_string_literal(s)).into_owned()
+}
+
 /// Convert a string literal (with surrounding quotes) to a byte-packed Value.
 /// e.g. "abc" → payload=0x616263, width=24, signed=false
 pub fn string_to_byte_value(s: &str) -> Value {
@@ -1590,7 +1594,16 @@ fn from_based_str(s: &str) -> Value {
 
 fn from_base_less_str(s: &str) -> Value {
     let x = s.replace('_', "");
-    let x = str::parse::<u64>(&x).unwrap();
+    // A base-less decimal literal is 32-bit. Parse with u64 on the common
+    // path; fall back to arbitrary precision (keeping the low bits) instead
+    // of panicking when the literal exceeds u64::MAX.
+    let x = match str::parse::<u64>(&x) {
+        Ok(x) => x,
+        Err(_) => BigUint::from_str_radix(&x, 10)
+            .ok()
+            .and_then(|b| b.to_u64_digits().first().copied())
+            .unwrap_or(0),
+    };
     Value::new(x, 32, true)
 }
 
@@ -1606,7 +1619,9 @@ fn from_all_bit_str(s: &str) -> Value {
             _ => unreachable!(),
         }
     } else {
-        let width = str::parse::<usize>(width).unwrap();
+        // Fall back to width 0 instead of panicking when the width prefix
+        // overflows usize (degenerate literal like `999...'0`).
+        let width = str::parse::<usize>(width).unwrap_or(0);
         let mask = ValueBigUint::gen_mask(width);
         match rest {
             "0" => (zero(), zero(), width),

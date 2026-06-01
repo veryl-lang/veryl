@@ -11705,6 +11705,53 @@ fn for_static_step_and_rev() {
 }
 
 #[test]
+fn for_rev_with_step() {
+    // A reverse loop combined with a step must visit the same values as the
+    // emitted SystemVerilog `for (int i = hi - 1; i >= lo; i -= step)`. For
+    // `rev 0..10 step += 2` that is {9, 7, 5, 3, 1} (sum 25), and for the
+    // inclusive `rev 0..=10 step += 2` that is {10, 8, 6, 4, 2, 0} (sum 30).
+    // Regression for the simulator diverging from the synthesized RTL.
+    let code = r#"
+    module Top (
+        sum_excl: output logic<32>,
+        sum_incl: output logic<32>,
+    ) {
+        always_comb {
+            sum_excl = 0;
+            for i in rev 0..10 step += 2 {
+                sum_excl += i;
+            }
+            sum_incl = 0;
+            for i in rev 0..=10 step += 2 {
+                sum_incl += i;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("sum_excl").unwrap(),
+            Value::new(25, 32, false),
+            "rev excl: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("sum_incl").unwrap(),
+            Value::new(30, 32, false),
+            "rev incl: JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
 fn wide_dynamic_bit_select() {
     // `bits[j]` with a runtime `j` on a 128-bit variable must return the
     // actual bit at position `j`, not a u64-truncated view (bits past 63

@@ -179,7 +179,20 @@ fn get_enum_member_next_value(
         match encoding {
             EnumEncodingItem::Sequential => Some(value + 1),
             EnumEncodingItem::OneHot => Some(value << 1),
-            EnumEncodingItem::Gray => Some(((value + 1) >> 1) ^ (value + 1)),
+            EnumEncodingItem::Gray => {
+                // `value` is the previous member's gray-encoded value, not its
+                // ordinal index. Recover the ordinal by gray-decoding, then
+                // re-encode the next ordinal so the chain stays a valid Gray
+                // sequence (0, 1, 3, 2, 6, 7, 5, 4, ...).
+                let mut n = value;
+                let mut g = value >> 1;
+                while g != 0 {
+                    n ^= g;
+                    g >>= 1;
+                }
+                let m = n + 1;
+                Some(m ^ (m >> 1))
+            }
         }
     } else if pre_value.is_none() {
         if matches!(encoding, EnumEncodingItem::OneHot) {

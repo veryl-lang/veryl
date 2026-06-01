@@ -572,14 +572,18 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 };
                 let mut loop_result = ExecResult::Continue;
                 if reverse {
-                    let mut i = end;
-                    while i > start {
-                        i -= step;
-                        let result = step_body(i);
+                    // Mirror the emitted SV `for (int i = hi - 1; i >= lo;
+                    // i -= step)`; i64 makes underflow past lo terminate.
+                    let mut i = end as i64 - 1;
+                    let lo = start as i64;
+                    let step = step as i64;
+                    while i >= lo {
+                        let result = step_body(i as u64);
                         if result.should_stop() {
                             loop_result = result;
                             break;
                         }
+                        i -= step;
                     }
                 } else if let Some(op) = op {
                     let mut i = start;

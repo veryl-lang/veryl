@@ -3430,3 +3430,100 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[track_caller]
+fn emit_with_default(code: &str) -> String {
+    let metadata = Metadata::create_default("prj").unwrap();
+    emit(&metadata, code)
+}
+
+#[test]
+fn regression_cast_to_positive_type_balanced_parens() {
+    // `as p8/p16/p32/p64` must emit balanced parentheses (previously the
+    // closing `))` was missing, producing invalid SystemVerilog).
+    let code = r#"
+    module Top {
+        var a: logic<8>;
+        var b: logic<8>;
+        assign a = 8'd5;
+        assign b = a as p8;
+    }
+    "#;
+    let code = emit_with_default(code);
+    assert!(
+        code.contains("unsigned'(byte'(a))"),
+        "cast to p8 should emit balanced parens, got:\n{code}"
+    );
+    assert!(
+        !code.contains("byte'(a;"),
+        "cast to p8 must not emit unbalanced parens, got:\n{code}"
+    );
+}
+
+#[test]
+fn regression_reverse_step_for_statement_descends() {
+    // `for i in rev 0..10 step += 2` must emit a descending, terminating
+    // loop (`i -= 2`), not the verbatim `i += 2` (which never terminates).
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in rev 0..10 step += 2 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let code = emit_with_default(code);
+    assert!(
+        code.contains("i >= 0; i -= 2"),
+        "reverse stepped for should descend, got:\n{code}"
+    );
+    assert!(
+        !code.contains("i >= 0; i += 2"),
+        "reverse stepped for must not count up toward a >= guard, got:\n{code}"
+    );
+}
+
+#[test]
+fn regression_reverse_step_generate_for_descends() {
+    // Same as above for genvar generate-for loops.
+    let code = r#"
+    module Top {
+        for i in rev 0..10 step += 2 :g {
+            let _x: logic = 0;
+        }
+    }
+    "#;
+    let code = emit_with_default(code);
+    assert!(
+        code.contains("i >= 0; i -= 2"),
+        "reverse stepped generate-for should descend, got:\n{code}"
+    );
+}
+
+#[test]
+fn regression_sv_attribute_backslash_unescape() {
+    // `#[sv("...")]` must decode an escaped backslash to a single one
+    // (previously only `\"` was decoded, doubling backslashes).
+    let code = r#"
+    module M2 {
+        #[sv("a\\b")]
+        var a: logic;
+        assign a = 1;
+    }
+    "#;
+    let code = emit_with_default(code);
+    assert!(
+        code.contains("(* a\\b *)"),
+        "sv attribute should decode backslash-backslash to one backslash, got:\n{code}"
+    );
+    assert!(
+        !code.contains("a\\\\b"),
+        "sv attribute must not emit a doubled backslash, got:\n{code}"
+    );
+}

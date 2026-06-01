@@ -135,17 +135,36 @@ impl ForRange {
                 start,
                 end,
                 inclusive,
-                ..
+                step,
             } => {
                 let start = start.eval_value(context)?;
                 let end = end.eval_value(context)?;
                 if end.saturating_sub(start) > limit {
                     return None;
                 }
-                if *inclusive {
-                    Some((start..=end).rev().collect())
+                if *step <= 1 {
+                    if *inclusive {
+                        Some((start..=end).rev().collect())
+                    } else {
+                        Some((start..end).rev().collect())
+                    }
                 } else {
-                    Some((start..end).rev().collect())
+                    // Descend from the high bound by `step`, matching the
+                    // emitted `for (i = hi; i >= lo; i -= step)`.
+                    let hi = if *inclusive {
+                        end
+                    } else {
+                        end.saturating_sub(1)
+                    };
+                    let mut ret = vec![];
+                    let mut i = hi as i64;
+                    let lo = start as i64;
+                    let step = *step as i64;
+                    while i >= lo {
+                        ret.push(i as usize);
+                        i -= step;
+                    }
+                    Some(ret)
                 }
             }
             ForRange::Stepped {

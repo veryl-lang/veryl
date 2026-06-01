@@ -915,17 +915,83 @@ impl ProtoExpression {
                         let ret = builder.ins().icmp(cc, x_payload, y_payload);
                         builder.ins().uextend(I64, ret)
                     }
-                    Op::LogicShiftL | Op::ArithShiftL => builder.ins().ishl(x_payload, y_payload),
-                    Op::LogicShiftR => builder.ins().ushr(x_payload, y_payload),
+                    Op::LogicShiftL | Op::ArithShiftL => {
+                        // For 65..128-bit operands the native I128 shift uses a
+                        // mod-128 count, so a runtime count >= width (e.g. 128)
+                        // would wrongly return the operand unshifted instead of
+                        // 0. Clamp: when count >= width, force 0.
+                        let raw = builder.ins().ishl(x_payload, y_payload);
+                        if needs_wide && expr_context.width <= 128 {
+                            let oob = icmp_const(
+                                builder,
+                                IntCC::UnsignedGreaterThanOrEqual,
+                                y_payload,
+                                expr_context.width as u128,
+                                needs_wide,
+                            );
+                            let zero = iconst_for_width(builder, 0, needs_wide);
+                            builder.ins().select(oob, zero, raw)
+                        } else {
+                            raw
+                        }
+                    }
+                    Op::LogicShiftR => {
+                        let raw = builder.ins().ushr(x_payload, y_payload);
+                        if needs_wide && expr_context.width <= 128 {
+                            let oob = icmp_const(
+                                builder,
+                                IntCC::UnsignedGreaterThanOrEqual,
+                                y_payload,
+                                expr_context.width as u128,
+                                needs_wide,
+                            );
+                            let zero = iconst_for_width(builder, 0, needs_wide);
+                            builder.ins().select(oob, zero, raw)
+                        } else {
+                            raw
+                        }
+                    }
                     Op::ArithShiftR => {
                         if signed {
                             let native_bits = if needs_wide { 128 } else { 64 };
                             let shl_amount = (native_bits - x.width()) as i64;
                             let shifted_up = builder.ins().ishl_imm(x_payload, shl_amount);
                             let sign_extended = builder.ins().sshr_imm(shifted_up, shl_amount);
-                            builder.ins().sshr(sign_extended, y_payload)
+                            let raw = builder.ins().sshr(sign_extended, y_payload);
+                            if needs_wide && x.width() <= 128 {
+                                // count >= width: arithmetic right shift fills
+                                // with the sign bit. sshr by (width-1) yields
+                                // all-sign-bits; native mod-128 would instead
+                                // return the operand unshifted.
+                                let oob = icmp_const(
+                                    builder,
+                                    IntCC::UnsignedGreaterThanOrEqual,
+                                    y_payload,
+                                    x.width() as u128,
+                                    needs_wide,
+                                );
+                                let fill = builder
+                                    .ins()
+                                    .sshr_imm(sign_extended, (x.width() - 1) as i64);
+                                builder.ins().select(oob, fill, raw)
+                            } else {
+                                raw
+                            }
                         } else {
-                            builder.ins().ushr(x_payload, y_payload)
+                            let raw = builder.ins().ushr(x_payload, y_payload);
+                            if needs_wide && expr_context.width <= 128 {
+                                let oob = icmp_const(
+                                    builder,
+                                    IntCC::UnsignedGreaterThanOrEqual,
+                                    y_payload,
+                                    expr_context.width as u128,
+                                    needs_wide,
+                                );
+                                let zero = iconst_for_width(builder, 0, needs_wide);
+                                builder.ins().select(oob, zero, raw)
+                            } else {
+                                raw
+                            }
                         }
                     }
                     Op::Pow => {

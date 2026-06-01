@@ -46,6 +46,9 @@ pub enum ResolveErrorCause {
     NotFound(StrId),
     Private,
     Invisible,
+    /// The name resolved to two or more distinct symbols imported at equal
+    /// priority (e.g. the same name from two wildcard-imported packages).
+    Ambiguous(StrId),
 }
 
 impl ResolveError {
@@ -642,6 +645,7 @@ impl SymbolTable {
                 .name_table
                 .get(&resource_table::canonical_str_id(*name))
             {
+                let mut included_count = 0usize;
                 for id in ids {
                     let symbol = self.symbol_table.get(id).unwrap();
                     let (included, imported) = if context.inner {
@@ -660,10 +664,62 @@ impl SymbolTable {
                             imported,
                         )
                     };
-                    if included && symbol.namespace.depth() >= max_depth {
-                        context.found = Some(symbol);
-                        context.imported = imported;
-                        max_depth = symbol.namespace.depth();
+                    if included {
+                        included_count += 1;
+                        if symbol.namespace.depth() >= max_depth {
+                            context.found = Some(symbol);
+                            context.imported = imported;
+                            max_depth = symbol.namespace.depth();
+                        }
+                    }
+                }
+
+                // Detect a name made ambiguous by two or more wildcard imports
+                // from different packages (`import A::*; import B::*;`), which
+                // otherwise binds arbitrarily. A local declaration or explicit
+                // import is authoritative and is never flagged. Candidates are
+                // keyed by definition site, not SymbolId, since generic
+                // instantiation clones one declaration into several SymbolIds.
+                // Gated on >= 2 in-scope candidates so the single-match hot path
+                // skips the rescan and allocation.
+                if context.found.is_some() && !context.inner && included_count >= 2 {
+                    let mut distinct_defs = std::collections::HashSet::new();
+                    let mut authoritative = false;
+                    for id in ids {
+                        let symbol = self.symbol_table.get(id).unwrap();
+                        if symbol.namespace.depth() != max_depth {
+                            continue;
+                        }
+                        if context.namespace.included(&symbol.namespace) {
+                            authoritative = true;
+                            continue;
+                        }
+                        let in_scope = symbol
+                            .imported
+                            .iter()
+                            .filter(|x| context.namespace.included(&x.namespace));
+                        let mut via_wildcard = false;
+                        let mut via_explicit = false;
+                        for imp in in_scope {
+                            if imp.wildcard {
+                                via_wildcard = true;
+                            } else {
+                                via_explicit = true;
+                            }
+                        }
+                        if via_explicit {
+                            authoritative = true;
+                        } else if via_wildcard {
+                            let t = &symbol.token;
+                            distinct_defs.insert((t.source, t.line, t.column));
+                        }
+                    }
+                    if !authoritative && distinct_defs.len() >= 2 {
+                        trace!("symbol_table: {}ambiguous '{}'", context.indent(), path);
+                        return Err(ResolveError::new(
+                            context.found,
+                            ResolveErrorCause::Ambiguous(*name),
+                        ));
                     }
                 }
 

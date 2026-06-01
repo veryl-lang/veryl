@@ -28,18 +28,30 @@ fn is_unexpandable_modport(context: &mut Context, symbol: &Symbol) -> bool {
                     return false;
                 };
 
-                if let SymbolKind::Modport(modport) = &symbol.found.kind
-                    && let Some(symbol) = symbol_table::get(modport.interface)
-                {
-                    let SymbolKind::Interface(x) = symbol.kind else {
-                        unreachable!()
-                    };
+                if let SymbolKind::Modport(modport) = &symbol.found.kind {
+                    // Inout members can't be expanded into top-level ports: the
+                    // expansion would emit them as `output var`, silently
+                    // dropping bidirectionality. Reject rather than miscompile.
+                    for member_id in &modport.members {
+                        if let Some(member) = symbol_table::get(*member_id)
+                            && let SymbolKind::ModportVariableMember(m) = &member.kind
+                            && matches!(m.direction, SymDirection::Inout)
+                        {
+                            return true;
+                        }
+                    }
 
-                    let is_expandable = x.parameters.is_empty()
-                        && (!context.is_affiliated(Affiliation::Function)
-                            || port_type.array.is_empty());
-                    if !is_expandable {
-                        return true;
+                    if let Some(symbol) = symbol_table::get(modport.interface) {
+                        let SymbolKind::Interface(x) = symbol.kind else {
+                            unreachable!()
+                        };
+
+                        let is_expandable = x.parameters.is_empty()
+                            && (!context.is_affiliated(Affiliation::Function)
+                                || port_type.array.is_empty());
+                        if !is_expandable {
+                            return true;
+                        }
                     }
                 }
             }

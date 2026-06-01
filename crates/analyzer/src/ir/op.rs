@@ -1530,12 +1530,16 @@ impl Op {
                             if x.is_xz() {
                                 Value::U64(ValueU64::new_x(width, x.signed))
                             } else if x.signed {
-                                let ret = x.to_i64().unwrap();
-                                let ret = ret.pow(y as u32);
-                                Value::U64(ValueU64::new(ret as u64, width, true))
+                                // Wrapping exponentiation + width masking like
+                                // Op::Mul, so an overflowing constant power does
+                                // not panic in debug builds.
+                                let ret = x.to_i64().unwrap().wrapping_pow(y as u32) as u64;
+                                let payload = ret & ValueU64::gen_mask(width);
+                                Value::U64(ValueU64::new(payload, width, true))
                             } else {
-                                let ret = x.payload.pow(y as u32);
-                                Value::U64(ValueU64::new(ret, width, false))
+                                let ret = x.payload.wrapping_pow(y as u32);
+                                let payload = ret & ValueU64::gen_mask(width);
+                                Value::U64(ValueU64::new(payload, width, false))
                             }
                         } else {
                             Value::U64(ValueU64::new_x(width, false))

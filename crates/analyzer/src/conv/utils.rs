@@ -1393,12 +1393,34 @@ fn build_for_range_inner(
         let op: ir::Op = Conv::conv(context, op)?;
 
         if matches!(op, ir::Op::Add) {
-            Ok(ir::ForRange::Forward {
-                start: beg,
-                end,
-                inclusive,
-                step: step_val,
-            })
+            // Honor `rev` for additive steps so the unrolled iteration order
+            // matches the emitted descending `for (i = hi; i >= lo; i -= step)`.
+            if rev {
+                Ok(ir::ForRange::Reverse {
+                    start: beg,
+                    end,
+                    inclusive,
+                    step: step_val,
+                })
+            } else {
+                Ok(ir::ForRange::Forward {
+                    start: beg,
+                    end,
+                    inclusive,
+                    step: step_val,
+                })
+            }
+        } else if rev {
+            // A reverse loop is emitted as `for (i = hi; i >= lo; <step>)`, so a
+            // non-additive step (`*=`, `<<=`, ...) cannot be inverted to descend
+            // toward the lower bound and would never terminate. Reject it rather
+            // than emit a broken loop.
+            let token: TokenRange = range.into();
+            context.insert_error(AnalyzerError::invalid_statement(
+                "reverse for-loop with a non-additive step",
+                &token,
+            ));
+            Err(ir_error!(token))
         } else {
             Ok(ir::ForRange::Stepped {
                 start: beg,
