@@ -489,6 +489,73 @@ fn wide_shift_amount(y: &ProtoExpression, pre: &mut String) -> Option<String> {
     }
 }
 
+/// Emit a scalar read-modify-write for a `<=64`-bit wide bit-select store
+/// `dst[hi:lo] <= src`, where `word_addr(k)` yields the C `veryl_u64_ua*`
+/// address of the destination's 64-bit word `k`.  Such a field spans one or
+/// two words, so this replaces the general path's full-width wide-op RMW
+/// (fill_ones/shl/band/band_not/bor/copy/apply_mask) with one or two scalar
+/// word RMWs.
+fn emit_wide_narrow_field_store(
+    expr: &ProtoExpression,
+    hi: usize,
+    lo: usize,
+    dst_width: usize,
+    word_addr: impl Fn(usize) -> String,
+) -> Option<String> {
+    // Bits >= dst_width must be dropped — the reference paths do so (interpret
+    // masks to gen_mask(dst_width); Cranelift and the 8-op path apply_mask) but
+    // the frontend doesn't reject an out-of-range LHS select (`// TODO
+    // invalid_select`).  Clamping the field to [lo, dst_width) is a
+    // compile-time fold that restores that parity without a runtime apply_mask,
+    // and keeps the written word index in bounds (k1 < nw).
+    if lo >= dst_width {
+        return Some(String::from("{ }")); // whole field out of range → no-op
+    }
+    let hi = hi.min(dst_width - 1);
+    let nbits = hi - lo + 1;
+    debug_assert!(nbits <= 64);
+    let mut pre = String::new();
+    let sv = wide_shift_amount(expr, &mut pre)?; // source's low 64 bits
+    let k0 = lo / 64;
+    let k1 = hi / 64;
+    let b = lo % 64;
+    if k0 == k1 {
+        let base_mask: u64 = if nbits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << nbits) - 1
+        };
+        let m = base_mask << b;
+        let a0 = word_addr(k0);
+        Some(format!(
+            "{{ {pre}veryl_u64_ua* _d = {a0}; \
+                *_d = ((*_d) & ~{m:#x}ULL) | ((((uint64_t)({sv})) << {b}) & {m:#x}ULL); }}"
+        ))
+    } else {
+        // Two words (k1 == k0 + 1): the low (64-b) field bits go to word k0
+        // [b:63], the rest to word k1 [0:hi%64].  b >= 1 (b == 0 would keep the
+        // field in one word), so sh = 64 - b is never the UB `>> 64`.
+        debug_assert!((1..=63).contains(&b));
+        let m0: u64 = u64::MAX << b;
+        let hb = hi % 64;
+        let m1: u64 = if hb == 63 {
+            u64::MAX
+        } else {
+            (1u64 << (hb + 1)) - 1
+        };
+        let sh = 64 - b;
+        let a0 = word_addr(k0);
+        let a1 = word_addr(k1);
+        Some(format!(
+            "{{ {pre}uint64_t _sv = (uint64_t)({sv}); \
+                veryl_u64_ua* _d0 = {a0}; \
+                veryl_u64_ua* _d1 = {a1}; \
+                *_d0 = ((*_d0) & ~{m0:#x}ULL) | ((_sv << {b}) & {m0:#x}ULL); \
+                *_d1 = ((*_d1) & ~{m1:#x}ULL) | ((_sv >> {sh}) & {m1:#x}ULL); }}"
+        ))
+    }
+}
+
 /// Wide binary op with a wide result (band/bor/bxor/bxor_not/add/sub/mul and
 /// the shifts).  Div/Rem/Pow → None (interpreter).  Mirrors
 /// `build_binary_wide_binary`'s non-comparison arm (expression.rs 2140-2241):
@@ -1818,8 +1885,10 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             }
             // Wide (>128-bit) comb store via the wide-op helper table.  The
             // 65-128 bit range is already handled by the `__uint128_t` path
-            // below; only >128 needs the flat-buffer pointer + helpers.
-            // Select / rhs_select wide stores stay on Cranelift (S1).
+            // below; only >128 needs the flat-buffer pointer + helpers.  A
+            // (bit-)select store IS emitted here (scalar fast path for <=64-bit
+            // fields, full wide RMW otherwise); only rhs_select stays on
+            // Cranelift (S1).
             if a.dst_width > 128 {
                 // rhs_select on a wide store stays on Cranelift (rare);
                 // dynamic_select bailed above.
@@ -1834,17 +1903,28 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 }
                 let nb = native_bytes(a.dst_width);
                 let nw = nb / 8;
-                let mut pre = String::new();
-                let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
                 let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
                 if let Some((hi, lo)) = a.select {
-                    // Wide bit-select WRITE (RMW, 2-state):
+                    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+                    // <=64-bit field → scalar word RMW (see
+                    // emit_wide_narrow_field_store); wider fields fall through.
+                    if nbits <= 64 {
+                        return emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, |k| {
+                            format!(
+                                "(veryl_u64_ua*)(comb_values + {:#x})",
+                                store_off + (k as isize) * 8
+                            )
+                        });
+                    }
+                    // General multi-word field — full wide RMW (2-state):
                     //   new = (old & ~rangemask) | ((src << lo) & rangemask)
                     // where rangemask = fill_ones(nbits) << lo.  `old` is read
                     // from the destination BEFORE the final copy overwrites it.
                     // Mirrors Cranelift emit_wide_select_rmw.
-                    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+                    let mut pre = String::new();
+                    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                    let src = r.addr;
                     let rmask = next_wide_tmp();
                     let srcsh = next_wide_tmp();
                     let newv = next_wide_tmp();
@@ -1859,7 +1939,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                          vw_band_not((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{rmask}, {nb}u); \
                          vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); ",
                         pkn = wpack(nb, nbits),
-                        src = r.addr,
+                        src = src,
                         dst = dst,
                     ));
                     return Some(format!(
@@ -1870,6 +1950,8 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 // No select: plain wide store.  Copy into the destination, then
                 // mask THERE (never the source, which may alias a flat-buffer
                 // variable read).
+                let mut pre = String::new();
+                let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
                 return Some(format!(
                     "{{ {pre}vw_copy({dst}, {src}, {nb}u); \
                         vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
@@ -2032,38 +2114,48 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 let max_idx = a.dst_num_elements.saturating_sub(1);
                 let idx_str = emit_expr(&a.dst_index_expr)?;
                 let dmask = wpack(nb, a.dst_width);
-                let mut pre = String::new();
-                let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
                 // `_pa` is the element byte-address; declared in the block below
                 // before the wide ops reference it.  `pre` (the RHS scratch)
                 // does not reference `_pa`/`_idx`, so the ordering is sound.
                 let store = if let Some((hi, lo)) = a.select {
-                    // Runtime-addressed wide bit-select RMW (2-state):
-                    //   new = (old & ~rangemask) | ((src << lo) & rangemask)
-                    // Mirrors the static wide-store RMW (Cranelift parity).
                     let nbits = hi.checked_sub(lo)?.checked_add(1)?;
-                    let rmask = next_wide_tmp();
-                    let srcsh = next_wide_tmp();
-                    let newv = next_wide_tmp();
-                    format!(
-                        "{pre}\
-                         uint64_t _w{rmask}[{nw}]; \
-                         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
-                         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
-                         uint64_t _w{srcsh}[{nw}]; \
-                         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
-                         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
-                         uint64_t _w{newv}[{nw}]; \
-                         vw_band_not((uint8_t*)_w{newv}, _pa, (const uint8_t*)_w{rmask}, {nb}u); \
-                         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); \
-                         vw_copy(_pa, (const uint8_t*)_w{newv}, {nb}u); \
-                         vw_apply_mask(_pa, (const uint8_t*)0, {dmask}u);",
-                        pkn = wpack(nb, nbits),
-                        src = r.addr,
-                    )
+                    // <=64-bit field → scalar word RMW of the runtime-addressed
+                    // element; see emit_wide_narrow_field_store.
+                    if nbits <= 64 {
+                        emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, |k| {
+                            format!("(veryl_u64_ua*)(_pa + {})", k * 8)
+                        })?
+                    } else {
+                        // General multi-word field — runtime-addressed wide RMW:
+                        //   new = (old & ~rangemask) | ((src << lo) & rangemask)
+                        // Mirrors the static wide-store RMW (Cranelift parity).
+                        let mut pre = String::new();
+                        let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                        let rmask = next_wide_tmp();
+                        let srcsh = next_wide_tmp();
+                        let newv = next_wide_tmp();
+                        format!(
+                            "{pre}\
+                             uint64_t _w{rmask}[{nw}]; \
+                             vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
+                             vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
+                             uint64_t _w{srcsh}[{nw}]; \
+                             vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
+                             vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
+                             uint64_t _w{newv}[{nw}]; \
+                             vw_band_not((uint8_t*)_w{newv}, _pa, (const uint8_t*)_w{rmask}, {nb}u); \
+                             vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); \
+                             vw_copy(_pa, (const uint8_t*)_w{newv}, {nb}u); \
+                             vw_apply_mask(_pa, (const uint8_t*)0, {dmask}u);",
+                            pkn = wpack(nb, nbits),
+                            src = r.addr,
+                        )
+                    }
                 } else {
                     // Full element write: copy then mask in the destination
                     // (never the source, which may alias a flat-buffer read).
+                    let mut pre = String::new();
+                    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
                     format!(
                         "{pre}vw_copy(_pa, {src}, {nb}u); \
                          vw_apply_mask(_pa, (const uint8_t*)0, {dmask}u);",

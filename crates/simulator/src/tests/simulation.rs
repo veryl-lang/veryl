@@ -504,6 +504,56 @@ fn wide_256_aot_native_comb() {
 }
 
 #[test]
+fn probe_wide_comb_oor_select_store() {
+    // PROBE: wide (>128-bit) COMB bit-select store where hi >= dst_width.
+    // a is 200-bit; a[201:199] writes bits 199..201, but only bit 199 is
+    // within [0,200). Bits 200,201 are above dst_width=200. The interpreter
+    // and Cranelift clamp to dst_width unconditionally; the new AOT-C scalar
+    // fast path (emit_wide_narrow_field_store) skips the trailing apply_mask.
+    // Drive a fully first so the RMW reads a defined base.
+    let code = r#"
+    module Top (
+        base: input  logic<200>,
+        b:    input  logic<8>,
+        o:    output logic<200>,
+    ) {
+        always_comb {
+            o = base;
+            o[201:199] = b;
+        }
+    }
+    "#;
+
+    // Reference value: interpreter / Cranelift semantics = only bits within
+    // [0,200) are written, rest of o = base, and bits >= 200 stay 0 (o is
+    // declared 200-bit so high storage bits must be 0).
+    // base low: set bit 199 region to 0 so we can see the written bit clearly.
+    let base_val = Value::new(0, 200, false);
+    let b_val = Value::new(0b111, 8, false); // wants to set bits 199,200,201
+
+    let mut results = vec![];
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("base", base_val.clone());
+        sim.set("b", b_val.clone());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let o = sim.get("o").unwrap();
+        eprintln!("PROBE config={config:?} o={}", o.format_hex());
+        results.push((format!("{config:?}"), o.format_hex()));
+    }
+    // Print all; assert all identical (this is the divergence check).
+    let first = results[0].1.clone();
+    for (cfg, v) in &results {
+        assert_eq!(
+            *v, first,
+            "DIVERGENCE: config {cfg} gave o={v}, expected {first}"
+        );
+    }
+}
+
+#[test]
 fn wide_256_aot_native_ff() {
     // G2: a wide (>128-bit) FF module must be covered NATIVELY by the AOT-C
     // event backend (whole_events non-empty), routing through the 64-byte
@@ -838,6 +888,108 @@ fn wide_v4_repro_dyn_array_232() {
         assert_eq!(
             sim.get("dout").unwrap(),
             Value::new_biguint(d, 232, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_narrow_field_two_word_straddle() {
+    // A <=64-bit field that STRADDLES a 64-bit word boundary exercises the
+    // two-word arm of emit_wide_narrow_field_store.  w[130:67] is a 64-bit
+    // field crossing the word-1/word-2 boundary (b = 67 % 64 = 3, k0=1, k1=2).
+    let code = r#"
+    module Top (
+        f: input  logic<64>,
+        w: output logic<200>,
+    ) {
+        always_comb {
+            w = 0;
+            w[130:67] = f;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let f: u64 = 0xFEDC_BA98_7654_3210;
+        sim.set("f", Value::new(f, 64, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let exp = {
+            use num_bigint::BigUint;
+            Value::new_biguint(BigUint::from(f) << 67usize, 200, false)
+        };
+        assert_eq!(sim.get("w").unwrap(), exp, "{config:?}");
+    }
+}
+
+#[test]
+fn wide_narrow_field_select_out_of_range_hi() {
+    // A bit-select store whose HIGH end exceeds dst_width: w[201:199] on a
+    // 200-bit value.  Bits 200,201 are out of range and must be dropped, like
+    // the interpret/Cranelift oracles do.  Regression: the bare RMW left them
+    // set (0x38..0 instead of the reference 0x80..0).
+    let code = r#"
+    module Top (
+        b: input  logic<3>,
+        w: output logic<200>,
+    ) {
+        always_comb {
+            w = 0;
+            w[201:199] = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("b", Value::new(0b111, 3, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // Only the in-range bit 199 survives; bits 200,201 are out of range.
+        let exp = {
+            use num_bigint::BigUint;
+            Value::new_biguint(BigUint::from(1u8) << 199usize, 200, false)
+        };
+        assert_eq!(sim.get("w").unwrap(), exp, "{config:?}");
+    }
+}
+
+#[test]
+fn wide_narrow_field_select_fully_out_of_range() {
+    // A bit-select store ENTIRELY past dst_width: w[260:259] on a 200-bit
+    // value.  The whole field is dropped (a no-op).  lo/64 = 4 also exceeds the
+    // value's native_bytes word count (native_bytes(200)/8 = 4 words, indices
+    // 0..3), so without the clamp the fast path would address word 4 — out of
+    // bounds; the clamp turns it into a no-op that leaves the base untouched.
+    let code = r#"
+    module Top (
+        a: input  logic<200>,
+        b: input  logic<2>,
+        w: output logic<200>,
+    ) {
+        always_comb {
+            w = a;
+            w[260:259] = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let a = {
+            use num_bigint::BigUint;
+            BigUint::from(1u8) << 150usize
+        };
+        sim.set("a", Value::new_biguint(a.clone(), 200, false));
+        sim.set("b", Value::new(0b11, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // The out-of-range field write is a no-op: w == a.
+        assert_eq!(
+            sim.get("w").unwrap(),
+            Value::new_biguint(a, 200, false),
             "{config:?}"
         );
     }
