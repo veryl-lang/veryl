@@ -3527,3 +3527,45 @@ fn regression_sv_attribute_backslash_unescape() {
         "sv attribute must not emit a doubled backslash, got:\n{code}"
     );
 }
+
+
+#[test]
+fn msb_after_unpacked_array_select_dimension() {
+    // Regression: SV $size numbers unpacked dims first, then packed. msb after
+    // an unpacked-array select must reference the packed dimension of the
+    // selected element (`$size(a, 2)`), and msb on the unpacked dimension
+    // itself must reference dimension 1 (`$size(a, 1)`).
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    o: output logic,
+) {
+    var a: logic<8> [4];
+    always_comb {
+        a = '{0, 0, 0, 0};
+        o = a[0][msb];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("a[0][($size(a, 2) - 1)]"),
+        "msb after unpacked select must use packed dimension 2:\n{ret}"
+    );
+
+    let code = r#"module M (
+    o: output logic<8>,
+) {
+    var a: logic<8> [4];
+    always_comb {
+        a = '{0, 0, 0, 0};
+        o = a[msb];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("a[($size(a, 1) - 1)]"),
+        "msb on the unpacked dimension must use dimension 1:\n{ret}"
+    );
+}

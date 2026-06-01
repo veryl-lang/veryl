@@ -637,18 +637,23 @@ impl Conv<&Factor> for ir::Expression {
                             }
 
                             let dim = context.get_select_dim().unwrap();
+                            let array_dims = comptime.r#type.array.dims();
 
                             let width = if comptime.r#type.is_struct()
                                 || comptime.r#type.is_unknown()
                             {
                                 comptime.r#type.total_width()
+                            } else if dim < array_dims {
+                                // msb selects an unpacked array dimension, so its
+                                // value is that dimension's element count minus 1
+                                // (e.g. `a[msb]` on `logic<8>[4]` is 3), not the
+                                // packed bit width.
+                                comptime.r#type.array.as_slice().get(dim).copied().flatten()
                             } else {
-                                // `dim` counts preceding unpacked-array
-                                // selects too, but width() holds only the
-                                // packed dimensions; skip the array
-                                // dimensions so we don't index past it
-                                // (which panicked for e.g. `a[0][msb]`).
-                                let packed_dim = dim.saturating_sub(comptime.r#type.array.dims());
+                                // packed dimension: skip the unpacked array dims
+                                // (which `dim` also counts) before indexing the
+                                // packed-width Shape.
+                                let packed_dim = dim - array_dims;
                                 comptime
                                     .r#type
                                     .width()
@@ -675,13 +680,16 @@ impl Conv<&Factor> for ir::Expression {
 
                             msb_table::insert(msb.msb.msb_token.token.id, dim + 1);
 
+                            let array_dims = r#type.array.dims();
                             let width = if r#type.is_struct() {
                                 r#type.total_width()
+                            } else if dim < array_dims {
+                                // msb on an unpacked array dimension: use that
+                                // dimension's element count (see variable branch).
+                                r#type.array.as_slice().get(dim).copied().flatten()
                             } else {
-                                // See the variable branch above: skip unpacked
-                                // array dimensions before indexing the packed
-                                // width Shape to avoid an out-of-bounds panic.
-                                let packed_dim = dim.saturating_sub(r#type.array.dims());
+                                // packed dimension: skip the unpacked array dims.
+                                let packed_dim = dim - array_dims;
                                 r#type.width().as_slice().get(packed_dim).copied().flatten()
                             };
                             let msb = if let Some(width) = width {
