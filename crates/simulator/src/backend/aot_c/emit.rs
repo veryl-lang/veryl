@@ -10,7 +10,8 @@
 use crate::FuncPtr;
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
-    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, VarOffset, native_bytes,
+    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
+    VarOffset, native_bytes, veryl_aot_sysfn_print,
 };
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -1514,7 +1515,10 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
         "// AOT-C event; do not edit.\n\
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
-         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n",
+         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
+         __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
     src.push_str(WIDEOPS_C_DECLS);
     src.push_str(WIDEOPS_C_INLINE);
@@ -1526,6 +1530,53 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     src.push_str(&body);
     src.push_str("}\n");
     Some(src)
+}
+
+/// Event-path `$display` / `$write` → a call into the Rust formatter
+/// (`veryl_sysfn_cb`, wired by `compile_source`), instead of bailing.  Reuses
+/// the interpret path's formatting + `output_buffer` for byte-identical,
+/// correctly-buffered output.  Args must be ≤ 64 bits (wider → bail to
+/// Cranelift, preserving correctness).  `newline` = true for `$display`.
+fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -> Option<String> {
+    let n = args.len();
+    let nl = newline as u32;
+    let flen = format_str.len();
+    // Pass the format string as raw bytes (no C escaping needed).
+    let fbytes: String = format_str
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{b},"))
+        .collect();
+    let mut s = format!("{{ static const unsigned char _f[] = {{ {fbytes}0 }};");
+    if n == 0 {
+        s.push_str(&format!(
+            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, 0, 0, 0ul, {nl}u); }}"
+        ));
+        return Some(s);
+    }
+    s.push_str(&format!(
+        " unsigned long long _v[{n}]; unsigned int _w[{n}];"
+    ));
+    for (i, arg) in args.iter().enumerate() {
+        let w = arg.width();
+        if w == 0 || w > 64 {
+            return None; // wide arg → bail to Cranelift
+        }
+        let e = emit_expr(arg)?;
+        let mask = width_mask(w);
+        // Pack signedness (bit 16) alongside the width so the Rust formatter
+        // rebuilds the AnalyzerValue exactly as the interpreter's eval() would
+        // — signedness changes %d/%s output (signed decimal) and the event
+        // path must match the Cranelift/interpret path byte-for-byte.
+        let packed = w | ((arg.expr_context().signed as usize) << 16);
+        s.push_str(&format!(
+            " _v[{i}] = (unsigned long long)({e}) & 0x{mask:x}ULL; _w[{i}] = {packed}u;"
+        ));
+    }
+    s.push_str(&format!(
+        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, _v, _w, {n}ul, {nl}u); }}"
+    ));
+    Some(s)
 }
 
 /// Compile C source to a `.so`, dlopen it, return a handle owning the
@@ -1621,6 +1672,17 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
     {
         let table = wideops_table();
         unsafe { setter(&table as *const WideOpsTable as *const c_void) };
+    }
+    // Event modules that emitted $display/$write expose `veryl_set_sysfn_cb`;
+    // wire it to the Rust formatter so their output goes through `output_buffer`
+    // (byte-identical, correctly buffered).  Absent on comb / sysfn-free
+    // modules, where the dlsym simply fails and we skip.
+    if let Ok(setter) =
+        unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_sysfn_cb\0") }
+    {
+        let cb: unsafe extern "C" fn(*const u8, usize, *const u64, *const u32, usize, u32) =
+            veryl_aot_sysfn_print;
+        unsafe { setter(cb as *mut c_void) };
     }
     Ok(EmittedModule { func, _lib: lib })
 }
@@ -2099,12 +2161,24 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
         ProtoStatement::For(for_stmt) => emit_for(for_stmt),
         ProtoStatement::Break => Some("break;".to_string()),
         ProtoStatement::SystemFunctionCall(call) => {
-            // Bail on all system functions: a no-op emit would silently drop
-            // $display/$write output, and $finish/$readmemh/$assert affect sim
-            // state.  Cranelift executes them — fine, since these live in
-            // testbench/debug code, not a core's hot datapath.
-            let _ = call;
-            None
+            // Event path: emit $display/$write as a call into the Rust formatter
+            // (veryl_sysfn_cb) so a single rare trace statement no longer forces
+            // the whole clock event onto Cranelift.  $finish/$assert/$readmemh
+            // affect sim state / need richer handling and stay on Cranelift.
+            // Comb path has no output side effects, so bail there as before.
+            if event_mode() {
+                match call {
+                    ProtoSystemFunctionCall::Display { format_str, args } => {
+                        emit_event_print(format_str, args, true)
+                    }
+                    ProtoSystemFunctionCall::Write { format_str, args } => {
+                        emit_event_print(format_str, args, false)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
         }
         ProtoStatement::TbMethodCall { .. } => {
             // ClockNext / ResetAssert advance simulation timeline; the

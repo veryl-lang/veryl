@@ -53,18 +53,38 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         let mut outs = Vec::new();
         s.gather_variable_offsets(&mut ins, &mut outs);
 
-        // `gather_variable_offsets` encodes a dynamic array read as only
-        // base+last, hiding interior elements — unsafe here, since a dynamic
-        // read may select an interior element whose pending write must be
-        // kept alive. Use the expanded read set; it only adds keys removed
-        // from `pending` (the safe direction). `outs` stays on base+last.
-        let mut ins_expanded = Vec::new();
-        let mut outs_expanded = Vec::new();
-        s.gather_variable_offsets_expanded(&mut ins_expanded, &mut outs_expanded);
-
         // A read of a pending dst commits it (the earlier write is live).
-        for r in ins.iter().chain(ins_expanded.iter()) {
+        // `ins` covers point reads plus a dynamic read's base+last endpoints.
+        for r in &ins {
             pending.remove(r);
+        }
+
+        // `gather_variable_offsets` encodes a dynamic array read as only
+        // base+last, hiding interior elements — a dynamic read may select an
+        // interior element whose pending write must be kept alive.  Rather than
+        // expand to every element (catastrophic for large arrays: the read set
+        // blows up to O(num_elements) per statement), record each dynamic read
+        // as a (is_ff, base, stride, num_elements) range and commit any pending
+        // write that lands on one of its stride-aligned offsets.  `pending`
+        // only holds prior full-width Assign dsts, so this is O(pending) per
+        // range and removes exactly the same keys the expansion would have.
+        // `outs` stays on base+last (partial-write handling below is unchanged).
+        if !pending.is_empty() {
+            let mut read_ranges: Vec<(bool, isize, isize, usize)> = Vec::new();
+            s.gather_dynamic_read_ranges(&mut read_ranges);
+            if !read_ranges.is_empty() {
+                pending.retain(|k, _| {
+                    !read_ranges.iter().any(|&(is_ff, base, stride, n)| {
+                        k.is_ff() == is_ff && stride != 0 && {
+                            let d = k.raw() - base;
+                            d % stride == 0 && {
+                                let i = d / stride;
+                                i >= 0 && (i as usize) < n
+                            }
+                        }
+                    })
+                });
+            }
         }
 
         // Full-width Assign: if there is a pending earlier write to the

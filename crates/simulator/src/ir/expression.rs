@@ -397,6 +397,63 @@ impl ProtoExpression {
             }
         }
     }
+
+    /// Read-side `DynamicVariable` accesses recorded as
+    /// `(is_ff, base_raw, stride, num_elements)` ranges instead of expanding to
+    /// every element.  Lets DCE commit a pending write covered by a dynamic
+    /// read in O(pending) per range, avoiding the O(num_elements) blow-up of
+    /// `gather_variable_offsets_expanded` for large arrays.  Only the index
+    /// sub-expressions (themselves reads) recurse; the array access is the
+    /// range.
+    pub fn gather_dynamic_read_ranges(&self, ranges: &mut Vec<(bool, isize, isize, usize)>) {
+        match self {
+            ProtoExpression::Variable { dynamic_select, .. } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoExpression::Value { .. } => (),
+            ProtoExpression::Unary { x, .. } => x.gather_dynamic_read_ranges(ranges),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.gather_dynamic_read_ranges(ranges);
+                y.gather_dynamic_read_ranges(ranges);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.gather_dynamic_read_ranges(ranges);
+                true_expr.gather_dynamic_read_ranges(ranges);
+                false_expr.gather_dynamic_read_ranges(ranges);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_dynamic_read_ranges(ranges);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+                ranges.push((
+                    base_offset.is_ff(),
+                    base_offset.raw(),
+                    *stride,
+                    *num_elements,
+                ));
+            }
+        }
+    }
 }
 
 /// Dynamic bit selection for packed arrays.
