@@ -4930,7 +4930,10 @@ impl VerylWalker for Emitter {
             self.str(&format!(
                 " = {}'d{}",
                 self.enum_width,
-                value.value().unwrap_or(0),
+                value
+                    .value()
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "0".to_string()),
             ));
         }
     }

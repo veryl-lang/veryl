@@ -3695,3 +3695,21 @@ fn widthless_decimal_zero_with_underscore_no_panic() {
     let ret = emit(&metadata, code);
     assert!(ret.contains("'d0_0"), "{ret}");
 }
+
+#[test]
+fn one_hot_enum_wider_than_64_bits() {
+    // A one_hot enum with >64 variants needs >64-bit values (variant 64 is
+    // 1<<64). The implicit value was computed in usize and silently wrapped to
+    // 0 past bit 63; it is now a BigUint, so the high variant emits correctly.
+    let mut members = String::new();
+    for i in 0..65 {
+        members.push_str(&format!("        V{i},\n"));
+    }
+    let code = format!(
+        "module top {{\n    #[enum_encoding(onehot)]\n    enum E: logic<65> {{\n{members}    }}\n    let x: E = E::V64;\n}}\n"
+    );
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, &code);
+    // V64 (the 65th one-hot variant) = 1<<64 = 18446744073709551616.
+    assert!(ret.contains("18446744073709551616"), "{ret}");
+}
