@@ -189,10 +189,12 @@ impl Default for Emitter {
     }
 }
 
-fn is_ifdef_attribute(arg: &Attribute) -> bool {
+// `elsif`/`else` continue an `ifdef`/`ifndef` block, so they must also be
+// emitted as guards, else the statement is emitted unconditionally.
+fn is_conditional_attribute(arg: &Attribute) -> bool {
     matches!(
         arg.identifier.identifier_token.token.to_string().as_str(),
-        "ifdef" | "ifndef"
+        "ifdef" | "ifndef" | "elsif" | "else"
     )
 }
 
@@ -1243,7 +1245,7 @@ impl Emitter {
                     .statement_block_group
                     .statement_block_group_list
                     .iter()
-                    .filter(|x| is_ifdef_attribute(&x.attribute))
+                    .filter(|x| is_conditional_attribute(&x.attribute))
                     .collect();
 
                 for (j, x) in ifdef_attributes.iter().enumerate() {
