@@ -13068,6 +13068,49 @@ fn binary_result_masked_to_width() {
     }
 }
 
+// Regression: unary `~x`/`-x` results fed to a comparison must be masked to
+// width; the aot_c backend left dirty high bits for an inlined consumer and
+// diverged from the interpreter / Cranelift.
+#[test]
+fn unary_result_masked_to_width() {
+    let code = r#"
+    module Top (
+        a:     input  logic<4>,
+        c_not: output logic,
+        c_neg: output logic,
+    ) {
+        // ~0x5 within 4 bits = 0xa (as i64, ~5 = ...fa; must mask to width).
+        assign c_not = (~a) == 4'ha;
+        // -0x5 within 4 bits = 0xb (two's complement; as i64, -5 = ...fb).
+        assign c_neg = (-a) == 4'hb;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x5, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:b}", sim.get("c_not").unwrap()),
+            "1'b1",
+            "not: JIT={} 4st={} aot={}",
+            config.use_jit,
+            config.use_4state,
+            config.aot_c,
+        );
+        assert_eq!(
+            format!("{:b}", sim.get("c_neg").unwrap()),
+            "1'b1",
+            "neg: JIT={} 4st={} aot={}",
+            config.use_jit,
+            config.use_4state,
+            config.aot_c,
+        );
+    }
+}
+
 // Regression: the aot_c width mask on a width-growing op feeding a comparison
 // is gated by an operand-derived overflow predicate. The predicate must use a
 // shift (`(x|y) >> (W-1)`), not `(x|y) & (1<<(W-1))`: an inner unmasked add

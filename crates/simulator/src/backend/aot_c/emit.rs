@@ -2610,8 +2610,22 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             match op {
                 // LogicNot yields 0/1 regardless of signedness.
                 Op::LogicNot => Some(format!("(!({}))", xs)),
-                Op::BitNot => Some(format!("(~({}))", xv)),
-                Op::Sub => Some(format!("(-({}))", xv)),
+                Op::BitNot | Op::Sub => {
+                    let inner = if matches!(op, Op::BitNot) {
+                        format!("(~({}))", xv)
+                    } else {
+                        format!("(-({}))", xv)
+                    };
+                    // `~x`/`-x` leave dirty bits at/above the width; Cranelift and
+                    // the interpreter mask to width, so an inlined consumer reading
+                    // the high bits (Eq/Ne, unsigned compare, shift) must too.
+                    if needs_clean && expr_context.width > 0 && expr_context.width < 64 {
+                        let mask = (1u64 << expr_context.width) - 1;
+                        Some(format!("(({}) & 0x{:x}ULL)", inner, mask))
+                    } else {
+                        Some(inner)
+                    }
+                }
                 _ => None, // unsupported
             }
         }
