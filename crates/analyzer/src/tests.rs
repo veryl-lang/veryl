@@ -13526,3 +13526,16 @@ fn regression_rev_for_non_additive_step_rejected() {
         "forward for-loop with a non-additive step should be accepted: {errors:?}"
     );
 }
+
+#[test]
+fn no_panic_on_oversized_based_literal() {
+    // Regression: a based literal whose value needs >64 bits while its declared
+    // width is <=64 previously panicked in ValueBigUint::to_value_u64
+    // (Option::unwrap on None). It must now produce a diagnostic, not crash.
+    let code = r#"
+    module Top {
+        let a: logic = 1'h1ffffffffffffffff;
+    }
+    "#;
+    let _ = analyze(code);
+}
