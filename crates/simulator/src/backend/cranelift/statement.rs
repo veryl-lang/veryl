@@ -1514,8 +1514,9 @@ fn emit_switch_via_br_table(
     let mut entries: Vec<_> = (0..table_size)
         .map(|_| builder.func.dfg.block_call(default_block, &[]))
         .collect();
-    for (i, arm) in chain.arms.iter().enumerate() {
-        // Later arm wins on duplicate value, matching nested-If fall-through.
+    // Reverse so a duplicate value resolves to the first arm: entries is
+    // last-write-wins, and `case` is first-match.
+    for (i, arm) in chain.arms.iter().enumerate().rev() {
         entries[arm.value as usize] = builder.func.dfg.block_call(arm_blocks[i], &[]);
     }
     let default_call = builder.func.dfg.block_call(default_block, &[]);
