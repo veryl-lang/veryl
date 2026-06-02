@@ -180,7 +180,11 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 if let Some(reset) = &x.reset {
                     let reset_event = Event::Reset(reset.id);
                     let head = statements.remove(0);
-                    let (true_side, false_side) = head.split_if_reset().unwrap();
+                    let (mut true_side, mut false_side) = head.split_if_reset().unwrap();
+                    // Statements after `if_reset` run on both reset and clock
+                    // edges, so append to both branches instead of dropping them.
+                    true_side.extend(statements.iter().cloned());
+                    false_side.extend(statements);
                     event_statements.insert(reset_event, true_side);
                     event_statements.insert(clock_event, false_side);
                 } else {
