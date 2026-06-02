@@ -169,9 +169,9 @@ impl Op {
             }
             Op::As => ExpressionContext {
                 width: x.width,
+                signed: y.signed,
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
-                ..Default::default()
             },
             _ => unreachable!(),
         }

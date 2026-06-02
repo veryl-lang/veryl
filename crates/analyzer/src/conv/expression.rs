@@ -419,7 +419,8 @@ impl Conv<&CastingType> for ir::Factor {
             }
         };
 
-        let r#type = Type::new(TypeKind::Type);
+        let mut r#type = Type::new(TypeKind::Type);
+        r#type.signed = value.signed;
         let ret = Comptime {
             value: ValueVariant::Type(value),
             r#type,

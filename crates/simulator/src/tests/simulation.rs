@@ -13472,3 +13472,35 @@ fn case_duplicate_value_first_match() {
         assert_eq!(sim.get("result").unwrap(), Value::new(20, 32, false));
     }
 }
+
+#[test]
+fn signed_cast_constfold_div_and_compare() {
+    // Regression: an `as <signed>` cast lost its signedness in the const-eval
+    // ExpressionContext, so Div/Rem and signed comparisons of cast operands
+    // folded as unsigned (diverging from the emitted SystemVerilog).
+    let code = r#"
+    module Top (
+        o: output signed logic<32>,
+        z: output logic,
+    ) {
+        type sn = signed bit<32>;
+        const A: sn = (-100 as sn) / (7 as sn);
+        const C: logic = if ((-100 as sn) <: (7 as sn)) ? 1 : 0;
+        assign o = A;
+        assign z = C;
+    }
+    "#;
+
+    let expect_o: Value = "32'shfffffff2".parse().unwrap(); // -100 / 7 = -14
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap().payload_u128(),
+            expect_o.payload_u128()
+        );
+        assert_eq!(sim.get("z").unwrap(), Value::new(1, 1, false));
+    }
+}
