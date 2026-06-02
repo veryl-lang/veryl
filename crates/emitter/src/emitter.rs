@@ -198,6 +198,29 @@ fn is_conditional_attribute(arg: &Attribute) -> bool {
     )
 }
 
+// A conditional enum member can be removed by the SV preprocessor, renumbering
+// later members' implicit values, so emit explicit values to stay in sync.
+fn enum_group_has_conditional_attribute(group: &EnumGroup) -> bool {
+    group
+        .enum_group_list
+        .iter()
+        .any(|x| is_conditional_attribute(&x.attribute))
+        || match &*group.enum_group_group {
+            EnumGroupGroup::LBraceEnumListRBrace(x) => {
+                enum_list_has_conditional_attribute(&x.enum_list)
+            }
+            EnumGroupGroup::EnumItem(_) => false,
+        }
+}
+
+fn enum_list_has_conditional_attribute(list: &EnumList) -> bool {
+    enum_group_has_conditional_attribute(&list.enum_group)
+        || list
+            .enum_list_list
+            .iter()
+            .any(|x| enum_group_has_conditional_attribute(&x.enum_group))
+}
+
 // SV `import` only accepts `package::symbol` or `package::*`, so suppress
 // imports whose target is an enum (wildcard), an enum member or an alias
 // outside a package — emitting them would produce invalid SystemVerilog.
@@ -4786,7 +4809,7 @@ impl VerylWalker for Emitter {
         self.emit_enum_implicit_valiant = matches!(
             r#enum.encoding,
             EnumEncodingItem::OneHot | EnumEncodingItem::Gray
-        );
+        ) || enum_list_has_conditional_attribute(&arg.enum_list);
 
         self.token(
             &arg.r#enum
