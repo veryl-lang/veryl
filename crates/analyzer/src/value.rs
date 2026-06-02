@@ -582,12 +582,14 @@ impl ValueBigUint {
     }
 
     pub fn new_bigint(payload: BigInt, width: usize, signed: bool) -> Self {
+        let mask = Self::gen_mask(width);
         let payload = if payload.sign() == Sign::Minus {
             let val = payload.magnitude();
-            let mask = Self::gen_mask(width);
             ((val ^ &mask) + BigUint::one()) & &mask
         } else {
-            payload.magnitude().clone()
+            // Mask a positive magnitude to `width` too: an overflowing value
+            // (e.g. a constant `**` result) must not keep bits beyond width.
+            payload.magnitude() & &mask
         };
 
         let payload = Box::new(payload);
@@ -4993,13 +4995,55 @@ mod tests {
         let x06 = op.eval_value_binary(&x06, &x16, 68, true, &mut cache);
         let x07 = op.eval_value_binary(&x07, &x17, 68, true, &mut cache);
         assert_eq!(format!("{:x}", x00), "68'h00000000000000009");
-        assert_eq!(format!("{:x}", x01), "68'hf00000000000000e1");
+        // (2**68 - 15)**2 mod 2**68 = 225 = 0xe1. The previous expectation
+        // (`f00000000000000e1`) encoded the old unmasked-pow bug.
+        assert_eq!(format!("{:x}", x01), "68'h000000000000000e1");
         assert_eq!(format!("{:x}", x02), "68'hxxxxxxxxxxxxxxxxx");
         assert_eq!(format!("{:x}", x03), "68'hxxxxxxxxxxxxxxxxx");
         assert_eq!(format!("{:x}", x04), "68'sh00000000000000009");
         assert_eq!(format!("{:x}", x05), "68'sh000000000000000e1");
         assert_eq!(format!("{:x}", x06), "68'shxxxxxxxxxxxxxxxxx");
         assert_eq!(format!("{:x}", x07), "68'shxxxxxxxxxxxxxxxxx");
+    }
+
+    #[test]
+    fn binary_pow_huge_and_signed_exponent() {
+        // Regression: the exponent was cast to u32 in the U64 and signed-BigUint
+        // pow paths, silently truncating exponents > u32::MAX. modpow now folds
+        // the width mask in and uses the full exponent.
+        let op = Op::Pow;
+        let mut cache = MaskCache::default();
+
+        // 2 ** (2**32 + 1) in 64 bits = 0 (exponent exceeds the width). The old
+        // `exp as u32` truncated the exponent to 1, giving 2.
+        let r = op.eval_value_binary(
+            &Value::from_str("64'd2").unwrap(),
+            &Value::from_str("4294967297").unwrap(),
+            64,
+            false,
+            &mut cache,
+        );
+        assert_eq!(format!("{:x}", r), "64'h0000000000000000");
+
+        // (-3) ** 51 in 8 bits signed = (-3)^51 mod 256 = 0xa5.
+        let r = op.eval_value_binary(
+            &Value::from_str("8'shfd").unwrap(),
+            &Value::from_str("51").unwrap(),
+            8,
+            true,
+            &mut cache,
+        );
+        assert_eq!(format!("{:x}", r), "8'sha5");
+
+        // BigUint unsigned path: 2 ** (2**32 + 1) in 70 bits = 0.
+        let r = op.eval_value_binary(
+            &Value::from_str("70'd2").unwrap(),
+            &Value::from_str("4294967297").unwrap(),
+            70,
+            false,
+            &mut cache,
+        );
+        assert_eq!(format!("{:x}", r), "70'h000000000000000000");
     }
 
     #[test]

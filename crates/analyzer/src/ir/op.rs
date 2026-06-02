@@ -3,8 +3,8 @@ use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_repeat;
 use crate::ir::{Comptime, Expression, ExpressionContext, Shape, Type, TypeKind, ValueVariant};
 use crate::value::{MaskCache, Value, ValueBigUint, ValueU64};
-use crate::{AnalyzerError, BigUint};
-use num_traits::{One, Zero};
+use crate::{AnalyzerError, BigUint, Sign};
+use num_traits::{One, ToPrimitive, Zero};
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,6 +85,18 @@ fn b0() -> BigUint {
 
 fn b1() -> BigUint {
     BigUint::one()
+}
+
+/// `base ** exp` masked to `width` bits via modpow (folds the width mask in and
+/// accepts any exponent). `mag`/`negative` are the base's magnitude and sign.
+fn pow_mod_width(mag: &BigUint, negative: bool, exp: usize, width: usize) -> BigUint {
+    let modulus = ValueBigUint::gen_mask(width) + BigUint::from(1u32);
+    let ret = mag.modpow(&BigUint::from(exp), &modulus);
+    if negative && exp % 2 == 1 && !ret.is_zero() {
+        (&modulus - &ret) % &modulus // odd power of a negative base
+    } else {
+        ret
+    }
 }
 
 impl Op {
@@ -1555,15 +1567,21 @@ impl Op {
                             if x.is_xz() {
                                 Value::U64(ValueU64::new_x(width, x.signed))
                             } else if x.signed {
-                                // Wrapping exponentiation + width masking like
-                                // Op::Mul, so an overflowing constant power does
-                                // not panic in debug builds.
-                                let ret = x.to_i64().unwrap().wrapping_pow(y as u32) as u64;
-                                let payload = ret & ValueU64::gen_mask(width);
+                                let base = x.to_i64().unwrap();
+                                let payload = pow_mod_width(
+                                    &BigUint::from(base.unsigned_abs()),
+                                    base < 0,
+                                    y,
+                                    width,
+                                )
+                                .to_u64()
+                                .unwrap_or(0);
                                 Value::U64(ValueU64::new(payload, width, true))
                             } else {
-                                let ret = x.payload.wrapping_pow(y as u32);
-                                let payload = ret & ValueU64::gen_mask(width);
+                                let payload =
+                                    pow_mod_width(&BigUint::from(x.payload), false, y, width)
+                                        .to_u64()
+                                        .unwrap_or(0);
                                 Value::U64(ValueU64::new(payload, width, false))
                             }
                         } else {
@@ -1575,12 +1593,17 @@ impl Op {
                             if x.is_xz() {
                                 Value::BigUint(ValueBigUint::new_x(width, x.signed))
                             } else if x.signed {
-                                let ret = x.to_bigint().unwrap();
-                                let ret = ret.pow(y as u32);
-                                Value::BigUint(ValueBigUint::new_bigint(ret, width, true))
+                                let base = x.to_bigint().unwrap();
+                                let payload = pow_mod_width(
+                                    base.magnitude(),
+                                    base.sign() == Sign::Minus,
+                                    y,
+                                    width,
+                                );
+                                Value::BigUint(ValueBigUint::new_biguint(payload, width, true))
                             } else {
-                                let ret = x.payload.pow(y as u32);
-                                Value::BigUint(ValueBigUint::new_biguint(ret, width, false))
+                                let payload = pow_mod_width(x.payload.as_ref(), false, y, width);
+                                Value::BigUint(ValueBigUint::new_biguint(payload, width, false))
                             }
                         } else {
                             Value::BigUint(ValueBigUint::new_x(width, false))
