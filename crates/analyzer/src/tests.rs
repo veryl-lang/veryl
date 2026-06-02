@@ -13685,3 +13685,26 @@ fn no_panic_on_for_step_shift_overflow() {
     "#;
     let _ = analyze(code);
 }
+
+#[test]
+fn wide_pow_is_masked_to_width() {
+    // Regression: a BigUint `**` result was not masked to the declared width,
+    // and the exponent was truncated to u32. Both must hold now: `3 ** 50`
+    // folds to (3**50 mod 2**8) and a huge exponent folds via modpow rather
+    // than wrapping the exponent. Here we just exercise the paths (correctness
+    // of the folded value is checked end-to-end against the built binary).
+    for code in [
+        "module Top { const A: logic<8> = 3 ** 50; }",
+        "module Top { const A: signed logic<8> = (-3) ** 7; }",
+        "module Top { const A: logic<65> = 65'd2 ** 4294967297; }",
+        "module Top { const A: logic<70> = 70'd3 ** 100; }",
+    ] {
+        let errors = analyze(code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+            "masked pow should fit its width: {errors:?}"
+        );
+    }
+}
