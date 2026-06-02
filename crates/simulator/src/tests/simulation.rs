@@ -13221,3 +13221,134 @@ fn dup_assign_dce_dynamic_array_read() {
         assert_eq!(sim.get("a1").unwrap(), Value::new(0xbb, 8, false));
     }
 }
+
+#[test]
+fn wide_signed_compare_uses_operand_width() {
+    // Regression: the Cranelift wide (>128-bit) signed comparison passed the
+    // result width (1) to wide_scmp instead of the operand width, so it probed
+    // bit 0 as the sign bit and fell back to an unsigned compare. For signed
+    // 200-bit operands, -1 >: 1 must be false (the interpreter's answer), not
+    // the unsigned (2**200-1) >: 1 == true.
+    let code = r#"
+    module Top (
+        a : input  signed logic<200>,
+        b : input  signed logic<200>,
+        gt: output logic,
+    ) {
+        assign gt = a >: b;
+    }
+    "#;
+
+    let neg_one: Value = format!("200'sh{}", "f".repeat(50)).parse().unwrap();
+    let one: Value = "200'sd1".parse().unwrap();
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", neg_one.clone());
+        sim.set("b", one.clone());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("gt").unwrap(), Value::new(0, 1, false));
+    }
+}
+
+#[test]
+fn wide_signed_compare_asymmetric_width() {
+    // Regression: signed comparison of wide (>128-bit) operands with DIFFERENT
+    // widths located the sign at a single common width, so a negative narrower
+    // operand was mis-read. Each operand must be sign-extended from its own
+    // width.
+    let code = r#"
+    module Top (
+        a : input  signed logic<200>,
+        b : input  signed logic<130>,
+        gt: output logic,
+        lt: output logic,
+    ) {
+        assign gt = a >: b;
+        assign lt = a <: b;
+    }
+    "#;
+    let a_pos1: Value = "200'sd1".parse().unwrap();
+    let a_neg1: Value = format!("200'sh{}", "f".repeat(50)).parse().unwrap();
+    let b_pos1: Value = "130'sd1".parse().unwrap();
+    let b_neg1: Value = format!("130'sh3{}", "f".repeat(32)).parse().unwrap();
+    let one = Value::new(1, 1, false);
+    let zero = Value::new(0, 1, false);
+
+    // (a, b, expected_gt, expected_lt)
+    let cases = [
+        (a_pos1.clone(), b_neg1.clone(), one.clone(), zero.clone()), // 1 >: -1
+        (a_neg1.clone(), b_pos1.clone(), zero.clone(), one.clone()), // -1 <: 1
+        (a_neg1.clone(), b_neg1.clone(), zero.clone(), zero.clone()), // -1 == -1
+    ];
+
+    for config in Config::all() {
+        dbg!(&config);
+        for (a, b, egt, elt) in &cases {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", a.clone());
+            sim.set("b", b.clone());
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("gt").unwrap(),
+                *egt,
+                "gt mismatch for {a:?} >: {b:?}"
+            );
+            assert_eq!(
+                sim.get("lt").unwrap(),
+                *elt,
+                "lt mismatch for {a:?} <: {b:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_signed_compare_asymmetric_width_aot_c() {
+    // Regression (cc/AOT-C): vw_scmp located the sign of both operands at a
+    // single common width, mis-reading a negative narrower operand. The cc
+    // backend must sign-extend each operand from its own width. The
+    // aot_c_validate config also dual-runs cc vs Cranelift every cycle.
+    if !crate::backend::aot_c::cc_available() {
+        return; // no external C compiler on this host
+    }
+    let code = r#"
+    module Top (
+        a : input  signed logic<200>,
+        b : input  signed logic<130>,
+        gt: output logic,
+        lt: output logic,
+    ) {
+        assign gt = a >: b;
+        assign lt = a <: b;
+    }
+    "#;
+    let a_pos1: Value = "200'sd1".parse().unwrap();
+    let a_neg1: Value = format!("200'sh{}", "f".repeat(50)).parse().unwrap();
+    let b_pos1: Value = "130'sd1".parse().unwrap();
+    let b_neg1: Value = format!("130'sh3{}", "f".repeat(32)).parse().unwrap();
+    let one = Value::new(1, 1, false);
+    let zero = Value::new(0, 1, false);
+    let cases = [
+        (a_pos1, b_neg1.clone(), one.clone(), zero.clone()), // 1 >: -1
+        (a_neg1.clone(), b_pos1, zero.clone(), one.clone()), // -1 <: 1
+        (a_neg1, b_neg1, zero.clone(), zero.clone()),        // -1 == -1
+    ];
+    let config = aot_native_validate_config();
+    for (a, b, egt, elt) in cases {
+        let ir = analyze(code, &config);
+        assert!(
+            ir.whole_comb.is_some(),
+            "wide signed compare must be AOT-C-native to exercise vw_scmp_asym"
+        );
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", a);
+        sim.set("b", b);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("gt").unwrap(), egt);
+        assert_eq!(sim.get("lt").unwrap(), elt);
+    }
+}

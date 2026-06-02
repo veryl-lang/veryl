@@ -224,6 +224,64 @@ pub unsafe extern "C" fn wide_scmp(a: *const u8, b: *const u8, packed_nb_width: 
     }
 }
 
+/// Sign-extended `i`-th 64-bit word of a `width`-bit value stored zero-padded in
+/// its buffer. Words at/above `width` read as all-sign; the word straddling the
+/// sign bit gets its high bits filled with `sign`. OOB-safe: never reads a word
+/// whose lowest bit is at/above `width`.
+#[inline]
+unsafe fn sext_word(ptr: *const u8, i: usize, width: u32, sign: u64) -> u64 {
+    let bits_below = i * 64;
+    if bits_below >= width as usize {
+        return if sign == 1 { u64::MAX } else { 0 };
+    }
+    let raw = unsafe { rd(ptr, i) };
+    let top = width as usize - bits_below;
+    if top >= 64 {
+        return raw;
+    }
+    let mask = (1u64 << top) - 1;
+    (raw & mask) | (if sign == 1 { !mask } else { 0 })
+}
+
+/// Signed compare of two operands that share a buffer size but may have
+/// different value widths. `a_packed`/`b_packed` each carry `(buffer-nb, value
+/// width)`; each operand is sign-extended from its OWN width, so a negative
+/// narrower operand compares correctly (a single common width mislocates its
+/// sign). Reads only within each operand's own buffer (OOB-safe).
+pub unsafe extern "C" fn wide_scmp_asym(
+    a: *const u8,
+    b: *const u8,
+    a_packed: u32,
+    b_packed: u32,
+) -> i64 {
+    let (a_nb, a_w) = unpack_nb_width(a_packed);
+    let (b_nb, b_w) = unpack_nb_width(b_packed);
+    if a_w == 0 || b_w == 0 || a_nb == 0 || b_nb == 0 {
+        return 0;
+    }
+    unsafe {
+        let a_sign = (rd(a, (a_w as usize - 1) / 64) >> ((a_w as usize - 1) % 64)) & 1;
+        let b_sign = (rd(b, (b_w as usize - 1) / 64) >> ((b_w as usize - 1) % 64)) & 1;
+        if a_sign != b_sign {
+            return if a_sign == 1 { -1 } else { 1 };
+        }
+        // Same sign: compare sign-extended words from the MSW down (same-sign
+        // two's complement keeps its order under an unsigned word comparison).
+        let words = nw(a_nb).max(nw(b_nb));
+        for i in (0..words).rev() {
+            let av = sext_word(a, i, a_w, a_sign);
+            let bv = sext_word(b, i, b_w, b_sign);
+            if av < bv {
+                return -1;
+            }
+            if av > bv {
+                return 1;
+            }
+        }
+        0
+    }
+}
+
 // ── Shifts ───────────────────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_shl(dst: *mut u8, a: *const u8, amount: u64, nb: u32) {
