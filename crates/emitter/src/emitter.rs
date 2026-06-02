@@ -1154,6 +1154,10 @@ impl Emitter {
             && let Some(name) = ir_type.to_sv_type_name()
         {
             self.str(name);
+            if ir_type.signed {
+                self.space(1);
+                self.str("signed");
+            }
             let width_str = ir_type.to_sv_width();
             if !width_str.is_empty() {
                 self.space(1);
