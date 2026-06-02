@@ -1,4 +1,5 @@
 use crate::BigUint;
+use crate::HashSet;
 use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
 use crate::attribute::EnumEncodingItem;
 use crate::conv::utils::TypePosition;
@@ -20,6 +21,7 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
 
         let mut pre_value = None;
         let mut member_width = 0;
+        let mut seen_values: HashSet<BigUint> = HashSet::default();
         for id in &r#enum.members {
             let mut symbol = symbol_table::get(*id).unwrap();
 
@@ -48,6 +50,12 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
                     ));
                 }
                 member_width = member_width.max(width);
+                if !seen_values.insert(value.clone()) {
+                    errors.push(AnalyzerError::duplicate_enum_variant(
+                        &symbol.token.to_string(),
+                        &symbol.token.into(),
+                    ));
+                }
             }
 
             if let SymbolKind::EnumMember(mut member) = symbol.kind {
