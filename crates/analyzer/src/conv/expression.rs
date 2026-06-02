@@ -637,12 +637,24 @@ impl Conv<&Factor> for ir::Expression {
                             }
 
                             let dim = context.get_select_dim().unwrap();
+                            let array_dims = comptime.r#type.array.dims();
 
                             let width =
                                 if comptime.r#type.is_struct() || comptime.r#type.is_unknown() {
                                     comptime.r#type.total_width()
+                                } else if dim < array_dims {
+                                    comptime.r#type.array.as_slice().get(dim).copied().flatten()
                                 } else {
-                                    comptime.r#type.width()[dim]
+                                    // packed dim: `dim` also counts the unpacked dims, so
+                                    // skip them before indexing the packed-width Shape.
+                                    let packed_dim = dim - array_dims;
+                                    comptime
+                                        .r#type
+                                        .width()
+                                        .as_slice()
+                                        .get(packed_dim)
+                                        .copied()
+                                        .flatten()
                                 };
                             let comptime = if let Some(width) = width {
                                 let msb = width.saturating_sub(1);
@@ -662,10 +674,15 @@ impl Conv<&Factor> for ir::Expression {
 
                             msb_table::insert(msb.msb.msb_token.token.id, dim + 1);
 
+                            let array_dims = r#type.array.dims();
                             let width = if r#type.is_struct() {
                                 r#type.total_width()
+                            } else if dim < array_dims {
+                                r#type.array.as_slice().get(dim).copied().flatten()
                             } else {
-                                r#type.width()[dim]
+                                // packed dimension: skip the unpacked array dims.
+                                let packed_dim = dim - array_dims;
+                                r#type.width().as_slice().get(packed_dim).copied().flatten()
                             };
                             let msb = if let Some(width) = width {
                                 width - 1

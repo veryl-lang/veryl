@@ -67,7 +67,10 @@ pub fn check_msb(list: Vec<Msb>) -> Vec<AnalyzerError> {
                     select_dimension -= t.array.len();
 
                     if select_dimension < t.width.len() {
-                        demension_number = Some(select_dimension + 1);
+                        // SV $size numbers unpacked dims first, then packed, so a
+                        // packed dim must include the unpacked count (e.g.
+                        // `a[0][msb]` on `logic<8>[4]` is $size(a, 2), not 1).
+                        demension_number = Some(t.array.len() + select_dimension + 1);
 
                         break;
                     }
