@@ -22,10 +22,14 @@ impl Parser {
             }
             TextInfo { path, text }
         };
+        // Parse the newline-terminated copy, not the original `input`: the lexer's
+        // line-comment regex needs a trailing newline, so a file ending in `// ...`
+        // would otherwise fail to lex.
+        let buf = text.text.clone();
         text_table::set_current_text(text);
 
         let mut grammar = VerylGrammar::new();
-        parse(input, file, &mut grammar)?;
+        parse(&buf, file, &mut grammar)?;
 
         let veryl = grammar.veryl.ok_or(anyhow!("parse failure"))?;
 
