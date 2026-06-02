@@ -98,10 +98,12 @@ impl Op {
             Op::BitAnd => x & y,
             Op::BitOr => x | y,
             Op::BitXor => x ^ y,
-            Op::ArithShiftL => x << y,
-            Op::ArithShiftR => x >> y,
-            Op::LogicShiftL => x << y,
-            Op::LogicShiftR => x >> y,
+            Op::ArithShiftL | Op::LogicShiftL => {
+                x.unbounded_shl(y.min(usize::BITS as usize) as u32)
+            }
+            Op::ArithShiftR | Op::LogicShiftR => {
+                x.unbounded_shr(y.min(usize::BITS as usize) as u32)
+            }
             _ => unimplemented!(),
         }
     }
