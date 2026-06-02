@@ -2234,6 +2234,21 @@ impl ClockDomain {
             },
         }
     }
+
+    /// Combine two operands' clock domains for the result: `None` yields the
+    /// other side, else the concrete (id-bearing) domain wins (keeps CDC alive).
+    pub fn merge(&self, other: &ClockDomain) -> ClockDomain {
+        match (self, other) {
+            (ClockDomain::None, x) | (x, ClockDomain::None) => *x,
+            (x, y) => {
+                if x.domain_id().is_some() {
+                    *x
+                } else {
+                    *y
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for ClockDomain {

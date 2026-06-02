@@ -198,7 +198,9 @@ impl Expression {
 
                     let expr = expr.comptime();
                     check_clock_domain(context, comptime, expr, &comptime.token.beg);
-                    comptime.clock_domain = expr.clock_domain;
+                    // accumulate a concrete domain (a trailing const field must
+                    // not launder the struct's clock domain to None)
+                    comptime.clock_domain = comptime.clock_domain.merge(&expr.clock_domain);
                 }
 
                 comptime.r#type = r#type.clone();
@@ -222,6 +224,11 @@ impl Expression {
                             let x_context = x.gather_context(context);
                             is_const &= x_context.is_const;
                             is_global &= x_context.is_global;
+                            // check + accumulate each element's clock domain so a
+                            // cross-domain element is flagged, not laundered
+                            let x = x.comptime();
+                            check_clock_domain(context, comptime, x, &comptime.token.beg);
+                            comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
                             if let Some(y) = y {
                                 let y_context = y.gather_context(context);
                                 is_const &= y_context.is_const;
@@ -232,6 +239,9 @@ impl Expression {
                             let x_context = x.gather_context(context);
                             is_const &= x_context.is_const;
                             is_global &= x_context.is_global;
+                            let x = x.comptime();
+                            check_clock_domain(context, comptime, x, &comptime.token.beg);
+                            comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
                         }
                     }
                 }
