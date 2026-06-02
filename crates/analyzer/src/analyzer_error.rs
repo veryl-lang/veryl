@@ -111,6 +111,38 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(duplicate_argument),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("named argument \"{identifier}\" is connected more than once")]
+    DuplicateArgument {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(duplicate_enum_variant),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("The value of enum variant \"{identifier}\" is the same as another variant")]
+    DuplicateEnumVariant {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(duplicated_identifier),
         help("{kind}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -350,22 +382,6 @@ pub enum AnalyzerError {
     InvalidEnumVariant {
         identifier: String,
         encoding: String,
-        #[source_code]
-        input: MultiSources,
-        #[label("Error location")]
-        error_location: SourceSpan,
-        token_source: TokenSource,
-    },
-
-    #[diagnostic(
-        severity(Error),
-        code(duplicate_enum_variant),
-        help(""),
-        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
-    )]
-    #[error("The value of enum variant \"{identifier}\" is the same as another variant")]
-    DuplicateEnumVariant {
-        identifier: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1697,6 +1713,8 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
+            AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
+            AnalyzerError::DuplicateEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::ExceedLimit { token_source, .. } => *token_source,
             AnalyzerError::FixedTypeWithSignedModifier { token_source, .. } => *token_source,
@@ -1712,7 +1730,6 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbed { token_source, .. } => *token_source,
             AnalyzerError::InvalidEmbedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidEnumVariant { token_source, .. } => *token_source,
-            AnalyzerError::DuplicateEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
@@ -1844,6 +1861,22 @@ impl AnalyzerError {
         AnalyzerError::CyclicTypeDependency {
             start: start.into(),
             end: end.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn duplicate_argument(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::DuplicateArgument {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn duplicate_enum_variant(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::DuplicateEnumVariant {
+            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -1983,14 +2016,6 @@ impl AnalyzerError {
         AnalyzerError::InvalidEnumVariant {
             identifier: identifier.to_string(),
             encoding: encoding.to_string(),
-            input: source(token),
-            error_location: token.into(),
-            token_source: token.source(),
-        }
-    }
-    pub fn duplicate_enum_variant(identifier: &str, token: &TokenRange) -> Self {
-        AnalyzerError::DuplicateEnumVariant {
-            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

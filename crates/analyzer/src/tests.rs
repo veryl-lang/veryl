@@ -11860,6 +11860,52 @@ fn mixed_function_argument() {
 }
 
 #[test]
+fn duplicate_argument() {
+    // The same named argument connected twice (port x bound twice, y never): the
+    // emitted SV connects one port twice and leaves another unconnected.
+    let code = r#"
+    module ModuleA {
+        function Add (
+            x: input u32,
+            y: input u32,
+        ) -> u32 {
+            return x + y;
+        }
+
+        let _a: u32 = Add(x: 10, x: 20);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateArgument { .. }))
+    );
+
+    // Distinct named arguments must NOT be flagged.
+    let code = r#"
+    module ModuleB {
+        function Add (
+            x: input u32,
+            y: input u32,
+        ) -> u32 {
+            return x + y;
+        }
+
+        let _a: u32 = Add(x: 10, y: 20);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateArgument { .. }))
+    );
+}
+
+#[test]
 fn mixed_struct_union_member() {
     let code = r#"
     package Pkg {
