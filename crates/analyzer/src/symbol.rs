@@ -1,3 +1,4 @@
+use crate::BigUint;
 use crate::HashMap;
 use crate::attribute::EnumEncodingItem;
 use crate::conv::Context;
@@ -2606,16 +2607,16 @@ pub struct EnumProperty {
 
 #[derive(Debug, Clone)]
 pub enum EnumMemberValue {
-    ImplicitValue(usize),
-    ExplicitValue(syntax_tree::Expression, Option<usize>),
+    ImplicitValue(BigUint),
+    ExplicitValue(syntax_tree::Expression, Option<BigUint>),
     UnevaluableValue,
 }
 
 impl EnumMemberValue {
-    pub fn value(&self) -> Option<usize> {
+    pub fn value(&self) -> Option<&BigUint> {
         match self {
-            EnumMemberValue::ImplicitValue(value) => Some(*value),
-            EnumMemberValue::ExplicitValue(_expression, evaluated) => *evaluated,
+            EnumMemberValue::ImplicitValue(value) => Some(value),
+            EnumMemberValue::ExplicitValue(_expression, evaluated) => evaluated.as_ref(),
             EnumMemberValue::UnevaluableValue => None,
         }
     }

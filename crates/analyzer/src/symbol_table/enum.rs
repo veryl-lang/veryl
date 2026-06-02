@@ -1,3 +1,4 @@
+use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, UnevaluableValueKind};
 use crate::attribute::EnumEncodingItem;
 use crate::conv::utils::TypePosition;
@@ -5,6 +6,7 @@ use crate::conv::{self, Context, Conv};
 use crate::ir::{self, IrResult};
 use crate::symbol::{EnumMemberValue, EnumProperty, Symbol, SymbolKind};
 use crate::symbol_table;
+use num_traits::ToPrimitive;
 
 pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
     let mut errors = Vec::new();
@@ -36,11 +38,11 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
             }
 
             if let Some(value) = value.value() {
-                let width = calc_width(value);
+                let width = value.bits() as usize;
                 if enum_width > 0 && width > enum_width {
                     errors.push(AnalyzerError::too_large_enum_variant(
                         &symbol.token.to_string(),
-                        value as isize,
+                        value.to_isize().unwrap_or(isize::MAX),
                         enum_width,
                         &symbol.token.into(),
                     ));
@@ -139,7 +141,7 @@ fn eval_enum_member_value(
                 enum_member.value.clone()
             }
         } else {
-            let value = value.to_usize().unwrap_or(0);
+            let value = value.payload().into_owned();
             let is_valid = match r#enum.encoding {
                 EnumEncodingItem::OneHot => value.count_ones() == 1,
                 EnumEncodingItem::Gray => get_enum_member_next_value(r#enum.encoding, pre_value)
@@ -172,33 +174,34 @@ fn calc_width(value: usize) -> usize {
 fn get_enum_member_next_value(
     encoding: EnumEncodingItem,
     pre_value: Option<&EnumMemberValue>,
-) -> Option<usize> {
+) -> Option<BigUint> {
     if let Some(value) = pre_value
         && let Some(value) = value.value()
     {
         match encoding {
-            EnumEncodingItem::Sequential => Some(value + 1),
-            EnumEncodingItem::OneHot => Some(value << 1),
+            EnumEncodingItem::Sequential => Some(value + 1u32),
+            EnumEncodingItem::OneHot => Some(value << 1u32),
             EnumEncodingItem::Gray => {
                 // `value` is the previous member's gray-encoded value, not its
                 // ordinal index. Recover the ordinal by gray-decoding, then
                 // re-encode the next ordinal so the chain stays a valid Gray
                 // sequence (0, 1, 3, 2, 6, 7, 5, 4, ...).
-                let mut n = value;
-                let mut g = value >> 1;
-                while g != 0 {
-                    n ^= g;
-                    g >>= 1;
+                let mut n = value.clone();
+                let mut g = value >> 1u32;
+                while g != BigUint::from(0u32) {
+                    n ^= &g;
+                    g >>= 1u32;
                 }
-                let m = n + 1;
-                Some(m ^ (m >> 1))
+                let m = n + 1u32;
+                let half = &m >> 1u32;
+                Some(&m ^ &half)
             }
         }
     } else if pre_value.is_none() {
         if matches!(encoding, EnumEncodingItem::OneHot) {
-            Some(1)
+            Some(BigUint::from(1u32))
         } else {
-            Some(0)
+            Some(BigUint::from(0u32))
         }
     } else {
         None

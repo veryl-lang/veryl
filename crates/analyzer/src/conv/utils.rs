@@ -1883,7 +1883,7 @@ pub fn eval_factor_symbol(
 
             let factor = match &x.value {
                 EnumMemberValue::ImplicitValue(x) => {
-                    let value = Value::new(*x as u64, r#enum.width, false);
+                    let value = Value::new_biguint(x.clone(), r#enum.width, false);
                     Some(ir::Factor::create_value(value, token))
                 }
                 EnumMemberValue::ExplicitValue(x, _) => {
