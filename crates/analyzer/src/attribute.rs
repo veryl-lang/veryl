@@ -3,6 +3,7 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::veryl_grammar_trait::AttributeOpt;
 use veryl_parser::veryl_token::Token;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,10 +106,7 @@ pub enum AttributeError {
     MismatchArgs(String),
 }
 
-fn get_arg_ident(
-    args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>,
-    pos: usize,
-) -> Option<Token> {
+fn get_arg_ident(args: &Option<AttributeOpt>, pos: usize) -> Option<Token> {
     use veryl_parser::veryl_grammar_trait as g;
 
     if let Some(x) = args {
@@ -125,10 +123,7 @@ fn get_arg_ident(
     }
 }
 
-fn get_arg_string(
-    args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>,
-    pos: usize,
-) -> Option<Token> {
+fn get_arg_string(args: &Option<AttributeOpt>, pos: usize) -> Option<Token> {
     use veryl_parser::veryl_grammar_trait as g;
 
     if let Some(x) = args {
@@ -145,7 +140,7 @@ fn get_arg_string(
     }
 }
 
-fn get_args_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>) -> Vec<Token> {
+fn get_args_ident(args: &Option<AttributeOpt>) -> Vec<Token> {
     use veryl_parser::veryl_grammar_trait as g;
 
     let mut ret = Vec::new();
@@ -159,6 +154,27 @@ fn get_args_ident(args: &Option<veryl_parser::veryl_grammar_trait::AttributeOpt>
         }
     }
     ret
+}
+
+fn arg_count(args: &Option<AttributeOpt>) -> usize {
+    if let Some(x) = args {
+        let args: Vec<_> = x.attribute_list.as_ref().into();
+        args.len()
+    } else {
+        0
+    }
+}
+
+// Single-argument attributes read only position 0 (test also 1); reject extra args
+// so a typo'd `#[allow(unused_variable, garbage)]` is an error, not silently dropped.
+fn reject_extra_args(args: &Option<AttributeOpt>, max: usize) -> Result<(), AttributeError> {
+    if arg_count(args) > max {
+        Err(AttributeError::MismatchArgs(format!(
+            "at most {max} argument(s)"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 struct Pattern {
@@ -239,6 +255,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
     fn try_from(value: &veryl_parser::veryl_grammar_trait::Attribute) -> Result<Self, Self::Error> {
         PAT.with_borrow(|pat| match value.identifier.identifier_token.token.text {
             x if x == pat.ifdef || x == pat.ifndef || x == pat.elsif || x == pat.r#else => {
+                reject_extra_args(&value.attribute_opt, if x == pat.r#else { 0 } else { 1 })?;
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
@@ -262,6 +279,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 }
             }
             x if x == pat.sv => {
+                reject_extra_args(&value.attribute_opt, 1)?;
                 let arg = get_arg_string(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
@@ -271,6 +289,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 }
             }
             x if x == pat.allow => {
+                reject_extra_args(&value.attribute_opt, 1)?;
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 let err =
@@ -295,6 +314,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 }
             }
             x if x == pat.enum_encoding => {
+                reject_extra_args(&value.attribute_opt, 1)?;
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 let err = AttributeError::MismatchArgs(format!(
@@ -318,6 +338,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 }
             }
             x if x == pat.enum_member_prefix => {
+                reject_extra_args(&value.attribute_opt, 1)?;
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 if let Some(arg) = arg {
@@ -329,6 +350,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 }
             }
             x if x == pat.test => {
+                reject_extra_args(&value.attribute_opt, 2)?;
                 let arg = get_arg_ident(&value.attribute_opt, 0);
                 let top = get_arg_ident(&value.attribute_opt, 1);
 
@@ -341,6 +363,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 }
             }
             x if x == pat.cond_type => {
+                reject_extra_args(&value.attribute_opt, 1)?;
                 let arg = get_arg_ident(&value.attribute_opt, 0);
 
                 let err = AttributeError::MismatchArgs(format!(

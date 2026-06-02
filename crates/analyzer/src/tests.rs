@@ -2207,6 +2207,42 @@ fn mismatch_attribute_args() {
         errors[0],
         AnalyzerError::MismatchAttributeArgs { .. }
     ));
+
+    // Extra arguments to a single-argument attribute must be rejected, not silently
+    // dropped (they used to mask typos).
+    let code = r#"
+    package PkgA {
+        #[enum_encoding(sequential, garbage_extra)]
+        enum E: logic<2> {
+            A,
+            B,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchAttributeArgs { .. }))
+    );
+
+    let code = r#"
+    package PkgB {
+        #[enum_member_prefix(P, garbage_extra)]
+        enum E: logic<2> {
+            A,
+            B,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchAttributeArgs { .. }))
+    );
 }
 
 #[test]
