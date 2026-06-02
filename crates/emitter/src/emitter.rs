@@ -1168,6 +1168,20 @@ impl Emitter {
         }
     }
 
+    /// Without this, an inferred declaration of an array (`let s = a;`) loses its
+    /// unpacked dimensions and emits a scalar.
+    fn emit_inferred_array(&mut self, token_id: veryl_parser::resource_table::TokenId) {
+        if let Some(ir_type) = resolved_type_table::get(&token_id)
+            && ir_type.is_array()
+        {
+            let array_str = ir_type.to_sv_array();
+            if !array_str.is_empty() {
+                self.space(1);
+                self.str(&array_str);
+            }
+        }
+    }
+
     fn is_implicit_scalar_type(&mut self, x: &ScalarType) -> bool {
         let mut stringifier = Stringifier::new();
         stringifier.scalar_type(x);
@@ -1346,6 +1360,7 @@ impl Emitter {
                     self.emit_inferred_type(x.identifier.identifier_token.token.id);
                     self.space(1);
                     self.identifier(&x.identifier);
+                    self.emit_inferred_array(x.identifier.identifier_token.token.id);
                 }
                 self.str(";");
             }
@@ -4275,6 +4290,7 @@ impl VerylWalker for Emitter {
             self.align_start(align_kind::IDENTIFIER);
             self.identifier(&arg.identifier);
             self.align_finish(align_kind::IDENTIFIER);
+            self.emit_inferred_array(arg.identifier.identifier_token.token.id);
             self.align_start(align_kind::ARRAY);
             let loc = self.align_last_location(align_kind::IDENTIFIER);
             self.align_dummy_location(align_kind::ARRAY, loc);
@@ -4319,6 +4335,7 @@ impl VerylWalker for Emitter {
             self.align_start(align_kind::IDENTIFIER);
             self.identifier(&arg.identifier);
             self.align_finish(align_kind::IDENTIFIER);
+            self.emit_inferred_array(arg.identifier.identifier_token.token.id);
         }
         self.semicolon(&arg.semicolon);
     }
@@ -4333,6 +4350,7 @@ impl VerylWalker for Emitter {
             self.align_start(align_kind::IDENTIFIER);
             self.identifier(&arg.identifier);
             self.align_finish(align_kind::IDENTIFIER);
+            self.emit_inferred_array(arg.identifier.identifier_token.token.id);
             self.space(1);
             self.equ(&arg.equ);
             self.space(1);

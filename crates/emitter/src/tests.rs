@@ -3636,3 +3636,49 @@ fn inferred_type_keeps_signed_qualifier() {
         "inferred signed type lost the `signed` qualifier:\n{ret}"
     );
 }
+
+#[test]
+fn inferred_type_keeps_unpacked_array() {
+    // Regression: a type-inferred `let` of an array must keep its unpacked
+    // dimensions, otherwise an array is emitted as a scalar (invalid SV).
+    let code = r#"module top {
+    var a: logic<8> [4];
+    var o: logic<8>;
+    always_comb {
+        a = '{8'h0, 8'h0, 8'h0, 8'h0};
+        let s = a;
+        o = s[0];
+    }
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("s [4]"),
+        "inferred array type lost its unpacked dimension:\n{ret}"
+    );
+}
+
+#[test]
+fn module_level_inferred_let_keeps_unpacked_array() {
+    // Regression: emit_inferred_array was added to statement-level let and to
+    // var/const declarations, but NOT to the module-level let_declaration, so a
+    // module-scope `let s = a;` of an array still emitted a scalar (invalid SV).
+    let code = r#"module top (
+    o: output logic<8>,
+) {
+    var a: logic<8> [4];
+    always_comb {
+        a = '{0, 0, 0, 0};
+    }
+    let s = a;
+    assign o = s[0];
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("s [4]"),
+        "module-level inferred let lost its unpacked array dimension:\n{ret}"
+    );
+}
