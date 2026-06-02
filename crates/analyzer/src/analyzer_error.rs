@@ -608,6 +608,22 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_range),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("range is invalid because {cause}")]
+    InvalidRange {
+        cause: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_reset),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1743,6 +1759,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidNumberCharacter { token_source, .. } => *token_source,
             AnalyzerError::InvalidOperand { token_source, .. } => *token_source,
             AnalyzerError::InvalidPortDefaultValue { token_source, .. } => *token_source,
+            AnalyzerError::InvalidRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidReset { token_source, .. } => *token_source,
             AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
@@ -2140,6 +2157,14 @@ impl AnalyzerError {
     ) -> Self {
         AnalyzerError::InvalidPortDefaultValue {
             kind,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_range(cause: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidRange {
+            cause: cause.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_range (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_range)
+
+  × range is invalid because the lower bound of an exclusive range is not less than the upper bound
+   ╭─[../../testcases/error/invalid_range.veryl:5:30]
+ 4 │ ) {
+ 5 │     assign out = inside sel {2..0};
+   ·                              ──┬─
+   ·                                ╰── Error location
+ 6 │ }
+   ╰────
+  help:

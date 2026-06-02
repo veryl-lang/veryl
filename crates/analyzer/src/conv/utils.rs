@@ -2128,6 +2128,7 @@ fn range_item(
     let mut exp: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
 
     let comptime = exp.eval_comptime(context, None);
+    let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
     if !comptime.is_const {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
@@ -2143,6 +2144,21 @@ fn range_item(
         if !comptime.is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::CaseCondition,
+                &token,
+            ));
+        }
+
+        // An empty exclusive range (constant `lo >= hi`) miscompiles: the emitter's
+        // `(hi)-1` underflows an unsigned `hi == 0` to a near-universal range.
+        if matches!(x.range_operator.as_ref(), RangeOperator::DotDot(_))
+            && let (Some(lo), Some(hi)) = (
+                lo_value,
+                comptime.get_value().ok().and_then(|v| v.to_usize()),
+            )
+            && lo >= hi
+        {
+            context.insert_error(AnalyzerError::invalid_range(
+                "the lower bound of an exclusive range is not less than the upper bound",
                 &token,
             ));
         }
