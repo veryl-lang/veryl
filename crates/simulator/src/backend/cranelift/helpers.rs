@@ -396,6 +396,125 @@ pub(crate) fn emit_wide_fill_ones(
     dst
 }
 
+/// Static narrow bit-select read of a wide (>128-bit) value: extract bits
+/// `[end ..= beg]` (result `width` = `beg - end + 1` ≤ 64) from the wide value
+/// at `ptr` into a single I64.  `beg`/`end` are compile-time constants, so the
+/// word index and intra-word shift are constants and the selection touches at
+/// most two adjacent 64-bit words.  Returns the masked I64 value.
+pub(crate) fn emit_wide_bit_select_read_narrow(
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    beg: usize,
+    end: usize,
+    width: usize,
+) -> CraneliftValue {
+    debug_assert!(beg >= end && width <= 64 && width > 0);
+    let flags = MemFlags::trusted();
+    let word = end / 64;
+    let bit = (end % 64) as i64;
+    let lo = builder.ins().load(I64, flags, ptr, (word * 8) as i32);
+    let mut result = if bit == 0 {
+        lo
+    } else {
+        builder.ins().ushr_imm(lo, bit)
+    };
+    // Selection straddles into the next word? (only possible when bit > 0)
+    if (end % 64) + width > 64 {
+        let hi = builder.ins().load(I64, flags, ptr, ((word + 1) * 8) as i32);
+        let hi_part = builder.ins().ishl_imm(hi, 64 - bit);
+        result = builder.ins().bor(result, hi_part);
+    }
+    // Mask to the declared result width (width == 64 needs no mask).
+    if width < 64 {
+        let mask = ((1u64 << width) - 1) as i64;
+        result = builder.ins().band_imm(result, mask);
+    }
+    result
+}
+
+/// `rhs_select`: `dst = (src >> end) & mask(width)` for a wide source, into a
+/// fresh wide slot.  `end` is a compile-time constant.
+pub(crate) fn emit_wide_shift_right_mask(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    src_ptr: CraneliftValue,
+    end: usize,
+    width: usize,
+    nb: usize,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    let amount = builder.ins().iconst(I64, end as i64);
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        wide_fn_addrs::lshr(),
+        &[dst, src_ptr, amount, nb_val],
+    );
+    emit_wide_apply_mask(context, builder, dst, nb, width);
+    dst
+}
+
+/// `select` (wide-dst bit-select WRITE / RMW), 2-state:
+/// `new = (old & ~rangemask) | ((src << end) & rangemask)` where `rangemask`
+/// covers bits `[end ..= end + width - 1]`.  Returns a fresh wide slot holding
+/// the full post-RMW value.  `old_ptr` points at the current dst value.
+pub(crate) fn emit_wide_select_rmw(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    old_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    end: usize,
+    width: usize,
+    nb: usize,
+) -> CraneliftValue {
+    let amount = builder.ins().iconst(I64, end as i64);
+    let nb_val = builder.ins().iconst(I32, nb as i64);
+    // rangemask = fill_ones(width) << end
+    let rmask = emit_wide_fill_ones(context, builder, nb, width);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        wide_fn_addrs::shl(),
+        &[rmask, rmask, amount, nb_val],
+    );
+    // src_in_range = (src << end) & rangemask
+    let src_sh = alloc_wide_slot(builder, nb);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        wide_fn_addrs::shl(),
+        &[src_sh, src_ptr, amount, nb_val],
+    );
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        wide_fn_addrs::band(),
+        &[src_sh, src_sh, rmask, nb_val],
+    );
+    // new = (old & ~rangemask) | src_in_range
+    let new = alloc_wide_slot(builder, nb);
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        wide_fn_addrs::band_not(),
+        &[new, old_ptr, rmask, nb_val],
+    );
+    call_helper_void(
+        context,
+        builder,
+        HelperSig::BinaryOp,
+        wide_fn_addrs::bor(),
+        &[new, new, src_sh, nb_val],
+    );
+    new
+}
+
 /// Word-by-word select between two wide values.
 pub(crate) fn emit_wide_select(
     builder: &mut FunctionBuilder,

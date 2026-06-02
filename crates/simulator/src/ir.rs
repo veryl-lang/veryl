@@ -20,7 +20,7 @@ pub use statement::{
     ProtoAssignStatement, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
     ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RuntimeForBound,
     RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
-    parse_hex_content, patch_stmt_log_buf,
+    parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,

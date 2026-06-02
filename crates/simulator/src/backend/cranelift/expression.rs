@@ -157,8 +157,28 @@ impl ProtoExpression {
                     };
                     let ptr = builder.ins().iadd_imm(base_addr, var_offset.raw() as i64);
 
-                    // Select on >128-bit values: fall back to interpreter
-                    if select.is_some() || dynamic_select.is_some() {
+                    // Static narrow bit-select (≤64-bit result) of a wide
+                    // value: extract the range into a register.  Wide-result
+                    // selects (>64-bit) and dynamic bit-selects on a wide
+                    // value still fall back to the interpreter (rare).
+                    if let Some((beg, end)) = *select {
+                        if dynamic_select.is_none() && *width <= 64 {
+                            use super::helpers::emit_wide_bit_select_read_narrow;
+                            let payload =
+                                emit_wide_bit_select_read_narrow(builder, ptr, beg, end, *width);
+                            let mask_xz = if context.use_4state {
+                                let mask_base = builder.ins().iadd_imm(ptr, nb as i64);
+                                Some(emit_wide_bit_select_read_narrow(
+                                    builder, mask_base, beg, end, *width,
+                                ))
+                            } else {
+                                None
+                            };
+                            return Some((payload, mask_xz));
+                        }
+                        return None;
+                    }
+                    if dynamic_select.is_some() {
                         return None;
                     }
 
@@ -1726,11 +1746,6 @@ impl ProtoExpression {
                 width,
                 ..
             } => {
-                // Wide DynamicVariable: fall back to interpreter for now
-                if is_wide_ptr(*width) {
-                    return None;
-                }
-
                 let nb = *element_native_bytes;
                 let wide = *width > 64;
                 let (idx_payload, _idx_mask_xz) = index_expr.build_binary(context, builder)?;
@@ -1757,6 +1772,41 @@ impl ProtoExpression {
                 let static_offset = builder.ins().iconst(I64, base_offset.raw() as i64);
                 let addr = builder.ins().iadd(base_addr, static_offset);
                 let addr = builder.ins().iadd(addr, byte_offset);
+
+                // Wide element (>16 native bytes): the array slot holds a wide
+                // value at `addr` (it cannot be loaded into an I64/I128).
+                // No select → return the pointer (4-state mask half at
+                // `addr + nb`).  Static narrow (≤64-bit) select → extract into a
+                // register.  Wide-result selects and dynamic bit-selects on a
+                // wide element still fall back to the interpreter (rare).
+                if nb > 16 {
+                    if select.is_none() && dynamic_select.is_none() {
+                        let mask_xz = if context.use_4state {
+                            Some(builder.ins().iadd_imm(addr, nb as i64))
+                        } else {
+                            None
+                        };
+                        return Some((addr, mask_xz));
+                    }
+                    if dynamic_select.is_none()
+                        && let Some((beg, end)) = *select
+                        && *width <= 64
+                    {
+                        use super::helpers::emit_wide_bit_select_read_narrow;
+                        let payload =
+                            emit_wide_bit_select_read_narrow(builder, addr, beg, end, *width);
+                        let mask_xz = if context.use_4state {
+                            let mask_base = builder.ins().iadd_imm(addr, nb as i64);
+                            Some(emit_wide_bit_select_read_narrow(
+                                builder, mask_base, beg, end, *width,
+                            ))
+                        } else {
+                            None
+                        };
+                        return Some((payload, mask_xz));
+                    }
+                    return None;
+                }
 
                 let load_mem_flag = MemFlags::trusted();
 
@@ -2021,19 +2071,35 @@ impl ProtoExpression {
         // Determine the native byte size for the operation
         let op_nb = calc_native_bytes(width.max(x_width).max(y_width));
 
-        // Ensure both operands are wide pointers of the right size
-        let x_ptr = if is_wide_ptr(x_width) {
+        // Ensure both operands are wide pointers of the right size.  Decide
+        // pointer-vs-register by `builds_wide_pointer()` (build_binary's actual
+        // representation choice), NOT `is_wide_ptr(width())`: a node whose
+        // `width` field exceeds its evaluation width builds a scalar register,
+        // and treating that scalar as a pointer dereferences garbage (the v4
+        // OoO-core wide_shl SIGSEGV).  When it's a register, force-store into a
+        // fresh slot (bypassing ensure_wide_ptr_val's own width-based guard,
+        // which would also be fooled by the inflated width field).
+        let x_ptr = if x.builds_wide_pointer() {
             x_payload
         } else {
-            ensure_wide_ptr_val(builder, x_payload, x_width, op_nb)
+            let slot = alloc_wide_zero(builder, op_nb);
+            builder.ins().store(MemFlags::trusted(), x_payload, slot, 0);
+            slot
         };
-        let y_ptr = if is_wide_ptr(y_width) {
+        let y_ptr = if y.builds_wide_pointer() {
             y_payload
         } else {
-            ensure_wide_ptr_val(builder, y_payload, y_width, op_nb)
+            let slot = alloc_wide_zero(builder, op_nb);
+            builder.ins().store(MemFlags::trusted(), y_payload, slot, 0);
+            slot
         };
+        let _ = (x_width, y_width); // widths no longer gate representation
 
         // Result is comparison (1-bit I64)?
+        // EqWildcard/NeWildcard are only treated as plain Eq/Ne here in
+        // 2-state mode, where `a ==? b ≡ a == b` (no x/z to match).  In
+        // 4-state mode wildcard matching needs mask-aware semantics, so they
+        // stay out of `is_cmp` and fall through to the `_ => None` bail.
         let is_cmp = matches!(
             op,
             Op::Eq
@@ -2044,19 +2110,19 @@ impl ProtoExpression {
                 | Op::LessEq
                 | Op::LogicAnd
                 | Op::LogicOr
-        );
+        ) || (!context.use_4state && matches!(op, Op::EqWildcard | Op::NeWildcard));
 
         if is_cmp {
             let nb_val = builder.ins().iconst(I32, op_nb as i64);
             let payload = match op {
-                Op::Eq => call_helper_ret(
+                Op::Eq | Op::EqWildcard => call_helper_ret(
                     context,
                     builder,
                     HelperSig::Compare,
                     wide_fn_addrs::eq(),
                     &[x_ptr, y_ptr, nb_val],
                 ),
-                Op::Ne => call_helper_ret(
+                Op::Ne | Op::NeWildcard => call_helper_ret(
                     context,
                     builder,
                     HelperSig::Compare,

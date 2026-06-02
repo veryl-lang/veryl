@@ -1098,10 +1098,12 @@ impl ProtoAssignStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
-        use super::helpers::{emit_wide_apply_mask, is_wide_ptr};
+        use super::helpers::emit_wide_apply_mask;
 
-        // Select on wide destination: fall back to interpreter
-        if self.select.is_some() || self.rhs_select.is_some() {
+        // Wide-dst bit-select WRITE (RMW) in 4-state mode needs mask-aware
+        // read-modify-write semantics; keep that on the interpreter (rare).
+        // 2-state dst-select and any rhs_select are handled below.
+        if self.select.is_some() && context.use_4state {
             return None;
         }
 
@@ -1133,15 +1135,52 @@ impl ProtoAssignStatement {
             0
         };
 
-        // Source is a wide pointer (for >128-bit expressions)
-        // Use expr_width captured before build_binary to determine representation.
-        // build_binary returns a pointer for width > 128, register otherwise.
-        let src_ptr = if is_wide_ptr(expr_width) {
+        // Source representation: build_binary returns a POINTER iff
+        // `builds_wide_pointer()` (the keystone predicate), NOT simply when
+        // width > 128.  A wide-WIDTH expression that build_binary still
+        // returns as a register — a comparison/reduction over wide operands,
+        // or any node whose declared width exceeds its build representation —
+        // must be promoted into a slot, else `payload` (a scalar) is
+        // dereferenced as a pointer (SIGSEGV).  `is_wide_ptr(expr_width)`
+        // alone gets this wrong and crashed the v4 OoO core's wide datapath.
+        let src_ptr = if self.expr.builds_wide_pointer() {
             payload
         } else {
-            // Expression was narrow but dest is wide — store into temp slot
-            use super::helpers::ensure_wide_ptr_val;
-            ensure_wide_ptr_val(builder, payload, expr_width, nb)
+            // Build produced a register (narrow or collapsed wide result):
+            // force-store it into a fresh wide slot.  We do NOT call
+            // ensure_wide_ptr_val here — its internal `is_wide_ptr(src_width)`
+            // guard is fooled by an inflated `width` field (> 128 while the
+            // build is actually a scalar) and would pass the register straight
+            // through unstored, to be dereferenced as a pointer (SIGSEGV).
+            let slot = alloc_wide_zero(builder, nb);
+            builder.ins().store(MemFlags::trusted(), payload, slot, 0);
+            slot
+        };
+        let _ = expr_width; // no longer gates representation (builds_wide_pointer does)
+
+        // rhs_select: `dst = src[beg:end]` — shift the source down by `end`
+        // and mask to the select width before storing the full wide dst.
+        let src_ptr = if let Some((beg, end)) = self.rhs_select {
+            use super::helpers::emit_wide_shift_right_mask;
+            emit_wide_shift_right_mask(context, builder, src_ptr, end, beg - end + 1, nb)
+        } else {
+            src_ptr
+        };
+
+        // select: `dst[beg:end] = src` — read the current dst value and
+        // read-modify-write the [beg:end] range (2-state; 4-state bailed
+        // above).  `src_ptr` becomes the full post-RMW wide value that the
+        // store/log path below writes to the canonical dst.
+        let src_ptr = if let Some((beg, end)) = self.select {
+            use super::helpers::emit_wide_select_rmw;
+            // Read the current dst value from `dst.raw()` (= `dst_offset`):
+            // for comb that is the live value, for a packed FF the old
+            // (last-cycle) current slot, and for an unpacked multi-RMW FF the
+            // next slot that already holds prior in-event writes (forwarding).
+            let old_ptr = builder.ins().iadd_imm(base_addr, dst_offset as i64);
+            emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
+        } else {
+            src_ptr
         };
 
         // Apply width mask to the source to truncate extra bits
@@ -1166,11 +1205,23 @@ impl ProtoAssignStatement {
         // 4-state mask: direct store (skip for packed FF) + parallel wide
         // log entries at `current_offset + nb`.
         if let Some(mask_xz) = mask_xz {
-            let mask_ptr = if is_wide_ptr(self.expr.width()) {
+            let mask_ptr = if self.expr.builds_wide_pointer() {
                 mask_xz
             } else {
-                use super::helpers::ensure_wide_ptr_val;
-                ensure_wide_ptr_val(builder, mask_xz, self.expr.width(), nb)
+                // Force-store (see the payload src_ptr note above): the
+                // width-field guard in ensure_wide_ptr_val is unreliable here.
+                let slot = alloc_wide_zero(builder, nb);
+                builder.ins().store(MemFlags::trusted(), mask_xz, slot, 0);
+                slot
+            };
+            // rhs_select shifts the mask half in parallel with the payload
+            // (4-state).  dst-select RMW only reaches here in 2-state, where
+            // there is no mask half, so it never combines with this block.
+            let mask_ptr = if let Some((beg, end)) = self.rhs_select {
+                use super::helpers::emit_wide_shift_right_mask;
+                emit_wide_shift_right_mask(context, builder, mask_ptr, end, beg - end + 1, nb)
+            } else {
+                mask_ptr
             };
             emit_wide_apply_mask(context, builder, mask_ptr, nb, self.dst_width);
             if !ff_packed {

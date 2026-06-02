@@ -475,6 +475,69 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
     result
 }
 
+/// Callback invoked by AOT-C event `.so` code for `$display` / `$write`.
+/// Mirrors `SystemFunctionCall::{Display,Write}::eval_step` so emitted output is
+/// byte-identical and flows through the same thread-local `output_buffer` (which
+/// prevents interleaving across parallel tests).  `fmt`/`fmt_len` carry the Veryl
+/// format-string bytes; `vals`/`widths` carry `n` argument payloads (≤ 64 bits —
+/// the emitter bails to Cranelift for wider args); `newline` is 1 for `$display`,
+/// 0 for `$write`.  The pointer is handed to the `.so` via `veryl_set_sysfn_cb`
+/// in `compile_source`.
+///
+/// # Safety
+/// `fmt` must point to `fmt_len` readable bytes (or be null with `fmt_len` 0),
+/// and `vals`/`widths` to `n` readable elements (or null with `n` 0).  Emitted
+/// code always satisfies this.
+pub unsafe extern "C" fn veryl_aot_sysfn_print(
+    fmt: *const u8,
+    fmt_len: usize,
+    vals: *const u64,
+    widths: *const u32,
+    n: usize,
+    newline: u32,
+) {
+    let fmt = if fmt.is_null() || fmt_len == 0 {
+        ""
+    } else {
+        let bytes = unsafe { std::slice::from_raw_parts(fmt, fmt_len) };
+        std::str::from_utf8(bytes).unwrap_or("")
+    };
+    let values: Vec<AnalyzerValue> = if n == 0 || vals.is_null() || widths.is_null() {
+        Vec::new()
+    } else {
+        (0..n)
+            .map(|i| {
+                let v = unsafe { *vals.add(i) };
+                // `widths[i]` packs the bit width (low 16 bits) with the
+                // signedness flag (bit 16); see `emit_event_print`.  Signedness
+                // changes %d/%s output, so it must match the interpreter's
+                // eval() value.
+                let packed = unsafe { *widths.add(i) } as usize;
+                let width = packed & 0xffff;
+                let signed = (packed >> 16) & 1 != 0;
+                AnalyzerValue::new(v, width, signed)
+            })
+            .collect()
+    };
+    // Mirror eval_step's Display/Write formatting precisely.
+    let output = if fmt.is_empty() {
+        values
+            .iter()
+            .map(|v| v.format_hex())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else if values.is_empty() {
+        fmt.to_string()
+    } else {
+        format_display_string(fmt, &values)
+    };
+    if newline != 0 {
+        output_buffer::println(&output);
+    } else {
+        output_buffer::print(&output);
+    }
+}
+
 impl SystemFunctionCall {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
         match self {
@@ -1070,6 +1133,83 @@ impl ProtoStatement {
                 // input/output sets.
                 for s in body {
                     s.gather_variable_offsets_expanded(inputs, outputs);
+                }
+            }
+            ProtoStatement::TbMethodCall { .. } => {}
+            ProtoStatement::Break => {}
+        }
+    }
+
+    /// Read-side `DynamicVariable` accesses recorded as ranges (see the
+    /// `ProtoExpression` method).  Used by DCE to commit pending writes a
+    /// dynamic read may touch without expanding to every element.  Walks only
+    /// the read positions; write dsts are handled by the base+last `outs` set.
+    pub fn gather_dynamic_read_ranges(&self, ranges: &mut Vec<(bool, isize, isize, usize)>) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.expr.gather_dynamic_read_ranges(ranges);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_index_expr.gather_dynamic_read_ranges(ranges);
+                x.expr.gather_dynamic_read_ranges(ranges);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &x.cond {
+                    cond.gather_dynamic_read_ranges(ranges);
+                }
+                for s in &x.true_side {
+                    s.gather_dynamic_read_ranges(ranges);
+                }
+                for s in &x.false_side {
+                    s.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.gather_dynamic_read_ranges(ranges);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
+                    condition.gather_dynamic_read_ranges(ranges);
+                    for arg in args {
+                        arg.gather_dynamic_read_ranges(ranges);
+                    }
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(x) => {
+                // Prefer the originals so their DynamicVariable reads register
+                // as ranges; without them only cached base+last point offsets
+                // exist (covered by the non-expanded read set), so nothing to
+                // add here.
+                if !x.original_stmts.is_empty() {
+                    for s in &x.original_stmts {
+                        s.gather_dynamic_read_ranges(ranges);
+                    }
+                }
+            }
+            ProtoStatement::For(x) => {
+                for e in x.range.dynamic_bounds() {
+                    e.gather_dynamic_read_ranges(ranges);
+                }
+                for s in &x.body {
+                    s.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.gather_dynamic_read_ranges(ranges);
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}

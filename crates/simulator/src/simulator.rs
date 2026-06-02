@@ -7,7 +7,9 @@ use crate::ir::{
     read_native_value, write_native_value,
 };
 use crate::wave_dumper::{DumpVar, WaveDumper};
+use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
+use std::sync::Arc;
 use veryl_analyzer::value::MaskCache;
 
 #[cfg(feature = "profile")]
@@ -38,6 +40,13 @@ pub struct Simulator {
     pub profile: SimProfile,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
+    /// Whole-event AOT-C handle for `last_event`, cached alongside
+    /// `last_event_stmts` (same predicate, same post-construction-immutable
+    /// `whole_events` invariant) so the hot path skips a per-cycle
+    /// `whole_events` HashMap probe + `Arc` clone.  `None` = no whole-event
+    /// backend for `last_event`.  Points into `self.ir.whole_events`'s `Arc`,
+    /// which is never mutated after `Ir` construction.
+    last_whole_event: Option<*const dyn CompiledWhole>,
     /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
     /// commit path.  Accumulated across the run; `dump` is invoked
     /// automatically when the cycle counter crosses a logarithmic
@@ -95,6 +104,7 @@ impl Simulator {
             profile: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
+            last_whole_event: None,
             write_log_diag: WriteLogDiag {
                 enabled: std::env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
                 next_print_cycle: 1_000_000,
@@ -264,16 +274,25 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let event_start = std::time::Instant::now();
 
-        let stmts_ptr = if self.last_event.as_ref() == Some(event) {
-            self.last_event_stmts
+        // Cache both the per-stmt list AND the whole-event AOT-C handle for
+        // the current event, keyed on `last_event`.  `event_statements` and
+        // `whole_events` are both immutable after `Ir` construction, so the
+        // raw pointers stay valid; this turns the per-cycle `whole_events`
+        // HashMap probe + `Arc` clone into a single predicate check that the
+        // per-stmt cache already pays for.
+        let (stmts_ptr, whole_event_ptr) = if self.last_event.as_ref() == Some(event) {
+            (self.last_event_stmts, self.last_whole_event)
         } else {
             let ptr: *const Vec<Statement> = match self.ir.event_statements.get(event) {
                 Some(v) => v as *const _,
                 None => std::ptr::null(),
             };
+            let wptr: Option<*const dyn CompiledWhole> =
+                self.ir.whole_events.get(event).map(Arc::as_ptr);
             self.last_event = Some(event.clone());
             self.last_event_stmts = ptr;
-            ptr
+            self.last_whole_event = wptr;
+            (ptr, wptr)
         };
 
         // Whole-event backend (today: AOT-C): if a backend committed to
@@ -283,8 +302,12 @@ impl Simulator {
         // (3rd arg), exactly as the Cranelift event JIT does;
         // `ff_commit_from_log` below applies them.
         use crate::backend::DispatchOutcome;
-        let whole_event = self.ir.whole_events.get(event).cloned();
-        let dispatched = if let Some(whole) = whole_event {
+        let dispatched = if let Some(wptr) = whole_event_ptr {
+            // SAFETY: `wptr` = `Arc::as_ptr` of an `Arc` owned by
+            // `self.ir.whole_events`, which is never mutated after `Ir`
+            // construction, so the pointee outlives this call.  Same
+            // invariant the `last_event_stmts` raw pointer relies on.
+            let whole: &dyn CompiledWhole = unsafe { &*wptr };
             let ff_ptr = self.ir.ff_values.as_ptr();
             let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
             let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
@@ -303,7 +326,7 @@ impl Simulator {
                 // on divergence.  The whole-event backend only exists on
                 // native (BackendRegistry stays empty on wasm), so this
                 // branch is effectively native-only at runtime.
-                self.validate_event_aot(whole.as_ref(), stmts_ptr);
+                self.validate_event_aot(whole, stmts_ptr);
                 true
             }
         } else {
@@ -367,23 +390,46 @@ impl Simulator {
         let ff_snap = self.ir.ff_values.to_vec();
         let comb_snap = self.ir.comb_values.to_vec();
         let count_before = self.ir.write_log_buffer.narrow_count as usize;
+        let wide_count_before = self.ir.write_log_buffer.wide_count as usize;
 
         // Whole-event backend, then capture its pushed entries + ff/comb.
         let _ = whole.try_dispatch(ff_ptr, comb_ptr, log_ptr);
-        // The committed FF effect is `ff_commit_from_log`'s last-write-wins per
-        // offset, so compare offset -> (width_class, last payload) maps, not the
-        // raw entry order or the pre-commit ff_values (the dual-slot "next slot"
-        // direct writes are vestigial — ff_commit applies the *log* to the
-        // current slots, so those transient writes don't affect correctness).
-        let lww_map = |buf: &WriteLogBuffer, lo: usize, hi: usize| {
-            let mut m: std::collections::HashMap<u32, (u16, u64)> = Default::default();
-            for e in &buf.narrow_entries_slice()[lo..hi] {
-                m.insert(e.offset, (e.width_class, e.payload));
-            }
-            m
-        };
+        // The committed FF effect is what `ff_commit_from_log` writes: all
+        // narrow entries first (typed stores of `width_class` bytes), then all
+        // wide entries (memcpy of `native_bytes`), last-write-wins per byte.
+        // The SAME committed value can be routed through DIFFERENT pools by
+        // different backends — a 65-128 bit FF is ONE wide entry for AOT-C /
+        // interpret but TWO narrow u64 entries for the Cranelift JIT — so we
+        // must compare the RESOLVED per-byte effect, not pool-specific entry
+        // maps, or a byte-identical commit would false-positive.  (The dual-slot
+        // "next slot" direct writes are vestigial; only the log drives commit.)
+        let committed_bytes =
+            |buf: &WriteLogBuffer, nlo: usize, nhi: usize, wlo: usize, whi: usize| {
+                let mut m: HashMap<u32, u8> = Default::default();
+                for e in &buf.narrow_entries_slice()[nlo..nhi] {
+                    let nb = (e.width_class as usize).min(8);
+                    let bytes = e.payload.to_le_bytes();
+                    for (i, &b) in bytes.iter().take(nb).enumerate() {
+                        m.insert(e.offset + i as u32, b);
+                    }
+                }
+                for e in &buf.wide_entries_slice()[wlo..whi] {
+                    let nb = (e.native_bytes as usize).min(e.payload.len());
+                    for (i, &b) in e.payload.iter().take(nb).enumerate() {
+                        m.insert(e.offset + i as u32, b);
+                    }
+                }
+                m
+            };
         let aot_count = self.ir.write_log_buffer.narrow_count as usize;
-        let aot_map = lww_map(&self.ir.write_log_buffer, count_before, aot_count);
+        let aot_wide_count = self.ir.write_log_buffer.wide_count as usize;
+        let aot_bytes = committed_bytes(
+            &self.ir.write_log_buffer,
+            count_before,
+            aot_count,
+            wide_count_before,
+            aot_wide_count,
+        );
 
         // Restore inputs + log count, then run the Cranelift event.
         unsafe {
@@ -399,6 +445,7 @@ impl Simulator {
             );
         }
         self.ir.write_log_buffer.narrow_count = count_before as u32;
+        self.ir.write_log_buffer.wide_count = wide_count_before as u32;
         if !stmts_ptr.is_null() {
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
             for x in statements {
@@ -406,28 +453,30 @@ impl Simulator {
             }
         }
         let cr_count = self.ir.write_log_buffer.narrow_count as usize;
-        let cr_map = lww_map(&self.ir.write_log_buffer, count_before, cr_count);
+        let cr_wide_count = self.ir.write_log_buffer.wide_count as usize;
+        let cr_bytes = committed_bytes(
+            &self.ir.write_log_buffer,
+            count_before,
+            cr_count,
+            wide_count_before,
+            cr_wide_count,
+        );
 
-        if aot_map != cr_map {
+        if aot_bytes != cr_bytes {
             eprintln!(
-                "[aot_event_validate] DIVERGENCE event={:?}: committed-FF maps differ (aot {} offsets, cranelift {} offsets)",
+                "[aot_event_validate] DIVERGENCE event={:?}: committed-FF bytes differ (aot {} bytes, cranelift {} bytes)",
                 self.last_event,
-                aot_map.len(),
-                cr_map.len(),
+                aot_bytes.len(),
+                cr_bytes.len(),
             );
-            // Offsets present in only one side, or with differing value.
-            for (off, av) in &aot_map {
-                match cr_map.get(off) {
-                    None => eprintln!("  off={off:#x}: aot={av:?} cranelift=<absent>"),
-                    Some(cv) if cv != av => {
-                        eprintln!("  off={off:#x}: aot={av:?} cranelift={cv:?}")
-                    }
-                    _ => {}
-                }
-            }
-            for off in cr_map.keys() {
-                if !aot_map.contains_key(off) {
-                    eprintln!("  off={off:#x}: aot=<absent> cranelift={:?}", cr_map[off]);
+            let mut offs: BTreeSet<u32> = Default::default();
+            offs.extend(aot_bytes.keys());
+            offs.extend(cr_bytes.keys());
+            for off in offs {
+                let a = aot_bytes.get(&off);
+                let c = cr_bytes.get(&off);
+                if a != c {
+                    eprintln!("  byte off={off:#x}: aot={a:?} cranelift={c:?}");
                 }
             }
             panic!("AOT-C event validate divergence (see above)");

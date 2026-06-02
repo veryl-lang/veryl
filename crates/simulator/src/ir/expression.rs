@@ -397,6 +397,63 @@ impl ProtoExpression {
             }
         }
     }
+
+    /// Read-side `DynamicVariable` accesses recorded as
+    /// `(is_ff, base_raw, stride, num_elements)` ranges instead of expanding to
+    /// every element.  Lets DCE commit a pending write covered by a dynamic
+    /// read in O(pending) per range, avoiding the O(num_elements) blow-up of
+    /// `gather_variable_offsets_expanded` for large arrays.  Only the index
+    /// sub-expressions (themselves reads) recurse; the array access is the
+    /// range.
+    pub fn gather_dynamic_read_ranges(&self, ranges: &mut Vec<(bool, isize, isize, usize)>) {
+        match self {
+            ProtoExpression::Variable { dynamic_select, .. } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoExpression::Value { .. } => (),
+            ProtoExpression::Unary { x, .. } => x.gather_dynamic_read_ranges(ranges),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.gather_dynamic_read_ranges(ranges);
+                y.gather_dynamic_read_ranges(ranges);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.gather_dynamic_read_ranges(ranges);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.gather_dynamic_read_ranges(ranges);
+                true_expr.gather_dynamic_read_ranges(ranges);
+                false_expr.gather_dynamic_read_ranges(ranges);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_dynamic_read_ranges(ranges);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
+                ranges.push((
+                    base_offset.is_ff(),
+                    base_offset.raw(),
+                    *stride,
+                    *num_elements,
+                ));
+            }
+        }
+    }
 }
 
 /// Dynamic bit selection for packed arrays.
@@ -615,6 +672,115 @@ impl ProtoExpression {
             ProtoExpression::Concatenation { expr_context, .. } => expr_context,
             ProtoExpression::Ternary { expr_context, .. } => expr_context,
             ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
+        }
+    }
+
+    /// KEYSTONE predicate: true when `build_binary` materializes this
+    /// expression as a *pointer* into wide (>128-bit, flat LE-u64-chunk)
+    /// storage rather than a scalar register / C value.
+    ///
+    /// The width threshold is `> 128` (`is_wide_ptr`).  The crucial
+    /// non-obvious cases are comparisons and reductions: they yield a 1-bit
+    /// register result EVEN when their operands are wide (>128), so they are
+    /// NOT wide-pointer producers regardless of width.  Deciding pointer-vs-
+    /// register from the raw `width()` instead of this predicate would treat
+    /// a 0/1 boolean as a pointer and dereference it → SIGSEGV.
+    ///
+    /// This mirrors the per-arm dispatch in the Cranelift backend
+    /// (`backend/cranelift/expression.rs`): Variable 151/164-183, Value
+    /// 384/428/460, Unary 496+1824-1955, Binary 691+2025-2241, Concat
+    /// 1473, Ternary 1615, DynamicVariable 1716.  The AOT-C emitter consults
+    /// it at the Binary/Unary wide branches and the leaf load/value sites.
+    pub fn builds_wide_pointer(&self) -> bool {
+        const W: usize = 128;
+        match self {
+            // A static ≤64-bit bit-select extracts into a register; a wide
+            // (>64) or dynamic select on a wide var is interpreter-only
+            // (the emitter returns None there), so it is never a producer.
+            ProtoExpression::Variable {
+                var_full_width,
+                select,
+                dynamic_select,
+                width,
+                ..
+            } => {
+                *var_full_width > W
+                    && !(select.is_some() && dynamic_select.is_none() && *width <= 64)
+            }
+            ProtoExpression::Value { width, .. } => *width > W,
+            ProtoExpression::Concatenation { width, .. } => *width > W,
+            ProtoExpression::Ternary {
+                width,
+                true_expr,
+                false_expr,
+                ..
+            } => *width > W || true_expr.width() > W || false_expr.width() > W,
+            // Cranelift keys this on the element's native byte size (>16),
+            // i.e. an element wider than 128 bits — not on the post-select
+            // `width`.
+            ProtoExpression::DynamicVariable {
+                element_native_bytes,
+                select,
+                dynamic_select,
+                width,
+                ..
+            } => {
+                *element_native_bytes > 16
+                    && !(select.is_some() && dynamic_select.is_none() && *width <= 64)
+            }
+            // Reductions (IS_REDUCTION) collapse to a 1-bit register.
+            // NOTE: use `expr_context.width` (the EVALUATION width that
+            // `build_binary` keys its wide-vs-narrow dispatch on — Cranelift
+            // expression.rs:493/691), NOT the `width` field.  For some nodes
+            // the analyzer leaves `width` > `expr_context.width`; build_binary
+            // then produces a NARROW register while the `width` field claims
+            // wide, so a consumer that trusts `width` would deref a scalar as a
+            // pointer (a register-vs-pointer SIGSEGV).
+            ProtoExpression::Unary {
+                op,
+                x,
+                expr_context,
+                ..
+            } => {
+                !matches!(
+                    op,
+                    Op::BitAnd
+                        | Op::BitNand
+                        | Op::BitOr
+                        | Op::BitNor
+                        | Op::LogicNot
+                        | Op::BitXor
+                        | Op::BitXnor
+                ) && (expr_context.width > W || x.width() > W)
+            }
+            // Comparisons / logic (IS_CMP_OR_LOGIC) collapse to a 1-bit
+            // register.  EqWildcard/NeWildcard are excluded unconditionally:
+            // in 2-state they are comparisons (register), in 4-state they
+            // bail to the interpreter — either way never a wide pointer.
+            ProtoExpression::Binary {
+                op,
+                x,
+                y,
+                expr_context,
+                ..
+            } => {
+                // `expr_context.width` to match build_binary's needs_wide_ptr
+                // (Cranelift expression.rs:691), not the `width` field — see
+                // the Unary note above.
+                !matches!(
+                    op,
+                    Op::Eq
+                        | Op::Ne
+                        | Op::EqWildcard
+                        | Op::NeWildcard
+                        | Op::Greater
+                        | Op::GreaterEq
+                        | Op::Less
+                        | Op::LessEq
+                        | Op::LogicAnd
+                        | Op::LogicOr
+                ) && (expr_context.width > W || x.width() > W || y.width() > W)
+            }
         }
     }
 

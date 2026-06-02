@@ -336,6 +336,666 @@ fn wide_256_arithmetic() {
 }
 
 #[test]
+fn wide_256_narrow_select() {
+    // Static narrow (≤64-bit) bit-select READ of a wide (>128-bit) value.
+    // Exercises the Cranelift `emit_wide_bit_select_read_narrow` path
+    // (previously a silent interpret fallback) across word-0, word-boundary,
+    // word-straddling, and high-word selects.  Validated against interpret
+    // via Config::all().
+    let code = r#"
+    module Top (
+        a:  input  logic<256>,
+        s0: output logic<8>,
+        s1: output logic<11>,
+        s2: output logic<8>,
+        s3: output logic<1>,
+        s4: output logic<32>,
+        s5: output logic<64>,
+    ) {
+        assign s0 = a[7:0];
+        assign s1 = a[70:60];
+        assign s2 = a[127:120];
+        assign s3 = a[64];
+        assign s4 = a[95:64];
+        assign s5 = a[127:64];
+    }
+    "#;
+
+    let p: u128 = (0xFEDC_BA98_7654_3210u128 << 64) | 0x0123_4567_89AB_CDEFu128;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_u128(p, 0, 256, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let want = |v: u64, w: usize| Value::new(v, w, false);
+        assert_eq!(
+            sim.get("s0").unwrap(),
+            want((p & 0xFF) as u64, 8),
+            "s0 {config:?}"
+        );
+        assert_eq!(
+            sim.get("s1").unwrap(),
+            want(((p >> 60) & 0x7FF) as u64, 11),
+            "s1 {config:?}"
+        );
+        assert_eq!(
+            sim.get("s2").unwrap(),
+            want(((p >> 120) & 0xFF) as u64, 8),
+            "s2 {config:?}"
+        );
+        assert_eq!(
+            sim.get("s3").unwrap(),
+            want(((p >> 64) & 1) as u64, 1),
+            "s3 {config:?}"
+        );
+        assert_eq!(
+            sim.get("s4").unwrap(),
+            want(((p >> 64) & 0xFFFF_FFFF) as u64, 32),
+            "s4 {config:?}"
+        );
+        assert_eq!(
+            sim.get("s5").unwrap(),
+            want((p >> 64) as u64, 64),
+            "s5 {config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_256_select_store() {
+    // Wide-dst bit-select WRITE (RMW) on a 256-bit FF, exercised as a
+    // multi-RMW chain (`f = lo; f[71:64] = b;`) so the select-RMW reads the
+    // forwarded prior write.  Validates the Cranelift `emit_wide_select_rmw`
+    // path (2-state) against the interpreter via Config::all().
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        lo:  input  logic<256>,
+        b:   input  logic<8>,
+        f:   output logic<256>,
+    ) {
+        always_ff {
+            f = lo;
+            f[71:64] = b;
+        }
+    }
+    "#;
+
+    let p: u128 = (0x1122_3344_5566_7788u128 << 64) | 0x99AA_BBCC_DDEE_FF00u128;
+    let bval: u64 = 0xA5;
+    let expected: u128 = (p & !(0xFFu128 << 64)) | ((bval as u128) << 64);
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+
+        sim.set("lo", Value::from_u128(p, 0, 256, false));
+        sim.set("b", Value::new(bval, 8, false));
+        sim.step(&clk);
+
+        assert_eq!(
+            sim.get("f").unwrap(),
+            Value::from_u128(expected, 0, 256, false),
+            "config: {config:?}"
+        );
+    }
+}
+
+/// AOT-C config that forces native whole-module compile (min_stmts=0) and
+/// dual-runs cc vs Cranelift every cycle (aot_c_validate), panicking on the
+/// first divergence.
+fn aot_native_validate_config() -> Config {
+    Config {
+        use_4state: false,
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async: false,
+        aot_c_validate: true,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn wide_256_aot_native_comb() {
+    // G1: a wide (>128-bit) comb module must be covered NATIVELY by the AOT-C
+    // backend (whole_comb = Some), not silently bailed to Cranelift.  The
+    // aot_c_validate config additionally dual-runs cc vs Cranelift each cycle,
+    // asserting the wide-op helper codegen is bit-identical.
+    if !crate::backend::aot_c::cc_available() {
+        return; // no external C compiler on this host
+    }
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        b: input  logic<256>,
+        c: output logic<256>,
+        d: output logic<256>,
+        e: output logic<256>,
+    ) {
+        assign c = (a & b) | (a ^ b);
+        assign d = a + b;
+        assign e = a << 8;
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        ir.whole_comb.is_some(),
+        "wide comb module must be AOT-C-native (whole_comb=Some), not bailed to Cranelift"
+    );
+    let mut sim = Simulator::new(ir, None);
+    let a = Value::new(0x00FF, 256, false);
+    let b = Value::new(0x0F0F, 256, false);
+    sim.set("a", a);
+    sim.set("b", b);
+    sim.step(&Event::Clock(VarId::SYNTHETIC));
+    // (a&b)|(a^b) == a|b == 0x0FFF; a+b == 0x100E; a<<8 == 0xFF00
+    assert_eq!(sim.get("c").unwrap(), Value::new(0x0FFF, 256, false));
+    assert_eq!(sim.get("d").unwrap(), Value::new(0x100E, 256, false));
+    assert_eq!(sim.get("e").unwrap(), Value::new(0xFF00, 256, false));
+}
+
+#[test]
+fn probe_wide_comb_oor_select_store() {
+    // PROBE: wide (>128-bit) COMB bit-select store where hi >= dst_width.
+    // a is 200-bit; a[201:199] writes bits 199..201, but only bit 199 is
+    // within [0,200). Bits 200,201 are above dst_width=200. The interpreter
+    // and Cranelift clamp to dst_width unconditionally; the new AOT-C scalar
+    // fast path (emit_wide_narrow_field_store) skips the trailing apply_mask.
+    // Drive a fully first so the RMW reads a defined base.
+    let code = r#"
+    module Top (
+        base: input  logic<200>,
+        b:    input  logic<8>,
+        o:    output logic<200>,
+    ) {
+        always_comb {
+            o = base;
+            o[201:199] = b;
+        }
+    }
+    "#;
+
+    // Reference value: interpreter / Cranelift semantics = only bits within
+    // [0,200) are written, rest of o = base, and bits >= 200 stay 0 (o is
+    // declared 200-bit so high storage bits must be 0).
+    // base low: set bit 199 region to 0 so we can see the written bit clearly.
+    let base_val = Value::new(0, 200, false);
+    let b_val = Value::new(0b111, 8, false); // wants to set bits 199,200,201
+
+    let mut results = vec![];
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("base", base_val.clone());
+        sim.set("b", b_val.clone());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let o = sim.get("o").unwrap();
+        eprintln!("PROBE config={config:?} o={}", o.format_hex());
+        results.push((format!("{config:?}"), o.format_hex()));
+    }
+    // Print all; assert all identical (this is the divergence check).
+    let first = results[0].1.clone();
+    for (cfg, v) in &results {
+        assert_eq!(
+            *v, first,
+            "DIVERGENCE: config {cfg} gave o={v}, expected {first}"
+        );
+    }
+}
+
+#[test]
+fn wide_256_aot_native_ff() {
+    // G2: a wide (>128-bit) FF module must be covered NATIVELY by the AOT-C
+    // event backend (whole_events non-empty), routing through the 64-byte
+    // WriteLogWideEntry pool.  aot_c_validate dual-runs cc vs Cranelift, which
+    // also exercises the wide-pool comparison added to validate_event_aot.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        a:   input  logic<256>,
+        q:   output logic<256>,
+    ) {
+        always_ff {
+            q = a + 1;
+        }
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        !ir.whole_events.is_empty(),
+        "wide FF module must be AOT-C-native (whole_events non-empty)"
+    );
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    sim.set("a", Value::new(100, 256, false));
+    sim.step(&clk);
+    assert_eq!(sim.get("q").unwrap(), Value::new(101, 256, false));
+}
+
+#[test]
+fn wide_128_ff_validate_pool_agnostic() {
+    // Regression for the validate-extension false positive: a 65-128 bit FF
+    // commits the SAME bytes through the AOT-C WIDE pool (one 16-byte entry)
+    // but the Cranelift JIT NARROW pool (two u64 entries).  validate_event_aot
+    // must compare the resolved committed BYTES, not pool-specific entry maps,
+    // or it spuriously panics on a byte-identical commit.  aot_c_validate=true
+    // dual-runs every cycle, so a regression panics inside step().
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        a:   input  logic<128>,
+        q:   output logic<128>,
+    ) {
+        always_ff {
+            q = a + 1;
+        }
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        !ir.whole_events.is_empty(),
+        "128-bit FF must be AOT-C-native"
+    );
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let a: u128 = (1u128 << 100) | 0xDEAD_BEEF;
+    sim.set("a", Value::from_u128(a, 0, 128, false));
+    sim.step(&clk); // pre-fix: panics here with a false "validate divergence"
+    assert_eq!(
+        sim.get("q").unwrap(),
+        Value::from_u128(a.wrapping_add(1), 0, 128, false)
+    );
+}
+
+#[test]
+fn wide_256_reduce_and_nested_unary() {
+    // Wide unary REDUCTIONS (&a / |a / ^a → 1-bit) exercise
+    // emit_wide_reduce_unary; the NESTED unary round-trips (~(~a) and -(-a))
+    // exercise emit_wide_unary (bnot/negate) and, crucially, the flat-prelude
+    // design where an outer wide op consumes an inner wide op's scratch.
+    // Cross-validated interpret/Cranelift/cc via Config::all().
+    let code = r#"
+    module Top (
+        a:     input  logic<256>,
+        r_and: output logic<1>,
+        r_or:  output logic<1>,
+        r_xor: output logic<1>,
+        inv2:  output logic<256>,
+        neg2:  output logic<256>,
+    ) {
+        assign r_and = &a;
+        assign r_or  = |a;
+        assign r_xor = ^a;
+        assign inv2  = ~(~a);
+        assign neg2  = -(-a);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // 0x7 = 3 set bits in the low word, all high bits zero.
+        sim.set("a", Value::from_u128(0x7, 0, 256, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // &a = 0 (not all-ones); |a = 1 (nonzero); ^a = parity(3) = 1.
+        assert_eq!(
+            sim.get("r_and").unwrap(),
+            Value::new(0, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("r_or").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("r_xor").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        // Double complement / double negate are the identity.
+        assert_eq!(
+            sim.get("inv2").unwrap(),
+            Value::from_u128(0x7, 0, 256, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("neg2").unwrap(),
+            Value::from_u128(0x7, 0, 256, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_256_concat_and_xnor() {
+    // Wide concatenation producing a >128-bit result (emit_wide_concat) and a
+    // wide BitXnor (`~^`, emit_wide_binary bxor_not).  Expected values exceed
+    // 128 bits, so built via BigUint.  Cross-validated via Config::all().
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a:   input  logic<128>,
+        b:   input  logic<128>,
+        cc:  output logic<256>,
+        xn:  output logic<256>,
+    ) {
+        assign cc = {a, b};
+        assign xn = {128'd0, a} ~^ {128'd0, b};
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let pa: u128 = (0x1122_3344_5566_7788u128 << 64) | 0x99AA_BBCC_DDEE_FF00u128;
+        let pb: u128 = (0x0F0F_0F0F_0F0F_0F0Fu128 << 64) | 0xF0F0_F0F0_F0F0_F0F0u128;
+        sim.set("a", Value::from_u128(pa, 0, 128, false));
+        sim.set("b", Value::from_u128(pb, 0, 128, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // cc = {a, b}: a in the high 128 bits, b in the low 128.
+        let cc_big = (BigUint::from(pa) << 128) | BigUint::from(pb);
+        assert_eq!(
+            sim.get("cc").unwrap(),
+            Value::new_biguint(cc_big, 256, false),
+            "{config:?}"
+        );
+        // xn = (0:a) ~^ (0:b) = ~((0:a) ^ (0:b)) masked to 256 bits.  The high
+        // 128 bits of both operands are 0, so xn's high 128 bits are all ones.
+        let ab = BigUint::from(pa) ^ BigUint::from(pb); // low 128 bits set, high 0
+        let mask256 = (BigUint::from(1u8) << 256) - BigUint::from(1u8);
+        let xn_big = (&mask256) ^ ab; // ~ab within 256 bits
+        assert_eq!(
+            sim.get("xn").unwrap(),
+            Value::new_biguint(xn_big, 256, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_result_narrower_than_operands() {
+    // Operands (256-bit) wider than the result (130-bit): the add is computed
+    // at the operand width then truncated to 130 on store.  Exercises
+    // emit_wide_operand's `r.nb > target_nb` clamp — a 256-bit (32-byte) value
+    // copied into the 130-bit (24-byte) destination scratch; an unclamped copy
+    // would overflow.  Cross-validated via Config::all().
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        b: input  logic<256>,
+        c: output logic<130>,
+    ) {
+        assign c = a + b;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // a = 2^200 + 5, b = 3 → a+b = 2^200 + 8; truncated to 130 bits = 8.
+        let a = (BigUint::from(1u8) << 200) + BigUint::from(5u8);
+        let b = BigUint::from(3u8);
+        sim.set("a", Value::new_biguint(a, 256, false));
+        sim.set("b", Value::new_biguint(b, 256, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("c").unwrap(),
+            Value::new(8, 130, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_v4_repro_comb_select_store_232() {
+    // Repro for the v4 boot SEGV: a wide (non-64-multiple) COMB signal with a
+    // single-bit select store, mirroring the census `Assign(dw=232,sel=true)`.
+    let code = r#"
+    module Top (
+        a:      input  logic<232>,
+        bit_in: input  logic,
+        w:      output logic<232>,
+    ) {
+        always_comb {
+            w = a;
+            w[231] = bit_in;
+            w[100] = bit_in;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let a = Value::new(0, 232, false);
+        sim.set("a", a);
+        sim.set("bit_in", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // w == a with bits 231 and 100 set.
+        let got = sim.get("w").unwrap();
+        let exp = {
+            use num_bigint::BigUint;
+            let v = (BigUint::from(1u8) << 231) | (BigUint::from(1u8) << 100);
+            Value::new_biguint(v, 232, false)
+        };
+        assert_eq!(got, exp, "{config:?}");
+    }
+}
+
+#[test]
+fn wide_v4_repro_var_select_read_232() {
+    // Repro: narrow bit-select READ from a wide var (census exprOK=false).
+    let code = r#"
+    module Top (
+        a:    input  logic<232>,
+        top:  output logic,
+        mid:  output logic,
+        bsel: output logic<8>,
+    ) {
+        assign top  = a[231];
+        assign mid  = a[100];
+        assign bsel = a[207:200];
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let p: u128 = (1u128 << 100) | 0xAB;
+        sim.set("a", Value::from_u128(p, 0, 232, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("top").unwrap(),
+            Value::new(0, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("mid").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("bsel").unwrap(),
+            Value::new(0, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_v4_repro_dyn_array_232() {
+    // Repro: dynamic-indexed read/write of a WIDE (232-bit) array element —
+    // the OoO regfile/ROB/IQ pattern.  `arr[idx]` is a wide DynamicVariable;
+    // exercises the Cranelift S1 `nb>16` DynamicVariable branch + wide dynamic
+    // FF write.
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        idx:  input  logic<4>,
+        we:   input  logic,
+        din:  input  logic<232>,
+        dout: output logic<232>,
+    ) {
+        var arr: logic<232> [16];
+        always_ff {
+            if we {
+                arr[idx] = din;
+            }
+        }
+        assign dout = arr[idx];
+    }
+    "#;
+    // 2-state only: the 4-state path under-allocates comb storage for a wide
+    // ARRAY (a pre-existing layout bug surfaced by this repro, unrelated to
+    // the wide-value JIT work here; v4 is 2-state).
+    for config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("idx", Value::new(5, 4, false));
+        sim.set("we", Value::new(1, 1, false));
+        let d: num_bigint::BigUint =
+            (num_bigint::BigUint::from(1u8) << 200usize) | num_bigint::BigUint::from(0xDEADu32);
+        sim.set("din", Value::new_biguint(d.clone(), 232, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("dout").unwrap(),
+            Value::new_biguint(d, 232, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_narrow_field_two_word_straddle() {
+    // A <=64-bit field that STRADDLES a 64-bit word boundary exercises the
+    // two-word arm of emit_wide_narrow_field_store.  w[130:67] is a 64-bit
+    // field crossing the word-1/word-2 boundary (b = 67 % 64 = 3, k0=1, k1=2).
+    let code = r#"
+    module Top (
+        f: input  logic<64>,
+        w: output logic<200>,
+    ) {
+        always_comb {
+            w = 0;
+            w[130:67] = f;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let f: u64 = 0xFEDC_BA98_7654_3210;
+        sim.set("f", Value::new(f, 64, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let exp = {
+            use num_bigint::BigUint;
+            Value::new_biguint(BigUint::from(f) << 67usize, 200, false)
+        };
+        assert_eq!(sim.get("w").unwrap(), exp, "{config:?}");
+    }
+}
+
+#[test]
+fn wide_narrow_field_select_out_of_range_hi() {
+    // A bit-select store whose HIGH end exceeds dst_width: w[201:199] on a
+    // 200-bit value.  Bits 200,201 are out of range and must be dropped, like
+    // the interpret/Cranelift oracles do.  Regression: the bare RMW left them
+    // set (0x38..0 instead of the reference 0x80..0).
+    let code = r#"
+    module Top (
+        b: input  logic<3>,
+        w: output logic<200>,
+    ) {
+        always_comb {
+            w = 0;
+            w[201:199] = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("b", Value::new(0b111, 3, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // Only the in-range bit 199 survives; bits 200,201 are out of range.
+        let exp = {
+            use num_bigint::BigUint;
+            Value::new_biguint(BigUint::from(1u8) << 199usize, 200, false)
+        };
+        assert_eq!(sim.get("w").unwrap(), exp, "{config:?}");
+    }
+}
+
+#[test]
+fn wide_narrow_field_select_fully_out_of_range() {
+    // A bit-select store ENTIRELY past dst_width: w[260:259] on a 200-bit
+    // value.  The whole field is dropped (a no-op).  lo/64 = 4 also exceeds the
+    // value's native_bytes word count (native_bytes(200)/8 = 4 words, indices
+    // 0..3), so without the clamp the fast path would address word 4 — out of
+    // bounds; the clamp turns it into a no-op that leaves the base untouched.
+    let code = r#"
+    module Top (
+        a: input  logic<200>,
+        b: input  logic<2>,
+        w: output logic<200>,
+    ) {
+        always_comb {
+            w = a;
+            w[260:259] = b;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let a = {
+            use num_bigint::BigUint;
+            BigUint::from(1u8) << 150usize
+        };
+        sim.set("a", Value::new_biguint(a.clone(), 200, false));
+        sim.set("b", Value::new(0b11, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // The out-of-range field write is a no-op: w == a.
+        assert_eq!(
+            sim.get("w").unwrap(),
+            Value::new_biguint(a, 200, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn wide_256_comparison() {
     let code = r#"
     module Top (

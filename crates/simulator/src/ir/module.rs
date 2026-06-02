@@ -2255,6 +2255,18 @@ impl Conv<&air::Module> for ProtoModule {
             map
         };
 
+        if std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1") {
+            for (event, stmts) in all_event_statements.iter() {
+                eprintln!(
+                    "[aot_event_module] module={:?} event={:?} top_stmts={} aot_c={}",
+                    src.name,
+                    event,
+                    stmts.len(),
+                    whole_events.contains_key(event),
+                );
+            }
+        }
+
         // Event statements preserve source order (no topological sorting).
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
@@ -2329,6 +2341,27 @@ impl Conv<&air::Module> for ProtoModule {
                 "[whole_comb] module {} fell back to per-chunk dispatch: {}",
                 src.name, reason,
             );
+            // Census of ALL uncovered comb stmts (not just the first) so a
+            // single fix doesn't just surface the next bail.  AOT-C (and its
+            // census) is gated off on wasm, like `backend::aot_c`.
+            #[cfg(not(target_family = "wasm"))]
+            if std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1") {
+                let census = crate::backend::aot_c::emit::comb_uncovered_census(&pre_jit_stmts);
+                let mut counts: std::collections::HashMap<String, usize> = Default::default();
+                for c in census {
+                    *counts.entry(c).or_default() += 1;
+                }
+                let mut v: Vec<_> = counts.into_iter().collect();
+                v.sort_by_key(|x| std::cmp::Reverse(x.1));
+                eprintln!(
+                    "[whole_comb_census] module {} uncovered comb stmts ({} distinct):",
+                    src.name,
+                    v.len()
+                );
+                for (k, n) in v.iter().take(40) {
+                    eprintln!("  {n:6}x  {k}");
+                }
+            }
         }
 
         Ok(ProtoModule {

@@ -514,4 +514,84 @@ mod tests {
         let ptr = unsafe { buf.as_mut_ptr().add(4) }; // 4-byte aligned, not 8
         unsafe { wide_add(ptr, ptr as *const u8, ptr as *const u8, 32) };
     }
+
+    // These helpers gained a new caller via the AOT-C `veryl_wideops` table;
+    // unit-test the ones with non-trivial boundary logic directly so a helper
+    // bug is isolated from an emit bug.
+
+    #[test]
+    fn test_wide_apply_mask() {
+        // width=130: keep bits [0,130), clear the rest.  nb=24 (3 words).
+        let mut dst = make_buf(&[u64::MAX, u64::MAX, u64::MAX]);
+        let packed = pack_nb_width(24, 130);
+        unsafe { wide_apply_mask(dst.as_mut_ptr(), std::ptr::null(), packed) };
+        // word 2 keeps low 2 bits (130 - 128), words 0/1 full.
+        assert_eq!(read_words(&dst), vec![u64::MAX, u64::MAX, 0b11]);
+    }
+
+    #[test]
+    fn test_wide_fill_ones() {
+        // width=130 over nb=24: words 0/1 all-ones, word 2 low 2 bits.
+        let mut dst = make_buf(&[0, 0, 0]);
+        unsafe { wide_fill_ones(dst.as_mut_ptr(), std::ptr::null(), pack_nb_width(24, 130)) };
+        assert_eq!(read_words(&dst), vec![u64::MAX, u64::MAX, 0b11]);
+    }
+
+    #[test]
+    fn test_wide_is_all_ones() {
+        // width=130 → nb=24 (3 words): bits [0,130) = words 0,1 full + word 2
+        // low 2 bits.
+        let all = make_buf(&[u64::MAX, u64::MAX, 0b11]);
+        assert_eq!(
+            unsafe { wide_is_all_ones(all.as_ptr(), pack_nb_width(24, 130)) },
+            1
+        );
+        let not_all = make_buf(&[u64::MAX, u64::MAX, 0b01]);
+        assert_eq!(
+            unsafe { wide_is_all_ones(not_all.as_ptr(), pack_nb_width(24, 130)) },
+            0
+        );
+    }
+
+    #[test]
+    fn test_wide_ashr_sign_fill() {
+        // width=130, value = sign bit (bit 129) set only → arithmetic >>1 must
+        // fill bit 129 back (sign) plus shift, giving bits 128 and 129 set.
+        let a = make_buf(&[0, 0, 0b10]); // bit 129
+        let mut dst = make_buf(&[0, 0, 0]);
+        unsafe { wide_ashr(dst.as_mut_ptr(), a.as_ptr(), 1, pack_nb_width(24, 130)) };
+        // >>1 moves bit129→128; sign fill sets bit129 again.
+        assert_eq!(read_words(&dst), vec![0, 0, 0b11]);
+
+        // Non-negative (sign bit clear) → plain logical shift, no fill.
+        let p = make_buf(&[0b100, 0, 0]);
+        let mut d2 = make_buf(&[0, 0, 0]);
+        unsafe { wide_ashr(d2.as_mut_ptr(), p.as_ptr(), 1, pack_nb_width(24, 130)) };
+        assert_eq!(read_words(&d2), vec![0b10, 0, 0]);
+    }
+
+    #[test]
+    fn test_wide_scmp_signed() {
+        // width=130: a has sign bit (129) set (negative), b is small positive.
+        let a = make_buf(&[1, 0, 0b10]); // negative
+        let b = make_buf(&[5, 0, 0]); // positive
+        let packed = pack_nb_width(24, 130);
+        assert_eq!(unsafe { wide_scmp(a.as_ptr(), b.as_ptr(), packed) }, -1);
+        assert_eq!(unsafe { wide_scmp(b.as_ptr(), a.as_ptr(), packed) }, 1);
+        assert_eq!(unsafe { wide_scmp(a.as_ptr(), a.as_ptr(), packed) }, 0);
+    }
+
+    #[test]
+    fn test_wide_xnor_and_band_not() {
+        let a = make_buf(&[0b1010, 0]);
+        let b = make_buf(&[0b1100, 0]);
+        let mut dst = make_buf(&[0, 0]);
+        unsafe { wide_bxor_not(dst.as_mut_ptr(), a.as_ptr(), b.as_ptr(), 16) };
+        // ~(a^b): a^b = 0b0110 → ~ = ...11111001 (all high bits set).
+        assert_eq!(read_words(&dst), vec![!0b0110u64, u64::MAX]);
+        let mut d2 = make_buf(&[0, 0]);
+        unsafe { wide_band_not(d2.as_mut_ptr(), a.as_ptr(), b.as_ptr(), 16) };
+        // a & ~b = 0b1010 & ~0b1100 = 0b0010.
+        assert_eq!(read_words(&d2), vec![0b0010, 0]);
+    }
 }
