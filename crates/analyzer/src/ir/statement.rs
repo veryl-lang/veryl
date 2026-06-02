@@ -119,6 +119,9 @@ impl ForRange {
                 if end.saturating_sub(start) > limit {
                     return None;
                 }
+                if *step == 0 {
+                    return None;
+                }
                 if *step == 1 {
                     Some((start..end).collect())
                 } else {
@@ -140,6 +143,9 @@ impl ForRange {
                 let start = start.eval_value(context)?;
                 let end = end.eval_value(context)?;
                 if end.saturating_sub(start) > limit {
+                    return None;
+                }
+                if *step == 0 {
                     return None;
                 }
                 if *step <= 1 {
