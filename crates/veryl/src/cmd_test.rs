@@ -175,9 +175,11 @@ impl CmdTest {
             aot_c_event: aot_c,
             aot_c_async: aot_c && !validate,
             aot_c_validate: aot_c && validate,
-            // Skip cc for tiny modules: per-module external compiles flood the
-            // host across the fast suite.  Overridable via VERYL_AOT_C_MIN_STMTS.
-            aot_c_min_stmts: if aot_c { 256 } else { 0 },
+            // No size floor: the compile pool (emit.rs) now caps concurrent
+            // `cc`, so the old 256 flood workaround is obsolete — and a small
+            // module that runs long benefits from `cc` too.  Override with
+            // VERYL_AOT_C_MIN_STMTS to restore a floor.
+            aot_c_min_stmts: 0,
             ..Config::default()
         };
         config.apply_env();

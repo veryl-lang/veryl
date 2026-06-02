@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, OnceLock};
 use veryl_analyzer::ir::Op;
 use veryl_analyzer::value::Value;
 
@@ -1465,21 +1466,95 @@ pub struct EmittedModule {
     _lib: libloading::Library,
 }
 
+/// A background compile request: build `src` and publish the result through
+/// `cell` when the `.so` is ready.
+struct CompileJob {
+    src: String,
+    cell: AotCell,
+}
+
+/// Concurrent external `cc` cap — the `-jN` knob for the compile pool (see
+/// [`compile_pool`]).  Default `max(2, available_parallelism / 4)`, override
+/// with `VERYL_AOT_C_COMPILE_JOBS`.  Only a quarter of the cores because
+/// `veryl test` already runs the testbenches on `available_parallelism` sim
+/// threads; sizing this background pool at the core count makes the (mostly
+/// wasted) compiles contend with that useful work and slows the suite.  The
+/// floor of 2 lets a boot compile its comb and clock-event in parallel.
+fn compile_jobs() -> usize {
+    std::env::var("VERYL_AOT_C_COMPILE_JOBS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| (n.get() / 4).max(2))
+                .unwrap_or(2)
+        })
+}
+
+/// Lazily-started global pool of `compile_jobs()` workers draining a shared
+/// queue; returns the job sender.
+///
+/// In async mode each whole-module compile used to get its own detached
+/// `std::thread::spawn` → `cc`.  The simulator never blocks on them (it stays
+/// on Cranelift until the `.so` lands), so the ~220-test fast suite spawned
+/// `cc` faster than they finished — hundreds at once, load average over 100.
+/// The pool caps in-flight `cc` like `make -jN`.
+fn compile_pool() -> &'static Sender<CompileJob> {
+    static POOL: OnceLock<Sender<CompileJob>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<CompileJob>();
+        // Shared receiver behind a Mutex: a worker holds the lock only to
+        // dequeue, then releases it before compiling.  recv blocks under the
+        // lock only when the queue is empty, so this never serializes compiles.
+        let rx = Arc::new(Mutex::new(rx));
+        for _ in 0..compile_jobs() {
+            let rx = Arc::clone(&rx);
+            let _ = std::thread::Builder::new()
+                .name("veryl-aot-cc".into())
+                .spawn(move || {
+                    loop {
+                        let job = {
+                            let guard = match rx.lock() {
+                                Ok(g) => g,
+                                Err(_) => break, // poisoned: drop this worker
+                            };
+                            guard.recv()
+                        };
+                        // Err only if every sender dropped; the sender is
+                        // 'static, so this never fires — but exit cleanly.
+                        let Ok(job) = job else { break };
+                        // Isolate a compile panic so it can't permanently shrink
+                        // the pool (compile_source returns Err for all expected
+                        // failures, so this only ever fires on a bug).
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if let Ok(m) = compile_source(&job.src) {
+                                let _ = job.cell.set(m);
+                            }
+                        }));
+                    }
+                });
+        }
+        tx
+    })
+}
+
 /// Compile `src` to an `EmittedModule` published through a `OnceLock`.  When
-/// `async_mode` is true a background thread fills the cell (empty until ready →
-/// callers stay on Cranelift, then hot-swap to AOT-C the cycle the `.so` is
-/// ready — hiding the cold gcc latency); otherwise it is filled synchronously
-/// before return.  A compile failure (e.g. missing `cc`) leaves the cell empty
-/// → graceful Cranelift fallback either way.
+/// `async_mode` is true the compile is queued on the bounded global pool
+/// (see [`compile_pool`]) and the cell stays empty until the `.so` is ready →
+/// callers stay on Cranelift, then hot-swap to AOT-C the cycle it lands —
+/// hiding the cold gcc latency; otherwise it is filled synchronously before
+/// return.  A compile failure (e.g. missing `cc`) leaves the cell empty →
+/// graceful Cranelift fallback either way.
 fn compile_or_spawn(src: String, async_mode: bool) -> AotCell {
     let cell = Arc::new(OnceLock::new());
     if async_mode {
-        let c = Arc::clone(&cell);
-        std::thread::spawn(move || {
-            if let Ok(m) = compile_source(&src) {
-                let _ = c.set(m);
-            }
-        });
+        let job = CompileJob {
+            src,
+            cell: Arc::clone(&cell),
+        };
+        // A failed send just leaves the cell empty → Cranelift handles it.
+        let _ = compile_pool().send(job);
     } else if let Ok(m) = compile_source(&src) {
         let _ = cell.set(m);
     }
