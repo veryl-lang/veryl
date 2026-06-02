@@ -3528,7 +3528,6 @@ fn regression_sv_attribute_backslash_unescape() {
     );
 }
 
-
 #[test]
 fn msb_after_unpacked_array_select_dimension() {
     // Regression: SV $size numbers unpacked dims first, then packed. msb after

@@ -13612,8 +13612,6 @@ fn no_panic_on_zero_step_for_loop() {
     let _ = analyze(code);
 }
 
-
-
 #[test]
 fn no_panic_on_msb_after_unpacked_array_select() {
     // Regression: `msb` applied after an unpacked-array select indexed past the
