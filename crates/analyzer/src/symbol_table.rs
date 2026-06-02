@@ -235,8 +235,17 @@ impl SymbolTable {
 
     fn trace_type_path<'a>(
         &self,
+        context: ResolveContext<'a>,
+        path: &GenericSymbolPath,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        self.trace_type_path_inner(context, path, &mut Vec::new())
+    }
+
+    fn trace_type_path_inner<'a>(
+        &self,
         mut context: ResolveContext<'a>,
         path: &GenericSymbolPath,
+        visited: &mut Vec<SymbolId>,
     ) -> Result<ResolveContext<'a>, ResolveError> {
         let symbol = self.resolve(
             &path.generic_path(),
@@ -245,10 +254,28 @@ impl SymbolTable {
         )?;
         context.generic_tables = symbol.generic_tables.clone();
 
+        // cyclic-alias guard (alias used as a type): report unresolvable if revisited.
+        if matches!(
+            symbol.found.kind,
+            SymbolKind::AliasModule(_)
+                | SymbolKind::AliasInterface(_)
+                | SymbolKind::AliasPackage(_)
+        ) {
+            if visited.contains(&symbol.found.id) {
+                return Err(ResolveError::new(
+                    Some(&symbol.found),
+                    ResolveErrorCause::NotFound(symbol.found.token.text),
+                ));
+            }
+            visited.push(symbol.found.id);
+        }
+
         match &symbol.found.kind {
-            SymbolKind::AliasModule(x) => self.trace_type_path(context, &x.target),
-            SymbolKind::AliasInterface(x) => self.trace_type_path(context, &x.target),
-            SymbolKind::AliasPackage(x) => self.trace_type_path(context, &x.target),
+            SymbolKind::AliasModule(x) => self.trace_type_path_inner(context, &x.target, visited),
+            SymbolKind::AliasInterface(x) => {
+                self.trace_type_path_inner(context, &x.target, visited)
+            }
+            SymbolKind::AliasPackage(x) => self.trace_type_path_inner(context, &x.target, visited),
             SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &symbol.found),
             SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &symbol.found),
             _ => {

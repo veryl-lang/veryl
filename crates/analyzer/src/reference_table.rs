@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::generic_inference_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{Direction, GenericMap, Symbol, SymbolKind};
+use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
@@ -136,6 +136,8 @@ impl From<&InstPortItem> for ReferenceCandidate {
 pub struct ReferenceTable {
     candidates: Vec<ReferenceCandidate>,
     errors: Vec<AnalyzerError>,
+    /// Alias symbols currently being expanded, to break cyclic alias chains.
+    alias_stack: Vec<SymbolId>,
 }
 
 impl ReferenceTable {
@@ -325,7 +327,9 @@ impl ReferenceTable {
                         continue;
                     }
 
-                    if let Some(mut alias_target) = symbol.found.alias_target(true) {
+                    if let Some(mut alias_target) = symbol.found.alias_target(true)
+                        && !self.alias_stack.contains(&symbol.found.id)
+                    {
                         // If the alias is in a generic instance namespace, include its maps
                         // so generic parameters in the alias target can be correctly resolved.
                         let mut alias_maps = generic_maps.clone();
@@ -335,6 +339,8 @@ impl ReferenceTable {
                             alias_maps.extend(ns_sym.generic_maps());
                         }
                         alias_target.apply_map(&alias_maps);
+                        // remember this alias while expanding it (cyclic-alias guard)
+                        self.alias_stack.push(symbol.found.id);
                         self.generic_symbol_path(
                             &alias_target,
                             &symbol.found.namespace,
@@ -342,6 +348,7 @@ impl ReferenceTable {
                             None,
                             Some(&alias_maps),
                         );
+                        self.alias_stack.pop();
                     }
 
                     if (params.len() + n_args) == 0 {

@@ -3,7 +3,9 @@ use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
 use crate::namespace_table;
-use crate::symbol::{DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolKind};
+use crate::symbol::{
+    DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolId, SymbolKind,
+};
 use crate::symbol_table;
 use crate::{SVec, svec};
 use std::cmp::Ordering;
@@ -468,6 +470,14 @@ impl GenericSymbolPath {
     }
 
     pub fn unalias(&mut self, generic_maps: Option<&Vec<GenericMap>>) {
+        self.unalias_inner(generic_maps, &mut Vec::new());
+    }
+
+    fn unalias_inner(
+        &mut self,
+        generic_maps: Option<&Vec<GenericMap>>,
+        visited: &mut Vec<SymbolId>,
+    ) {
         if !self.is_resolvable() {
             return;
         }
@@ -483,6 +493,12 @@ impl GenericSymbolPath {
             if let Ok(ref symbol) = symbol
                 && let Some(mut alias_target) = symbol.found.alias_target(false)
             {
+                // cyclic-alias guard: stop if this alias was already visited.
+                if visited.contains(&symbol.found.id) {
+                    return;
+                }
+                visited.push(symbol.found.id);
+
                 alias_target.resolve_imported(&namespace, Some(&generic_maps));
                 alias_target.apply_map(&generic_maps);
                 if (i + 1) < self.len() {
@@ -490,7 +506,7 @@ impl GenericSymbolPath {
                         alias_target.paths.push(self.paths[j].clone());
                     }
                 }
-                alias_target.unalias(Some(&generic_maps));
+                alias_target.unalias_inner(Some(&generic_maps), visited);
 
                 self.paths = alias_target.paths;
                 self.kind = alias_target.kind;

@@ -13642,3 +13642,24 @@ fn no_panic_on_msb_after_unpacked_array_select() {
     "#;
     let _ = analyze(code);
 }
+
+#[test]
+fn no_stack_overflow_on_cyclic_alias() {
+    // Regression: a cyclic alias chain recursed forever while expanding the
+    // alias target (ReferenceTable::generic_symbol_path / unalias /
+    // TypeDag::resolve_symbol_path), overflowing the stack and aborting.
+    for code in [
+        // unreferenced cyclic aliases
+        "alias package P1 = P2; alias package P2 = P1; module Top ( o: output logic<32> ) { always_comb { o = 0; } }",
+        "alias package P1 = P2; alias package P2 = P3; alias package P3 = P1; module Top ( o: output logic<32> ) { always_comb { o = 0; } }",
+        "alias module A = B; alias module B = A; module Top ( o: output logic<32> ) { always_comb { o = 0; } }",
+        "alias interface A = B; alias interface B = A; module Top ( o: output logic<32> ) { always_comb { o = 0; } }",
+        // cyclic aliases that are actually referenced/instantiated (must not
+        // stack-overflow via resolve_inst_type / trace_type_path either)
+        "alias module A = B; alias module B = A; module top ( o: output logic ) { inst u: A ( o ); assign o = 1'b0; }",
+        "alias interface IA = IB; alias interface IB = IA; module top { inst u: IA; }",
+        "alias package P1 = P2; alias package P2 = P1; module top ( o: output logic<8> ) { var x: P1::T; assign o = 0; assign x = 0; }",
+    ] {
+        let _ = analyze(code);
+    }
+}
