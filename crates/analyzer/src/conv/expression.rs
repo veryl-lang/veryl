@@ -175,22 +175,9 @@ impl Conv<&Expression02> for ir::Expression {
     fn conv(context: &mut Context, value: &Expression02) -> IrResult<Self> {
         let mut ret: ir::Expression = Conv::conv(context, value.factor.as_ref())?;
 
-        // optional `as` cast
-        if let Some(x) = &value.expression02_opt {
-            let right: ir::Factor = Conv::conv(context, x.casting_type.as_ref())?;
-
-            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Binary(
-                Box::new(ret),
-                Op::As,
-                Box::new(ir::Expression::Term(Box::new(right))),
-                comptime,
-            );
-        }
-
-        // unary prefix operators (reverse iteration for right-associativity)
+        // Apply unary prefixes before the `as` cast so the IR nests like the
+        // emitter (`-x as u8` -> `(-x) as u8`); else const-eval diverges from
+        // the emitted SV. Reverse iteration gives right-associativity.
         for x in value.expression02_list.iter().rev() {
             let op = match x.expression02_op.as_ref() {
                 Expression02Op::UnaryOperator(x) => {
@@ -226,6 +213,21 @@ impl Conv<&Expression02> for ir::Expression {
             let token: TokenRange = value.into();
             let comptime = Box::new(Comptime::create_unknown(token));
             ret = ir::Expression::Unary(op, Box::new(ret), comptime);
+        }
+
+        // optional `as` cast (outermost: binds looser than the unary prefixes)
+        if let Some(x) = &value.expression02_opt {
+            let right: ir::Factor = Conv::conv(context, x.casting_type.as_ref())?;
+
+            let token = TokenRange::from_range(&ret.token_range(), &right.token_range());
+            let comptime = Box::new(Comptime::create_unknown(token));
+
+            ret = ir::Expression::Binary(
+                Box::new(ret),
+                Op::As,
+                Box::new(ir::Expression::Term(Box::new(right))),
+                comptime,
+            );
         }
 
         Ok(ret)

@@ -13504,3 +13504,32 @@ fn signed_cast_constfold_div_and_compare() {
         assert_eq!(sim.get("z").unwrap(), Value::new(1, 1, false));
     }
 }
+
+#[test]
+fn unary_binds_tighter_than_cast() {
+    // The emitter nests `&X as u16` as `(&X) as u16` (`unsigned'(shortint'(&X))`),
+    // so const-eval must too. A reduction's value depends on width: reducing the
+    // 8-bit all-ones X gives 1, while the as-inside reading `&(X as u16)` reduces
+    // the zero-extended 16-bit value and gives 0. VCS confirms the emitted SV is
+    // 1, so the analyzer fold (0 before this fix) was the divergent one.
+    let code = r#"
+    module Top (
+        o: output logic<16>,
+    ) {
+        const X: logic<8>  = 8'hff;
+        const A: logic<16> = &X as u16;
+        assign o = A;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(1, 16, false),
+            "{config:?}"
+        );
+    }
+}
