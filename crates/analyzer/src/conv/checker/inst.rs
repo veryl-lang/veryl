@@ -18,27 +18,37 @@ enum InstTypeSource {
 }
 
 fn resolve_inst_type(arg: &InstTypeSource) -> Option<Symbol> {
+    resolve_inst_type_inner(arg, &mut Vec::new())
+}
+
+fn resolve_inst_type_inner(arg: &InstTypeSource, visited: &mut Vec<SymbolId>) -> Option<Symbol> {
     let symbol = match arg {
         InstTypeSource::Id(x) => symbol_table::get(*x)?,
         InstTypeSource::Path(x) => (*symbol_table::resolve(x).ok()?.found).clone(),
     };
 
+    // cyclic-alias guard (alias instantiated): stop if a symbol was revisited.
+    if visited.contains(&symbol.id) {
+        return None;
+    }
+    visited.push(symbol.id);
+
     match &symbol.kind {
         SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
-            return resolve_inst_type(&InstTypeSource::Path(path));
+            return resolve_inst_type_inner(&InstTypeSource::Path(path), visited);
         }
         SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
-            return resolve_inst_type(&InstTypeSource::Path(path));
+            return resolve_inst_type_inner(&InstTypeSource::Path(path), visited);
         }
         SymbolKind::GenericInstance(x) => {
-            return resolve_inst_type(&InstTypeSource::Id(x.base));
+            return resolve_inst_type_inner(&InstTypeSource::Id(x.base), visited);
         }
         SymbolKind::GenericParameter(x) => {
             let proto = x.bound.resolve_proto_bound(&symbol.namespace).ok()?;
             if let Some(symbol) = proto.get_symbol() {
-                return resolve_inst_type(&InstTypeSource::Id(symbol.id));
+                return resolve_inst_type_inner(&InstTypeSource::Id(symbol.id), visited);
             }
         }
         _ => {}

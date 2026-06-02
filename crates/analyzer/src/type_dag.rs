@@ -242,13 +242,30 @@ impl TypeDag {
     }
 
     fn resolve_symbol_path(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
+        Self::resolve_symbol_path_inner(path, namespace, &mut Vec::new())
+    }
+
+    fn resolve_symbol_path_inner(
+        path: &SymbolPath,
+        namespace: &Namespace,
+        visited: &mut Vec<SymbolId>,
+    ) -> Option<Symbol> {
         let symbol = symbol_table::resolve((path, namespace)).ok()?;
         if let Some(alias_path) = symbol.found.alias_target(false) {
             // alias referenced as generic arg for generic instance put on the same namespace
             // causes cyclic dependency error.
             // https://github.com/veryl-lang/veryl/blob/52b46337148340b43f8ab1c8f2ab67f58cd3c943/crates/analyzer/src/tests.rs#L3740-L3743
             // Need to use the target symbol of the alias instead of it to prevent this situation.
-            Self::resolve_symbol_path(&alias_path.generic_path(), &symbol.found.namespace)
+            // cyclic-alias guard: stop (return None) if already visited.
+            if visited.contains(&symbol.found.id) {
+                return None;
+            }
+            visited.push(symbol.found.id);
+            Self::resolve_symbol_path_inner(
+                &alias_path.generic_path(),
+                &symbol.found.namespace,
+                visited,
+            )
         } else {
             Some((*symbol.found).clone())
         }
