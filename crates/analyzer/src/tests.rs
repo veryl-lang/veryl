@@ -13574,3 +13574,19 @@ fn no_panic_on_out_of_range_bit_select() {
             .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. }))
     );
 }
+
+#[test]
+fn no_panic_on_large_shift_amount() {
+    // Regression: a const shift by an amount >= the operand width previously
+    // panicked in debug/test builds (native u64 shift overflow and a
+    // `width - y` usize underflow in the arithmetic-shift sign-extension mask).
+    for code in [
+        "module Top { const A: bit<8> = 8'hff >> 100; }",
+        "module Top { const A: bit<8> = 8'hff << 80; }",
+        "module Top { const A: i8 = -1; const B: i8 = A >>> 9; }",
+        "module Top { const A: i8 = 1; const B: i8 = A <<< 80; }",
+        "module Top { const A: signed logic<70> = -1; const B: signed logic<70> = A >>> 71; }",
+    ] {
+        let _ = analyze(code);
+    }
+}

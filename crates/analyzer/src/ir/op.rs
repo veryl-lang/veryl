@@ -1381,8 +1381,9 @@ impl Op {
                         if let Some(y) = y {
                             let mut ret = x.clone();
                             ret.signed = false;
-                            ret.payload >>= y;
-                            ret.mask_xz >>= y;
+                            let s = y.min(64) as u32;
+                            ret.payload = ret.payload.unbounded_shr(s);
+                            ret.mask_xz = ret.mask_xz.unbounded_shr(s);
                             let ret = Value::U64(ret);
                             ret.expand(width, false).into_owned()
                         } else {
@@ -1413,8 +1414,9 @@ impl Op {
                             let mask = ValueU64::gen_mask(width);
                             let mut ret = x.clone();
                             ret.signed = false;
-                            ret.payload <<= y;
-                            ret.mask_xz <<= y;
+                            let s = y.min(64) as u32;
+                            ret.payload = ret.payload.unbounded_shl(s);
+                            ret.mask_xz = ret.mask_xz.unbounded_shl(s);
                             ret.payload &= mask;
                             ret.mask_xz &= mask;
                             let ret = Value::U64(ret);
@@ -1450,7 +1452,9 @@ impl Op {
                             let mut ret = x.clone();
 
                             let (ext_payload, ext_mask_xz) = if signed {
-                                let mut ext_mask = ValueU64::gen_mask(width - y);
+                                // y >= width: saturate width - y to 0 (avoids the
+                                // underflow) -> ext_mask is the full sign fill.
+                                let mut ext_mask = ValueU64::gen_mask(width.saturating_sub(y));
                                 ext_mask ^= ValueU64::gen_mask(width);
 
                                 let payload_msb = ((x.payload >> (x.width - 1)) & 1) == 1;
@@ -1462,8 +1466,9 @@ impl Op {
                                 (0, 0)
                             };
 
-                            ret.payload >>= y;
-                            ret.mask_xz >>= y;
+                            let s = y.min(64) as u32;
+                            ret.payload = ret.payload.unbounded_shr(s);
+                            ret.mask_xz = ret.mask_xz.unbounded_shr(s);
                             ret.payload |= ext_payload;
                             ret.mask_xz |= ext_mask_xz;
                             let ret = Value::U64(ret);
@@ -1477,7 +1482,8 @@ impl Op {
                             let mut ret = x.clone();
 
                             let (ext_payload, ext_mask_xz) = if signed {
-                                let mut ext_mask = mask_cache.get(width - y).clone();
+                                // y >= width: saturate width - y to 0 (no underflow).
+                                let mut ext_mask = mask_cache.get(width.saturating_sub(y)).clone();
                                 ext_mask ^= mask_cache.get(width);
 
                                 let payload_msb = ((x.payload() >> (x.width - 1)) & b1()) == b1();
@@ -1510,8 +1516,9 @@ impl Op {
                         if let Some(y) = y {
                             let mask = ValueU64::gen_mask(width);
                             let mut ret = x.clone();
-                            ret.payload <<= y;
-                            ret.mask_xz <<= y;
+                            let s = y.min(64) as u32;
+                            ret.payload = ret.payload.unbounded_shl(s);
+                            ret.mask_xz = ret.mask_xz.unbounded_shl(s);
                             ret.payload &= mask;
                             ret.mask_xz &= mask;
                             let ret = Value::U64(ret);
