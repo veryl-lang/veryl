@@ -482,10 +482,10 @@ pub struct Config {
     /// Dual-run `cc` and Cranelift every cycle, panicking on the first
     /// divergence (correctness check).  Implies a synchronous compile.
     pub aot_c_validate: bool,
-    /// Minimum module statement count (comb + event) before `cc` is attempted.
-    /// The external compile is a fixed per-module cost; on tiny modules it is
-    /// pure overhead and floods the host across the fast suite.  Default 0 (no
-    /// floor, so tests exercise the path); `--backend cc` raises it to 256.
+    /// Minimum module statement count (comb + event) before `cc` is attempted;
+    /// below it the module stays on per-chunk Cranelift.  Default 0 (no floor)
+    /// now that the compile pool caps concurrency; set `VERYL_AOT_C_MIN_STMTS=N`
+    /// to restore a floor.
     pub aot_c_min_stmts: usize,
 }
 
