@@ -403,6 +403,14 @@ impl Type {
         s
     }
 
+    pub fn to_sv_array(&self) -> String {
+        let mut s = String::new();
+        for n in self.array.as_slice().iter().flatten() {
+            s.push_str(&format!("[{n}]"));
+        }
+        s
+    }
+
     pub fn is_4state(&self) -> bool {
         match &self.kind {
             TypeKind::Struct(x) => x.is_4state(),
