@@ -279,6 +279,18 @@ impl ValueU64 {
         } else {
             let width = beg - end + 1;
             let mask = Self::gen_mask(width);
+
+            // A select at/after bit 64 is outside a <=64-bit value; the native
+            // `>>= end` would overflow. Out-of-range bits read as x in SV.
+            if end >= 64 {
+                return Self {
+                    payload: 0,
+                    mask_xz: mask,
+                    width: width as u32,
+                    signed: false,
+                };
+            }
+
             let mut ret = self.clone();
 
             ret.payload >>= end;
