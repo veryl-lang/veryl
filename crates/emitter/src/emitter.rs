@@ -2545,6 +2545,11 @@ impl Emitter {
 }
 
 fn calc_emitted_width(number: &str, base: u32) -> Option<usize> {
+    // strnum_bitwidth panics on a decimal zero written with underscores (e.g.
+    // `'d0_0`); emit it unsized like a plain `'d0` instead of crashing.
+    if base == 10 && number.contains('_') && number.chars().all(|c| c == '0' || c == '_') {
+        return None;
+    }
     let width = strnum_bitwidth::bitwidth(number, base)?;
 
     let width_by_digits = if number.starts_with("0") {

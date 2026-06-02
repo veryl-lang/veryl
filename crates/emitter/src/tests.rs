@@ -3682,3 +3682,16 @@ fn module_level_inferred_let_keeps_unpacked_array() {
         "module-level inferred let lost its unpacked array dimension:\n{ret}"
     );
 }
+
+#[test]
+fn widthless_decimal_zero_with_underscore_no_panic() {
+    // Regression: `'d0_0` panicked in calc_emitted_width (strnum_bitwidth on a
+    // decimal zero with underscores). It must emit unsized like `'d0`, not crash.
+    let code = r#"module top {
+    const a: logic<32> = 'd0_0;
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(ret.contains("'d0_0"), "{ret}");
+}
