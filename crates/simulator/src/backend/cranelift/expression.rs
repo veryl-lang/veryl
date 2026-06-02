@@ -2131,14 +2131,20 @@ impl ProtoExpression {
                 ),
                 Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
                     let cmp_result = if expr_context.signed {
-                        let packed = wide_ops::pack_nb_width(op_nb, width);
-                        let packed_val = builder.ins().iconst(I32, packed as i64);
+                        // Sign-extend each operand from its OWN value width: the
+                        // result width here is 1 (useless for sign location) and
+                        // a single common width mislocates a narrower operand's
+                        // sign.
+                        let a_packed = wide_ops::pack_nb_width(op_nb, x_width);
+                        let b_packed = wide_ops::pack_nb_width(op_nb, y_width);
+                        let a_pv = builder.ins().iconst(I32, a_packed as i64);
+                        let b_pv = builder.ins().iconst(I32, b_packed as i64);
                         call_helper_ret(
                             context,
                             builder,
-                            HelperSig::Compare,
-                            wide_fn_addrs::scmp(),
-                            &[x_ptr, y_ptr, packed_val],
+                            HelperSig::Compare2,
+                            wide_fn_addrs::scmp_asym(),
+                            &[x_ptr, y_ptr, a_pv, b_pv],
                         )
                     } else {
                         call_helper_ret(

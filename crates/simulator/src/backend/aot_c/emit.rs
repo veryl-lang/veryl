@@ -104,6 +104,19 @@ static inline int64_t vw_scmp(const uint8_t* a,const uint8_t* b,uint32_t packed)
   unsigned sw=(width-1)/64, sb=(width-1)%64;
   uint64_t as=(VW_RD(a,sw)>>sb)&1, bs=(VW_RD(b,sw)>>sb)&1;
   if(as!=bs){ return as==1? -1 : 1; } return vw_ucmp(a,b,nb); }
+static inline uint64_t vw_sext_word(const uint8_t* p,unsigned i,uint32_t w,int sign){
+  unsigned bits_below=i*64; if(bits_below>=w) return sign? ~(uint64_t)0 : (uint64_t)0;
+  uint64_t raw=VW_RD(p,i); unsigned top=w-bits_below; if(top>=64) return raw;
+  uint64_t mask=((uint64_t)1<<top)-1; return (raw & mask) | (sign? ~mask : (uint64_t)0); }
+static inline int64_t vw_scmp_asym(const uint8_t* a,const uint8_t* b,uint32_t ap,uint32_t bp){
+  uint32_t anb=ap&0xFFFF, aw=ap>>16, bnb=bp&0xFFFF, bw=bp>>16;
+  if(aw==0||bw==0||anb==0||bnb==0) return 0;
+  int as=(int)((VW_RD(a,(aw-1)/64)>>((aw-1)%64))&1);
+  int bs=(int)((VW_RD(b,(bw-1)/64)>>((bw-1)%64))&1);
+  if(as!=bs){ return as==1? -1 : 1; }
+  unsigned anw=anb/8, bnw=bnb/8, words=anw>bnw?anw:bnw;
+  for(unsigned i=words;i-->0;){ uint64_t av=vw_sext_word(a,i,aw,as), bv=vw_sext_word(b,i,bw,bs);
+    if(av<bv) return -1; if(av>bv) return 1; } return 0; }
 static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
   unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
@@ -757,9 +770,13 @@ fn emit_wide_cmp_binary(
         Op::Ne | Op::NeWildcard => format!("(uint64_t)vw_ne({a}, {b}, {op_nb}u)"),
         Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
             let cmp = if expr_context.signed {
+                // Sign-extend each operand from its OWN width: the result width
+                // is 1 (useless for sign location) and a single common width
+                // mislocates a narrower operand's sign.
                 format!(
-                    "vw_scmp({a}, {b}, {p}u)",
-                    p = wpack(op_nb, expr_context.width)
+                    "vw_scmp_asym({a}, {b}, {ap}u, {bp}u)",
+                    ap = wpack(op_nb, x.width()),
+                    bp = wpack(op_nb, y.width())
                 )
             } else {
                 format!("vw_ucmp({a}, {b}, {op_nb}u)")

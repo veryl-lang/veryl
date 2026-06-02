@@ -22,6 +22,8 @@ pub enum HelperSig {
     UnaryOp,
     /// `(a, b, nb) -> i64` — comparisons.
     Compare,
+    /// `(a, b, a_packed, b_packed) -> i64` — asymmetric-width signed compare.
+    Compare2,
     /// `(a, nb) -> i64` — reductions.
     Reduce,
     /// `(offset, payload, width_class) -> ()` — write-log push.
@@ -81,6 +83,13 @@ pub fn get_or_create_sig(
             sig.params.push(AbiParam::new(I64)); // a
             sig.params.push(AbiParam::new(I64)); // b
             sig.params.push(AbiParam::new(I32)); // nb
+            sig.returns.push(AbiParam::new(I64));
+        }
+        HelperSig::Compare2 => {
+            sig.params.push(AbiParam::new(I64)); // a
+            sig.params.push(AbiParam::new(I64)); // b
+            sig.params.push(AbiParam::new(I32)); // a_packed
+            sig.params.push(AbiParam::new(I32)); // b_packed
             sig.returns.push(AbiParam::new(I64));
         }
         HelperSig::Reduce => {

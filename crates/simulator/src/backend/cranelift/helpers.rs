@@ -254,6 +254,9 @@ pub(crate) mod wide_fn_addrs {
     pub fn scmp() -> usize {
         fn_addr!(wide_ops::wide_scmp)
     }
+    pub fn scmp_asym() -> usize {
+        fn_addr!(wide_ops::wide_scmp_asym)
+    }
     pub fn shl() -> usize {
         fn_addr!(wide_ops::wide_shl)
     }
