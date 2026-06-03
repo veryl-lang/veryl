@@ -1393,6 +1393,17 @@ fn build_for_range_inner(
         let op: ir::Op = Conv::conv(context, op)?;
 
         if matches!(op, ir::Op::Add) {
+            // An additive step of 0 never advances the induction variable. The
+            // unroll path bails in eval_iter, but a dynamic-range loop reaches
+            // build_for_statement and would emit an infinite `for (; ; i += 0)`.
+            if step_val == 0 {
+                let token: TokenRange = expr.into();
+                context.insert_error(AnalyzerError::invalid_statement(
+                    "for-loop with a zero step never advances",
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
             // Honor `rev` for additive steps so the unrolled iteration order
             // matches the emitted descending `for (i = hi; i >= lo; i -= step)`.
             if rev {

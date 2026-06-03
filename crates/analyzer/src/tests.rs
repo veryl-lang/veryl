@@ -13753,6 +13753,54 @@ fn no_panic_on_zero_step_for_loop() {
 }
 
 #[test]
+fn for_zero_step_rejected() {
+    // `step += 0` never advances the induction variable. The unroll path bails in
+    // eval_iter, but a dynamic-range loop reaches build_for_statement and would
+    // emit an infinite `for (; i < n; i += 0)`. Both forms must be rejected.
+    for code in [
+        // dynamic range (runtime bound -> not unrolled)
+        r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic<32>,
+        ) {
+            always_comb {
+                var acc: logic<32>;
+                acc = 0;
+                for i in 0..n step += 0 {
+                    acc += i;
+                }
+                o = acc;
+            }
+        }
+        "#,
+        // static range
+        r#"
+        module Top (
+            o: output logic<32>,
+        ) {
+            always_comb {
+                var acc: logic<32>;
+                acc = 0;
+                for i in 0..10 step += 0 {
+                    acc += i;
+                }
+                o = acc;
+            }
+        }
+        "#,
+    ] {
+        let errors = analyze(code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
 fn no_panic_on_msb_after_unpacked_array_select() {
     // Regression: `msb` applied after an unpacked-array select indexed past the
     // packed-width Shape (the select dimension counts the unpacked array
