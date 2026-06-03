@@ -5321,6 +5321,64 @@ fn invalid_enum_variant() {
 }
 
 #[test]
+fn duplicate_enum_variant() {
+    // Sequential auto-numbering after an explicit value collides with an earlier
+    // member (A=0, B=1, C=1, D=2): the emitted SV is rejected by SV tools.
+    let code = r#"
+    module ModuleA {
+        enum E: logic<3> {
+            A,
+            B,
+            C = 1,
+            D,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateEnumVariant { .. }))
+    );
+
+    // Two explicit members sharing a value.
+    let code = r#"
+    module ModuleB {
+        enum E: logic<2> {
+            A = 1,
+            B = 1,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateEnumVariant { .. }))
+    );
+
+    // Distinct values must NOT be flagged.
+    let code = r#"
+    module ModuleC {
+        enum E: logic<2> {
+            A,
+            B,
+            C,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateEnumVariant { .. }))
+    );
+}
+
+#[test]
 fn invisible_identifier() {
     let code = r#"
     package Pkg::<A: u32> {}
