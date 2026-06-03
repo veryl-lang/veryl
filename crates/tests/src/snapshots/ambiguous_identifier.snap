@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+ambiguous_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#ambiguous_identifier)
+
+  × "X" is ambiguous because it is imported from multiple packages
+    ╭─[../../testcases/error/ambiguous_identifier.veryl:17:13]
+ 16 │     always_comb {
+ 17 │         o = X;
+    ·             ┬
+    ·             ╰── Error location
+ 18 │     }
+    ╰────
+  help: disambiguate with an explicit scope or import

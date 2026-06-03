@@ -13650,6 +13650,66 @@ fn regression_ifdef_duplicate_decls_not_ambiguous() {
 }
 
 #[test]
+fn regression_ambiguous_wildcard_import_cross_depth() {
+    // The same name wildcard-imported from namespaces of different depths (a
+    // package const at depth 2 vs an enum member at depth 3) collides just like
+    // the same-depth case and must be reported ambiguous, not silently bound to
+    // the deeper candidate.
+    let code = r#"
+    package PkgA {
+        const X: u32 = 7;
+    }
+    package PkgB {
+        enum MyEnum: logic<2> {
+            X = 1,
+        }
+    }
+    module Top {
+        import PkgA::*;
+        import PkgB::MyEnum::*;
+        var a: logic<32>;
+        always_comb {
+            a = X;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousIdentifier { .. })),
+        "cross-depth ambiguous wildcard import should be reported: {errors:?}"
+    );
+
+    // Distinct names across the two depths must still resolve cleanly.
+    let code = r#"
+    package PkgA {
+        const Y: u32 = 7;
+    }
+    package PkgB {
+        enum MyEnum: logic<2> {
+            X = 1,
+        }
+    }
+    module Top {
+        import PkgA::*;
+        import PkgB::MyEnum::*;
+        var a: logic<32>;
+        always_comb {
+            a = X + Y;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousIdentifier { .. })),
+        "distinct cross-depth wildcard imports must not be ambiguous: {errors:?}"
+    );
+}
+
+#[test]
 fn regression_pow_overflow_no_panic() {
     // Constant ** that overflows the host integer must not panic in debug
     // builds (wrapping + width masking, like Op::Mul).
