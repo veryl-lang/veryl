@@ -4,7 +4,7 @@ mod function;
 mod msb;
 
 use crate::analyzer_error::DuplicatedIdentifierKind;
-use crate::namespace::Namespace;
+use crate::namespace::{DefineContext, Namespace};
 use crate::sv_system_function;
 use crate::symbol::{
     ConnectTarget, Direction, DocComment, GenericBoundKind, GenericMap, GenericTable,
@@ -710,7 +710,7 @@ impl SymbolTable {
                 // Gated on >= 2 in-scope candidates so the single-match hot path
                 // skips the rescan and allocation.
                 if context.found.is_some() && !context.inner && included_count >= 2 {
-                    let mut distinct_defs = std::collections::HashSet::new();
+                    let mut candidates: Vec<((TokenSource, u32, u32), DefineContext)> = Vec::new();
                     let mut authoritative = false;
                     for id in ids {
                         let symbol = self.symbol_table.get(id).unwrap();
@@ -738,10 +738,24 @@ impl SymbolTable {
                             authoritative = true;
                         } else if via_wildcard {
                             let t = &symbol.token;
-                            distinct_defs.insert((t.source, t.line, t.column));
+                            let key = (t.source, t.line, t.column);
+                            if !candidates.iter().any(|(k, _)| *k == key) {
+                                candidates.push((key, symbol.namespace.define_context.clone()));
+                            }
                         }
                     }
-                    if !authoritative && distinct_defs.len() >= 2 {
+                    // Two candidates whose `#[ifdef]`/`#[ifndef]` contexts are
+                    // mutually exclusive can never both be active at the same
+                    // time, so they do not introduce ambiguity. Only flag when
+                    // a pair could be simultaneously active.
+                    let ambiguous = !authoritative
+                        && candidates.iter().enumerate().any(|(i, (_, ci))| {
+                            candidates
+                                .iter()
+                                .skip(i + 1)
+                                .any(|(_, cj)| !ci.exclusive(cj))
+                        });
+                    if ambiguous {
                         trace!("symbol_table: {}ambiguous '{}'", context.indent(), path);
                         return Err(ResolveError::new(
                             context.found,
