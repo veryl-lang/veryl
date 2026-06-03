@@ -15,7 +15,7 @@ use crate::ir::{
 };
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -1750,7 +1750,17 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
 /// `compile_or_spawn` discards it to fall back to Cranelift.
 pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
     let cache_dir = aot_c_cache_dir().map_err(|e| format!("cache dir: {e}"))?;
-    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    compile_source_in(&cache_dir, src)
+}
+
+/// `compile_source` with an explicit cache directory instead of resolving
+/// it from `VERYL_AOT_CACHE_DIR`/`XDG_CACHE_HOME`/`HOME`.  Tests pass a
+/// per-test dir here directly: the cache dir is a *process-global* env var,
+/// so mutating it from one test perturbs every other test compiling
+/// concurrently (libtest runs tests multi-threaded by default).  Passing it
+/// as an argument keeps each test hermetic without touching shared state.
+fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, String> {
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
 
     let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
     // Full flag list — built once and used for *both* the cache key and the
@@ -4133,8 +4143,8 @@ mod tests {
     /// Compile `src` end-to-end; return `None` when the built `.so`
     /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
     /// Genuine compile failures still panic.
-    fn compile_for_test(src: &str, what: &str) -> Option<EmittedModule> {
-        match compile_source(src) {
+    fn compile_for_test(cache_dir: &Path, src: &str, what: &str) -> Option<EmittedModule> {
+        match compile_source_in(cache_dir, src) {
             Ok(m) => Some(m),
             Err(e) if e.starts_with("dlopen") || e.starts_with("dlsym") => {
                 eprintln!("{what}: shared object not loadable on this host ({e}); skipping");
@@ -4184,11 +4194,14 @@ mod tests {
         };
         let src = emit_function(&[ProtoStatement::Assign(assign)]).unwrap();
 
+        // Per-test cache dir passed explicitly (no VERYL_AOT_CACHE_DIR env
+        // mutation): the env var is process-global, so set/remove from a
+        // concurrently-running test would point this compile at the wrong
+        // dir — and a peer test's remove_dir_all could delete the dir mid-cc
+        // (observed as `ld: open() failed, errno=2` flakes in CI).
         let tmp = std::env::temp_dir().join(format!("veryl_aot_dv_{}", std::process::id()));
-        unsafe {
-            std::env::set_var("VERYL_AOT_CACHE_DIR", &tmp);
-        }
-        let Some(module) = compile_for_test(&src, "emit_function_dynamic_variable_compiles") else {
+        let Some(module) = compile_for_test(&tmp, &src, "emit_function_dynamic_variable_compiles")
+        else {
             return;
         };
         let mut ff = vec![0u8; 16];
@@ -4229,9 +4242,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
-        unsafe {
-            std::env::remove_var("VERYL_AOT_CACHE_DIR");
-        }
     }
 
     #[test]
@@ -4278,16 +4288,13 @@ mod tests {
                 (void)ff; (void)log;\n\
                 *(uint32_t*)(comb + 0) = 0xdeadbeef;\n\
             }\n";
-        // Use a per-test cache dir so we don't pollute the user's
-        // shared cache and so the test is hermetic.
+        // Per-test cache dir passed explicitly so we don't pollute the
+        // user's shared cache and the test stays hermetic.  Passing it as
+        // an argument (rather than via the process-global VERYL_AOT_CACHE_DIR
+        // env var) avoids racing every other AOT-C test that compiles
+        // concurrently — libtest runs tests multi-threaded by default.
         let tmp = std::env::temp_dir().join(format!("veryl_aot_test_{}", std::process::id()));
-        // SAFETY: tests run in a single-threaded test runner by
-        // default; even with --test-threads, env races would only
-        // perturb other AOT-C tests, not this one's correctness.
-        unsafe {
-            std::env::set_var("VERYL_AOT_CACHE_DIR", &tmp);
-        }
-        let Some(module) = compile_for_test(src, "compile_source_round_trip") else {
+        let Some(module) = compile_for_test(&tmp, src, "compile_source_round_trip") else {
             return;
         };
         let mut ff = vec![0u8; 16];
@@ -4304,8 +4311,5 @@ mod tests {
         assert_eq!(written, 0xdeadbeef, "comb[0..4] should be 0xdeadbeef");
         // Best-effort cleanup; ignore failures.
         let _ = std::fs::remove_dir_all(&tmp);
-        unsafe {
-            std::env::remove_var("VERYL_AOT_CACHE_DIR");
-        }
     }
 }
