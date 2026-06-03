@@ -1,6 +1,9 @@
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::stable_topo_sort;
+use crate::ir::derived_clock::{
+    DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
+};
 use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
@@ -46,6 +49,10 @@ pub struct Module {
     /// cache-line aligned padding between Inst FF blocks and per-Inst
     /// independent commit.
     pub inst_layout: InstLayout,
+    /// Derived (gated / FF-divided) clocks in this module; empty when none.
+    pub derived_clock_schedule: DerivedClockSchedule,
+    /// JIT-compiled evaluation chunk for derived clocks; empty when none.
+    pub derived_clock_eval_stmts: Vec<Statement>,
     /// Diagnostic: number of non-trivial strongly-connected components in
     /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
     /// loops are rejected up-front by `analyze_dependency`, so any non-zero
@@ -80,6 +87,10 @@ pub struct ProtoModule {
     pub site_table: SiteTable,
     /// See `Module::inst_layout`.
     pub inst_layout: InstLayout,
+    /// See `Module::derived_clock_schedule`.
+    pub derived_clock_schedule: DerivedClockSchedule,
+    /// Pre-JIT form of `Module::derived_clock_eval_stmts`.
+    pub derived_clock_eval: ProtoStatements,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -268,6 +279,18 @@ impl ProtoModule {
             self.use_4state,
         ));
 
+        let derived_clock_eval_stmts = if self.derived_clock_eval.0.is_empty() {
+            Vec::new()
+        } else {
+            batch_compiled_statements(self.derived_clock_eval.to_statements(
+                ff_ptr,
+                ff_len,
+                comb_ptr,
+                comb_len,
+                self.use_4state,
+            ))
+        };
+
         #[cfg(debug_assertions)]
         self.validate_offsets();
 
@@ -277,12 +300,14 @@ impl ProtoModule {
             ff_values,
             comb_values,
             module_variables,
+            derived_clock_eval_stmts,
 
             event_statements,
             comb_statements,
             required_comb_passes: self.required_comb_passes,
             site_table: self.site_table.clone(),
             inst_layout: self.inst_layout.clone(),
+            derived_clock_schedule: self.derived_clock_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
             whole_comb: self.whole_comb.clone(),
             whole_events: self.whole_events.clone(),
@@ -2036,7 +2061,13 @@ impl Conv<&air::Module> for ProtoModule {
             use veryl_analyzer::ir::VarKind;
             let mut protect: crate::HashSet<VarOffset> = crate::HashSet::default();
             for (vid, var) in &src.variables {
-                if matches!(var.kind, VarKind::Let) {
+                // Clock-typed lets are protected too: derived clocks have
+                // no in-module stmt reader (only `always_ff` sensitivity,
+                // invisible to the dataflow graph), so DCE would drop the
+                // assignment and starve `partial_settle`.
+                let is_let = matches!(var.kind, VarKind::Let);
+                let is_clock = var.r#type.is_clock();
+                if is_let && !is_clock {
                     continue;
                 }
                 if let Some(meta) = variable_meta.get(vid) {
@@ -2276,6 +2307,43 @@ impl Conv<&air::Module> for ProtoModule {
             .map(|(event, stmts)| (event, try_jit(context, stmts)))
             .collect();
 
+        // Collect derived clocks + port-clock offsets BEFORE
+        // `variable_meta` moves into `module_variable_meta`.  Early-exit
+        // on the common no-clock-var case to skip two extra walks.
+        let has_any_clock_var = src.variables.values().any(|v| v.r#type.is_clock());
+        let (derived_clock_vars, port_clock_offsets) = if !has_any_clock_var {
+            (Vec::new(), HashMap::default())
+        } else {
+            // O(V+P) port lookup via HashSet.
+            let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
+            let dc_vars: Vec<(VarId, VarOffset, usize)> = src
+                .variables
+                .iter()
+                .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
+                .filter_map(|(vid, _)| {
+                    let meta = variable_meta.get(vid)?;
+                    let elem = meta.elements.first()?;
+                    Some((*vid, elem.current, elem.native_bytes))
+                })
+                .collect();
+            let mut pc_offsets: HashMap<VarOffset, VarId> = HashMap::default();
+            for vid in src.ports.values() {
+                let var = match src.variables.get(vid) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                if !var.r#type.is_clock() {
+                    continue;
+                }
+                if let Some(meta) = variable_meta.get(vid)
+                    && let Some(elem) = meta.elements.first()
+                {
+                    pc_offsets.insert(elem.current, *vid);
+                }
+            }
+            (dc_vars, pc_offsets)
+        };
+
         let module_variable_meta = ModuleVariableMeta {
             name: src.name,
             variable_meta,
@@ -2309,6 +2377,21 @@ impl Conv<&air::Module> for ProtoModule {
         if std::env::var("VERYL_SCC_TRACE").is_ok() {
             trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
         }
+
+        // Derived-clock eval is a separate `try_jit` chunk so the main
+        // comb JIT/AOT-C blob stays intact while partial_settle is fast.
+        let (derived_clock_schedule, derived_clock_eval) = if derived_clock_vars.is_empty() {
+            (DerivedClockSchedule::default(), ProtoStatements(vec![]))
+        } else {
+            let (sched, eval_indices) = build_derived_clock_schedule(
+                &derived_clock_vars,
+                &pre_jit_stmts,
+                &port_clock_offsets,
+            );
+            let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
+            let eval = try_jit(context, eval_protos);
+            (sched, eval)
+        };
 
         // Whole-comb backend (today: AOT-C) — when registered + size_ok,
         // try compile_whole_comb; backends that decline (4-state,
@@ -2376,6 +2459,8 @@ impl Conv<&air::Module> for ProtoModule {
             required_comb_passes,
             site_table,
             inst_layout,
+            derived_clock_schedule,
+            derived_clock_eval,
             nontrivial_comb_scc,
             whole_comb,
             whole_events,
