@@ -32,6 +32,17 @@ fn comment() {
 }
 
 #[test]
+fn line_comment_at_eof_without_newline() {
+    // A file whose last line is a `// ...` comment with no trailing newline must
+    // parse: the lexer's line-comment regex needs a terminating newline, which the
+    // parser appends internally before lexing.
+    let code = "module A {\n}\n// trailing comment, no newline";
+    assert!(!code.ends_with('\n'));
+    let parser = Parser::parse(code, &"");
+    assert!(parser.is_ok(), "{:?}", parser.err());
+}
+
+#[test]
 fn number() {
     // integer
     success("let a: u32 = 0123456789;");
