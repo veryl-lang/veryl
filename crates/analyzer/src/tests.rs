@@ -13596,6 +13596,60 @@ fn regression_ambiguous_wildcard_import() {
 }
 
 #[test]
+fn regression_ifdef_duplicate_decls_not_ambiguous() {
+    // Two declarations of the same identifier guarded by mutually-exclusive
+    // `#[ifdef]`/`#[ifndef]` (or ifdef/elsif/else) attributes cannot both be
+    // active, so wildcard-importing the package must not flag ambiguity.
+    let code = r#"
+    package PkgA {
+        #[ifdef(DEFINE_X)]
+        const X: u32 = 1;
+        #[ifndef(DEFINE_X)]
+        const X: u32 = 2;
+    }
+    module Top {
+        import PkgA::*;
+        var a: logic<32>;
+        always_comb {
+            a = X;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousIdentifier { .. })),
+        "ifdef/ifndef alternatives in one package must not be ambiguous: {errors:?}"
+    );
+
+    let code = r#"
+    package PkgA {
+        #[ifdef(DEFINE_Y)]
+        const X: u32 = 1;
+        #[elsif(DEFINE_Z)]
+        const X: u32 = 2;
+        #[else]
+        const X: u32 = 3;
+    }
+    module Top {
+        import PkgA::*;
+        var a: logic<32>;
+        always_comb {
+            a = X;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousIdentifier { .. })),
+        "ifdef/elsif/else alternatives in one package must not be ambiguous: {errors:?}"
+    );
+}
+
+#[test]
 fn regression_pow_overflow_no_panic() {
     // Constant ** that overflows the host integer must not panic in debug
     // builds (wrapping + width masking, like Op::Mul).
