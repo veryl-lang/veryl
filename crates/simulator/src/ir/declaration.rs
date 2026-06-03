@@ -259,7 +259,9 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = src.component.as_ref() else {
-            panic!("InstDeclaration for non-Module component");
+            // `$sv::` blackbox instances reach this conv path with a
+            // SystemVerilog component — the simulator cannot model them.
+            return Err(SimulatorError::unsupported_description(&src.token));
         };
 
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();

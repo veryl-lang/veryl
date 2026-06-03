@@ -1488,6 +1488,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     inputs,
                     outputs,
                     component: component_arc,
+                    token,
                 })))
             }
             ir::Component::Interface(component) => {
@@ -1604,6 +1605,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     inputs: vec![],
                     outputs: vec![],
                     component,
+                    token,
                 })))
             }
         }

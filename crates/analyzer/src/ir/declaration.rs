@@ -233,6 +233,7 @@ pub struct InstDeclaration {
     /// `Arc`-shared: without it, repeated instantiations of the same generic
     /// module each deep-clone the `Component`, blowing pass2 memory.
     pub component: Arc<Component>,
+    pub token: TokenRange,
 }
 
 impl InstDeclaration {
