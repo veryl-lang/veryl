@@ -8,6 +8,7 @@ jobs:
   build:
 
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         rust: [stable, beta, nightly]

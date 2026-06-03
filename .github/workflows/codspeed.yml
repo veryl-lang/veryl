@@ -12,6 +12,7 @@ on:
 jobs:
   benchmarks:
     strategy:
+      fail-fast: false
       matrix:
         package: [veryl-tests, veryl-simulator]
 
@@ -28,6 +29,7 @@ jobs:
           bins: cargo-codspeed
 
       - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: "${{ runner.os }}-codspeed-${{ matrix.package }}"
           save-if: ${{ github.ref == 'refs/heads/master' }}
