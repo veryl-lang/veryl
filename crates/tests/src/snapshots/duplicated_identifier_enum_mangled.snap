@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+duplicated_identifier (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#duplicated_identifier)
+
+  × "Foo_A" is duplicated
+   ╭─[../../testcases/error/duplicated_identifier_enum_mangled.veryl:4:9]
+ 3 │     enum Foo: logic<2> {
+ 4 │         A,
+   ·         ┬
+   ·         ╰── Error location
+ 5 │     }
+   ╰────
+  help:
