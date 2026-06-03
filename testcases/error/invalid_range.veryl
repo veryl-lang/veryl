@@ -1,0 +1,6 @@
+module invalid_range (
+    sel: input  logic<8>,
+    out: output logic   ,
+) {
+    assign out = inside sel {2..0};
+}

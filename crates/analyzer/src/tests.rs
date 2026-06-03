@@ -10161,6 +10161,57 @@ fn unevaluable_value_case_condition() {
 }
 
 #[test]
+fn empty_exclusive_range_rejected() {
+    // An exclusive `lo..hi` with constant `lo >= hi` is empty; in particular the
+    // `..0` case (e.g. a `param N: u32 = 0` upper bound) made the emitter's
+    // `(hi)-1` underflow to a near-universal range. Reject the empty range.
+    for body in ["2..N", "2..0", "5..3"] {
+        let code = format!(
+            r#"
+            module ModuleA #(
+                param N: u32 = 0,
+            ) (
+                sel: input  logic<8>,
+                out: output logic,
+            ) {{
+                assign out = inside sel {{{body}}};
+            }}
+            "#
+        );
+
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidRange { .. })),
+            "{body}: {errors:?}"
+        );
+    }
+
+    // Non-empty exclusive ranges and inclusive ranges must NOT be flagged.
+    for body in ["2..10", "0..10", "1..=10", "0..=0"] {
+        let code = format!(
+            r#"
+            module ModuleB (
+                sel: input  logic<8>,
+                out: output logic,
+            ) {{
+                assign out = inside sel {{{body}}};
+            }}
+            "#
+        );
+
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidRange { .. })),
+            "{body}: {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn invalid_cast() {
     let code = r#"
     module ModuleA {
