@@ -19,7 +19,7 @@ use crate::symbol::{
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
-use crate::{HashMap, ir_error};
+use crate::{HashMap, HashSet, ir_error};
 use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -2196,12 +2196,20 @@ pub fn switch_condition(context: &mut Context, cond: &SwitchCondition) -> IrResu
 pub fn argument_list(context: &mut Context, value: &ArgumentList) -> IrResult<Arguments> {
     let mut positional = vec![];
     let mut named = vec![];
+    let mut seen_named = HashSet::default();
     let x: Vec<_> = value.into();
     for arg in x {
         if let Some(x) = &arg.argument_item_opt {
             if let Some(name) = arg.argument_expression.expression.unwrap_identifier() {
-                let name = name.identifier().token.text;
+                let name_token = name.identifier().token;
+                let name = name_token.text;
                 let token: TokenRange = x.expression.as_ref().into();
+                if !seen_named.insert(name) {
+                    context.insert_error(AnalyzerError::duplicate_argument(
+                        &name_token.to_string(),
+                        &token,
+                    ));
+                }
                 let expr = Conv::conv(context, x.expression.as_ref())?;
                 let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
                 named.push((name, (expr, dst, token)));

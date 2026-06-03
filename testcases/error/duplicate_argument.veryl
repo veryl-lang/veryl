@@ -1,0 +1,13 @@
+module duplicate_argument {
+    function Add (
+        x: input u32,
+        y: input u32,
+    ) -> u32 {
+        return x + y;
+    }
+
+    let _a: u32 = Add(
+        x: 10,
+        x: 20,
+    );
+}

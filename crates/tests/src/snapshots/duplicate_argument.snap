@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+duplicate_argument (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#duplicate_argument)
+
+  × named argument "x" is connected more than once
+    ╭─[../../testcases/error/duplicate_argument.veryl:11:12]
+ 10 │         x: 10,
+ 11 │         x: 20,
+    ·            ─┬
+    ·             ╰── Error location
+ 12 │     );
+    ╰────
+  help:
