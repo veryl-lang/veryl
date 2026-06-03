@@ -14001,3 +14001,24 @@ fn wide_pow_is_masked_to_width() {
         );
     }
 }
+
+#[test]
+fn no_panic_on_resolving_symbol_path_including_alias() {
+    let code = r#"
+    package a_pkg::<W: u32> {
+        type T = logic<W>;
+    }
+    package b_pkg::<W: u32> {
+        alias package a = a_pkg::<W>;
+    }
+    package c_pkg {
+        alias package b = b_pkg::<32>;
+    }
+    package d_pkg {
+        import c_pkg::b::a::T;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}

@@ -101,6 +101,7 @@ pub struct SymbolTable {
     reference_func_table: HashMap<SymbolId, Vec<GenericSymbolPath>>,
     reference_table: HashMap<SymbolId, Vec<Token>>,
     suppress_cache_clear: bool,
+    skip_generic_args: bool,
 }
 
 impl SymbolTable {
@@ -627,12 +628,20 @@ impl SymbolTable {
 
         trace!("symbol_table: {}resolve   '{}'", context.indent(), path);
 
-        let namespace_generic_map = self.get_namespace_generic_map(&project_namespace);
+        let namespace_generic_map = if self.skip_generic_args {
+            None
+        } else {
+            self.get_namespace_generic_map(&project_namespace)
+        };
         for (i, name) in path.as_slice().iter().enumerate() {
             let mut max_depth = 0;
             context.found = None;
 
-            let mut generic_argument = generic_arguments.get(i).cloned();
+            let mut generic_argument = if self.skip_generic_args {
+                None
+            } else {
+                generic_arguments.get(i).cloned()
+            };
             if let Some(args) = &mut generic_argument {
                 for arg in args {
                     // Generic argumetns will be resolved in the namespace of base component.
@@ -1193,6 +1202,11 @@ impl SymbolTable {
     }
 
     pub fn apply_import(&mut self) {
+        // Set skip_generic_args to true to skip applying generic args during resolving the path.
+        // symbol_table::get is used when applying generic args but it is forbidden in
+        // apply import which borrows `&mut self`.
+        self.skip_generic_args = true;
+
         let import_list: Vec<_> = self.import_list.drain(0..).collect();
         for import in &import_list {
             let context = ResolveContext::new(&import.path.1);
@@ -1226,6 +1240,8 @@ impl SymbolTable {
                 self.add_imported_item(symbol.id, import);
             }
         }
+
+        self.skip_generic_args = false;
     }
 
     fn get_package(
@@ -1239,9 +1255,6 @@ impl SymbolTable {
             SymbolKind::ProtoPackage(_) if include_proto => return Some(symbol.clone()),
             SymbolKind::AliasPackage(x) => {
                 let context = ResolveContext::new(&symbol.namespace);
-                // Use `&[]` instead of `x.target.generic_arguments()`
-                // because symbol_table::get is forbidden in apply_import which borrows `&mut self`
-                // It is not necessary for apply_import
                 if let Ok(symbol) = self.resolve(&x.target.generic_path(), &[], context) {
                     return self.get_package(&symbol.found, include_proto, false);
                 }
