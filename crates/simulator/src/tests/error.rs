@@ -106,3 +106,26 @@ fn unsupported_statement() {
         Err(SimulatorError::UnsupportedDescription { .. })
     ));
 }
+
+#[test]
+fn unsupported_sv_module_instance() {
+    // Instantiating a SystemVerilog blackbox (`$sv::SvMod`) must surface as
+    // UnsupportedDescription rather than panic during IR build.
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        c: output logic<32>,
+    ) {
+        inst u: $sv::SvMod (
+            a,
+            c,
+        );
+    }
+    "#;
+
+    let result = analyze_top(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::UnsupportedDescription { .. })
+    ));
+}
