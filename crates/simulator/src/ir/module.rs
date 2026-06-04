@@ -621,6 +621,25 @@ pub(crate) fn analyze_dependency(
     });
 
     if has_expandable {
+        // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
+        // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
+        // must be unwrapped too or they manufacture phantom edges.
+        fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+            match stmt {
+                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                    for sub in cb.original_stmts {
+                        flatten(sub, out);
+                    }
+                }
+                ProtoStatement::SequentialBlock(body) => {
+                    for sub in body {
+                        flatten(sub, out);
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
 
@@ -628,23 +647,11 @@ pub(crate) fn analyze_dependency(
         let mut new_id = 0usize;
         for key in sorted_keys {
             let stmt = table.remove(&key).unwrap();
-            match stmt {
-                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                    for sub in cb.original_stmts {
-                        new_table.insert(new_id, sub);
-                        new_id += 1;
-                    }
-                }
-                ProtoStatement::SequentialBlock(body) => {
-                    for sub in body {
-                        new_table.insert(new_id, sub);
-                        new_id += 1;
-                    }
-                }
-                other => {
-                    new_table.insert(new_id, other);
-                    new_id += 1;
-                }
+            let mut flat = Vec::new();
+            flatten(stmt, &mut flat);
+            for sub in flat {
+                new_table.insert(new_id, sub);
+                new_id += 1;
             }
         }
         table = new_table;
@@ -678,6 +685,11 @@ pub(crate) fn analyze_dependency(
             let mut ins = vec![];
             let mut outs = vec![];
             s.gather_variable_offsets(&mut ins, &mut outs);
+            // FF reads/writes don't participate in comb cycles, and
+            // `packed_ff` collapses next_offset onto current_offset so they'd
+            // share a VarOffset and form phantom edges otherwise.
+            ins.retain(|o| !o.is_ff());
+            outs.retain(|o| !o.is_ff());
             s_inputs.push(ins);
             s_outputs.push(outs);
         }
@@ -724,12 +736,29 @@ pub(crate) fn analyze_dependency(
         if cnt == n {
             return Ok(sorted);
         }
-        // Collect tokens from statements involved in the cycle (deg > 0).
-        let mut tokens: Vec<_> = deg
+        // `deg > 0` includes the cycle's downstream cone; isolate just the
+        // cycle (SCC size >= 2) so the diagnostic focuses on the real loop.
+        let cycle_indices: Vec<usize> = {
+            use daggy::petgraph::Graph;
+            use daggy::petgraph::algo::tarjan_scc;
+            let mut g: Graph<usize, ()> = Graph::new();
+            let nodes: Vec<_> = (0..n).map(|i| g.add_node(i)).collect();
+            for (u, succs) in a.iter().enumerate() {
+                for &v in succs {
+                    g.add_edge(nodes[u], nodes[v], ());
+                }
+            }
+            let mut cycle: Vec<usize> = tarjan_scc(&g)
+                .into_iter()
+                .filter(|c| c.len() >= 2)
+                .flat_map(|c| c.into_iter().map(|ni| g[ni]))
+                .collect();
+            cycle.sort();
+            cycle
+        };
+        let mut tokens: Vec<_> = cycle_indices
             .iter()
-            .enumerate()
-            .filter(|(_, d)| **d > 0)
-            .filter_map(|(i, _)| sorted[i].token())
+            .filter_map(|&i| sorted[i].token())
             .filter(|t| *t != Default::default())
             .collect();
         let trigger = tokens.pop().unwrap_or_default();
