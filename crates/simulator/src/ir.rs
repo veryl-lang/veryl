@@ -6,6 +6,7 @@ mod expression;
 pub(crate) mod inst_layout;
 mod module;
 pub(crate) mod opt;
+pub(crate) mod partial_index;
 pub(crate) mod site_table;
 mod statement;
 pub(crate) mod variable;

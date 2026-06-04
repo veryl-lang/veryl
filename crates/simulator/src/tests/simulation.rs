@@ -3978,6 +3978,179 @@ fn inst_array_output_port() {
     }
 }
 
+// Pass a whole array variable as a function argument. The Variable factor
+// for a bare `arr` reference has no scalar index, so without per-element
+// expansion in `FunctionCall::conv` the inner `Variable` conv panics on
+// `calc_index([]).unwrap()`. The function reads via `pipe[idx]` to verify
+// each element is copied correctly.
+#[test]
+fn function_call_array_arg() {
+    let code = r#"
+    module Top (
+        in0: input  logic<8>,
+        in1: input  logic<8>,
+        in2: input  logic<8>,
+        sel: input  logic<2>,
+        out: output logic<8>,
+    ) {
+        function pick (
+            pipe: input logic<8> [3],
+            idx : input logic<2>   ,
+        ) -> logic<8> {
+            case idx {
+                2'd0   : return pipe[0];
+                2'd1   : return pipe[1];
+                2'd2   : return pipe[2];
+                default: return pipe[0];
+            }
+        }
+
+        var arr: logic<8> [3];
+        assign arr[0] = in0;
+        assign arr[1] = in1;
+        assign arr[2] = in2;
+        assign out = pick(arr, sel);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("in0", Value::new(0x11, 8, false));
+        sim.set("in1", Value::new(0x22, 8, false));
+        sim.set("in2", Value::new(0x33, 8, false));
+
+        for (sel_val, exp) in [(0, 0x11), (1, 0x22), (2, 0x33)] {
+            sim.set("sel", Value::new(sel_val, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("out").unwrap(),
+                Value::new(exp, 8, false),
+                "sel={}",
+                sel_val,
+            );
+        }
+    }
+}
+
+// Partial constant-index of a multi-dim parent array as a function argument
+// (e.g. `pick(arr[0], ...)` on a `logic [N, M]` parent → 1D array param).
+#[test]
+fn function_call_array_arg_partial_index() {
+    let code = r#"
+    module Top (
+        in0: input  logic<8>,
+        in1: input  logic<8>,
+        in2: input  logic<8>,
+        sel: input  logic<2>,
+        out: output logic<8>,
+    ) {
+        function pick (
+            pipe: input logic<8> [3],
+            idx : input logic<2>   ,
+        ) -> logic<8> {
+            case idx {
+                2'd0   : return pipe[0];
+                2'd1   : return pipe[1];
+                2'd2   : return pipe[2];
+                default: return pipe[0];
+            }
+        }
+
+        var arr: logic<8> [2, 3];
+        assign arr[0][0] = in0;
+        assign arr[0][1] = in1;
+        assign arr[0][2] = in2;
+        // Row 1 is unused — we only test row 0 with partial index `arr[0]`.
+        assign arr[1][0] = 0;
+        assign arr[1][1] = 0;
+        assign arr[1][2] = 0;
+        assign out = pick(arr[0], sel);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("in0", Value::new(0x11, 8, false));
+        sim.set("in1", Value::new(0x22, 8, false));
+        sim.set("in2", Value::new(0x33, 8, false));
+
+        for (sel_val, exp) in [(0, 0x11), (1, 0x22), (2, 0x33)] {
+            sim.set("sel", Value::new(sel_val, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("out").unwrap(),
+                Value::new(exp, 8, false),
+                "sel={}",
+                sel_val,
+            );
+        }
+    }
+}
+
+// Partial constant-index of a multi-dim parent array as a port connection:
+// `arr[0]` (a row) wires the child's 1D array port to a contiguous slice of
+// the parent's flattened storage. Exercises both input and output partial-
+// index paths in declaration.rs simultaneously.
+#[test]
+fn inst_array_port_partial_index() {
+    let code = r#"
+    module Sub (
+        i_x: input  logic<8> [3],
+        o_y: output logic<8> [3],
+    ) {
+        assign o_y[0] = i_x[0] + 8'd1;
+        assign o_y[1] = i_x[1] + 8'd2;
+        assign o_y[2] = i_x[2] + 8'd3;
+    }
+    module Top (
+        in0:  input  logic<8>,
+        in1:  input  logic<8>,
+        in2:  input  logic<8>,
+        out0: output logic<8>,
+        out1: output logic<8>,
+        out2: output logic<8>,
+    ) {
+        var arr: logic<8> [2, 3];
+        // Row 0 = inputs, row 1 = Sub's outputs (via partial-index ports).
+        assign arr[0][0] = in0;
+        assign arr[0][1] = in1;
+        assign arr[0][2] = in2;
+        inst u: Sub (
+            i_x: arr[0],
+            o_y: arr[1],
+        );
+        assign out0 = arr[1][0];
+        assign out1 = arr[1][1];
+        assign out2 = arr[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("in0", Value::new(10, 8, false));
+        sim.set("in1", Value::new(20, 8, false));
+        sim.set("in2", Value::new(30, 8, false));
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("out0").unwrap(), Value::new(11, 8, false));
+        assert_eq!(sim.get("out1").unwrap(), Value::new(22, 8, false));
+        assert_eq!(sim.get("out2").unwrap(), Value::new(33, 8, false));
+    }
+}
+
 // Regression: comb-only variable in a child module must be correctly included
 // in the unified comb list. The split comb/ff pattern (always_comb feeding
 // always_ff) in a child module must work identically to the single-block pattern.
