@@ -95,7 +95,7 @@ lto           = true
 codegen-units = 1
 
 [profile.bench]
-debug = true
+debug = 1
 
 [profile.release-verylup]
 inherits      = "release"
