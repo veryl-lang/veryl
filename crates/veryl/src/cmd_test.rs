@@ -9,6 +9,7 @@ use veryl_analyzer::symbol_table;
 use veryl_metadata::WaveFormFormat;
 use veryl_metadata::{FilelistType, Metadata, SimType, WaveFormTarget};
 use veryl_parser::resource_table::{self, PathId};
+use veryl_parser::text_table;
 use veryl_simulator::ir::{Config, Ir, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
@@ -25,6 +26,16 @@ struct NativeTestJob {
     module_name: String,
     sim_ir: Ir,
     dump: Option<WaveDumper>,
+}
+
+/// Per-test outcome split so the main thread only logs "Executing test"
+/// when the test actually ran (not when elaboration failed).
+enum NativeOutcome {
+    ElaborateFailed(SimulatorError),
+    Ran {
+        result: std::result::Result<TestResult, SimulatorError>,
+        wave_path: Option<PathBuf>,
+    },
 }
 
 struct PendingNativeTest {
@@ -220,24 +231,25 @@ impl CmdTest {
                 .unwrap_or(1)
                 .min(pending_native.len());
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
-            let table_snapshot = resource_table::export_tables();
+            let resource_snapshot = resource_table::export_tables();
+            // `SimulatorError` snapshots source text from `text_table` eagerly
+            // at construction time; without this, worker errors carry no source.
+            let text_snapshot = text_table::export_tables();
 
-            type JobResult = (
-                String,
-                std::result::Result<(TestResult, Option<PathBuf>), SimulatorError>,
-                String,
-            );
+            type JobResult = (String, NativeOutcome, String);
             let ir_ref = &ir;
             let config_ref = &config;
             let opt_ref = &self.opt;
             let metadata_ref: &Metadata = metadata;
             let results: Vec<Vec<JobResult>> = std::thread::scope(|s| {
                 let queue = &pending_queue;
-                let snapshot = &table_snapshot;
+                let resource_snap = &resource_snapshot;
+                let text_snap = &text_snapshot;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         s.spawn(move || {
-                            resource_table::import_tables(snapshot);
+                            resource_table::import_tables(resource_snap);
+                            text_table::import_tables(text_snap);
                             // Per-thread cache avoids locking; cross-test
                             // reuse is rare since each top name is unique.
                             let mut thread_cache = ProtoModuleCache::default();
@@ -268,14 +280,18 @@ impl CmdTest {
                                 let build_el = t_build.elapsed();
                                 #[cfg(feature = "profile")]
                                 let t_run = std::time::Instant::now();
-                                let run_result = match build_result {
+                                let outcome = match build_result {
                                     Ok(job) => {
                                         let wave_path =
                                             job.dump.as_ref().and_then(|d| d.path().cloned());
-                                        run_native_testbench(job.sim_ir, job.dump, job.module_name)
-                                            .map(|r| (r, wave_path))
+                                        let result = run_native_testbench(
+                                            job.sim_ir,
+                                            job.dump,
+                                            job.module_name,
+                                        );
+                                        NativeOutcome::Ran { result, wave_path }
                                     }
-                                    Err(e) => Err(e),
+                                    Err(e) => NativeOutcome::ElaborateFailed(e),
                                 };
                                 #[cfg(feature = "profile")]
                                 {
@@ -288,7 +304,7 @@ impl CmdTest {
                                     );
                                 }
                                 let output = output_buffer::take();
-                                thread_results.push((pending.test_name, run_result, output));
+                                thread_results.push((pending.test_name, outcome, output));
                             }
                             thread_results
                         })
@@ -297,26 +313,40 @@ impl CmdTest {
                 handles.into_iter().map(|h| h.join().unwrap()).collect()
             });
 
-            for (test_name, result, output) in results.into_iter().flatten() {
-                info!("Executing test ({test_name})");
-                if !output.is_empty() {
-                    print!("{output}");
-                }
-                match result {
-                    Ok((TestResult::Pass, wave_path)) => {
-                        info!("Succeeded test ({test_name})");
-                        success += 1;
-                        if let Some(path) = wave_path {
-                            metadata.add_generated_file(path);
+            for (test_name, outcome, output) in results.into_iter().flatten() {
+                match outcome {
+                    NativeOutcome::ElaborateFailed(e) => {
+                        // Buffered output is from IR build; emit before the diag.
+                        if !output.is_empty() {
+                            print!("{output}");
                         }
-                    }
-                    Ok((TestResult::Fail(msg), _)) => {
-                        error!("Failed test ({test_name}): {msg}");
+                        error!("Failed to elaborate test ({test_name})");
+                        eprintln!("{:?}", miette::Report::new(e));
                         failure += 1;
                     }
-                    Err(e) => {
-                        error!("Failed test ({test_name}): {e}");
-                        failure += 1;
+                    NativeOutcome::Ran { result, wave_path } => {
+                        info!("Executing test ({test_name})");
+                        if !output.is_empty() {
+                            print!("{output}");
+                        }
+                        match result {
+                            Ok(TestResult::Pass) => {
+                                info!("Succeeded test ({test_name})");
+                                success += 1;
+                                if let Some(path) = wave_path {
+                                    metadata.add_generated_file(path);
+                                }
+                            }
+                            Ok(TestResult::Fail(msg)) => {
+                                error!("Failed test ({test_name}): {msg}");
+                                failure += 1;
+                            }
+                            Err(e) => {
+                                error!("Failed test ({test_name})");
+                                eprintln!("{:?}", miette::Report::new(e));
+                                failure += 1;
+                            }
+                        }
                     }
                 }
             }

@@ -1,6 +1,7 @@
 use crate::resource_table::PathId;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextId(pub usize);
@@ -24,13 +25,15 @@ pub struct TextInfo {
 #[derive(Clone, Default, Debug)]
 pub struct TextTable {
     current_text: TextId,
-    table: HashMap<TextId, TextInfo>,
+    // `Arc`-shared so `export_tables`/`import_tables` bumps refcounts
+    // instead of duplicating every source file (MB per entry on large designs).
+    table: HashMap<TextId, Arc<TextInfo>>,
 }
 
 impl TextTable {
     pub fn set_current_text(&mut self, info: TextInfo) -> TextId {
         let id = new_text_id();
-        self.table.insert(id, info);
+        self.table.insert(id, Arc::new(info));
         self.current_text = id;
         id
     }
@@ -40,7 +43,7 @@ impl TextTable {
     }
 
     pub fn get(&self, id: TextId) -> Option<TextInfo> {
-        self.table.get(&id).cloned()
+        self.table.get(&id).map(|x| (**x).clone())
     }
 
     pub fn drop(&mut self, id: PathId) {
@@ -64,4 +67,20 @@ pub fn get(id: TextId) -> Option<TextInfo> {
 
 pub fn drop(id: PathId) {
     TEXT_TABLE.with(|f| f.borrow_mut().drop(id))
+}
+
+/// Snapshot of the calling thread's `text_table`. Cheap to pass between
+/// threads — `TextInfo` payloads are `Arc`-shared.
+pub struct TextTableSnapshot {
+    text_table: TextTable,
+}
+
+pub fn export_tables() -> TextTableSnapshot {
+    TextTableSnapshot {
+        text_table: TEXT_TABLE.with(|f| f.borrow().clone()),
+    }
+}
+
+pub fn import_tables(snapshot: &TextTableSnapshot) {
+    TEXT_TABLE.with(|f| *f.borrow_mut() = snapshot.text_table.clone());
 }
