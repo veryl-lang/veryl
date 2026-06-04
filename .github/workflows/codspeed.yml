@@ -31,7 +31,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         continue-on-error: true
         with:
-          shared-key: "${{ runner.os }}-codspeed-${{ matrix.package }}"
+          shared-key: "${{ runner.os }}-codspeed"
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Build the benchmark target(s)
