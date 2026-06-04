@@ -3302,6 +3302,96 @@ fn interface_modport() {
 }
 
 #[test]
+fn interface_array_modport_index() {
+    // `inst u: Child(port: s_port[i])` where `s_port` is a modport array.
+    // Earlier, `get_port_connects` dropped the `[i]` from the input member
+    // expression and produced an unsupported_description in the simulator.
+    let code = r#"
+    interface Bus {
+        var data: logic<8>;
+        modport master {
+            data: output,
+        }
+        modport slave {
+            data: input,
+        }
+    }
+
+    module Producer (
+        clk: input clock,
+        rst: input reset,
+        bus: modport Bus::master,
+        val: input logic<8>,
+    ) {
+        assign bus.data = val;
+    }
+
+    module Consumer (
+        clk: input clock,
+        rst: input reset,
+        bus: modport Bus::slave,
+        out_data: output logic<8>,
+    ) {
+        assign out_data = bus.data;
+    }
+
+    module Mid #(
+        param N: u32 = 2,
+    ) (
+        clk: input clock,
+        rst: input reset,
+        s_port: modport Bus::slave [N],
+        out: output logic<8>[N],
+    ) {
+        for i in 0..N :g {
+            inst u_cons: Consumer (
+                clk,
+                rst,
+                bus: s_port[i],
+                out_data: out[i],
+            );
+        }
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        out0: output logic<8>,
+        out1: output logic<8>,
+    ) {
+        inst u_bus: Bus [2];
+
+        inst u_p0: Producer (clk, rst, bus: u_bus[0], val: 10);
+        inst u_p1: Producer (clk, rst, bus: u_bus[1], val: 11);
+
+        var w_out: logic<8>[2];
+        assign out0 = w_out[0];
+        assign out1 = w_out[1];
+
+        inst u_mid: Mid #(N: 2) (
+            clk,
+            rst,
+            s_port: u_bus,
+            out:    w_out,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        println!("{}", ir.dump_variables());
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        println!("{}", sim.ir.dump_variables());
+        let out0 = sim.get("out0").unwrap();
+        let out1 = sim.get("out1").unwrap();
+        assert_eq!(out0, Value::new(10, 8, false));
+        assert_eq!(out1, Value::new(11, 8, false));
+    }
+}
+
+#[test]
 fn interface_function() {
     let code = r#"
     interface BusIf {
