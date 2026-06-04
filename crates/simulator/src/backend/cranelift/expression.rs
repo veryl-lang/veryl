@@ -504,6 +504,15 @@ impl ProtoExpression {
                 if expr_context.signed {
                     (x_payload, x_mask_xz) =
                         expand_sign(width, x.width(), x_payload, x_mask_xz, builder);
+                } else if wide && builder.func.dfg.value_type(x_payload) != I128 {
+                    // Wide unary helpers build I128 constants; widen narrow
+                    // payloads so `op(I64, I128)` doesn't panic at lowering.
+                    x_payload = builder.ins().uextend(I128, x_payload);
+                    if let Some(m) = x_mask_xz
+                        && builder.func.dfg.value_type(m) != I128
+                    {
+                        x_mask_xz = Some(builder.ins().uextend(I128, m));
+                    }
                 }
 
                 let payload = match op {
