@@ -1216,7 +1216,12 @@ pub fn build_linear_index_expr(
     Ok(ret.expect("non-empty array must produce index expression"))
 }
 
-/// Build a ProtoDynamicBitSelect from a VarSelect that contains variable expressions.
+/// Build a `ProtoDynamicBitSelect` from a `VarSelect` containing variable
+/// expressions. Consumes the first `select_dims` dims of `width_shape`;
+/// unconsumed dims times `kind_width` form the returned element. A select
+/// of `width_shape.dims() + 1` drills into the kind atom itself (packed
+/// scalar), in which case the extra consumed dim is `kind_width` and the
+/// element is a single bit.
 pub fn build_dynamic_bit_select(
     context: &mut Context,
     width_shape: &veryl_analyzer::ir::ShapeRef,
@@ -1225,22 +1230,46 @@ pub fn build_dynamic_bit_select(
 ) -> Result<ProtoDynamicBitSelect, SimulatorError> {
     let select_dims = select.dimension();
 
-    // Consumed = first select_dims dims (outermost), remaining = the rest (innermost).
-    // elem_width = product of remaining dims * kind_width.
-    // num_elements = product of consumed dims.
-    let mut elem_width = kind_width;
-    for i in select_dims..width_shape.dims() {
-        if let Some(Some(d)) = width_shape.get(i) {
-            elem_width *= d;
-        }
-    }
+    // Gracefully fail if the shape can't accommodate the select (too many
+    // dims, or any consumed dim has unknown size).
+    let drills_into_kind = select_dims == width_shape.dims() + 1;
+    let consumed_dims: Vec<usize> = (0..select_dims)
+        .map(|i| {
+            if i < width_shape.dims() {
+                width_shape.get(i).copied().flatten()
+            } else if drills_into_kind {
+                Some(kind_width)
+            } else {
+                None
+            }
+        })
+        .collect::<Option<_>>()
+        .ok_or_else(|| {
+            let token = select
+                .0
+                .first()
+                .map(|e| e.comptime().token)
+                .unwrap_or_default();
+            SimulatorError::unsupported_description(&token)
+        })?;
 
-    let mut num_elements = 1;
-    for i in 0..select_dims {
-        if let Some(Some(d)) = width_shape.get(i) {
-            num_elements *= d;
+    // Consumed = first select_dims dims (outermost), remaining = the rest (innermost).
+    // elem_width = product of remaining dims * kind_width, except when the
+    // final select index drilled into the kind itself — then a single bit is
+    // selected.
+    let elem_width = if drills_into_kind {
+        1
+    } else {
+        let mut w = kind_width;
+        for i in select_dims..width_shape.dims() {
+            if let Some(Some(d)) = width_shape.get(i) {
+                w *= d;
+            }
         }
-    }
+        w
+    };
+
+    let num_elements: usize = consumed_dims.iter().product();
 
     let index_width = 32;
     let index_expr_context = ExpressionContext {
@@ -1250,10 +1279,6 @@ pub fn build_dynamic_bit_select(
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
-
-    let consumed_dims: Vec<usize> = (0..select_dims)
-        .map(|i| width_shape.get(i).unwrap().unwrap())
-        .collect();
 
     for (i, &dim_size) in consumed_dims.iter().enumerate().rev() {
         let idx_proto: ProtoExpression = Conv::conv(context, &select.0[i])?;
@@ -1354,7 +1379,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                     if let Some(idx_vals) = const_index {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
-                        let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
+                        let index = meta.r#type.array.calc_index(&idx_vals).ok_or_else(|| {
+                            SimulatorError::unsupported_description(&comptime.token)
+                        })?;
                         let element = &meta.elements[index];
                         let var_full_width = kind_width
                             * width_shape

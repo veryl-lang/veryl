@@ -2,6 +2,7 @@ use crate::backend::inst::try_compile_inst_chunks;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
+use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
@@ -484,41 +485,61 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
-            // Array port with a simple variable expression: expand per-element
+            // Array port fed by a bare or constant partial-index variable
+            // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
             if child_meta.elements.len() > 1
                 && let air::Expression::Term(factor) = &input.expr
                 && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
-                && index.0.is_empty()
                 && select.is_empty()
             {
                 let parent_scope = context.scope();
-                let parent_meta = parent_scope.variable_meta.get(parent_id).unwrap();
-                for i in 0..child_meta.elements.len() {
-                    let child_element = &child_meta.elements[i];
-                    let parent_element = &parent_meta.elements[i];
-                    let parent_expr = ProtoExpression::Variable {
-                        var_offset: parent_element.current,
-                        select: None,
-                        dynamic_select: None,
-                        width: child_meta.width,
-                        var_full_width: child_meta.width,
-                        expr_context: ExpressionContext {
-                            width: child_meta.width,
-                            signed: false,
-                        },
+                if let Some(parent_meta) = parent_scope.variable_meta.get(parent_id).cloned() {
+                    let base_index = if index.0.is_empty() {
+                        Some(0)
+                    } else if let Some(idx_vals) =
+                        index.eval_value(&mut parent_scope.analyzer_context)
+                    {
+                        partial_index_base(
+                            parent_meta.r#type.array.as_slice(),
+                            &idx_vals,
+                            child_meta.elements.len(),
+                            parent_meta.elements.len(),
+                        )
+                    } else {
+                        None
                     };
-                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                        dst: child_element.current,
-                        dst_width: child_meta.width,
-                        select: None,
-                        dynamic_select: None,
-                        rhs_select: None,
-                        expr: parent_expr,
-                        dst_ff_current_offset: 0, // not FF
-                        token: TokenRange::default(),
-                    }));
+
+                    if let Some(base) = base_index {
+                        for i in 0..child_meta.elements.len() {
+                            let child_element = &child_meta.elements[i];
+                            let parent_element = &parent_meta.elements[base + i];
+                            let parent_expr = ProtoExpression::Variable {
+                                var_offset: parent_element.current,
+                                select: None,
+                                dynamic_select: None,
+                                width: child_meta.width,
+                                var_full_width: child_meta.width,
+                                expr_context: ExpressionContext {
+                                    width: child_meta.width,
+                                    signed: false,
+                                },
+                            };
+                            all_comb_statements.push(ProtoStatement::Assign(
+                                ProtoAssignStatement {
+                                    dst: child_element.current,
+                                    dst_width: child_meta.width,
+                                    select: None,
+                                    dynamic_select: None,
+                                    rhs_select: None,
+                                    expr: parent_expr,
+                                    dst_ff_current_offset: 0, // not FF
+                                    token: TokenRange::default(),
+                                },
+                            ));
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
 
             let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
@@ -597,21 +618,23 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let parent_scope = context.scope();
                 let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
 
-                // Determine which parent elements to connect.
-                // When the parent destination has no index and the variable is an
-                // array, connect each element individually (array-to-array port).
-                let parent_element_indices: Vec<usize> = if let Some(idx) =
-                    parent_meta.r#type.array.calc_index(&parent_index)
-                {
-                    vec![idx]
-                } else if parent_index.is_empty() && !parent_meta.r#type.array.is_empty() {
-                    (0..parent_meta.elements.len()).collect()
-                } else {
-                    panic!(
-                        "calc_index failed for output port destination (index {:?}, array {:?})",
-                        parent_index, parent_meta.r#type.array,
-                    );
-                };
+                // Parent elements to connect: full index → 1, empty index →
+                // whole array, partial constant prefix → contiguous slice.
+                let parent_element_indices: Vec<usize> =
+                    if let Some(idx) = parent_meta.r#type.array.calc_index(&parent_index) {
+                        vec![idx]
+                    } else if parent_index.is_empty() && !parent_meta.r#type.array.is_empty() {
+                        (0..parent_meta.elements.len()).collect()
+                    } else if let Some(base) = partial_index_base(
+                        parent_meta.r#type.array.as_slice(),
+                        &parent_index,
+                        child_meta.elements.len(),
+                        parent_meta.elements.len(),
+                    ) {
+                        (base..base + child_meta.elements.len()).collect()
+                    } else {
+                        return Err(SimulatorError::unsupported_description(&parent_dst.token));
+                    };
 
                 for (elem_idx, &parent_elem_idx) in parent_element_indices.iter().enumerate() {
                     let child_element = &child_meta.elements[elem_idx];

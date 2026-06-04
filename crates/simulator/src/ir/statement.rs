@@ -6,6 +6,7 @@ use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
     build_linear_index_expr,
 };
+use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
     VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
@@ -2923,6 +2924,66 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
 
         for (var_path, expr) in &src.inputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
+
+            // Array argument fed by a bare or constant partial-index
+            // variable (`arr` or `arr[0]`): copy per-element. The generic
+            // path treats the argument as a scalar and panics at
+            // `calc_index().unwrap()` on a whole-array reference.
+            let arg_meta_clone = context.scope().variable_meta.get(arg_var_id).cloned();
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && arg_meta.elements.len() > 1
+                && let air::Expression::Term(factor) = expr
+                && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
+                && select.is_empty()
+            {
+                let parent_scope = context.scope();
+                if let Some(parent_meta) = parent_scope.variable_meta.get(parent_id).cloned() {
+                    let base_index = if index.0.is_empty() {
+                        Some(0)
+                    } else if let Some(idx_vals) =
+                        index.eval_value(&mut parent_scope.analyzer_context)
+                    {
+                        partial_index_base(
+                            parent_meta.r#type.array.as_slice(),
+                            &idx_vals,
+                            arg_meta.elements.len(),
+                            parent_meta.elements.len(),
+                        )
+                    } else {
+                        None
+                    };
+
+                    if let Some(base) = base_index {
+                        for i in 0..arg_meta.elements.len() {
+                            let arg_element = &arg_meta.elements[i];
+                            let parent_element = &parent_meta.elements[base + i];
+                            let parent_expr = ProtoExpression::Variable {
+                                var_offset: parent_element.current,
+                                select: None,
+                                dynamic_select: None,
+                                width: arg_meta.width,
+                                var_full_width: arg_meta.width,
+                                expr_context: ExpressionContext {
+                                    width: arg_meta.width,
+                                    signed: false,
+                                },
+                            };
+                            result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                                dst: arg_element.current,
+                                dst_width: arg_meta.width,
+                                select: None,
+                                dynamic_select: None,
+                                rhs_select: None,
+                                expr: parent_expr,
+                                dst_ff_current_offset: 0, // not FF
+                                token: TokenRange::default(),
+                            }));
+                        }
+                        continue;
+                    }
+                }
+            }
+
             let proto_expr: ProtoExpression = Conv::conv(context, expr)?;
             let scope = context.scope();
             let meta = scope.variable_meta.get(arg_var_id).unwrap();
