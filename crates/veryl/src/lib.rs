@@ -143,6 +143,12 @@ pub struct OptBuild {
     /// Run build in check mode
     #[arg(long)]
     pub check: bool,
+
+    /// Base directory for build outputs, overriding the project path
+    /// derived from Veryl.toml. Relative paths resolve against the
+    /// current working directory.
+    #[arg(long, value_name = "DIR")]
+    pub base_dir: Option<PathBuf>,
 }
 
 /// Clean-up the current project

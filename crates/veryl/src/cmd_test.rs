@@ -94,6 +94,7 @@ impl CmdTest {
         let build = CmdBuild::new(OptBuild {
             files: self.opt.files.clone(),
             check: false,
+            base_dir: None,
         });
 
         // Mutate metadata so external simulator runners (which read

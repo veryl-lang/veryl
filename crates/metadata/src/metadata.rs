@@ -66,6 +66,11 @@ pub struct Metadata {
     pub lockfile: Lockfile,
     #[serde(skip)]
     pub build_info: BuildInfo,
+    /// Output base directory override (e.g. `veryl build --base-dir`).
+    /// When set, build outputs are emitted relative to this directory
+    /// instead of the project path. Never read from Veryl.toml.
+    #[serde(skip)]
+    pub output_base_override: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -310,6 +315,12 @@ impl Metadata {
         };
 
         let base = self.project_path();
+        // Build outputs may be redirected (e.g. `veryl build --base-dir`);
+        // sources are always resolved against the project path.
+        let out_base = self
+            .output_base_override
+            .clone()
+            .unwrap_or_else(|| base.clone());
         let mut ret = Vec::new();
 
         // Pre-canonicalize explicit file args once so we can route each to
@@ -354,21 +365,29 @@ impl Metadata {
                     return Err(MetadataError::InvalidSourceLocation(src));
                 };
                 let dst = match self.build.target {
-                    Target::Source => src.with_extension("sv"),
-                    Target::Directory { ref path } => {
-                        base.join(path.join(src_relative.with_extension("sv")))
+                    Target::Source => {
+                        if self.output_base_override.is_some() {
+                            // Redirected source-target builds keep the
+                            // source-relative layout under the override.
+                            out_base.join(src_relative.with_extension("sv"))
+                        } else {
+                            src.with_extension("sv")
+                        }
                     }
-                    Target::Bundle { .. } => base.join(
+                    Target::Directory { ref path } => {
+                        out_base.join(path.join(src_relative.with_extension("sv")))
+                    }
+                    Target::Bundle { .. } => out_base.join(
                         PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
                     ),
                 };
                 let map = match &self.build.sourcemap_target {
                     SourceMapTarget::Directory { path } => {
                         if let Target::Directory { .. } = self.build.target {
-                            base.join(path.join(src_relative.with_extension("sv.map")))
+                            out_base.join(path.join(src_relative.with_extension("sv.map")))
                         } else {
-                            let dst = dst.strip_prefix(&base).unwrap();
-                            base.join(path.join(dst.with_extension("sv.map")))
+                            let dst = dst.strip_prefix(&out_base).unwrap();
+                            out_base.join(path.join(dst.with_extension("sv.map")))
                         }
                     }
                     _ => {

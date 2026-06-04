@@ -37,6 +37,18 @@ impl CmdBuild {
         test_filter: Option<&str>,
         defines: &[String],
     ) -> Result<bool> {
+        if let Some(ref base_dir) = self.opt.base_dir {
+            let base_dir = if base_dir.is_absolute() {
+                base_dir.clone()
+            } else {
+                std::env::current_dir()
+                    .into_diagnostic()
+                    .wrap_err("")?
+                    .join(base_dir)
+            };
+            metadata.output_base_override = Some(base_dir);
+        }
+
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
         let mut check_error = CheckError::new(metadata.build.error_count_limit);
