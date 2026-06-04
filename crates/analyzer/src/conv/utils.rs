@@ -2501,10 +2501,15 @@ pub fn get_port_connects(
                 let member_path = member.0.clone();
                 let expr = if let Some((var_id, mut comptime)) = context.find_path(&member_path) {
                     comptime.token = token;
+                    // Apply dst_select (e.g. `[i]` in `port: s_port[i]`):
+                    // array dims go to the variable's index, the rest to a bit select.
+                    let (array_select, width_select) =
+                        dst_select.clone().split(comptime.r#type.array.dims());
+                    comptime.r#type.array.drain(0..array_select.dimension());
                     ir::Expression::Term(Box::new(ir::Factor::Variable(
                         var_id,
-                        VarIndex::default(),
-                        VarSelect::default(),
+                        array_select.to_index(),
+                        width_select,
                         comptime,
                     )))
                 } else {
