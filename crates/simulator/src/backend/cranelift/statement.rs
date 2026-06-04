@@ -597,6 +597,14 @@ impl ProtoAssignStatement {
             {
                 mask_xz = Some(builder.ins().uextend(I128, mxz));
             }
+        } else if !wide && builder.func.dfg.value_type(payload) == I128 {
+            // Narrow dst with a wide (I128) expression value: truncate to I64.
+            payload = builder.ins().ireduce(I64, payload);
+            if let Some(mxz) = mask_xz
+                && builder.func.dfg.value_type(mxz) == I128
+            {
+                mask_xz = Some(builder.ins().ireduce(I64, mxz));
+            }
         }
 
         // Narrow known_bits if rhs_select is applied
@@ -1504,6 +1512,16 @@ fn emit_switch_via_br_table(
         builder.ins().band_not(sel_payload, mask)
     } else {
         sel_payload
+    };
+    // `br_table` requires an I32 selector. Inputs may arrive as I64 (the
+    // default scalar size) or I128 (wide selector); coerce.
+    let sel_ty = builder.func.dfg.value_type(sel_clean);
+    let sel_clean = if sel_ty == I32 {
+        sel_clean
+    } else if sel_ty.bits() > 32 {
+        builder.ins().ireduce(I32, sel_clean)
+    } else {
+        builder.ins().uextend(I32, sel_clean)
     };
 
     let arm_blocks: Vec<_> = chain.arms.iter().map(|_| builder.create_block()).collect();

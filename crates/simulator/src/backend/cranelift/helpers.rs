@@ -7,7 +7,7 @@ use super::runtime::{
 use crate::ir::{ProtoDynamicBitSelect, native_bytes as calc_native_bytes};
 use crate::wide_ops;
 use cranelift::prelude::Value as CraneliftValue;
-use cranelift::prelude::types::{I32, I64};
+use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::ir::Op;
 
@@ -595,14 +595,23 @@ pub(crate) fn expand_sign(
     builder: &mut FunctionBuilder,
 ) -> (CraneliftValue, Option<CraneliftValue>) {
     if dst_width != src_width {
-        let wide = dst_width > 64;
+        let dst_wide = dst_width > 64;
+        let src_wide = src_width > 64;
+        // narrow → wide: uextend payload to I128 before downstream
+        // `bor_const(.., wide=true)` builds an I128 mask.
+        if dst_wide && !src_wide {
+            payload = builder.ins().uextend(I128, payload);
+            if let Some(m) = mask_xz {
+                mask_xz = Some(builder.ins().uextend(I128, m));
+            }
+        }
         let mask = gen_mask_for_width(dst_width) ^ gen_mask_for_width(src_width);
         let msb = builder.ins().ushr_imm(payload, (src_width - 1) as i64);
-        let ext = bor_const(builder, payload, mask, wide);
+        let ext = bor_const(builder, payload, mask, dst_wide);
         payload = builder.ins().select(msb, ext, payload);
         if let Some(x) = mask_xz {
             let msb_xz = builder.ins().ushr_imm(x, (src_width - 1) as i64);
-            let ext_xz = bor_const(builder, x, mask, wide);
+            let ext_xz = bor_const(builder, x, mask, dst_wide);
             mask_xz = Some(builder.ins().select(msb_xz, ext_xz, x));
         }
     }
