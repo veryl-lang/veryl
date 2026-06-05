@@ -657,6 +657,35 @@ fn format_is_idempotent_for_long_case_condition() {
 }
 
 #[test]
+fn format_is_idempotent_for_case_arm_with_wide_source_gap() {
+    // Regression: the arm-isolation estimate counted literal source whitespace,
+    // so a wide gap straddling the threshold flipped the isolation/`:`-alignment
+    // decision between passes.
+    let metadata = Metadata::create_default("prj").unwrap();
+    let gap = " ".repeat(110);
+    let code = format!(
+        r#"module M {{
+    var y: logic;
+    let x: logic = 1;
+    always_comb {{
+        case x {{
+            1,{gap}2: y = 1;
+            3: y = 1;
+            default: y = 1;
+        }}
+    }}
+}}
+"#
+    );
+    let first = format(&metadata, &code);
+    let second = format(&metadata, &first);
+    assert_eq!(
+        first, second,
+        "format is not idempotent:\nfirst:\n{first}\nsecond:\n{second}"
+    );
+}
+
+#[test]
 fn format_is_idempotent_for_case_expression_multi_line_keys_issue_992() {
     // Regression test for veryl-lang/veryl#992.
     let metadata = Metadata::create_default("prj").unwrap();

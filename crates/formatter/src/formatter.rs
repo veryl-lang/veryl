@@ -3308,7 +3308,10 @@ fn estimated_token_width(tokens: &[Token]) -> u32 {
     for pair in tokens.windows(2) {
         let (curr, next) = (&pair[0], &pair[1]);
         let gap = if curr.line == next.line {
-            next.column.saturating_sub(curr.column + curr.length)
+            // Collapse source whitespace to one space (like the cross-line case
+            // below) so the estimate, and thus the arm-isolation decision, is
+            // layout-independent and identical across passes.
+            u32::from(next.column > curr.column + curr.length)
         } else {
             // Cross-line tokens collapse to a single space when joined.
             1
