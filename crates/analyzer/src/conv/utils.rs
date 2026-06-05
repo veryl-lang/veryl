@@ -1687,6 +1687,10 @@ pub fn eval_factor_path(
             let index = array_select.to_index();
             comptime.r#type.array.drain(0..index.dimension());
 
+            // A const symbol read through a dynamic index/select is not itself
+            // a compile-time constant (e.g. `A[idx]` for a const array `A`).
+            comptime.is_const &= index.is_const() && width_select.is_const();
+
             comptime.token = token;
             if comptime.r#type.is_type() {
                 Ok(ir::Factor::Value(comptime))
