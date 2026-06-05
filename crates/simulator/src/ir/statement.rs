@@ -2639,6 +2639,48 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
     stmts.extend(extras);
 }
 
+/// Size an unsized all-bit fill literal (`'0`/`'1`/`'x`/`'z`) on an
+/// assignment RHS to the destination width.
+///
+/// The analyzer leaves these literals unsized (`width` 0) and lets the
+/// assignment context resolve the width; the interpret path fills them
+/// lazily at `assign`/`trunc` time.  The JIT backends (Cranelift / AOT-C)
+/// materialize the value eagerly, so an unsized sentinel would be filled to
+/// width 0 — all zeros — silently dropping the value (e.g. `f.a = '1` reads
+/// back 0).  Expanding here keeps every backend consistent.
+fn size_fill_literal_rhs(
+    expr: &mut ProtoExpression,
+    select: Option<(usize, usize)>,
+    dyn_window: Option<usize>,
+    dst_width: usize,
+) {
+    let ProtoExpression::Value {
+        value,
+        width,
+        expr_context,
+    } = expr
+    else {
+        return;
+    };
+    // Only the unsized fill sentinels have width 0; sized literals
+    // (`1'b1`, `8'hff`, …) already carry their width.
+    if value.width() != 0 {
+        return;
+    }
+    // Target is the number of bits actually written: the dynamic-select
+    // window or the static bit-select width for a partial write, else the
+    // full destination width.
+    let target = dyn_window
+        .or_else(|| select.map(|(beg, end)| beg - end + 1))
+        .unwrap_or(dst_width);
+    if target == 0 {
+        return;
+    }
+    *value = value.expand(target, false).into_owned();
+    *width = target;
+    expr_context.width = target;
+}
+
 impl Conv<&air::AssignStatement> for ProtoStatement {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         // TODO multiple dst
@@ -2704,7 +2746,13 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 VarOffset::Comb(current_offset)
             };
 
-            let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+            let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+            size_fill_literal_rhs(
+                &mut expr,
+                select,
+                dynamic_select.as_ref().map(|d| d.window),
+                dst_width,
+            );
 
             Ok(ProtoStatement::Assign(ProtoAssignStatement {
                 dst,
@@ -2736,7 +2784,13 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             };
 
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
-            let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+            let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+            size_fill_literal_rhs(
+                &mut expr,
+                select,
+                dynamic_select.as_ref().map(|d| d.window),
+                dst_width,
+            );
 
             Ok(ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
                 dst_base,
@@ -2830,7 +2884,13 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             VarOffset::Comb(current_offset)
         };
 
-        let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+        let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+        size_fill_literal_rhs(
+            &mut expr,
+            select,
+            dynamic_select.as_ref().map(|d| d.window),
+            dst_width,
+        );
 
         Ok(ProtoAssignStatement {
             dst: dst_var,
