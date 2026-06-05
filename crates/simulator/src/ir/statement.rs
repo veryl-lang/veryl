@@ -1333,6 +1333,7 @@ impl ProtoStatement {
                                 use_4state,
                             )),
                             elem_width: dyn_sel.elem_width,
+                            window: dyn_sel.window,
                             num_elements: dyn_sel.num_elements,
                         });
                     Statement::AssignDynamic(AssignDynamicStatement {
@@ -1660,7 +1661,7 @@ impl AssignStatement {
                 .unwrap_or(0)
                 .min(dyn_sel.num_elements.saturating_sub(1));
             let end = idx * dyn_sel.elem_width;
-            let beg = end + dyn_sel.elem_width - 1;
+            let beg = end + dyn_sel.window - 1;
             let mut current = unsafe {
                 read_native_value(
                     self.dst,
@@ -1797,7 +1798,7 @@ impl AssignDynamicStatement {
                 .unwrap_or(0)
                 .min(dyn_sel.num_elements.saturating_sub(1));
             let end = dyn_idx * dyn_sel.elem_width;
-            let beg = end + dyn_sel.elem_width - 1;
+            let beg = end + dyn_sel.window - 1;
             let mut current = unsafe {
                 read_native_value(
                     dst,
@@ -1923,6 +1924,7 @@ impl ProtoAssignStatement {
                         use_4state,
                     )),
                     elem_width: dyn_sel.elem_width,
+                    window: dyn_sel.window,
                     num_elements: dyn_sel.num_elements,
                 });
 

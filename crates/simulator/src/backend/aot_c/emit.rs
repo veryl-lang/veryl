@@ -1315,13 +1315,14 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
     if let Some(dyn_sel) = &a.dynamic_select {
         let ew = dyn_sel.elem_width;
         let ne = dyn_sel.num_elements;
-        if ew == 0 || ew >= 64 || ne == 0 || ne.checked_mul(ew)? > 64 {
+        let win = dyn_sel.window;
+        if ew == 0 || ew >= 64 || win == 0 || win >= 64 || ne == 0 || ne.checked_mul(ew)? > 64 {
             ev_diag(&format!(
-                "static FF: dynamic_select ew={ew} ne={ne} unsupported"
+                "static FF: dynamic_select ew={ew} win={win} ne={ne} unsupported"
             ));
             return None;
         }
-        let vmask = (1u64 << ew) - 1;
+        let vmask = (1u64 << win) - 1;
         let max_idx = ne - 1;
         let idx = emit_expr(&dyn_sel.index_expr)?;
         let body = format!(
@@ -2505,11 +2506,14 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             if let Some(dyn_sel) = dynamic_select {
                 // Mirror Expression::Variable::eval with dynamic_select:
                 //   load full underlying var, idx = clamp(index_expr),
-                //   shift right by idx*elem_width, mask elem_width bits.
+                //   shift right by idx*elem_width, mask `window` bits.
                 if *var_full_width == 0 || *var_full_width > 64 {
                     return None;
                 }
                 if dyn_sel.elem_width == 0 || dyn_sel.elem_width >= 64 {
+                    return None;
+                }
+                if dyn_sel.window == 0 || dyn_sel.window >= 64 {
                     return None;
                 }
                 if dyn_sel.num_elements == 0 {
@@ -2518,7 +2522,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 let load = emit_var_load(var_offset, *var_full_width)?;
                 let idx_str = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements.saturating_sub(1);
-                let mask = (1u64 << dyn_sel.elem_width) - 1;
+                let mask = (1u64 << dyn_sel.window) - 1;
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -3822,6 +3826,7 @@ mod tests {
             dynamic_select: Some(ProtoDynamicBitSelect {
                 index_expr: Box::new(idx),
                 elem_width: 4,
+                window: 4,
                 num_elements: 8,
             }),
             width: 4,
@@ -3847,6 +3852,7 @@ mod tests {
             dynamic_select: Some(ProtoDynamicBitSelect {
                 index_expr: Box::new(idx),
                 elem_width: 4,
+                window: 4,
                 num_elements: 4,
             }),
             width: 4,
