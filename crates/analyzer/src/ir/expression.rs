@@ -333,7 +333,9 @@ impl Expression {
                         val.trunc(cast_width);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else if val_width < cast_width {
-                        let val = val.expand(cast_width, false).into_owned();
+                        // SV's `N'(expr)` sign-extends a signed operand; widen by the
+                        // source signedness so comptime matches the emitted SV.
+                        let val = val.expand(cast_width, val.signed()).into_owned();
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else {
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));

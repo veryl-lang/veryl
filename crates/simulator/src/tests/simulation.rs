@@ -13796,3 +13796,25 @@ fn unary_binds_tighter_than_cast() {
         );
     }
 }
+
+#[test]
+fn comptime_widening_cast_sign_extends() {
+    // A widening `as` cast of a signed value sign-extends like SV's `N'(expr)`:
+    // `-1 as 16` is 0xffff, not 0x00ff.
+    let code = r#"
+    module Top (
+        o: output logic<16>,
+    ) {
+        const A: i8        = -1;
+        const B: logic<16> = A as 16;
+        assign o = B;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap().payload_u128(), 0xffff, "{config:?}");
+    }
+}
