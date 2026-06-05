@@ -43,6 +43,17 @@ fn line_comment_at_eof_without_newline() {
 }
 
 #[test]
+fn string_literal_no_unicode_escape() {
+    // JSON-style `\uXXXX` escapes are intentionally unsupported: SystemVerilog
+    // has no equivalent, so they are rejected at lex time rather than emitted
+    // verbatim (which SV renders as the literal text `u0041`, not the char).
+    failure(r#"initial { $display("x\u0041y"); }"#);
+    // Two-char escapes and plain text still lex.
+    success(r#"initial { $display("two\nchar"); }"#);
+    success(r#"initial { $display("plain"); }"#);
+}
+
+#[test]
 fn number() {
     // integer
     success("let a: u32 = 0123456789;");
