@@ -184,6 +184,102 @@ fn ff_statement_after_if_reset() {
 }
 
 #[test]
+fn ff_reset_fill_literal_field_wise() {
+    // Regression: a `'1` fill literal assigned to a struct field (bit-select
+    // write) in an `if_reset` block read back 0 on the JIT backends while
+    // interpret stayed correct.  See `size_fill_literal_rhs`.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        o_a: output logic,
+        o_b: output logic,
+        o_c: output logic,
+    ) {
+        struct flags_t {
+            a: logic,
+            b: logic,
+            c: logic,
+        }
+        var f: flags_t;
+        always_ff {
+            if_reset {
+                f.a = '1;
+                f.b = '0;
+                f.c = '1;
+            }
+        }
+        always_comb {
+            o_a = f.a;
+            o_b = f.b;
+            o_c = f.c;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(0, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_c").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn ff_reset_fill_literal_full_width() {
+    // Companion to `ff_reset_fill_literal_field_wise` for a bare `'1` written
+    // to a full-width register (no bit-select).
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        x  : output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                x = '1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        assert_eq!(
+            sim.get("x").unwrap(),
+            Value::new(0xff, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn short_bit() {
     let code = r#"
     module Top (
