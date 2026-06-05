@@ -29,9 +29,10 @@ pub struct DerivedClock {
 #[derive(Clone, Debug, Default)]
 pub struct DerivedClockSchedule {
     pub clocks: Vec<DerivedClock>,
-    /// Input-port clocks toggled 0→1 in `step()` so gated-clock
-    /// expressions see a rising edge.  Boundary inputs of the dependency
-    /// closure that match a clock-typed input port.
+    /// Input clocks toggled 0→1 in `step()` so gated-clock expressions
+    /// see a rising edge.  Boundary inputs of the dependency closure
+    /// that match a top-module clock-typed variable — either an input
+    /// port or a testbench `$tb::clock_gen` inst output.
     pub master_input_clocks: SmallVec<[VarId; 4]>,
 }
 
@@ -47,7 +48,7 @@ impl DerivedClockSchedule {
 pub fn build_schedule(
     derived_clock_vars: &[(VarId, VarOffset, usize)],
     pre_jit_stmts: &[ProtoStatement],
-    port_clock_offsets: &HashMap<VarOffset, VarId>,
+    input_clock_offsets: &HashMap<VarOffset, VarId>,
 ) -> (DerivedClockSchedule, Vec<usize>) {
     // Comb-only reverse map: VarOffset -> writer stmt index.  FF outputs
     // go through the event/commit path so they're not tracked.
@@ -107,7 +108,7 @@ pub fn build_schedule(
             clk.current_offset,
             pre_jit_stmts,
             &output_to_writer,
-            port_clock_offsets,
+            input_clock_offsets,
             &mut dep_set,
             &mut master_set,
         );
@@ -142,12 +143,13 @@ pub fn extract_eval_proto_stmts(
 }
 
 /// BFS back from `target_offset` through `output_to_writer`.  FF inputs
-/// are leaves; boundary clock-port inputs are recorded as masters.
+/// are leaves; boundary clock-typed inputs (top-module ports or testbench
+/// inst outputs) are recorded as masters.
 fn collect_comb_closure(
     target_offset: VarOffset,
     pre_jit_stmts: &[ProtoStatement],
     output_to_writer: &HashMap<VarOffset, usize>,
-    port_clock_offsets: &HashMap<VarOffset, VarId>,
+    input_clock_offsets: &HashMap<VarOffset, VarId>,
     dep_set: &mut HashSet<usize>,
     master_set: &mut HashSet<VarId>,
 ) {
@@ -181,7 +183,7 @@ fn collect_comb_closure(
                     }
                 }
                 None => {
-                    if let Some(&vid) = port_clock_offsets.get(off) {
+                    if let Some(&vid) = input_clock_offsets.get(off) {
                         master_set.insert(vid);
                     }
                 }
