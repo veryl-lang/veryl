@@ -13818,3 +13818,24 @@ fn comptime_widening_cast_sign_extends() {
         assert_eq!(sim.get("o").unwrap().payload_u128(), 0xffff, "{config:?}");
     }
 }
+
+#[test]
+fn all_bit_underscore_width() {
+    // `1_0'1` (width 10) must strip the underscore like based literals; else the
+    // width parses as 0 and the all-ones value collapses to 0 instead of 1023.
+    let code = r#"
+    module Top (
+        o: output logic<10>,
+    ) {
+        const A: logic<10> = 1_0'1;
+        assign o = A;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap().payload_u128(), 0x3ff, "{config:?}");
+    }
+}
