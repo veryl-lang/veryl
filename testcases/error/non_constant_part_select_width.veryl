@@ -1,0 +1,7 @@
+module non_constant_part_select_width (
+    i_n: input  logic<3>,
+    i_a: input  logic<8>,
+    o  : output logic<8>,
+) {
+    assign o = i_a[0+:i_n];
+}

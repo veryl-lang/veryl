@@ -3049,6 +3049,7 @@ pub enum InvalidSelectKind {
     OutOfRange { beg: usize, end: usize, size: usize },
     OutOfDimension { dim: usize, size: usize },
     SelectAfterRange,
+    NonConstantWidth,
 }
 
 impl fmt::Display for InvalidSelectKind {
@@ -3066,6 +3067,9 @@ impl fmt::Display for InvalidSelectKind {
             }
             InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
             InvalidSelectKind::SelectAfterRange => "select after range is not allowed".fmt(f),
+            InvalidSelectKind::NonConstantWidth => {
+                "non-constant `+:`/`-:`/`step` part-select width".fmt(f)
+            }
         }
     }
 }

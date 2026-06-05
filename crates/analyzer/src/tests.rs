@@ -1,3 +1,4 @@
+use crate::analyzer_error::InvalidSelectKind;
 use crate::conv::Context;
 use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
@@ -10478,6 +10479,45 @@ fn invalid_select() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // A `+:`/`-:`/`step` part-select with a runtime width is unsynthesizable
+    // (SV requires a constant width) and must be rejected.
+    let code = r#"
+    module module_a (
+        i_n: input  logic<3>,
+        i_a: input  logic<8>,
+        o  : output logic<8>,
+    ) {
+        assign o = i_a[0+:i_n];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.iter().any(|e| matches!(
+        e,
+        AnalyzerError::InvalidSelect {
+            kind: InvalidSelectKind::NonConstantWidth,
+            ..
+        }
+    )));
+
+    // A constant width (literal or parameter) is fine even with a runtime base.
+    let code = r#"
+    module module_a (
+        i_idx: input  logic<4>,
+        i_a  : input  logic<8>,
+        o    : output logic<4>,
+    ) {
+        assign o = i_a[i_idx+:4];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(!errors.iter().any(|e| matches!(
+        e,
+        AnalyzerError::InvalidSelect {
+            kind: InvalidSelectKind::NonConstantWidth,
+            ..
+        }
+    )));
 }
 
 #[test]

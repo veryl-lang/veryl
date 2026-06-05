@@ -58,6 +58,29 @@ fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &E
     }
 }
 
+// SystemVerilog requires a constant width for indexed part-selects
+// (`+:`/`-:`/`step`); a runtime width is unsynthesizable, so reject it.
+// `expr`'s comptime must already be evaluated (via check_select_type).
+fn check_part_select_width(
+    context: &mut Context,
+    op: &VarSelectOp,
+    expr: &ir::Expression,
+    value: &Expression,
+) {
+    if matches!(
+        op,
+        VarSelectOp::PlusColon | VarSelectOp::MinusColon | VarSelectOp::Step
+    ) && !expr.comptime().is_const
+    {
+        let token: TokenRange = value.into();
+        context.insert_error(AnalyzerError::invalid_select(
+            &InvalidSelectKind::NonConstantWidth,
+            &token,
+            &[],
+        ));
+    }
+}
+
 impl Conv<&ScopedIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &ScopedIdentifier) -> IrResult<Self> {
         let var_path: VarPath = Conv::conv(context, value)?;
@@ -97,6 +120,7 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut expr = Conv::conv(context, x.expression.as_ref())?;
                 check_select_type(context, &mut expr, &x.expression);
+                check_part_select_width(context, &op, &expr, &x.expression);
                 end = Some((op, expr));
             }
             context.select_paths.pop();
@@ -170,6 +194,7 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut expr = Conv::conv(context, x.expression.as_ref())?;
                 check_select_type(context, &mut expr, &x.expression);
+                check_part_select_width(context, &op, &expr, &x.expression);
                 end = Some((op, expr));
             }
             context.select_paths.pop();
