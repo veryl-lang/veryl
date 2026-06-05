@@ -723,9 +723,10 @@ impl SymbolTable {
                     let mut authoritative = false;
                     for id in ids {
                         let symbol = self.symbol_table.get(id).unwrap();
-                        if symbol.namespace.depth() != max_depth {
-                            continue;
-                        }
+                        // Scan candidates at every depth, not just `max_depth`:
+                        // cross-depth wildcard imports (`import A::*` vs
+                        // `import B::E::*`) collide too, but the deeper candidate
+                        // would otherwise silently win.
                         if context.namespace.included(&symbol.namespace) {
                             authoritative = true;
                             continue;

@@ -1,0 +1,19 @@
+package ambiguous_identifier_pkg_a {
+    const X: u32 = 7;
+}
+
+package ambiguous_identifier_pkg_b {
+    enum MyEnum: logic<2> {
+        X = 1,
+    }
+}
+
+module ambiguous_identifier (
+    o: output logic<32>,
+) {
+    import ambiguous_identifier_pkg_a::*;
+    import ambiguous_identifier_pkg_b::MyEnum::*;
+    always_comb {
+        o = X;
+    }
+}
