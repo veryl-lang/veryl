@@ -47,6 +47,12 @@ impl VarPathSelect {
             }
 
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+            if array_select.is_range() {
+                // Validate a range over the array dims (e.g. `o[2:0]`): a wrong-order
+                // (descending) slice can't lower to valid SystemVerilog on an
+                // ascending unpacked array, so reject it rather than silently drop it.
+                array_select.eval_comptime(context, &comptime.r#type, true);
+            }
             comptime.r#type.array.drain(0..array_select.dimension());
 
             if let Some(variable) = context.variables.get(&id)

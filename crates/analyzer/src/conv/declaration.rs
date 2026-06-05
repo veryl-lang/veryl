@@ -13,10 +13,11 @@ use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
 use crate::conv::utils::{
-    TypePosition, eval_assign_statement, eval_clock, eval_const_assign, eval_expr,
-    eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
-    expand_connect_const, get_component, get_overridden_params, get_port_connects, get_return_str,
-    insert_port_connect, try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
+    TypePosition, eval_array_range_assign, eval_assign_statement, eval_clock, eval_const_assign,
+    eval_expr, eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable,
+    expand_connect, expand_connect_const, get_component, get_overridden_params, get_port_connects,
+    get_return_str, insert_port_connect, try_infer_decl_type, try_infer_var_assign,
+    var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
@@ -836,6 +837,12 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     };
 
                 let dst: VarPathSelect = Conv::conv(context, ident)?;
+
+                if let Some(statements) =
+                    eval_array_range_assign(context, &dst, &value.expression, token)?
+                {
+                    return Ok(ir::Declaration::new_comb(statements));
+                }
 
                 if let Some(mut dst) = dst.to_assign_destination(context, false) {
                     let mut expr = if let Some(inferred) = inferred {

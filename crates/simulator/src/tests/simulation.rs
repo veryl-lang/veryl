@@ -3879,6 +3879,41 @@ fn array_dynamic_index_write_comb() {
     }
 }
 
+// Regression for #9: an array-range assignment LHS (`arr[0+:3] = '{...}` /
+// `arr[0:2] = '{...}`) must drive each covered element with the matching literal
+// item (first item -> lowest index), matching the emitted SystemVerilog.
+#[test]
+fn array_range_assign() {
+    for sel_form in ["arr[0+:3]", "arr[0:2]"] {
+        let code = format!(
+            r#"
+            module Top (
+                sel: input  logic<2>,
+                o  : output logic<8>,
+            ) {{
+                var arr: logic<8> [4];
+                assign {sel_form} = '{{8'd10, 8'd20, 8'd30}};
+                assign arr[3]   = 8'd40;
+                assign o        = arr[sel];
+            }}
+            "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            for (sel, expected) in [(0u64, 10u64), (1, 20), (2, 30), (3, 40)] {
+                sim.set("sel", Value::new(sel, 2, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("o").unwrap(),
+                    Value::new(expected, 8, false),
+                    "{sel_form} sel={sel} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn assert_pass() {
     let code = r#"

@@ -568,6 +568,73 @@ pub fn eval_assign_statement(
     Ok(ret)
 }
 
+/// Expand an array-range assignment LHS (`o[0+:N] = '{...}`) over scalar elements
+/// into one assignment per covered element, like the connect path. Returns `None`
+/// when the LHS isn't such a range (caller uses the scalar path). Multi-dim /
+/// multi-element-width elements and non-literal RHS are declined.
+pub fn eval_array_range_assign(
+    context: &mut Context,
+    lhs: &VarPathSelect,
+    rhs: &Expression,
+    token: TokenRange,
+) -> IrResult<Option<Vec<ir::Statement>>> {
+    let (_, select, _) = lhs.clone().into();
+    let Some((_, mut comptime)) = context.find_path(&lhs.0) else {
+        return Ok(None);
+    };
+    if let Some(part_select) = &comptime.part_select {
+        comptime.r#type = part_select.base.clone();
+    }
+    let (array_select, _) = select.split(comptime.r#type.array.dims());
+    if !array_select.is_range() {
+        return Ok(None);
+    }
+
+    // Validate the range here (wrong-order / out-of-range slices are rejected).
+    array_select.eval_comptime(context, &comptime.r#type, true);
+    let dsts = lhs.clone().to_assign_destinations(context, false);
+    if dsts.is_empty() {
+        // Invalid range (already reported); still type-check the RHS.
+        let _ = eval_expr(context, None, rhs, false)?;
+        return Ok(Some(vec![]));
+    }
+
+    // The flat pairing below only models scalar elements; decline multi-dim /
+    // multi-element-width ones so a structured literal isn't mis-decomposed.
+    let elem_type = dsts[0].comptime.r#type.clone();
+    if elem_type.array.dims() != 0 || elem_type.width().dims() > 1 {
+        return Ok(None);
+    }
+
+    // Pair each destination with the matching literal item (both ascending order).
+    let n = dsts.len();
+    let mut sub_type = elem_type.clone();
+    sub_type.array = Shape::new(vec![Some(n)]);
+    let (rhs_comptime, mut rhs_expr) = eval_expr(context, Some(sub_type), rhs, false)?;
+
+    let array_shape = [Some(n)];
+    let items = eval_array_literal(
+        context,
+        Some(ShapeRef::new(&array_shape)),
+        Some(elem_type.width()),
+        &mut rhs_expr,
+    )?;
+    // Non-literal RHS, or any unexpected element count, isn't safely expandable here.
+    let Some(items) = items else {
+        return Ok(Some(vec![]));
+    };
+    if items.len() != n {
+        return Ok(Some(vec![]));
+    }
+
+    let mut statements = vec![];
+    for (mut dst, item) in dsts.into_iter().zip(items) {
+        let mut expr = (rhs_comptime.clone(), item.expr);
+        statements.extend(eval_assign_statement(context, &mut dst, &mut expr, token)?);
+    }
+    Ok(Some(statements))
+}
+
 fn eval_array_literal_expressions(
     context: &mut Context,
     r#type: &ir::Type,

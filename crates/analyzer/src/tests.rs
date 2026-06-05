@@ -10444,6 +10444,53 @@ fn invalid_select() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // Assignment LHS with a wrong-order (descending) array range must be
+    // rejected, not silently dropped (#9).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {
+        assign o[2:0] = '{8'd0, 8'd0, 8'd0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+    );
+
+    // Valid array-range assignment LHS expands element-wise, so every covered
+    // element is driven (no false unassign) and overlaps are still caught (#9).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {
+        assign o[0+:2] = '{8'd0, 8'd0};
+        assign o[2+:2] = '{8'd1, 8'd1};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Multi-element-width elements aren't expanded (a flat literal decomposition
+    // would flatten/mis-pair sub-elements); the range assign is declined rather
+    // than silently mis-driven, so it surfaces as unassigned (#9 review).
+    let code = r#"
+    module ModuleA (
+        o: output logic<10, 10> [4],
+    ) {
+        assign o[0+:2] = '{'{10'd1, 10'd2}, '{10'd3, 10'd4}};
+        assign o[2]    = '{10'd0, 10'd0};
+        assign o[3]    = '{10'd0, 10'd0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(!errors.is_empty());
+
     let code = r#"
     module ModuleA {
         let _a: logic<2> = 1;
