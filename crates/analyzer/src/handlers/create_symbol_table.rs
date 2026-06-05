@@ -1424,9 +1424,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             // add EnumMemberMangled to detect identifier conflict in generated SV
             let prefix = self.enum_member_prefix.clone().unwrap();
-            let path = token.source.get_path().unwrap();
             let text = resource_table::insert_str(&format!("{prefix}_{}", token.text));
-            let mangled_token = Token::generate(text, path);
+            // Point the mangled token at the real enum member: on a
+            // duplicated_identifier collision insert_symbol reports against this
+            // token, and a generated offset-0 token renders an unreadable span.
+            let mangled_token = Token {
+                id: resource_table::new_token_id(),
+                text,
+                ..token
+            };
             let kind = SymbolKind::EnumMemberMangled;
 
             // namespace of EnumMemberMangled is outside of enum

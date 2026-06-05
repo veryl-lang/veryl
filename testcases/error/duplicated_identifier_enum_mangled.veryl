@@ -1,0 +1,6 @@
+module duplicated_identifier_enum_mangled {
+    const Foo_A: u32      = 1;
+    enum Foo: logic<2> {
+        A,
+    }
+}
