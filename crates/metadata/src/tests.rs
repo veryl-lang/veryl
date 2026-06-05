@@ -464,3 +464,43 @@ fn lockfile_inner_projects() {
 
     let _ = lockfile.clear_cache();
 }
+
+// Concurrent test functions each rewrite the same Veryl.lock via Lockfile::save
+// while others read it; a non-atomic (truncate-then-write) save let a reader
+// observe an empty file and fail with "missing field `projects`".
+#[test]
+fn lockfile_save_is_atomic() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let path = tempdir.path().join("Veryl.lock");
+    Lockfile::default().save(&path).unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let readers: Vec<_> = (0..1)
+        .map(|_| {
+            let path = path.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    // On Windows a read can transiently fail during the atomic
+                    // replace; only a successful read must never be truncated.
+                    if let Ok(text) = fs::read_to_string(&path) {
+                        toml::from_str::<Lockfile>(&text)
+                            .unwrap_or_else(|e| panic!("read a partial lock file ({e}): {text:?}"));
+                    }
+                }
+            })
+        })
+        .collect();
+
+    for _ in 0..2000 {
+        Lockfile::default().save(&path).unwrap();
+    }
+    stop.store(true, Ordering::Relaxed);
+    for r in readers {
+        r.join().unwrap();
+    }
+}

@@ -6033,6 +6033,7 @@ dependencies = [
  "fs4",
  "log",
  "miette",
+ "tempfile",
  "thiserror",
  "walkdir",
 ]

@@ -91,6 +91,50 @@ pub fn unlock_dir(_lock: ()) -> Result<(), PathError> {
     Ok(())
 }
 
+/// Write `contents` to `path` atomically (temp file + rename) so a concurrent
+/// reader never observes a truncated/empty file, only the old or new contents.
+#[cfg(not(target_family = "wasm"))]
+pub fn atomic_write<P: AsRef<Path>>(path: P, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = path.as_ref();
+    // The temp must share the target's dir so the rename stays on one filesystem.
+    let dir = path
+        .parent()
+        .filter(|x| !x.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(contents)?;
+    // tempfile creates with 0600; widen to 0644 to match a plain write.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o644))?;
+    }
+    // On Windows, replacing the target while a reader holds it open transiently
+    // fails with a sharing violation (PermissionDenied); retry a few times.
+    let mut attempts = 0;
+    loop {
+        match file.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                attempts += 1;
+                if attempts >= 50 || e.error.kind() != std::io::ErrorKind::PermissionDenied {
+                    return Err(e.error);
+                }
+                file = e.file;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+// wasm has no real filesystem concurrency; fall back to a plain write.
+#[cfg(target_family = "wasm")]
+pub fn atomic_write<P: AsRef<Path>>(path: P, contents: &[u8]) -> std::io::Result<()> {
+    std::fs::write(path, contents)
+}
+
 pub fn ignore_already_exists(x: Result<(), std::io::Error>) -> Result<(), std::io::Error> {
     if let Err(x) = x
         && x.kind() != std::io::ErrorKind::AlreadyExists
