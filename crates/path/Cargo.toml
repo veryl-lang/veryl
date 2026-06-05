@@ -22,3 +22,4 @@ miette      = {workspace = true, features = ["fancy-no-syscall"]}
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 miette      = {workspace = true, features = ["fancy"]}
 fs4         = {version = "1.1.0", features = ["sync"]}
+tempfile    = {workspace = true}
