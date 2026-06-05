@@ -14085,3 +14085,49 @@ fn all_bit_underscore_width() {
         assert_eq!(sim.get("o").unwrap().payload_u128(), 0x3ff, "{config:?}");
     }
 }
+
+// A wide (>128-bit) dynamic part-select write `o[i+:130] = v` must store the
+// 130-bit window at runtime start i, identically on every backend. (A #20 review
+// flagged this as a possible pre-existing divergence; it is not — all backends
+// agree and are correct, so this pins the behavior.)
+#[test]
+fn wide_dynamic_part_select_write() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        i  : input  logic<3>,
+        v  : input  logic<130>,
+        o  : output logic<200>,
+    ) {
+        always_ff {
+            if_reset {
+                o = 0;
+            } else {
+                o[i+:130] = v;
+            }
+        }
+    }
+    "#;
+    // High bits across multiple 64-bit words exercise the wide (pointer) path.
+    let v: u128 = (1u128 << 127) | (1u128 << 100) | (1u128 << 64) | 0xDEAD_BEEF;
+    for i in [0u64, 5] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step(&rst);
+            sim.set("v", Value::from_u128(v, 0, 130, false));
+            sim.set("i", Value::new(i, 3, false));
+            sim.step(&clk);
+            // payload_u128 captures the low 128 result bits; `v << i` truncated
+            // to 128 bits is the expected low window content.
+            assert_eq!(
+                sim.get("o").unwrap().payload_u128(),
+                v.wrapping_shl(i as u32),
+                "o[{i}+:130]=v config={config:?}"
+            );
+        }
+    }
+}
