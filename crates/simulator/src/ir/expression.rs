@@ -103,7 +103,7 @@ impl Expression {
                         .unwrap_or(0)
                         .min(dyn_sel.num_elements.saturating_sub(1));
                     let end = idx * dyn_sel.elem_width;
-                    let beg = end + dyn_sel.elem_width - 1;
+                    let beg = end + dyn_sel.window - 1;
                     val.select(beg, end)
                 } else if let Some((beg, end)) = select {
                     val.select(*beg, *end)
@@ -201,7 +201,7 @@ impl Expression {
                         .unwrap_or(0)
                         .min(dyn_sel.num_elements.saturating_sub(1));
                     let end = idx * dyn_sel.elem_width;
-                    let beg = end + dyn_sel.elem_width - 1;
+                    let beg = end + dyn_sel.window - 1;
                     value.select(beg, end)
                 } else if let Some((beg, end)) = select {
                     value.select(*beg, *end)
@@ -456,12 +456,15 @@ impl ProtoExpression {
     }
 }
 
-/// Dynamic bit selection for packed arrays.
-/// At runtime: end = index * elem_width, beg = end + elem_width - 1
+/// Dynamic bit selection for packed arrays / part-selects.
+/// At runtime: low = index * elem_width, high = low + window - 1.
+/// `elem_width` is the per-index stride; `window` is the total selected bits
+/// (= elem_width for a plain element select, part-select-count * elem_width for `+:`/`-:`/step).
 #[derive(Clone, Debug)]
 pub struct ProtoDynamicBitSelect {
     pub index_expr: Box<ProtoExpression>,
     pub elem_width: usize,
+    pub window: usize,
     pub num_elements: usize,
 }
 
@@ -470,6 +473,7 @@ pub struct ProtoDynamicBitSelect {
 pub struct DynamicBitSelect {
     pub index_expr: Box<Expression>,
     pub elem_width: usize,
+    pub window: usize,
     pub num_elements: usize,
 }
 
@@ -962,6 +966,7 @@ impl ProtoExpression {
                             use_4state,
                         )),
                         elem_width: dyn_sel.elem_width,
+                        window: dyn_sel.window,
                         num_elements: dyn_sel.num_elements,
                     });
                     Expression::Variable {
@@ -1125,6 +1130,7 @@ impl ProtoExpression {
                             use_4state,
                         )),
                         elem_width: dyn_sel.elem_width,
+                        window: dyn_sel.window,
                         num_elements: dyn_sel.num_elements,
                     });
                     Expression::DynamicVariable {
@@ -1321,9 +1327,50 @@ pub fn build_dynamic_bit_select(
         expr_context: index_expr_context,
     });
 
+    // Fold a `+:`/`-:`/step part-select into the (elem_width, window) model:
+    // `-:`/step adjust the start/stride via index_expr so every backend keeps the
+    // plain `low = index*elem_width` formula.
+    let const_op = |x: usize| ProtoExpression::Value {
+        value: Value::new(x as u64, index_width, false),
+        width: index_width,
+        expr_context: index_expr_context,
+    };
+    let (index_expr, window) = match &select.1 {
+        Some((op, w_expr)) if !matches!(op, air::VarSelectOp::Colon) => {
+            let w = {
+                let scope = context.scope();
+                w_expr
+                    .eval_value(&mut scope.analyzer_context)
+                    .and_then(|v| v.to_usize())
+                    .unwrap_or(1)
+                    .max(1)
+            };
+            let index_expr = match op {
+                air::VarSelectOp::MinusColon => ProtoExpression::Binary {
+                    x: Box::new(index_expr),
+                    op: Op::Sub,
+                    y: Box::new(const_op(w - 1)),
+                    width: index_width,
+                    expr_context: index_expr_context,
+                },
+                air::VarSelectOp::Step => ProtoExpression::Binary {
+                    x: Box::new(index_expr),
+                    op: Op::Mul,
+                    y: Box::new(const_op(w)),
+                    width: index_width,
+                    expr_context: index_expr_context,
+                },
+                _ => index_expr,
+            };
+            (index_expr, w * elem_width)
+        }
+        _ => (index_expr, elem_width),
+    };
+
     Ok(ProtoDynamicBitSelect {
         index_expr: Box::new(index_expr),
         elem_width,
+        window,
         num_elements,
     })
 }

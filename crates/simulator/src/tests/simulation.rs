@@ -11527,6 +11527,91 @@ fn packed_array_dynamic_bit_select_read() {
     }
 }
 
+// Regression for #20: a dynamic part-select `d[i+:4]` (const width, runtime
+// start) dropped its window width in the sim IR and selected a single bit
+// instead of 4. (`-:`/step with a runtime start are rejected upstream by the
+// analyzer, so only `+:` reaches the simulator.)
+#[test]
+fn dynamic_part_select_read() {
+    let code = r#"
+    module Top (
+        d  : input  logic<32>,
+        i  : input  logic<3>,
+        o_p: output logic<4>,
+    ) {
+        assign o_p = d[i+:4];
+    }
+    "#;
+
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    for config in configs {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let d: u64 = 0xABCD_1234;
+        for i in 0..8u64 {
+            sim.set("d", Value::new(d, 32, false));
+            sim.set("i", Value::new(i, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o_p").unwrap(),
+                Value::new((d >> i) & 0xF, 4, false),
+                "d[{i}+:4] config={config:?}"
+            );
+        }
+    }
+}
+
+// Regression for #20: LHS dynamic part-select write `o[i+:4] = v` must update the
+// 4-bit window at runtime start i (register RMW), not a single bit.
+#[test]
+fn dynamic_part_select_write() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        i  : input  logic<3>,
+        v  : input  logic<4>,
+        o  : output logic<16>,
+    ) {
+        always_ff {
+            if_reset {
+                o = 0;
+            } else {
+                o[i+:4] = v;
+            }
+        }
+    }
+    "#;
+
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    for config in configs {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        let mut exp: u64 = 0;
+        for (i, v) in [(4u64, 0x5u64), (0, 0xA), (7, 0x3), (2, 0xC)] {
+            sim.set("i", Value::new(i, 3, false));
+            sim.set("v", Value::new(v, 4, false));
+            sim.step(&clk);
+            exp = ((exp & !(0xF << i)) | ((v & 0xF) << i)) & 0xFFFF;
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(exp, 16, false),
+                "o[{i}+:4]={v} config={config:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn packed_array_single_bit_dynamic_select() {
     let code = r#"

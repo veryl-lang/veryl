@@ -300,7 +300,7 @@ impl ProtoExpression {
 
                 if let Some(dyn_sel) = dynamic_select {
                     let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
-                    let mask = gen_mask_for_width(dyn_sel.elem_width);
+                    let mask = gen_mask_for_width(dyn_sel.window);
                     payload = builder.ins().ushr(payload, shift);
                     payload = band_const(builder, payload, mask, wide);
                     if context.use_4state {
@@ -311,7 +311,7 @@ impl ProtoExpression {
                     // Match the cranelift value type to the reported
                     // expression width so downstream ops don't uextend an
                     // I128 again.
-                    if wide && dyn_sel.elem_width <= 64 {
+                    if wide && dyn_sel.window <= 64 {
                         payload = builder.ins().ireduce(I64, payload);
                         if let Some(mxz) = mask_xz {
                             mask_xz = Some(builder.ins().ireduce(I64, mxz));
@@ -1839,7 +1839,7 @@ impl ProtoExpression {
 
                 if let Some(dyn_sel) = dynamic_select {
                     let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
-                    let mask = gen_mask_for_width(dyn_sel.elem_width);
+                    let mask = gen_mask_for_width(dyn_sel.window);
                     payload = builder.ins().ushr(payload, shift);
                     payload = band_const(builder, payload, mask, wide);
                     if context.use_4state {

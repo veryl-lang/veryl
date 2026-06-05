@@ -161,7 +161,7 @@ impl ProtoAssignDynamicStatement {
 
             let payload = builder.ins().ishl(payload, shift);
 
-            let elem_mask = gen_mask_for_width(dyn_sel.elem_width);
+            let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = builder.ins().iconst(I64, elem_mask as i64);
             let dyn_mask = builder.ins().ishl(mask_val, shift);
             let not_mask = builder.ins().bnot(dyn_mask);
@@ -691,7 +691,7 @@ impl ProtoAssignStatement {
             let payload = builder.ins().ishl(payload, shift);
 
             // Dynamic mask: elem_mask << shift, then invert
-            let elem_mask = gen_mask_for_width(dyn_sel.elem_width);
+            let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = if wide {
                 iconst_128(builder, elem_mask)
             } else {
