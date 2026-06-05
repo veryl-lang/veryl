@@ -171,6 +171,9 @@ impl VarPathSelect {
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             comptime.r#type.array.drain(0..array_select.dimension());
 
+            // Same const-with-dynamic-index guard as `eval_factor_path`.
+            comptime.is_const &= array_select.is_const() && width_select.is_const();
+
             comptime.token = token;
             let src = Factor::Variable(id, array_select.to_index(), width_select, comptime);
             Some(Expression::Term(Box::new(src)))

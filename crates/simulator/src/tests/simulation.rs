@@ -937,6 +937,71 @@ fn wide_v4_repro_dyn_array_232() {
 }
 
 #[test]
+fn nested_array_index_const_array() {
+    // Regression for a nested array index `mem[A[idx]]` with a const array
+    // `A`: the const-symbol read `A[idx]` was wrongly flagged as a compile-time
+    // constant and folded to `A[0]`, so the outer index ignored `idx` and the
+    // simulator read `mem[A[0]]` instead of `mem[A[idx]]`. All three backends
+    // were affected; the emitted SV was correct.
+    let code = r#"
+    module Top (
+        idx:    input  logic<8>,
+        nested: output logic<8>,
+        inner:  output logic<8>,
+    ) {
+        const A:   logic<8> [2] = '{1, 3};
+        var   mem: logic<8> [8];
+        always_comb {
+            mem[0] = 0;
+            mem[1] = 11;
+            mem[2] = 22;
+            mem[3] = 33;
+            mem[4] = 44;
+            mem[5] = 55;
+            mem[6] = 66;
+            mem[7] = 77;
+        }
+        assign inner  = A[idx];
+        assign nested = mem[A[idx]];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // idx = 1 -> A[1] = 3 -> mem[3] = 33 (buggy fold gives mem[A[0]] = 11).
+        sim.set("idx", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("inner").unwrap(),
+            Value::new(3, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("nested").unwrap(),
+            Value::new(33, 8, false),
+            "{config:?}"
+        );
+
+        // idx = 0 -> A[0] = 1 -> mem[1] = 11 (differs from idx = 1, so not folded).
+        sim.set("idx", Value::new(0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("inner").unwrap(),
+            Value::new(1, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("nested").unwrap(),
+            Value::new(11, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn wide_narrow_field_two_word_straddle() {
     // A <=64-bit field that STRADDLES a 64-bit word boundary exercises the
     // two-word arm of emit_wide_narrow_field_store.  w[130:67] is a 64-bit
