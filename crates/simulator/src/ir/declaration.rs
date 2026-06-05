@@ -145,6 +145,10 @@ pub struct ProtoDeclaration {
     /// Post-comb functions: child comb-only JIT functions for pre-event eval.
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
+    /// Clock-typed non-port variables discovered inside child instances.
+    /// Bubbled up through `Inst` declarations so the top module sees every
+    /// derived clock across the hierarchy, not just its own locals.
+    pub derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)>,
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
@@ -166,6 +170,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements,
                     post_comb_fns: vec![],
                     child_modules: vec![],
+                    derived_clock_candidates: vec![],
                 })
             }
             air::Declaration::Ff(x) => {
@@ -197,6 +202,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements: vec![],
                     post_comb_fns: vec![],
                     child_modules: vec![],
+                    derived_clock_candidates: vec![],
                 })
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
@@ -227,6 +233,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements: vec![],
                     post_comb_fns: vec![],
                     child_modules: vec![],
+                    derived_clock_candidates: vec![],
                 })
             }
             air::Declaration::Final(x) => {
@@ -242,6 +249,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     comb_statements: vec![],
                     post_comb_fns: vec![],
                     child_modules: vec![],
+                    derived_clock_candidates: vec![],
                 })
             }
             air::Declaration::Unsupported(token) => {
@@ -252,6 +260,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 comb_statements: vec![],
                 post_comb_fns: vec![],
                 child_modules: vec![],
+                derived_clock_candidates: vec![],
             }),
         }
     }
@@ -451,6 +460,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
+        let mut all_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
 
         for decl in child_decls {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -464,6 +474,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
+            all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
         }
 
         context.scope_contexts.pop();
@@ -709,6 +720,28 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 .or_insert(stmts);
         }
 
+        // Collect derived-clock candidates declared *inside* this child
+        // module: clock-typed non-port variables whose 0→1 transitions
+        // must be monitored by the top simulator.  Offsets in
+        // `child_variable_meta` are already absolute (parent-rebased) and
+        // account for port aliasing — since these are non-port vars, no
+        // alias rewriting applies.
+        let child_port_var_set: HashSet<air::VarId> =
+            child_module.ports.values().copied().collect();
+        for (vid, var) in &child_module.variables {
+            if !var.r#type.is_clock() {
+                continue;
+            }
+            if child_port_var_set.contains(vid) {
+                continue;
+            }
+            if let Some(meta) = child_variable_meta.get(vid)
+                && let Some(elem) = meta.elements.first()
+            {
+                all_derived_clock_candidates.push((*vid, elem.current, elem.native_bytes));
+            }
+        }
+
         let child_module_meta = ModuleVariableMeta {
             name: src.name,
             variable_meta: child_variable_meta,
@@ -720,6 +753,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             comb_statements: all_comb_statements,
             post_comb_fns: all_post_comb_fns,
             child_modules: vec![child_module_meta],
+            derived_clock_candidates: all_derived_clock_candidates,
         })
     }
 }

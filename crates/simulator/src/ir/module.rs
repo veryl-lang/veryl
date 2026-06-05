@@ -2011,6 +2011,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
+        let mut nested_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
 
         for decl in declarations {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -2024,6 +2025,7 @@ impl Conv<&air::Module> for ProtoModule {
             all_comb_statements.append(&mut proto_decl.comb_statements.clone());
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
+            nested_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
         }
 
         context.scope_contexts.pop();
@@ -2104,6 +2106,13 @@ impl Conv<&air::Module> for ProtoModule {
                         protect.insert(elem.current);
                     }
                 }
+            }
+            // Same protection for clock vars declared inside child
+            // instances: their only in-IR reader is the `always_ff`
+            // sensitivity (invisible to DCE), and dropping the writer
+            // would starve the derived-clock partial-settle.
+            for (_, off, _) in &nested_derived_clock_candidates {
+                protect.insert(*off);
             }
             // Multi-pass DCE default ON: iterate to fixpoint so that
             // cascaded drops (a dst becomes dead once its only consumer
@@ -2336,16 +2345,22 @@ impl Conv<&air::Module> for ProtoModule {
             .map(|(event, stmts)| (event, try_jit(context, stmts)))
             .collect();
 
-        // Collect derived clocks + port-clock offsets BEFORE
-        // `variable_meta` moves into `module_variable_meta`.  Early-exit
-        // on the common no-clock-var case to skip two extra walks.
-        let has_any_clock_var = src.variables.values().any(|v| v.r#type.is_clock());
-        let (derived_clock_vars, port_clock_offsets) = if !has_any_clock_var {
+        // Collect derived clocks + input-clock offsets BEFORE
+        // `variable_meta` moves into `module_variable_meta`.  We must look
+        // at both the top module's own clock vars AND any clock vars
+        // bubbled up from child instances (e.g. `var w_gclk: '_ clock;`
+        // declared inside a sub-module): without the nested ones, a
+        // testbench top whose DUT contains the gated clock would have an
+        // empty `derived_clock_schedule` and `always_ff(w_gclk, ...)`
+        // would never fire.
+        let has_any_clock_var = src.variables.values().any(|v| v.r#type.is_clock())
+            || !nested_derived_clock_candidates.is_empty();
+        let (derived_clock_vars, input_clock_offsets) = if !has_any_clock_var {
             (Vec::new(), HashMap::default())
         } else {
             // O(V+P) port lookup via HashSet.
             let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
-            let dc_vars: Vec<(VarId, VarOffset, usize)> = src
+            let mut dc_vars: Vec<(VarId, VarOffset, usize)> = src
                 .variables
                 .iter()
                 .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
@@ -2355,12 +2370,28 @@ impl Conv<&air::Module> for ProtoModule {
                     Some((*vid, elem.current, elem.native_bytes))
                 })
                 .collect();
+            // Nested candidates already carry absolute (parent-rebased)
+            // offsets and exclude child ports.  Dedup by (var_id, offset)
+            // so a clock-typed input port re-exported through aliasing
+            // can't be added twice.
+            let mut seen: crate::HashSet<(VarId, VarOffset)> =
+                dc_vars.iter().map(|(v, o, _)| (*v, *o)).collect();
+            for (vid, off, nb) in nested_derived_clock_candidates.drain(..) {
+                if seen.insert((vid, off)) {
+                    dc_vars.push((vid, off, nb));
+                }
+            }
+            // "Input clock" candidates: top-module clock-typed variables
+            // whose value the simulator needs to drive directly so the
+            // gated-clock expression sees a rising edge.  Historically
+            // restricted to input ports, but testbench tops drive the
+            // clock through `inst clk: $tb::clock_gen` (a non-port inst
+            // output that's still a clock-typed top-level var), so
+            // collect every clock-typed top var that has a backing
+            // storage entry — `set_input_clock_bit` only walks the
+            // top-level `module_variables.variables` map.
             let mut pc_offsets: HashMap<VarOffset, VarId> = HashMap::default();
-            for vid in src.ports.values() {
-                let var = match src.variables.get(vid) {
-                    Some(v) => v,
-                    None => continue,
-                };
+            for (vid, var) in &src.variables {
                 if !var.r#type.is_clock() {
                     continue;
                 }
@@ -2415,7 +2446,7 @@ impl Conv<&air::Module> for ProtoModule {
             let (sched, eval_indices) = build_derived_clock_schedule(
                 &derived_clock_vars,
                 &pre_jit_stmts,
-                &port_clock_offsets,
+                &input_clock_offsets,
             );
             let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
             let eval = try_jit(context, eval_protos);

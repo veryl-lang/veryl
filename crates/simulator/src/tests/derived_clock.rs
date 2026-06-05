@@ -360,3 +360,140 @@ fn constant_derived_clock_no_edge() {
         );
     }
 }
+
+/// Repro of user-reported issue: testbench drives a DUT whose sub-module
+/// produces `o_gclk = i_clk & 1` — a gated `logic` output — wired to the
+/// DUT's `'_ clock` variable that clocks an `always_ff`.  The counter
+/// must reach 10 after `clk.next(10)`.
+#[test]
+fn gated_clock_via_submodule_in_testbench() {
+    let code = r#"
+    module GclkCell (
+        i_clk : input  logic,
+        i_en  : input  logic,
+        o_gclk: output logic,
+    ) {
+        assign o_gclk = i_clk & i_en;
+    }
+
+    module GatedCounter (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        o_cnt: output logic<8>,
+    ) {
+        var w_gclk: '_ clock;
+        inst u_gclk: GclkCell (
+            i_clk : i_clk ,
+            i_en  : 1'b1  ,
+            o_gclk: w_gclk,
+        );
+        var r_cnt: logic<8>;
+        always_ff (w_gclk, i_rst) {
+            if_reset { r_cnt = 0; } else { r_cnt += 1; }
+        }
+        assign o_cnt = r_cnt;
+    }
+
+    #[test(test_gated_clock)]
+    module test_gated_clock {
+        inst i_clk: $tb::clock_gen;
+        inst i_rst: $tb::reset_gen(clk: i_clk);
+        var o_cnt: logic<8>;
+        inst dut: GatedCounter (
+            i_clk: i_clk,
+            i_rst: i_rst,
+            o_cnt: o_cnt,
+        );
+        initial {
+            i_rst.assert();
+            i_clk.next(10);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = match analyze_top(code, &config, "test_gated_clock") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let initial_stmts = sim
+            .ir
+            .event_statements
+            .get(&Event::Initial)
+            .expect("initial block");
+        let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+        let result = run_testbench(&mut sim, &tb_stmts);
+        assert_eq!(result, TestResult::Pass);
+        let cnt = sim
+            .get_var("dut.o_cnt")
+            .or_else(|| sim.get_var("o_cnt"))
+            .expect("o_cnt variable not found");
+        assert_eq!(
+            cnt,
+            Value::new(10, 8, false),
+            "gated counter must reach 10 (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// Repro: sub-module produces a combinational `logic` output that is
+/// connected to a parent `clock`-typed variable, which is used as the
+/// clock of an `always_ff`.  The parent counter must increment on each
+/// input clock posedge when the enable is asserted.
+#[test]
+fn gated_clock_via_submodule_output() {
+    let code = r#"
+    module GclkCell (
+        i_clk : input  logic,
+        i_en  : input  logic,
+        o_gclk: output logic,
+    ) {
+        assign o_gclk = i_clk & i_en;
+    }
+
+    module Top (
+        i_clk: input  '_ clock   ,
+        i_rst: input  '_ reset   ,
+        o_cnt: output    logic<8>,
+    ) {
+        var w_gclk: '_ clock;
+        inst u_gclk: GclkCell (
+            i_clk : i_clk ,
+            i_en  : 1'b1  ,
+            o_gclk: w_gclk,
+        );
+        var r_cnt: logic<8>;
+        always_ff (w_gclk, i_rst) {
+            if_reset { r_cnt = 0; } else { r_cnt += 1; }
+        }
+        assign o_cnt = r_cnt;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step(&rst);
+
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_cnt").unwrap(),
+            Value::new(10, 8, false),
+            "counter must advance 10 times when gated clock comes from sub-module",
+        );
+    }
+}
