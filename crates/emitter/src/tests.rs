@@ -3713,3 +3713,16 @@ fn one_hot_enum_wider_than_64_bits() {
     // V64 (the 65th one-hot variant) = 1<<64 = 18446744073709551616.
     assert!(ret.contains("18446744073709551616"), "{ret}");
 }
+
+#[test]
+fn all_bit_underscore_width_expands() {
+    // `1_0'1` (width 10) must strip the underscore and expand like `10'1`;
+    // emitting the size-prefixed fill literal `1_0'1` verbatim is illegal SV.
+    let code = r#"module top {
+    const a: logic<10> = 1_0'1;
+}
+"#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(ret.contains("10'b1111111111"), "{ret}");
+}

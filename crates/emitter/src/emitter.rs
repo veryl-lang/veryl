@@ -2615,7 +2615,7 @@ impl VerylWalker for Emitter {
 
         if width.is_empty() {
             self.veryl_token(&arg.all_bit_token);
-        } else if let Ok(width) = width.parse::<usize>() {
+        } else if let Ok(width) = width.replace('_', "").parse::<usize>() {
             let text = format!("{width}'b{}", tail.repeat(width));
             self.veryl_token(&arg.all_bit_token.replace(&text));
         } else {

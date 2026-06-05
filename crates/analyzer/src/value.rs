@@ -1635,9 +1635,10 @@ fn from_all_bit_str(s: &str) -> Value {
             _ => unreachable!(),
         }
     } else {
-        // Fall back to width 0 instead of panicking when the width prefix
-        // overflows usize (degenerate literal like `999...'0`).
-        let width = str::parse::<usize>(width).unwrap_or(0);
+        // Strip underscores (the grammar allows `1_0'1`) before parsing, like
+        // from_based_str; fall back to width 0 instead of panicking when the
+        // width prefix overflows usize (degenerate literal like `999...'0`).
+        let width = str::parse::<usize>(&width.replace('_', "")).unwrap_or(0);
         let mask = ValueBigUint::gen_mask(width);
         match rest {
             "0" => (zero(), zero(), width),
