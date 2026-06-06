@@ -169,7 +169,7 @@ impl Runner for Cocotb {
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
 
         let (py_waves, build_args) = match wave.then_some(metadata.test.waveform_format) {
-            Some(WaveFormFormat::Vcd) => ("True", "['--trace']"),
+            Some(WaveFormFormat::Vcd) => ("True", "['--trace-vcd']"),
             Some(WaveFormFormat::Fst) => ("True", "['--trace-fst', '--trace-structs']"),
             None => ("False", "[]"),
         };
