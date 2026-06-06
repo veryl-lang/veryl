@@ -175,8 +175,8 @@ impl Runner for Cocotb {
 
         // Parse wave arguments
         let (py_waves, wave_args) = match wave.then_some(metadata.test.waveform_format) {
-            Some(WaveFormFormat::Vcd) => ("True", "'--trace-vcd'"),
-            Some(WaveFormFormat::Fst) => ("True", "'--trace-fst', '--trace-structs'"),
+            Some(WaveFormFormat::Vcd) => ("True", "'--trace-vcd',"),
+            Some(WaveFormFormat::Fst) => ("True", "'--trace-fst', '--trace-structs',"),
             None => ("False", ""),
         };
 
