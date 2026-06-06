@@ -199,8 +199,8 @@ impl Runner for Cocotb {
                 build_args.push_str(&format!("'{arg}',"));
             }
             // If wave_args isn't empty, add it to the build args.
-            if wave_args != "" {
-                build_args.push_str(&wave_args);
+            if !wave_args.is_empty() {
+                build_args.push_str(wave_args);
             }
             build_args = format!("[{}]", build_args.strip_suffix(',').unwrap());
         } else {
