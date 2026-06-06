@@ -168,7 +168,7 @@ impl Runner for Cocotb {
         sources = format!("[{}]", sources.strip_suffix(',').unwrap());
 
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
-    
+
         // Create storage for build and test arguments
         let mut vec_build_args = Vec::new();
         let mut vec_test_args = Vec::new();
@@ -197,26 +197,24 @@ impl Runner for Cocotb {
         if !vec_build_args.is_empty() {
             for arg in &vec_build_args {
                 build_args.push_str(&format!("'{arg}',"));
-            }   
+            }
             // If wave_args isn't empty, add it to the build args.
             if wave_args != "" {
                 build_args.push_str(&wave_args);
             }
             build_args = format!("[{}]", build_args.strip_suffix(',').unwrap());
-        }
-        else {
+        } else {
             build_args.push_str("[]");
         }
 
         if !vec_test_args.is_empty() {
             for arg in &vec_test_args {
                 test_args.push_str(&format!("'{arg}',"));
-            }   
+            }
             test_args = format!("[{}]", test_args.strip_suffix(',').unwrap());
-        }   
-        else {
+        } else {
             test_args.push_str("[]");
-        }     
+        }
 
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
