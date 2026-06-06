@@ -168,7 +168,7 @@ impl Runner for Cocotb {
 
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
 
-        let (py_waves, args) = match wave.then_some(metadata.test.waveform_format) {
+        let (py_waves, build_args) = match wave.then_some(metadata.test.waveform_format) {
             Some(WaveFormFormat::Vcd) => ("True", "['--trace']"),
             Some(WaveFormFormat::Fst) => ("True", "['--trace-fst', '--trace-structs']"),
             None => ("False", "[]"),
@@ -197,7 +197,7 @@ if cocotb_version.startswith("2."):
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
-        build_args={args},
+        build_args={build_args},
     )
 
     runner.test(
@@ -216,7 +216,7 @@ elif cocotb_version.startswith("1.9."):
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
-        build_args={args},
+        build_args={build_args},
     )
 
     runner.test(
