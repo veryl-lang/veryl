@@ -14043,6 +14043,47 @@ fn unary_binds_tighter_than_cast() {
     }
 }
 
+// Regression: a numeric-width `as <N>` cast yields an UNSIGNED result at
+// RUNTIME (`x as N` is an unsigned `logic<N>` like the emitted SV); a stray
+// signed flag on the cast would sign-extend it when widened / arithmetic-
+// shifted. The operand is a RUNTIME input (const operands fold via the separate
+// path `comptime_widening_cast_sign_extends` covers), exercising the signedness
+// `gather_context` computes. With the bug: wid=0xff80, asr=0xc0.
+#[test]
+fn runtime_numeric_width_cast_is_unsigned() {
+    let code = r#"
+    module Top (
+        a:   input  logic<8> ,
+        wid: output logic<16>,
+        asr: output logic<8> ,
+    ) {
+        always_comb {
+            wid = (a as 8) as 16;
+            asr = (a as 8) >>> 1;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // a = 0x80: MSB set, so a signed-vs-unsigned interpretation diverges.
+        sim.set("a", Value::new(0x80, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("wid").unwrap().payload_u128(),
+            0x0080,
+            "(a as 8) as 16 must zero-extend, {config:?}",
+        );
+        assert_eq!(
+            sim.get("asr").unwrap().payload_u128(),
+            0x40,
+            "(a as 8) >>> 1 must not sign-fill, {config:?}",
+        );
+    }
+}
+
 #[test]
 fn comptime_widening_cast_sign_extends() {
     // A widening `as` cast of a signed value sign-extends like SV's `N'(expr)`:
