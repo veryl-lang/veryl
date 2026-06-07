@@ -12453,6 +12453,53 @@ fn function_var_reassign_not_comb_loop() {
     }
 }
 
+// Regression: a reorder-hazard block in a PHANTOM cross-block cycle must not be
+// misreported as a combinational loop. Block A reassigns x (hazard -> kept
+// atomic by the fast path) AND cross-references n; B writes n, reads m. `m=b`
+// does NOT depend on n, so the design is ACYCLIC, but A's conflated I/O (reads
+// n, writes m) + B forms a phantom cycle that the bipartite fast path rejects.
+// analyze_dependency must then fall through to the full-flatten + stable sort,
+// which unwraps A's statements and resolves the phantom (no false loop error).
+#[test]
+fn hazard_block_phantom_cycle_not_a_loop() {
+    let code = r#"
+    module Top (
+        a:   input  logic<32>,
+        b:   input  logic<32>,
+        p_o: output logic<32>,
+        q_o: output logic<32>,
+    ) {
+        var m: logic<32>;
+        var n: logic<32>;
+        always_comb {
+            var x: logic<32>;
+            x   = a;
+            p_o = x;
+            x   = b;
+            m   = x;   // m = b, independent of n
+            q_o = n;
+        }
+        always_comb {
+            n = m;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(5, 32, false));
+        sim.set("b", Value::new(7, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("p_o").unwrap(), Value::new(5, 32, false), "p_o=a");
+        assert_eq!(
+            sim.get("q_o").unwrap(),
+            Value::new(7, 32, false),
+            "q_o=n=m=b"
+        );
+    }
+}
+
 // Regression: sequential reassignment must survive analyze_dependency's
 // Phase-2 flatten AND reorder_by_level's leveling. Two always_comb blocks
 // cross-reference m/z so Phase-1 sees a phantom cycle and drops into Phase 2,
