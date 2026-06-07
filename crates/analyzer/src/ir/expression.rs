@@ -121,13 +121,14 @@ impl Expression {
                 op.eval_context_unary(x)
             }
             Expression::Binary(x, op, y, comptime) => {
-                let (x, y) = if op.binary_op_self_determined() {
+                let mut as_target_is_type = false;
+                let (xc, yc) = if op.binary_op_self_determined() {
                     let expr_context = x.gather_context(context).merge(y.gather_context(context));
                     x.apply_context(context, expr_context);
                     y.apply_context(context, expr_context);
                     (expr_context, expr_context)
                 } else {
-                    let x = if op.binary_x_self_determined() {
+                    let xc = if op.binary_x_self_determined() {
                         x.check_self_determined_unsized(context);
                         let expr_context = x.gather_context(context);
                         x.apply_context(context, expr_context);
@@ -136,7 +137,7 @@ impl Expression {
                         x.gather_context(context)
                     };
 
-                    let y = if op.binary_y_self_determined() {
+                    let yc = if op.binary_y_self_determined() {
                         y.check_self_determined_unsized(context);
                         let expr_context = y.gather_context(context);
                         y.apply_context(context, expr_context);
@@ -145,13 +146,24 @@ impl Expression {
                         y.gather_context(context)
                     };
 
-                    (x, y)
+                    // `y` (the cast target) now has its comptime populated.
+                    as_target_is_type = matches!(y.comptime().value, ValueVariant::Type(_));
+
+                    (xc, yc)
                 };
 
-                comptime.is_const = x.is_const & y.is_const;
-                comptime.is_global = x.is_global & y.is_global;
+                comptime.is_const = xc.is_const & yc.is_const;
+                comptime.is_global = xc.is_global & yc.is_global;
 
-                op.eval_context_binary(x, y)
+                let mut ctx = op.eval_context_binary(xc, yc);
+                // An `as`-cast inherits its target's signedness only for an
+                // explicit signed TYPE; a numeric width cast (`x as N`) is an
+                // unsigned `logic<N>` like the emitted SystemVerilog. Otherwise
+                // it is spuriously signed at runtime, sign-extending in shifts.
+                if *op == Op::As && !as_target_is_type {
+                    ctx.signed = false;
+                }
+                ctx
             }
             Expression::Ternary(x, y, z, comptime) => {
                 // x is self-determined

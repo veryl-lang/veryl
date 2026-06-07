@@ -482,6 +482,67 @@ fn build_chunked_via_registry(
     ProtoStatements(blocks)
 }
 
+/// Acyclicity check for the Phase-2 `stable_topo_sort` schedule, using the SAME
+/// edge model (most-recent-PRIOR-writer + single-writer special case, FF offsets
+/// excluded). Decides whether to return the schedule or fall through to Phase 3's
+/// combinational-loop diagnostic; a bipartite "every-writer → reader" check would
+/// instead false-positive on legitimate sequential reassignment.
+fn comb_schedule_acyclic(sorted: &[ProtoStatement]) -> bool {
+    let n = sorted.len();
+    let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    for s in sorted {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        ins.retain(|o| !o.is_ff());
+        outs.retain(|o| !o.is_ff());
+        s_inputs.push(ins);
+        s_outputs.push(outs);
+    }
+    let mut w: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    for (i, outs) in s_outputs.iter().enumerate() {
+        for &key in outs {
+            w.entry(key).or_default().push(i);
+        }
+    }
+    let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    let mut deg: Vec<usize> = vec![0; n];
+    for (ri, ins) in s_inputs.iter().enumerate() {
+        for key in ins {
+            if let Some(wis) = w.get(key) {
+                if wis.len() == 1 {
+                    let wi = wis[0];
+                    if wi != ri && a[wi].insert(ri) {
+                        deg[ri] += 1;
+                    }
+                } else if let Some(&wi) = wis.iter().rev().find(|&&w| w < ri)
+                    && a[wi].insert(ri)
+                {
+                    deg[ri] += 1;
+                }
+            }
+        }
+    }
+    let mut q: VecDeque<usize> = VecDeque::new();
+    for (i, &d) in deg.iter().enumerate() {
+        if d == 0 {
+            q.push_back(i);
+        }
+    }
+    let mut cnt = 0;
+    while let Some(idx) = q.pop_front() {
+        cnt += 1;
+        for &succ in &a[idx] {
+            deg[succ] -= 1;
+            if deg[succ] == 0 {
+                q.push_back(succ);
+            }
+        }
+    }
+    cnt == n
+}
+
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
 ) -> Result<Vec<ProtoStatement>, SimulatorError> {
@@ -656,9 +717,21 @@ pub(crate) fn analyze_dependency(
         }
         table = new_table;
 
-        if let Ok(sorted) = try_topo_sort(&table) {
+        // Sort the flattened (program-order) statements with `stable_topo_sort`,
+        // NOT the bipartite `try_topo_sort`: the bipartite model makes a reader
+        // wait for EVERY writer of a var, reordering sequential reassignment —
+        // flattened `x=a; y=x; x=b` would become `x=a; x=b; y=x`, so `y` wrongly
+        // reads `b`. `stable_topo_sort` links `y` to its most recent PRIOR writer
+        // only. (reorder_by_level applies the matching WAR/WAW leveling downstream.)
+        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+        sorted_keys.sort();
+        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+        let sorted = stable_topo_sort(stmts);
+        if comb_schedule_acyclic(&sorted) {
             return Ok(sorted);
         }
+        // Not a DAG under the sequential model — fall through to Phase 3, which
+        // re-derives the order and reports the genuine combinational loop.
     }
 
     // Phase 3: Check for genuine combinational loop vs false positive
@@ -1658,6 +1731,12 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     // Level = max(var_level[input]) + 1. For CBs, use all offsets
     // (including FF) since gather_variable_offsets filters FF for DAG.
     let mut var_level: HashMap<VarOffset, usize> = HashMap::default();
+    // WAR/WAW guard: last level at which each comb var was read or written. A
+    // re-writer must land strictly ABOVE it; otherwise pure-RAW leveling hoists
+    // the re-write (`x=b`, reads only `b`) ahead of a reader of the old value
+    // (`y=x`), re-introducing the reorder analyze_dependency just fixed. FF
+    // offsets are excluded: written at event time, not the comb settle.
+    let mut var_last_use: HashMap<VarOffset, usize> = HashMap::default();
     let mut levels: Vec<usize> = Vec::with_capacity(sorted.len());
 
     for stmt in &sorted {
@@ -1680,18 +1759,43 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
             }
         }
 
-        let level = inputs
+        let raw_level = inputs
             .iter()
             .filter_map(|key| var_level.get(key))
             .copied()
             .max()
             .map(|l| l + 1)
             .unwrap_or(0);
+        let hazard_level = outputs
+            .iter()
+            .filter(|key| !key.is_ff())
+            .filter_map(|key| var_last_use.get(key))
+            .copied()
+            .max()
+            .map(|l| l + 1)
+            .unwrap_or(0);
+        let level = raw_level.max(hazard_level);
 
         for key in &outputs {
             let e = var_level.entry(*key).or_insert(0);
             if level > *e {
                 *e = level;
+            }
+            if !key.is_ff() {
+                let u = var_last_use.entry(*key).or_insert(level);
+                if level > *u {
+                    *u = level;
+                }
+            }
+        }
+        // A read marks the var as used at this level so a LATER writer (WAR)
+        // is ordered after it.
+        for key in &inputs {
+            if !key.is_ff() {
+                let u = var_last_use.entry(*key).or_insert(level);
+                if level > *u {
+                    *u = level;
+                }
             }
         }
 
