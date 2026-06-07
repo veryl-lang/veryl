@@ -12453,6 +12453,83 @@ fn function_var_reassign_not_comb_loop() {
     }
 }
 
+// Regression: sequential reassignment must survive analyze_dependency's
+// Phase-2 flatten AND reorder_by_level's leveling. Two always_comb blocks
+// cross-reference m/z so Phase-1 sees a phantom cycle and drops into Phase 2,
+// flattening both. Block A reassigns a local `x` (x=c; y_o=x; x=d; w_o=x) with
+// a read BETWEEN the writes; the old bipartite sort and pure-RAW leveling each
+// reordered it so `y_o` read `d`. With the fix `y_o` must read `c` (5).
+#[test]
+fn phase2_sequential_reassign_survives_reorder() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a:   input  logic<32>,
+        b:   input  logic<32>,
+        c:   input  logic<32>,
+        d:   input  logic<32>,
+        y_o: output logic<32>,
+        w_o: output logic<32>,
+        p_o: output logic<32>,
+        q_o: output logic<32>,
+    ) {
+        var m: logic<32>;
+        var z: logic<32>;
+
+        always_comb {
+            var x: logic<32>;
+            m   = a;
+            p_o = z;
+            x   = c;
+            y_o = x; // must read c, not the later x=d
+            x   = d;
+            w_o = x; // must read d
+        }
+
+        always_comb {
+            z   = b;
+            q_o = m;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(1, 32, false));
+        sim.set("b", Value::new(2, 32, false));
+        sim.set("c", Value::new(5, 32, false));
+        sim.set("d", Value::new(7, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let msg = format!("JIT={} 4st={}", config.use_jit, config.use_4state);
+        assert_eq!(
+            sim.get("y_o").unwrap(),
+            Value::new(5, 32, false),
+            "y_o must read x=c (5), {msg}",
+        );
+        assert_eq!(
+            sim.get("w_o").unwrap(),
+            Value::new(7, 32, false),
+            "w_o must read x=d (7), {msg}",
+        );
+        assert_eq!(
+            sim.get("p_o").unwrap(),
+            Value::new(2, 32, false),
+            "p_o must read z=b (2), {msg}",
+        );
+        assert_eq!(
+            sim.get("q_o").unwrap(),
+            Value::new(1, 32, false),
+            "q_o must read m=a (1), {msg}",
+        );
+    }
+}
+
 #[test]
 fn for_break_in_comb() {
     let code_basic = r#"
