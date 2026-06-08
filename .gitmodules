@@ -16,3 +16,6 @@
 [submodule "support/discovery"]
 	path = support/discovery
 	url = https://github.com/veryl-lang/discovery.git
+[submodule "testcases/heliodor"]
+	path = testcases/heliodor
+	url = https://github.com/dalance/heliodor
