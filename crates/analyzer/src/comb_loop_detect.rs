@@ -430,6 +430,7 @@ fn build_module_graph(
                     .get(reader_decl)
                     .map(|w| {
                         w.iter()
+                            .filter(|(id, _, _)| *id == *src_id)
                             .map(|(id, idx, m)| ((*id, *idx), m.clone()))
                             .collect()
                     })

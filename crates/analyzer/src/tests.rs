@@ -8682,6 +8682,41 @@ fn combinational_loop() {
             .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
         "source-side false positive: {errors:?}"
     );
+
+    // False-positive cycle through unrelated assigns in the same comb block.
+    // `op1_fp32 = op1; op2_fp32 = op2;` are independent.
+    // All writes in the same reader_decl are collected as destinations,
+    // incorrectly linking op1_fp32 and op2_fp32 and forming a spurious cycle.
+    let code = r#"
+    module FPComp (
+        op1: input logic<32>,
+        op2: input logic<32>,
+
+        less_than: output logic,
+    ) {
+        struct FP32 {
+            sign: logic    ,
+            exp : logic<8> ,
+            frac: logic<23>,
+        }
+
+        var op1_fp32: FP32;
+        var op2_fp32: FP32;
+
+        always_comb {
+            op1_fp32 = op1;
+            op2_fp32 = op2;
+
+            if (op1_fp32.exp == op2_fp32.exp) {
+                less_than = op1_fp32.frac <: op2_fp32.frac;
+            } else {
+                less_than = op1_fp32.exp <: op2_fp32.exp;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
