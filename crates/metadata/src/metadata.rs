@@ -66,6 +66,11 @@ pub struct Metadata {
     pub lockfile: Lockfile,
     #[serde(skip)]
     pub build_info: BuildInfo,
+    /// Output directory override (e.g. `veryl build --out-dir`).
+    /// When set, build outputs are emitted relative to this directory
+    /// instead of the project path. Never read from Veryl.toml.
+    #[serde(skip)]
+    pub output_dir_override: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -310,6 +315,9 @@ impl Metadata {
         };
 
         let base = self.project_path();
+        // Build outputs may be redirected (e.g. `veryl build --out-dir`);
+        // sources are always resolved against the project path.
+        let out_base = self.output_dir();
         let mut ret = Vec::new();
 
         // Pre-canonicalize explicit file args once so we can route each to
@@ -354,21 +362,29 @@ impl Metadata {
                     return Err(MetadataError::InvalidSourceLocation(src));
                 };
                 let dst = match self.build.target {
-                    Target::Source => src.with_extension("sv"),
-                    Target::Directory { ref path } => {
-                        base.join(path.join(src_relative.with_extension("sv")))
+                    Target::Source => {
+                        if self.output_dir_override.is_some() {
+                            // Redirected source-target builds keep the
+                            // source-relative layout under the override.
+                            out_base.join(src_relative.with_extension("sv"))
+                        } else {
+                            src.with_extension("sv")
+                        }
                     }
-                    Target::Bundle { .. } => base.join(
+                    Target::Directory { ref path } => {
+                        out_base.join(path.join(src_relative.with_extension("sv")))
+                    }
+                    Target::Bundle { .. } => out_base.join(
                         PathBuf::from("target").join(src.with_extension("sv").file_name().unwrap()),
                     ),
                 };
                 let map = match &self.build.sourcemap_target {
                     SourceMapTarget::Directory { path } => {
                         if let Target::Directory { .. } = self.build.target {
-                            base.join(path.join(src_relative.with_extension("sv.map")))
+                            out_base.join(path.join(src_relative.with_extension("sv.map")))
                         } else {
-                            let dst = dst.strip_prefix(&base).unwrap();
-                            base.join(path.join(dst.with_extension("sv.map")))
+                            let dst = dst.strip_prefix(&out_base).unwrap();
+                            out_base.join(path.join(dst.with_extension("sv.map")))
                         }
                     }
                     _ => {
@@ -394,9 +410,9 @@ impl Metadata {
             return Err(MetadataError::InvalidSourceLocation(cf[pos].clone()));
         }
 
-        let base_dst = self.project_dependencies_path();
+        let base_dst = self.output_dependencies_path();
         if !base_dst.exists() {
-            ignore_already_exists(fs::create_dir(&base_dst))
+            ignore_already_exists(fs::create_dir_all(&base_dst))
                 .map_err(|x| MetadataError::file_io(x, &base_dst))?;
         }
 
@@ -449,8 +465,18 @@ obj_dir/
         self.metadata_path.parent().unwrap().to_path_buf()
     }
 
+    pub fn output_dir(&self) -> PathBuf {
+        self.output_dir_override
+            .clone()
+            .unwrap_or_else(|| self.project_path())
+    }
+
     pub fn project_dependencies_path(&self) -> PathBuf {
         self.project_path().join("dependencies")
+    }
+
+    pub fn output_dependencies_path(&self) -> PathBuf {
+        self.output_dir().join("dependencies")
     }
 
     pub fn project_dot_build_path(&self) -> PathBuf {
@@ -468,7 +494,7 @@ obj_dir/
             FilelistType::Flgen => format!("{}.list.rb", self.project.name),
         };
 
-        self.metadata_path.with_file_name(filelist_name)
+        self.output_dir().join(filelist_name)
     }
 
     pub fn doc_path(&self) -> PathBuf {

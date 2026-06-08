@@ -37,6 +37,19 @@ impl CmdBuild {
         test_filter: Option<&str>,
         defines: &[String],
     ) -> Result<bool> {
+        if let Some(ref out_dir) = self.opt.out_dir {
+            let out_dir = if out_dir.is_absolute() {
+                out_dir.clone()
+            } else {
+                std::env::current_dir()
+                    .into_diagnostic()
+                    .wrap_err("")?
+                    .join(out_dir)
+            };
+            std::fs::create_dir_all(&out_dir).into_diagnostic()?;
+            metadata.output_dir_override = Some(out_dir.canonicalize().into_diagnostic()?);
+        }
+
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
         let mut check_error = CheckError::new(metadata.build.error_count_limit);
@@ -164,16 +177,13 @@ impl CmdBuild {
             if !context.skip {
                 let path = &context.path;
                 let (dst, map) = if let Some(ref temp_dir) = temp_dir {
-                    let dst_temp = temp_dir.path().join(
-                        path.dst
-                            .strip_prefix(metadata.project_path())
-                            .into_diagnostic()?,
-                    );
-                    let map_temp = temp_dir.path().join(
-                        path.map
-                            .strip_prefix(metadata.project_path())
-                            .into_diagnostic()?,
-                    );
+                    let output_dir = metadata.output_dir();
+                    let dst_temp = temp_dir
+                        .path()
+                        .join(path.dst.strip_prefix(&output_dir).into_diagnostic()?);
+                    let map_temp = temp_dir
+                        .path()
+                        .join(path.map.strip_prefix(&output_dir).into_diagnostic()?);
                     (dst_temp, map_temp)
                 } else {
                     (path.dst.clone(), path.map.clone())
@@ -240,13 +250,16 @@ impl CmdBuild {
     }
 
     fn gen_filelist_line(&self, metadata: &Metadata, path: &Path) -> Result<String> {
-        let base_path = metadata.project_path();
+        let base_path = metadata.output_dir();
         let path = path.canonicalize().into_diagnostic()?;
-        let relative = path.strip_prefix(&base_path).into_diagnostic()?;
         Ok(match metadata.build.filelist_type {
             FilelistType::Absolute => format!("{}\n", path.to_string_lossy()),
-            FilelistType::Relative => format!("{}\n", relative.to_string_lossy()),
+            FilelistType::Relative => {
+                let relative = path.strip_prefix(&base_path).into_diagnostic()?;
+                format!("{}\n", relative.to_string_lossy())
+            }
             FilelistType::Flgen => {
+                let relative = path.strip_prefix(&base_path).into_diagnostic()?;
                 format!("source_file '{}'\n", relative.to_string_lossy())
             }
         })
@@ -260,7 +273,7 @@ impl CmdBuild {
         include_tests: bool,
     ) -> Result<()> {
         let filelist_path = metadata.filelist_path();
-        let base_path = metadata.project_path();
+        let base_path = metadata.output_dir();
 
         let paths = Self::sort_filelist(metadata, paths, include_tests);
 
@@ -277,6 +290,11 @@ impl CmdBuild {
                 text.push_str(&fs::read_to_string(&dst).into_diagnostic()?);
             }
 
+            if let Some(parent) = target_path.parent()
+                && !parent.exists()
+            {
+                std::fs::create_dir_all(parent).into_diagnostic()?;
+            }
             let written = utils::write_file_if_changed(&target_path, text.as_bytes())?;
             if written {
                 debug!("Output file ({})", target_path.to_string_lossy());
@@ -294,6 +312,11 @@ impl CmdBuild {
             text
         };
 
+        if let Some(parent) = filelist_path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent).into_diagnostic()?;
+        }
         utils::write_file_if_changed(&filelist_path, text.as_bytes())?;
 
         info!("Output filelist ({})", filelist_path.to_string_lossy());
@@ -394,5 +417,144 @@ impl CmdBuild {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static BUILD_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    struct CurrentDirGuard {
+        path: PathBuf,
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.path).unwrap();
+        }
+    }
+
+    fn set_current_dir(path: &Path) -> CurrentDirGuard {
+        let current = std::env::current_dir().unwrap();
+        std::env::set_current_dir(path).unwrap();
+        CurrentDirGuard { path: current }
+    }
+
+    fn create_project(root: &Path, name: &str, filelist_type: FilelistType) -> (Metadata, PathBuf) {
+        let project_path = root.join(name);
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        let filelist_type = match filelist_type {
+            FilelistType::Absolute => "absolute",
+            FilelistType::Relative => "relative",
+            FilelistType::Flgen => "flgen",
+        };
+        fs::write(
+            project_path.join("Veryl.toml"),
+            format!(
+                r#"[project]
+name = "{name}"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {{type = "directory", path = "target"}}
+filelist_type = "{filelist_type}"
+sourcemap_target = {{type = "none"}}
+exclude_std = true
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(src_path.join("foo.veryl"), "module Foo {}\n").unwrap();
+
+        let metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
+        (metadata, project_path)
+    }
+
+    fn run_build(metadata: &mut Metadata, out_dir: Option<PathBuf>) {
+        Analyzer::new(metadata).clear();
+
+        let build = CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: false,
+            out_dir,
+        });
+        build
+            .exec(metadata, false, true, None, None, &[])
+            .expect("build should succeed");
+
+        Analyzer::new(metadata).clear();
+    }
+
+    #[test]
+    fn build_without_out_dir_uses_project_output_dir() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "default_out", FilelistType::Absolute);
+
+        run_build(&mut metadata, None);
+
+        assert!(project_path.join("target/foo.sv").exists());
+        assert!(project_path.join("default_out.f").exists());
+        assert!(project_path.join("dependencies").is_dir());
+    }
+
+    #[test]
+    fn build_with_absolute_out_dir_moves_generated_outputs() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "absolute_out", FilelistType::Absolute);
+        let out_dir = tempdir.path().join("outside-project");
+
+        run_build(&mut metadata, Some(out_dir.clone()));
+
+        let out_dir = out_dir.canonicalize().unwrap();
+        let generated = out_dir.join("target/foo.sv");
+        let filelist = out_dir.join("absolute_out.f");
+        assert!(generated.exists());
+        assert!(filelist.exists());
+        assert!(out_dir.join("dependencies").is_dir());
+        assert!(!project_path.join("target/foo.sv").exists());
+        assert!(!project_path.join("absolute_out.f").exists());
+        assert!(!project_path.join("dependencies").exists());
+
+        let filelist_text = fs::read_to_string(filelist).unwrap();
+        assert!(
+            filelist_text
+                .lines()
+                .any(|line| line == generated.to_string_lossy())
+        );
+    }
+
+    #[test]
+    fn build_with_relative_out_dir_resolves_from_current_dir() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "relative_out", FilelistType::Relative);
+        let _guard = set_current_dir(&project_path);
+
+        run_build(&mut metadata, Some(PathBuf::from("build-output")));
+
+        let out_dir = project_path.join("build-output");
+        let filelist = out_dir.join("relative_out.f");
+        assert!(out_dir.join("target/foo.sv").exists());
+        assert!(filelist.exists());
+        assert!(out_dir.join("dependencies").is_dir());
+
+        let filelist_text = fs::read_to_string(filelist).unwrap();
+        let relative_path = Path::new("target").join("foo.sv");
+        assert!(
+            filelist_text
+                .lines()
+                .any(|line| line == relative_path.to_string_lossy())
+        );
     }
 }
