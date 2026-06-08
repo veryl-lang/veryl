@@ -987,14 +987,14 @@ fn testbench_fst_clock_reset_waveform() {
         // Find clk and rst variables
         let clk_var = hier
             .all_vars()
-            .find(|v| v.name(hier) == "clk")
+            .find(|v| hier[*v].name(hier) == "clk")
             .expect("clk not found in FST");
         let rst_var = hier
             .all_vars()
-            .find(|v| v.name(hier) == "rst")
+            .find(|v| hier[*v].name(hier) == "rst")
             .expect("rst not found in FST");
-        let clk_ref = clk_var.signal_ref();
-        let rst_ref = rst_var.signal_ref();
+        let clk_ref = hier[clk_var].signal_ref();
+        let rst_ref = hier[rst_var].signal_ref();
 
         wave.load_signals(&[clk_ref, rst_ref]);
 
@@ -1142,14 +1142,14 @@ fn testbench_fst_dumps_all_array_elements() {
                     let suffix = format!("[{i}]");
                     let var = hier
                         .all_vars()
-                        .find(|v| v.name(hier).ends_with(&suffix))
+                        .find(|v| hier[*v].name(hier).ends_with(&suffix))
                         .unwrap_or_else(|| {
                             panic!(
                                 "array element {suffix} not found in FST (jit={}, 4state={})",
                                 config.use_jit, config.use_4state
                             )
                         });
-                    var.signal_ref()
+                    hier[var].signal_ref()
                 })
                 .collect()
         };
