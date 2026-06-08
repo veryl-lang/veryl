@@ -25,10 +25,14 @@ impl ProtoAssignDynamicStatement {
             if full_width > 128 || !dyn_sel.index_expr.can_build_binary() {
                 return false;
             }
-            full_width <= 64
-        } else {
-            self.dst_width <= 64
+            return full_width <= 64;
         }
+        // Wide (>128-bit) comb-base dynamic-indexed store: see
+        // `build_binary_dynamic_wide`. FF-base / 65..=128 bail (AOT-C parity).
+        if self.dst_width > 128 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
+            return true;
+        }
+        self.dst_width <= 64
     }
 
     pub fn build_binary(
@@ -36,6 +40,11 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
+        // The narrow path below assumes a native (≤8-byte) dst; route the
+        // wide (>128-bit) comb-base case to its own emitter.
+        if self.dst_width > 128 && !self.dst_base.is_ff() {
+            return self.build_binary_dynamic_wide(context, builder);
+        }
         // Plain store re-masks the payload to dst_width (istoreN truncation
         // or the non-native band below), so the producer-side root mask is
         // redundant; select/dynamic_select shift the payload and need it.
@@ -279,6 +288,114 @@ impl ProtoAssignDynamicStatement {
             // mask_xz at `offset + nb`.
             emit_log_push(context, builder, payload_for_log, mask_xz_for_log);
         }
+
+        Some(())
+    }
+
+    /// Runtime byte-address of the dynamically-indexed element:
+    /// `comb_values + dst_base + dst_stride * clamp(idx, num_elements-1)`.
+    fn dynamic_elem_addr(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<cranelift::prelude::Value> {
+        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
+        let max_idx = builder
+            .ins()
+            .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
+        let in_bounds = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThan, idx_payload, max_idx);
+        let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
+        let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
+        let byte_offset = builder.ins().imul(clamped, stride_val);
+        let static_offset = builder.ins().iconst(I64, self.dst_base.raw() as i64);
+        let addr = builder.ins().iadd(context.comb_values, static_offset);
+        Some(builder.ins().iadd(addr, byte_offset))
+    }
+
+    /// Wide (>128-bit) comb-base dynamic-indexed store (`var arr[idx] <= wide`).
+    /// Stores byte-for-byte to the comb buffer (no write-log) and masks to
+    /// `dst_width`; a ≤64-bit `select` is a scalar field RMW. Mirrors the AOT-C
+    /// wide AssignDynamic path. 4-state / `rhs_select` / `dynamic_select` bail.
+    fn build_binary_dynamic_wide(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<()> {
+        if context.use_4state || self.rhs_select.is_some() || self.dynamic_select.is_some() {
+            return None;
+        }
+        if self.dst_base.is_ff() || self.dst_num_elements == 0 {
+            return None;
+        }
+        let nb = calc_native_bytes(self.dst_width);
+        let n_words = nb / 8;
+        let flags = MemFlags::trusted();
+
+        // Narrow-field (≤64-bit) bit-select: scalar 1-2 word RMW at the runtime
+        // element address (the helper clamps the field to `dst_width`).
+        if let Some((beg, end)) = self.select
+            && (beg - end + 1) <= 64
+        {
+            let (raw, _mask_xz) = self.expr.build_binary(context, builder)?;
+            // A `builds_wide_pointer` expr returns a pointer; the field is its
+            // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
+            let sv = if self.expr.builds_wide_pointer() {
+                builder.ins().load(I64, MemFlags::trusted(), raw, 0)
+            } else {
+                raw
+            };
+            let addr = self.dynamic_elem_addr(context, builder)?;
+            emit_wide_narrow_field_store(builder, addr, 0, beg, end, self.dst_width, sv);
+            return Some(());
+        }
+
+        // Build the wide RHS into a pointer (a register result is force-stored
+        // into a fresh slot; `builds_wide_pointer()` is the gate, not `width`).
+        let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
+        let src_ptr = if self.expr.builds_wide_pointer() {
+            // The slot is sized to the expr's width, which may be NARROWER than
+            // the dst element; the copy below reads `nb` (dst) bytes, so a
+            // narrower source would read past it into uninitialised stack. When
+            // sizes differ, marshal into a zeroed dst-sized slot copying only
+            // min(src_nb, nb) bytes. Mirrors AOT-C's `emit_wide_operand`.
+            let src_nb = calc_native_bytes(self.expr.width());
+            if src_nb == nb {
+                payload
+            } else {
+                let slot = alloc_wide_zero(builder, nb);
+                let copy_words = src_nb.min(nb) / 8;
+                for i in 0..copy_words {
+                    let off = (i * 8) as i32;
+                    let w = builder.ins().load(I64, MemFlags::trusted(), payload, off);
+                    builder.ins().store(MemFlags::trusted(), w, slot, off);
+                }
+                slot
+            }
+        } else {
+            let slot = alloc_wide_zero(builder, nb);
+            builder.ins().store(MemFlags::trusted(), payload, slot, 0);
+            slot
+        };
+
+        let addr = self.dynamic_elem_addr(context, builder)?;
+
+        // Wide (>64-bit) bit-select: RMW the [end..=beg] range; else full value.
+        let store_ptr = if let Some((beg, end)) = self.select {
+            emit_wide_select_rmw(context, builder, addr, src_ptr, end, beg - end + 1, nb)
+        } else {
+            src_ptr
+        };
+
+        // Word-copy into the element, then mask the DESTINATION (not the
+        // source, which may alias a flat-buffer read) to dst_width.
+        for i in 0..n_words {
+            let off = (i * 8) as i32;
+            let val = builder.ins().load(I64, flags, store_ptr, off);
+            builder.ins().store(flags, val, addr, off);
+        }
+        emit_wide_apply_mask(context, builder, addr, nb, self.dst_width);
 
         Some(())
     }
@@ -1115,6 +1232,37 @@ impl ProtoAssignStatement {
             return None;
         }
 
+        // Fast path: ≤64-bit bit-select into a wide COMB value
+        // (`wide_comb[hi:lo] <= narrow`). Collapse to a scalar 1-2 word RMW
+        // instead of the full-width wide-op sequence — the dominant comb cost on
+        // `--backend cranelift`. FF / `rhs_select` / `dynamic_select` / 4-state
+        // keep the general wide path below.
+        if !self.dst.is_ff()
+            && self.dynamic_select.is_none()
+            && self.rhs_select.is_none()
+            && let Some((beg, end)) = self.select
+            && (beg - end + 1) <= 64
+        {
+            let (raw, _mask_xz) = self.expr.build_binary(context, builder)?;
+            // A `builds_wide_pointer` expr returns a pointer; the field is its
+            // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
+            let sv = if self.expr.builds_wide_pointer() {
+                builder.ins().load(I64, MemFlags::trusted(), raw, 0)
+            } else {
+                raw
+            };
+            emit_wide_narrow_field_store(
+                builder,
+                context.comb_values,
+                self.dst.raw() as i32,
+                beg,
+                end,
+                self.dst_width,
+                sv,
+            );
+            return Some(());
+        }
+
         let expr_width = self.expr.width();
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
         let nb = calc_native_bytes(self.dst_width);
@@ -1341,6 +1489,79 @@ impl ProtoIfStatement {
         context.store_elim_enabled = prev_store_elim;
 
         Some(())
+    }
+}
+
+/// Scalar 1-2 word RMW of a ≤64-bit field `[lo..=hi]` of a wide value at
+/// `base_addr + base_off` (`sv`'s low bits hold it), touching only the word(s)
+/// the field spans instead of the full-width wide-op sequence — the dominant
+/// `--backend cranelift` comb cost. Mirrors AOT-C's `emit_wide_narrow_field_store`.
+/// 2-state, comb dst (no write-log); bits ≥ `dst_width` are clamped out.
+fn emit_wide_narrow_field_store(
+    builder: &mut FunctionBuilder,
+    base_addr: cranelift::prelude::Value,
+    base_off: i32,
+    hi: usize,
+    lo: usize,
+    dst_width: usize,
+    sv: cranelift::prelude::Value,
+) {
+    if lo >= dst_width {
+        return; // whole field out of range → no-op
+    }
+    let hi = hi.min(dst_width - 1);
+    let nbits = hi - lo + 1; // ≤ 64
+    let flags = MemFlags::trusted();
+    let k0 = lo / 64;
+    let k1 = hi / 64;
+    let b = (lo % 64) as i64;
+    let base_mask: u64 = if nbits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << nbits) - 1
+    };
+    // `sv` may be I128 (e.g. an unsized literal); the field is ≤64-bit so the
+    // low word carries it.
+    let sv = if builder.func.dfg.value_type(sv) == I128 {
+        builder.ins().ireduce(I64, sv)
+    } else {
+        sv
+    };
+    if k0 == k1 {
+        let m = base_mask << b;
+        let off0 = base_off + (k0 * 8) as i32;
+        let d = builder.ins().load(I64, flags, base_addr, off0);
+        let cleared = builder.ins().band_imm(d, !m as i64);
+        let shifted = builder.ins().ishl_imm(sv, b);
+        let masked = builder.ins().band_imm(shifted, m as i64);
+        let result = builder.ins().bor(cleared, masked);
+        builder.ins().store(flags, result, base_addr, off0);
+    } else {
+        // Two adjacent words (k1 == k0+1).  b ∈ 1..=63 here: b==0 would keep a
+        // ≤64-bit field within one word, so `sh = 64 - b` is never the UB `>>64`.
+        let m0: u64 = u64::MAX << b;
+        let hb = hi % 64;
+        let m1: u64 = if hb >= 63 {
+            u64::MAX
+        } else {
+            (1u64 << (hb + 1)) - 1
+        };
+        let sh = 64 - b;
+        let off0 = base_off + (k0 * 8) as i32;
+        let off1 = base_off + (k1 * 8) as i32;
+        let d0 = builder.ins().load(I64, flags, base_addr, off0);
+        let cleared0 = builder.ins().band_imm(d0, !m0 as i64);
+        let shifted0 = builder.ins().ishl_imm(sv, b);
+        let masked0 = builder.ins().band_imm(shifted0, m0 as i64);
+        let result0 = builder.ins().bor(cleared0, masked0);
+        builder.ins().store(flags, result0, base_addr, off0);
+
+        let d1 = builder.ins().load(I64, flags, base_addr, off1);
+        let cleared1 = builder.ins().band_imm(d1, !m1 as i64);
+        let shifted1 = builder.ins().ushr_imm(sv, sh);
+        let masked1 = builder.ins().band_imm(shifted1, m1 as i64);
+        let result1 = builder.ins().bor(cleared1, masked1);
+        builder.ins().store(flags, result1, base_addr, off1);
     }
 }
 

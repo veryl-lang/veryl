@@ -138,7 +138,102 @@ impl Ir {
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
+        ir.backend_diag();
         ir
+    }
+
+    /// `VERYL_BACKEND_DIAG=1`: report per-event/comb jit vs interpreter counts
+    /// and whether a whole-comb/event backend is dispatched. Chunking is
+    /// identical for `cc` and `cranelift` (only dispatch differs), so a `cc`
+    /// run also describes Cranelift's interp fallback. Read-only.
+    fn backend_diag(&self) {
+        if std::env::var("VERYL_BACKEND_DIAG").as_deref() != Ok("1") {
+            return;
+        }
+        fn classify(s: &Statement) -> String {
+            match s {
+                Statement::Assign(a) => format!(
+                    "Assign dst_width={}{}{}",
+                    a.dst_width,
+                    if a.select.is_some() { " select" } else { "" },
+                    a.dynamic_select
+                        .as_ref()
+                        .map(|d| format!(
+                            " dynsel(elem={} n={} full={})",
+                            d.elem_width,
+                            d.num_elements,
+                            d.elem_width * d.num_elements
+                        ))
+                        .unwrap_or_default(),
+                ),
+                Statement::AssignDynamic(a) => format!(
+                    "AssignDynamic dst_width={} n_elem={} full={}{}",
+                    a.dst_width,
+                    a.dst_num_elements,
+                    a.dst_width * a.dst_num_elements,
+                    a.dynamic_select
+                        .as_ref()
+                        .map(|d| format!(
+                            " dynsel(elem={} n={} full={})",
+                            d.elem_width,
+                            d.num_elements,
+                            d.elem_width * d.num_elements
+                        ))
+                        .unwrap_or_default(),
+                ),
+                Statement::If(i) => {
+                    // Recurse into the bodies so the leaf store that forced the
+                    // whole If onto the interpreter is visible.
+                    let kids: Vec<String> = i
+                        .true_side
+                        .iter()
+                        .chain(i.false_side.iter())
+                        .map(classify)
+                        .collect();
+                    format!("If{{ {} }}", kids.join("; "))
+                }
+                Statement::For(_) => "For".to_string(),
+                Statement::SystemFunctionCall(_) => "SysFn".to_string(),
+                Statement::SequentialBlock(b) => {
+                    let kids: Vec<String> = b.iter().map(classify).collect();
+                    format!("Seq{{ {} }}", kids.join("; "))
+                }
+                Statement::TbMethodCall { .. } => "TbMethodCall".to_string(),
+                Statement::Break => "Break".to_string(),
+                Statement::Compiled(_) | Statement::CompiledBatch(_) => "Compiled".to_string(),
+            }
+        }
+        let report = |label: &str, stmts: &[Statement], whole: bool| {
+            let (mut jit, mut interp) = (0usize, 0usize);
+            for s in stmts {
+                if s.is_compiled() {
+                    jit += 1;
+                } else if !matches!(s, Statement::Break) {
+                    interp += 1;
+                }
+            }
+            eprintln!(
+                "  {label}: total={} jit={jit} interp={interp}  whole={whole}",
+                stmts.len()
+            );
+            for s in stmts {
+                if !s.is_compiled() && !matches!(s, Statement::Break) {
+                    eprintln!("      interp: {}", classify(s));
+                }
+            }
+        };
+        eprintln!("=== BackendDiag for {} ===", self.name);
+        report("comb", &self.comb_statements, self.whole_comb.is_some());
+        let mut events: Vec<_> = self.event_statements.iter().collect();
+        events.sort_by_key(|(e, _)| format!("{e:?}"));
+        for (event, stmts) in events {
+            report(
+                &format!("event {event:?}"),
+                stmts,
+                self.whole_events.contains_key(event),
+            );
+        }
+        eprintln!("==========================");
     }
 
     /// Walk every event/comb statement tree and overwrite the placeholder
