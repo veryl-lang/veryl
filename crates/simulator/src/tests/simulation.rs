@@ -4546,7 +4546,7 @@ fn merged_comb_output_multi_level() {
 // child's comb output through a port connection. Without child comb in
 // the unified comb list, the parent FF sees stale values from the previous cycle.
 //
-// This pattern matches heliodor's testbench memory reading dmem_wdata
+// This pattern matches a testbench memory reading dmem_wdata
 // from the memory module.
 #[test]
 fn merged_comb_output_write_to_parent_ff() {
@@ -4942,7 +4942,7 @@ fn child_comb_eq_comparison() {
 }
 
 // Debug test: minimal pipeline with branch flush.
-// Reproduces the heliodor BEQ/BNE issue where branch_taken=1
+// Reproduces a BEQ/BNE issue where branch_taken=1
 // causes flush but not PC redirect in non-JIT mode.
 //
 // Pipeline: Comparator (child comb) produces taken signal.
@@ -5592,7 +5592,7 @@ fn analyze_dep_self_ref_in_child_module() {
 // JIT ON/OFF timing consistency tests
 // ============================================================
 
-// Pipeline register pattern (like heliodor's ifid_pc):
+// Pipeline register pattern (an IF/ID PC register):
 // Child FF → child comb output → parent pipeline register (always_ff).
 // The parent's pipeline register only references its own always_ff
 // assignment context, so is_ff may be false. Verify that JIT ON
@@ -5679,7 +5679,7 @@ fn jit_timing_pipeline_register() {
     assert_eq!(first[7], 28);
 }
 
-// Conditional FF write with stall pattern (like heliodor's ifid_pc with stall_if):
+// Conditional FF write with stall pattern (an IF/ID PC register with a stall):
 // Pipeline register that holds its value when stalled.
 // Variable is assigned in always_ff but only read by comb → is_ff=false.
 #[test]
@@ -6565,7 +6565,7 @@ fn three_level_var_port_redirect() {
     }
 }
 
-// Reproduce heliodor MMU var-redirect issue: deep pipeline with
+// Reproduce an MMU var-redirect issue: deep pipeline with
 // memory stage output redirected through var. Testbench wraps the
 // core and provides combinational memory feedback. Tests both direct
 // and indirect port connections with many pipeline signals.
@@ -6848,7 +6848,7 @@ fn child_output_var_mux() {
     }
 }
 
-// Faithful reproduction of heliodor var-redirect bug:
+// Faithful reproduction of a var-redirect bug:
 // 4-level hierarchy with store/load through var-redirected ports.
 // TB → Core → MemStage (var redirect here) → internal comb
 // The testbench has sequential memory that reads wdata from the core.
@@ -7401,7 +7401,7 @@ fn store_load_through_passthrough_with_ff() {
     }
 }
 
-// Same as above but with combinational memory read (like heliodor testbenches).
+// Same as above but with combinational memory read (as in many testbenches).
 #[test]
 fn store_load_comb_mem_through_passthrough_with_ff() {
     let code = r#"
@@ -7656,7 +7656,7 @@ fn ff_comb_let_basic() {
     }
 }
 
-/// Read-only cache with tag/index address decomposition (like heliodor icache).
+/// Read-only cache with tag/index address decomposition (an I-cache).
 /// Tests that fill_count-driven o_mem_addr propagates through comb to update
 /// i_mem_rdata each fill cycle, so data[0] != data[1].
 #[test]
@@ -7763,7 +7763,7 @@ fn readonly_cache_fill_with_tags() {
     }
 }
 
-/// 3-level hierarchy: TestTop → Harness → Cache (like heliodor's test structure)
+/// 3-level hierarchy: TestTop → Harness → Cache (a typical test structure)
 #[test]
 fn readonly_cache_fill_3level() {
     let code = "
@@ -7956,7 +7956,7 @@ fn bit_select_ternary_wide_var() {
 }
 
 /// Same as above but halfword select is on a child module's comb output.
-/// Reproduces the heliodor pattern: icache.o_rdata → parent bit select → pipeline.
+/// Reproduces a pattern: icache.o_rdata → parent bit select → pipeline.
 #[test]
 fn bit_select_child_output() {
     let code = r#"
@@ -8035,7 +8035,7 @@ fn bit_select_child_output() {
     }
 }
 
-/// Cache + halfword select + stall: reproduces heliodor compressed instruction issue.
+/// Cache + halfword select + stall: reproduces a compressed-instruction issue.
 /// icache stalls for fill, then parent selects halfword based on pc[1].
 #[test]
 fn cache_halfword_select_with_stall() {
@@ -8400,7 +8400,7 @@ fn nonff_dynamic_array_deep_hierarchy() {
         o_rdata: output logic<64>,
         o_stall: output logic,
     ) {
-        // Mirror heliodor D-Cache structure
+        // Mirror a D-cache structure
         let tag      : logic<54> = i_addr[63:10];
         let index    : logic<4>  = i_addr[9:6];
         let offset_w : logic<3>  = i_addr[5:3];
@@ -9119,7 +9119,7 @@ fn within_level_comb_chain_through_parent_wire() {
 
 /// Regression: stall-signal propagation through parent-level wire.
 ///
-/// Models the pattern that caused the heliodor sv39_4k failure:
+/// Models the pattern that caused an Sv39 4K-page failure:
 /// a "staller" child module produces a busy signal, which propagates
 /// through a parent wire (with a comb transform) to a "controller"
 /// child module. The controller must see the staller's output in
@@ -12453,6 +12453,53 @@ fn function_var_reassign_not_comb_loop() {
     }
 }
 
+// Regression: a reorder-hazard block in a PHANTOM cross-block cycle must not be
+// misreported as a combinational loop. Block A reassigns x (hazard -> kept
+// atomic by the fast path) AND cross-references n; B writes n, reads m. `m=b`
+// does NOT depend on n, so the design is ACYCLIC, but A's conflated I/O (reads
+// n, writes m) + B forms a phantom cycle that the bipartite fast path rejects.
+// analyze_dependency must then fall through to the full-flatten + stable sort,
+// which unwraps A's statements and resolves the phantom (no false loop error).
+#[test]
+fn hazard_block_phantom_cycle_not_a_loop() {
+    let code = r#"
+    module Top (
+        a:   input  logic<32>,
+        b:   input  logic<32>,
+        p_o: output logic<32>,
+        q_o: output logic<32>,
+    ) {
+        var m: logic<32>;
+        var n: logic<32>;
+        always_comb {
+            var x: logic<32>;
+            x   = a;
+            p_o = x;
+            x   = b;
+            m   = x;   // m = b, independent of n
+            q_o = n;
+        }
+        always_comb {
+            n = m;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(5, 32, false));
+        sim.set("b", Value::new(7, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("p_o").unwrap(), Value::new(5, 32, false), "p_o=a");
+        assert_eq!(
+            sim.get("q_o").unwrap(),
+            Value::new(7, 32, false),
+            "q_o=n=m=b"
+        );
+    }
+}
+
 // Regression: sequential reassignment must survive analyze_dependency's
 // Phase-2 flatten AND reorder_by_level's leveling. Two always_comb blocks
 // cross-reference m/z so Phase-1 sees a phantom cycle and drops into Phase 2,
@@ -13818,7 +13865,7 @@ fn wide_result_from_narrow_operands() {
 // NOT be bailed by the aot_c backend — C's usual arithmetic conversions
 // promote the narrow operand to __uint128_t, so the op is computed in 128
 // bits. Over-bailing here forced the whole comb block to cranelift (a large
-// heliodor linux-boot regression). Carry into bit 64 distinguishes a correct
+// linux-boot regression). Carry into bit 64 distinguishes a correct
 // 128-bit add from a truncated 64-bit one.
 #[test]
 fn wide_result_one_operand_wide() {

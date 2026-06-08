@@ -682,6 +682,75 @@ pub(crate) fn analyze_dependency(
     });
 
     if has_expandable {
+        // FAST PATH: flatten only blocks WITHOUT an intra-block reorder hazard
+        // (a write to a comb var an earlier statement of the block read or
+        // wrote — WAR/WAW/reassignment); those keep their program order by
+        // staying atomic. A bipartite topological sort then interleaves the
+        // hazard-free statements across blocks into a backward-edge-free order
+        // that settles in ONE comb pass — the common case, where the full
+        // recursive flatten + stable_topo_sort below instead leaves a backward
+        // edge for cross-block no-prior-writer reads that doubles the passes.
+        //
+        // On failure fall through to that full-flatten path: an atomic hazard
+        // block's conflated I/O can form a phantom cross-block cycle that the
+        // bipartite sort rejects but the per-statement flatten resolves.
+        {
+            fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
+                let mut seen: HashSet<VarOffset> = HashSet::default();
+                for s in stmts {
+                    let mut ins = vec![];
+                    let mut outs = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut outs);
+                    ins.retain(|o| !o.is_ff());
+                    outs.retain(|o| !o.is_ff());
+                    if outs.iter().any(|o| seen.contains(o)) {
+                        return true;
+                    }
+                    seen.extend(ins);
+                    seen.extend(outs);
+                }
+                false
+            }
+            fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+                match stmt {
+                    ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                        if block_has_reorder_hazard(&cb.original_stmts) {
+                            out.push(ProtoStatement::CompiledBlock(cb));
+                        } else {
+                            for sub in cb.original_stmts {
+                                hazard_flatten(sub, out);
+                            }
+                        }
+                    }
+                    ProtoStatement::SequentialBlock(body) => {
+                        if block_has_reorder_hazard(&body) {
+                            out.push(ProtoStatement::SequentialBlock(body));
+                        } else {
+                            for sub in body {
+                                hazard_flatten(sub, out);
+                            }
+                        }
+                    }
+                    other => out.push(other),
+                }
+            }
+            let mut keys: Vec<usize> = table.keys().cloned().collect();
+            keys.sort();
+            let mut fast: HashMap<usize, ProtoStatement> = HashMap::default();
+            let mut id = 0usize;
+            for key in &keys {
+                let mut flat = Vec::new();
+                hazard_flatten(table[key].clone(), &mut flat);
+                for sub in flat {
+                    fast.insert(id, sub);
+                    id += 1;
+                }
+            }
+            if let Ok(sorted) = try_topo_sort(&fast) {
+                return Ok(sorted);
+            }
+        }
+
         // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
         // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
         // must be unwrapped too or they manufacture phantom edges.
@@ -1713,8 +1782,8 @@ fn compute_scc_iteration_depth(sorted: &[ProtoStatement]) -> usize {
         // Add 1 for the safety of propagation through the cycle head:
         // the reverse-scan counts "backward edges along longest path"
         // but the cycle head needs one extra iteration for its own
-        // stale-input read to settle.  Empirically matches heliodor
-        // (measured K_runtime = 4, algo without margin returns 3).
+        // stale-input read to settle.  Empirically a real design needed
+        // K_runtime = 4 where the marginless algo returns 3.
         let scc_max = delay.iter().copied().max().unwrap_or(0) + 1;
         if scc_max > max_depth {
             max_depth = scc_max;

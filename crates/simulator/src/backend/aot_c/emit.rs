@@ -1942,8 +1942,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     } else {
         // Each chunk → noinline static function so gcc isolates its
         // regalloc/spill domain.  -flto can still inline if it judges
-        // the cost worthwhile, but for the typical 800-stmt heliodor
-        // chunk it preserves the boundary.
+        // the cost worthwhile, but for a typical ~800-stmt chunk it
+        // preserves the boundary.
         for (i, cb) in chunk_bodies.iter().enumerate() {
             body.push_str(&format!(
                 "static __attribute__((noinline)) \
@@ -2672,8 +2672,8 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // sufficient because merge() with an unsigned sibling can
             // strip the bit even when both operands ARE signed.
             // We approximate by trusting expr_context.signed for the
-            // outer expression — heliodor's div/rem are all
-            // expr_context.signed when both operands are signed.
+            // outer expression — div/rem are expr_context.signed
+            // exactly when both operands are signed.
             let is_signed_divrem = expr_context.signed && matches!(op, Op::Div | Op::Rem);
             // Operands need pre-masking only where this op reads their high
             // bits. Add/Sub/Mul (low bits suffice; the result mask cleans the
@@ -2751,7 +2751,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 Op::Eq => Some("=="),
                 Op::Ne => Some("!="),
                 // EqWildcard / NeWildcard reduce to Eq / Ne in 2-state
-                // mode (heliodor uses 2-state — `mask_xz` is always 0
+                // mode (in 2-state `mask_xz` is always 0
                 // and the analyzer's eval becomes a plain payload diff,
                 // see analyzer/op.rs::eval_value_binary Op::EqWildcard).
                 // 4-state semantics would need an X-bit-aware emit; out
@@ -3241,7 +3241,7 @@ fn emit_var_load(var_offset: &VarOffset, width: usize) -> Option<String> {
         return None; // > 128 bit
     }
     if width == 0 {
-        // 0-width loads occur in heliodor (zero-width sentinels and
+        // 0-width loads occur (zero-width sentinels and
         // implicit-default reads); the interpreter treats them as
         // numeric 0, so we emit `(uint64_t)0` rather than allocating
         // a no-op load.
@@ -3272,7 +3272,7 @@ fn emit_value(value: &Value, width: usize) -> Option<String> {
     }
     match value {
         Value::U64(v) => {
-            // width=0 occurs in heliodor (zero-width sentinels and
+            // width=0 occurs (zero-width sentinels and
             // implicit-default constants); the interpreter treats them as
             // numeric zero, so emit 0ULL — except for the analyzer's encoding
             // of the unsized all-ones literal `'1` (`width: 0, payload != 0`):
@@ -3484,7 +3484,7 @@ mod tests {
 
     #[test]
     fn emit_value_width_zero_emits_zero() {
-        // width=0 Values appear in heliodor (zero-width sentinels);
+        // width=0 Values appear (zero-width sentinels);
         // emit them as 0ULL to mirror the interpreter's numeric-zero
         // treatment.
         let v = val_u64(0, 0);

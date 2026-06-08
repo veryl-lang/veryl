@@ -445,7 +445,7 @@ fn tb_readonly_cache_fill() {
     "#;
 
     // Test with multi-file processing: Cache in one file, test in another
-    // (like heliodor's src/cache/icache.veryl + tb/test_icache.veryl)
+    // (a Cache module in one file + its testbench in another)
     let cache_file = r#"
     pub module Cache (
         clk: input clock, rst: input reset,
