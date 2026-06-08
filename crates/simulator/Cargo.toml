@@ -49,3 +49,7 @@ profile = []
 [[bench]]
 name = "benchmark"
 harness = false
+
+[[bench]]
+name = "heliodor_boot"
+harness = false

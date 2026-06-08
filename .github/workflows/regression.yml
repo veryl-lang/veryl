@@ -109,6 +109,24 @@ jobs:
         run: ../../../target/release-verylup/veryl test --sim verilator
         working-directory: crates/std/veryl
 
+  heliodor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: "${{ runner.os }}-release"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Setup veryl
+        run: cargo build --profile release-verylup
+      - name: Test
+        run: ../../target/release-verylup/veryl test
+        working-directory: testcases/heliodor
+
   cocotb:
     runs-on: ubuntu-latest
     steps:
