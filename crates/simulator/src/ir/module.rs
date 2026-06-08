@@ -1782,8 +1782,8 @@ fn compute_scc_iteration_depth(sorted: &[ProtoStatement]) -> usize {
         // Add 1 for the safety of propagation through the cycle head:
         // the reverse-scan counts "backward edges along longest path"
         // but the cycle head needs one extra iteration for its own
-        // stale-input read to settle.  Empirically matches heliodor
-        // (measured K_runtime = 4, algo without margin returns 3).
+        // stale-input read to settle.  Empirically a real design needed
+        // K_runtime = 4 where the marginless algo returns 3.
         let scc_max = delay.iter().copied().max().unwrap_or(0) + 1;
         if scc_max > max_depth {
             max_depth = scc_max;
