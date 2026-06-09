@@ -50,11 +50,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        continue-on-error: true
+      - uses: ./.github/actions/setup-sccache
         with:
-          shared-key: "${{ runner.os }}-gen_sv"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rw_key_id: ${{ secrets.R2_CACHE_ACCESS_KEY_ID }}
+          rw_secret: ${{ secrets.R2_CACHE_SECRET_ACCESS_KEY }}
+          ro_key_id: ${{ secrets.R2_CACHE_RO_ACCESS_KEY_ID }}
+          ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
+          s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
+          bucket: ${{ secrets.R2_CACHE_BUCKET }}
       - name: Run gen_sv
         run: make gen_sv
       - name: Check gen_sv
@@ -77,11 +80,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-        continue-on-error: true
+      - uses: ./.github/actions/setup-sccache
         with:
-          shared-key: "${{ runner.os }}-clippy"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rw_key_id: ${{ secrets.R2_CACHE_ACCESS_KEY_ID }}
+          rw_secret: ${{ secrets.R2_CACHE_SECRET_ACCESS_KEY }}
+          ro_key_id: ${{ secrets.R2_CACHE_RO_ACCESS_KEY_ID }}
+          ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
+          s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
+          bucket: ${{ secrets.R2_CACHE_BUCKET }}
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
@@ -138,11 +144,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        continue-on-error: true
+      - uses: ./.github/actions/setup-sccache
         with:
-          shared-key: "${{ runner.os }}-release"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rw_key_id: ${{ secrets.R2_CACHE_ACCESS_KEY_ID }}
+          rw_secret: ${{ secrets.R2_CACHE_SECRET_ACCESS_KEY }}
+          ro_key_id: ${{ secrets.R2_CACHE_RO_ACCESS_KEY_ID }}
+          ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
+          s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
+          bucket: ${{ secrets.R2_CACHE_BUCKET }}
       - name: Setup veryl
         run:  cargo build --profile release-verylup
       - name: Setup verilator

@@ -27,6 +27,16 @@ inputs:
 runs:
   using: composite
   steps:
+    # Cache ~/.cargo (registry/git) on GitHub Actions — sccache covers compiler
+    # output but not dependency downloads. target/ is left to sccache (R2), so
+    # this GHA entry stays small. Forks read the master entry natively; only
+    # master saves.
+    - uses: Swatinem/rust-cache@v2
+      with:
+        cache-targets: false
+        shared-key: cargo
+        save-if: ${{ github.ref == 'refs/heads/master' }}
+
     # Pick the backend before installing sccache so the server starts with the
     # right config. master writes via S3; internal PRs (secrets present) read via
     # S3 with a read-only token; fork PRs (no secrets) read anonymously via the
