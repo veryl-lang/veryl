@@ -35,7 +35,19 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           targets: ${{ matrix.target }}
+      # Windows: sccache can't skip the final link and oversubscription doesn't
+      # help (link/proc-macro bound), so a warm rust-cache that restores the whole
+      # target/ is far faster here. Only the 2 Windows variants stay on the GHA
+      # cache (~3.4GB), which fits the 10GB cap now that everything else is on
+      # sccache/R2. Master saves; PRs (incl. forks) restore read-only.
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'Windows'
+        with:
+          shared-key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      # Everything else: sccache (codegen cache on R2) + oversubscription.
       - uses: ./.github/actions/setup-sccache
+        if: runner.os != 'Windows'
         with:
           rw_key_id: ${{ secrets.R2_CACHE_ACCESS_KEY_ID }}
           rw_secret: ${{ secrets.R2_CACHE_SECRET_ACCESS_KEY }}
@@ -43,8 +55,25 @@ jobs:
           ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
           s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
           bucket: ${{ secrets.R2_CACHE_BUCKET }}
+      # Windows: native shell (pwsh), warm rust-cache restores target/ so there is
+      # nothing to oversubscribe. Kept separate so Windows is not run under bash.
       - name: Run tests
+        if: runner.os == 'Windows'
         run: cargo test --locked --target ${{ matrix.target }}
+      # sccache jobs (non-Windows): the cache is hit-heavy on PRs and each hit is
+      # IO-bound (network fetch of the cached object), so oversubscribe cargo jobs
+      # (4x cores, the sweep knee) to overlap the fetches instead of serializing on
+      # the few runner cores. Skipped on master push (cold populate = real compiles,
+      # OOM risk).
+      - name: Run tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/master" ] || [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            if command -v nproc >/dev/null 2>&1; then CORES=$(nproc); else CORES=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4); fi
+            export CARGO_BUILD_JOBS=$((CORES * 4))
+          fi
+          cargo test --locked --target ${{ matrix.target }}
 
   gen_sv:
     runs-on: ubuntu-latest
