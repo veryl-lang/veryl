@@ -85,6 +85,9 @@ runs:
         fi
 
     - uses: mozilla-actions/sccache-action@v0.0.10
+      with:
+        # Rollout is done; suppress the per-run "N% hits ..." stat annotations.
+        disable_annotations: true
 
     # If the cache backend is unreachable, sccache's server startup fails and
     # would otherwise hard-fail every rustc call. Disable sccache instead so the
