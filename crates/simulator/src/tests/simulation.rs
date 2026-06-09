@@ -14296,3 +14296,45 @@ fn wide_dynamic_part_select_write() {
         }
     }
 }
+
+#[test]
+fn comb_block_cycle_war_preserves_blocking_order() {
+    // WAR: the forward read of `ext` in `o = a + ext` must not drag `o` past the
+    // later `a = in1`, so o captures a's earlier value 0, not in1.
+    let code = r#"
+    module Top (
+        in1: input  logic<32>,
+        y:   output logic<32>,
+        o:   output logic<32>,
+    ) {
+        var a:   logic<32>;
+        var ext: logic<32>;
+        always_comb {
+            a = 0;
+            o = a + ext;
+            a = in1;
+            y = a;
+        }
+        always_comb {
+            ext = y + 1;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("in1", Value::new(50, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // y = in1 = 50; ext = y + 1 = 51; o = a(==0) + ext = 51.
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(50, 32, false),
+            "y config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(51, 32, false),
+            "o config={config:?}"
+        );
+    }
+}
