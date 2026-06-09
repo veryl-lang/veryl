@@ -80,3 +80,38 @@ jobs:
           run: cargo codspeed run -p veryl-simulator
           mode: "walltime"
           token: ${{ secrets.CODSPEED_TOKEN }}
+
+  # heliodor compiler memory profile: parse + analyze of a large design (memory
+  # mode runs on a standard runner, unlike walltime).
+  compile-memory:
+    name: Run heliodor compile memory benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup rust toolchain, cache and cargo-codspeed binary
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+          cache: false
+          bins: cargo-codspeed
+
+      - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: "${{ runner.os }}-codspeed-compile"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # release-verylup-prof: lto=false (skips the slow fat-LTO link) and keeps
+      # debug symbols for allocation attribution.
+      - name: Build the benchmark target
+        run: cargo codspeed build -p veryl-tests --bench heliodor_compile --profile release-verylup-prof
+
+      - name: Run the benchmark
+        uses: CodSpeedHQ/action@v4
+        with:
+          run: cargo codspeed run -p veryl-tests
+          mode: "memory"
+          token: ${{ secrets.CODSPEED_TOKEN }}

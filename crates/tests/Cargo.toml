@@ -31,5 +31,9 @@ walkdir = {workspace = true}
 name = "benchmark"
 harness = false
 
+[[bench]]
+name = "heliodor_compile"
+harness = false
+
 [package.metadata.release]
 release = false
