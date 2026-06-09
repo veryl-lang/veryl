@@ -94,7 +94,10 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
-  std:
+  # Build the release-verylup veryl binary once and share it via an artifact;
+  # std / heliodor / cocotb consume it instead of each rebuilding (less redundant
+  # compile + fewer heavy jobs competing for runners).
+  build-veryl:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -107,8 +110,24 @@ jobs:
           ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
           s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
           bucket: ${{ secrets.R2_CACHE_BUCKET }}
-      - name: Setup veryl
-        run:  cargo build --profile release-verylup
+      - name: Build veryl
+        run: cargo build --profile release-verylup --bin veryl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: veryl-release-verylup
+          path: target/release-verylup/veryl
+          retention-days: 1
+
+  std:
+    needs: build-veryl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: veryl-release-verylup
+          path: target/release-verylup
+      - run: chmod +x target/release-verylup/veryl
       - name: Setup verilator
         uses: veryl-lang/setup-verilator@v2
       - name: Format check
@@ -122,41 +141,31 @@ jobs:
         working-directory: crates/std/veryl
 
   heliodor:
+    needs: build-veryl
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/setup-sccache
+      - uses: actions/download-artifact@v4
         with:
-          rw_key_id: ${{ secrets.R2_CACHE_ACCESS_KEY_ID }}
-          rw_secret: ${{ secrets.R2_CACHE_SECRET_ACCESS_KEY }}
-          ro_key_id: ${{ secrets.R2_CACHE_RO_ACCESS_KEY_ID }}
-          ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
-          s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
-          bucket: ${{ secrets.R2_CACHE_BUCKET }}
-      - name: Setup veryl
-        run: cargo build --profile release-verylup
+          name: veryl-release-verylup
+          path: target/release-verylup
+      - run: chmod +x target/release-verylup/veryl
       - name: Test
         run: ../../target/release-verylup/veryl test
         working-directory: testcases/heliodor
 
   cocotb:
+    needs: build-veryl
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/setup-sccache
+      - uses: actions/download-artifact@v4
         with:
-          rw_key_id: ${{ secrets.R2_CACHE_ACCESS_KEY_ID }}
-          rw_secret: ${{ secrets.R2_CACHE_SECRET_ACCESS_KEY }}
-          ro_key_id: ${{ secrets.R2_CACHE_RO_ACCESS_KEY_ID }}
-          ro_secret: ${{ secrets.R2_CACHE_RO_SECRET_ACCESS_KEY }}
-          s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
-          bucket: ${{ secrets.R2_CACHE_BUCKET }}
-      - name: Setup veryl
-        run:  cargo build --profile release-verylup
+          name: veryl-release-verylup
+          path: target/release-verylup
+      - run: chmod +x target/release-verylup/veryl
       - name: Setup verilator
         uses: veryl-lang/setup-verilator@v2
       - name: Test cocotb 1.9.2
