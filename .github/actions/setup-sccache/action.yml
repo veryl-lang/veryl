@@ -1,0 +1,84 @@
+name: setup-sccache
+description: >-
+  Configure sccache against the R2 cache: read/write (S3) on master, read-only
+  (S3) on internal PRs, anonymous read (Worker) on fork PRs. Falls back to no
+  cache (build proceeds, just slower) if the backend is unreachable.
+
+inputs:
+  rw_key_id:
+    description: R2 read/write access key id (used only on master push)
+    required: false
+  rw_secret:
+    description: R2 read/write secret access key
+    required: false
+  ro_key_id:
+    description: R2 read-only access key id (used on internal PRs)
+    required: false
+  ro_secret:
+    description: R2 read-only secret access key
+    required: false
+  s3_endpoint:
+    description: R2 S3 endpoint (https://<account>.r2.cloudflarestorage.com)
+    required: false
+  bucket:
+    description: R2 cache bucket name
+    required: false
+
+runs:
+  using: composite
+  steps:
+    # Pick the backend before installing sccache so the server starts with the
+    # right config. master writes via S3; internal PRs (secrets present) read via
+    # S3 with a read-only token; fork PRs (no secrets) read anonymously via the
+    # Worker. Only master ever writes — the poisoning mitigation.
+    - name: Configure sccache backend
+      shell: bash
+      env:
+        RW_KEY_ID: ${{ inputs.rw_key_id }}
+        RW_SECRET: ${{ inputs.rw_secret }}
+        RO_KEY_ID: ${{ inputs.ro_key_id }}
+        RO_SECRET: ${{ inputs.ro_secret }}
+        S3_ENDPOINT: ${{ inputs.s3_endpoint }}
+        BUCKET: ${{ inputs.bucket }}
+      run: |
+        {
+          echo "RUSTC_WRAPPER=sccache"
+          echo "CARGO_INCREMENTAL=0"
+          echo "SCCACHE_REGION=auto"
+          echo "SCCACHE_S3_KEY_PREFIX=sccache"
+        } >> "$GITHUB_ENV"
+        if [ "$GITHUB_REF" = "refs/heads/master" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+          echo "sccache backend: R2 S3 (read/write, master)"
+          {
+            echo "SCCACHE_BUCKET=$BUCKET"
+            echo "SCCACHE_ENDPOINT=$S3_ENDPOINT"
+            echo "AWS_ACCESS_KEY_ID=$RW_KEY_ID"
+            echo "AWS_SECRET_ACCESS_KEY=$RW_SECRET"
+          } >> "$GITHUB_ENV"
+        elif [ -n "$RO_KEY_ID" ]; then
+          echo "sccache backend: R2 S3 (read-only, internal PR)"
+          {
+            echo "SCCACHE_BUCKET=$BUCKET"
+            echo "SCCACHE_ENDPOINT=$S3_ENDPOINT"
+            echo "AWS_ACCESS_KEY_ID=$RO_KEY_ID"
+            echo "AWS_SECRET_ACCESS_KEY=$RO_SECRET"
+          } >> "$GITHUB_ENV"
+        else
+          echo "sccache backend: Worker (anonymous read, fork PR)"
+          # Bucket name must differ from the Worker subdomain (veryl-sccache),
+          # else the S3 client strips it as a vhost label and hits a dead host.
+          {
+            echo "SCCACHE_BUCKET=cache"
+            echo "SCCACHE_ENDPOINT=https://veryl-sccache.veryl-lang.workers.dev"
+            echo "SCCACHE_S3_NO_CREDENTIALS=1"
+          } >> "$GITHUB_ENV"
+        fi
+
+    - uses: mozilla-actions/sccache-action@v0.0.10
+
+    # If the cache backend is unreachable, sccache's server startup fails and
+    # would otherwise hard-fail every rustc call. Disable sccache instead so the
+    # build still completes (cold, just slower).
+    - name: Start sccache (disable on unreachable backend)
+      shell: bash
+      run: sccache --start-server 2>/dev/null || echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
