@@ -44,41 +44,39 @@ jobs:
           mode: "simulation"
           token: ${{ secrets.CODSPEED_TOKEN }}
 
-  # heliodor 1-core Linux boot benchmark (CodSpeed walltime).
-  #
-  # Disabled until CodSpeed Macro Runners are available for veryl-lang: walltime
-  # only runs on Macro Runners (`runs-on: codspeed-macro`, ARM64), not on standard
-  # GitHub-hosted runners. Uncomment to enable; the bench needs a C compiler (cc
-  # backend). Run locally with:
-  #   cargo bench -p veryl-simulator --bench heliodor_boot
-  #
-  # boot-benchmark:
-  #   name: Run heliodor boot benchmark (walltime)
-  #   runs-on: codspeed-macro
-  #   steps:
-  #     - uses: actions/checkout@v6
-  #       with:
-  #         submodules: recursive
-  #
-  #     - name: Setup rust toolchain, cache and cargo-codspeed binary
-  #       uses: moonrepo/setup-rust@v1
-  #       with:
-  #         channel: stable
-  #         cache: false
-  #         bins: cargo-codspeed
-  #
-  #     - uses: Swatinem/rust-cache@v2
-  #       continue-on-error: true
-  #       with:
-  #         shared-key: "${{ runner.os }}-${{ runner.arch }}-codspeed-boot"
-  #         save-if: ${{ github.ref == 'refs/heads/master' }}
-  #
-  #     - name: Build the benchmark target
-  #       run: cargo codspeed build -p veryl-simulator --bench heliodor_boot
-  #
-  #     - name: Run the benchmark
-  #       uses: CodSpeedHQ/action@v4
-  #       with:
-  #         run: cargo codspeed run -p veryl-simulator
-  #         mode: "walltime"
-  #         token: ${{ secrets.CODSPEED_TOKEN }}
+  # heliodor 1-core Linux boot benchmark (CodSpeed walltime). Runs on a CodSpeed
+  # Macro Runner (codspeed-macro, ARM64) — walltime is not available on standard
+  # GitHub-hosted runners. Needs a C compiler (the simulator cc backend).
+  # Run locally with: cargo bench -p veryl-simulator --bench heliodor_boot
+  boot-benchmark:
+    name: Run heliodor boot benchmark (walltime)
+    runs-on: codspeed-macro
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup rust toolchain, cache and cargo-codspeed binary
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+          cache: false
+          bins: cargo-codspeed
+
+      - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: "${{ runner.os }}-${{ runner.arch }}-codspeed-boot"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # release-verylup (lto=false) avoids the slow fat-LTO link the default
+      # `bench` profile forces; boot-only, so the `benchmarks` job keeps its baseline.
+      - name: Build the benchmark target
+        run: cargo codspeed build -p veryl-simulator --bench heliodor_boot --profile release-verylup
+
+      - name: Run the benchmark
+        uses: CodSpeedHQ/action@v4
+        with:
+          run: cargo codspeed run -p veryl-simulator
+          mode: "walltime"
+          token: ${{ secrets.CODSPEED_TOKEN }}

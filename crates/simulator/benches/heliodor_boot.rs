@@ -1,10 +1,6 @@
-// CodSpeed walltime benchmark: 1-core Linux boot of the heliodor RV64GC SoC.
-//
-// Drives the `test_soc_linux_boot` native testbench (heliodor submodule under
-// testcases/heliodor) on the in-tree simulator, measuring the full boot to SBI
-// shutdown. It also guards correctness: the run must pass.
-//
-// heliodor is a git submodule; the benchmark is skipped when it isn't checked out.
+// CodSpeed walltime benchmark: a fixed BOOT_CYCLES slice of the heliodor RV64GC
+// 1-core Linux boot, via the `test_soc_linux_boot` native testbench. Skipped when
+// the heliodor submodule (testcases/heliodor) isn't checked out.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::path::{Path, PathBuf};
@@ -15,9 +11,21 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table;
 use veryl_simulator::ir::{Config, build_ir};
-use veryl_simulator::testbench::{TestResult, run_native_testbench};
+use veryl_simulator::testbench::{TestResult, run_native_testbench_capped};
 
 const TOP: &str = "test_soc_linux_boot";
+
+// Fixed clock-cycle slice, large enough that stepping (~0.97 us/cycle) dominates
+// the ~274 ms per-run fixed cost (Simulator::new + $readmemh + reset): ~78% at 1M.
+// Override locally via VERYL_HELIODOR_BOOT_CYCLES.
+const BOOT_CYCLES: u64 = 1_000_000;
+
+fn boot_cycles() -> u64 {
+    std::env::var("VERYL_HELIODOR_BOOT_CYCLES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(BOOT_CYCLES)
+}
 
 // Keep only error-severity diagnostics; heliodor emits warnings (e.g.
 // missing_reset_statement on memory arrays) that the real `veryl build` tolerates.
@@ -91,9 +99,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let top = resource_table::get_str_id(TOP.to_string()).expect("top module not found");
 
     let mut group = c.benchmark_group("heliodor");
-    // One iteration runs the whole boot (a single long run), so cap the sample
-    // count at the criterion minimum to keep a local `cargo bench` bounded; under
-    // `cargo codspeed` the CodSpeed runner controls the measurement.
+    // Only affect a local `cargo bench`; `cargo codspeed` ignores them.
     group.sample_size(10);
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(60));
@@ -102,8 +108,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             || build_ir(&air_ir, top, &config).expect("build_ir failed"),
             |sim_ir| {
                 let result =
-                    run_native_testbench(sim_ir, None, TOP.to_string()).expect("testbench error");
-                assert_eq!(result, TestResult::Pass, "heliodor linux boot did not pass");
+                    run_native_testbench_capped(sim_ir, None, TOP.to_string(), Some(boot_cycles()))
+                        .expect("testbench error");
+                assert_eq!(result, TestResult::Pass, "heliodor boot slice did not pass");
             },
             BatchSize::PerIteration,
         )
