@@ -10475,21 +10475,32 @@ fn invalid_select() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
-    // Multi-element-width elements aren't expanded (a flat literal decomposition
-    // would flatten/mis-pair sub-elements); the range assign is declined rather
-    // than silently mis-driven, so it surfaces as unassigned (#9 review).
+    // Multi-dim follow-up: an element with multi-dim-packed width is expanded
+    // element-wise too (each covered element gets its scalar literal).
     let code = r#"
     module ModuleA (
         o: output logic<10, 10> [4],
     ) {
-        assign o[0+:2] = '{'{10'd1, 10'd2}, '{10'd3, 10'd4}};
-        assign o[2]    = '{10'd0, 10'd0};
-        assign o[3]    = '{10'd0, 10'd0};
+        assign o[0+:2] = '{100, 200};
+        assign o[2+:2] = '{300, 400};
     }
     "#;
 
     let errors = analyze(code);
-    assert!(!errors.is_empty());
+    assert!(errors.is_empty());
+
+    // Multi-dim follow-up: a range over the outer dim of a 2-D unpacked array
+    // expands the nested literal per outer element (no false unassign).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [2, 2],
+    ) {
+        assign o[0+:2] = '{'{8'd1, 8'd2}, '{8'd3, 8'd4}};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleA {

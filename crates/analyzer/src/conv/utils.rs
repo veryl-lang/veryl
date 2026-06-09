@@ -599,37 +599,66 @@ pub fn eval_array_range_assign(
         return Ok(Some(vec![]));
     }
 
-    // The flat pairing below only models scalar elements; decline multi-dim /
-    // multi-element-width ones so a structured literal isn't mis-decomposed.
-    let elem_type = dsts[0].comptime.r#type.clone();
-    if elem_type.array.dims() != 0 || elem_type.width().dims() > 1 {
-        return Ok(None);
-    }
-
-    // Pair each destination with the matching literal item (both ascending order).
+    // Type-check the RHS against the full sliced type ([n] prepended to the
+    // element's own dims) so element widths / clock-domains are validated.
     let n = dsts.len();
+    let elem_type = dsts[0].comptime.r#type.clone();
     let mut sub_type = elem_type.clone();
-    sub_type.array = Shape::new(vec![Some(n)]);
+    let mut dims = vec![Some(n)];
+    dims.extend(elem_type.array.iter().copied());
+    sub_type.array = Shape::new(dims);
     let (rhs_comptime, mut rhs_expr) = eval_expr(context, Some(sub_type), rhs, false)?;
 
-    let array_shape = [Some(n)];
-    let items = eval_array_literal(
-        context,
-        Some(ShapeRef::new(&array_shape)),
-        Some(elem_type.width()),
-        &mut rhs_expr,
-    )?;
-    // Non-literal RHS, or any unexpected element count, isn't safely expandable here.
-    let Some(items) = items else {
-        return Ok(Some(vec![]));
+    // Split the RHS one dim deep and pair each outer item with one element dst;
+    // `eval_assign_statement` then recurses the element's inner dims. (A flat
+    // `eval_array_literal` would recurse past the outer dim and mis-decompose a
+    // sub-array/multi-dim element.) A non-literal RHS has no per-element item to
+    // pair, so defer to the scalar assign path.
+    let ir::Expression::ArrayLiteral(items, _) = &mut rhs_expr else {
+        return Ok(None);
     };
-    if items.len() != n {
+    let mut outer: Vec<ir::Expression> = Vec::new();
+    let mut default: Option<ir::Expression> = None;
+    for item in items.iter_mut() {
+        match item {
+            ir::ArrayLiteralItem::Value(expr, repeat) => {
+                let count = if let Some(repeat) = repeat {
+                    eval_repeat(context, repeat)
+                        .and_then(|v| v.to_usize())
+                        .unwrap_or(0)
+                } else {
+                    1
+                };
+                for _ in 0..count {
+                    outer.push(expr.as_ref().clone());
+                }
+            }
+            ir::ArrayLiteralItem::Defaul(expr) => {
+                if default.is_some() {
+                    context.insert_error(AnalyzerError::multiple_default(
+                        MultipleDefaultKind::ArrayLiteral,
+                        "default",
+                        &token,
+                    ));
+                    return Ok(Some(vec![]));
+                }
+                default = Some(expr.as_ref().clone());
+            }
+        }
+    }
+    if let Some(def) = default {
+        while outer.len() < n {
+            outer.push(def.clone());
+        }
+    }
+    // Unexpected element count: let normal type checking report the mismatch.
+    if outer.len() != n {
         return Ok(Some(vec![]));
     }
 
     let mut statements = vec![];
-    for (mut dst, item) in dsts.into_iter().zip(items) {
-        let mut expr = (rhs_comptime.clone(), item.expr);
+    for (mut dst, sub_expr) in dsts.into_iter().zip(outer) {
+        let mut expr = (rhs_comptime.clone(), sub_expr);
         statements.extend(eval_assign_statement(context, &mut dst, &mut expr, token)?);
     }
     Ok(Some(statements))

@@ -157,12 +157,26 @@ impl VarPathSelect {
 
         let width_select = VarSelect::default();
 
-        let array_shape = base_comptime.r#type.array.clone();
-        (beg..=end)
+        // `beg..=end` are flat indices over the full element space. Collapse them
+        // to OUTER-element indices (divide out the un-selected inner array dims)
+        // and decode against the selected outer dims only, so each dst's index
+        // matches its inner-drained `comptime.r#type` — required for multi-dim
+        // arrays (a 1-D slice is unchanged: inner_total == 1).
+        let d = array_select.dimension();
+        let full_shape = base_comptime.r#type.array.clone();
+        let outer_dims: Vec<Option<usize>> = full_shape.iter().take(d).copied().collect();
+        let outer_shape = ShapeRef::new(&outer_dims);
+        let inner_total = full_shape
+            .iter()
+            .skip(d)
+            .map(|x| x.unwrap_or(1))
+            .product::<usize>()
+            .max(1);
+        (beg / inner_total..=end / inner_total)
             .map(|i| AssignDestination {
                 id,
                 path: path.clone(),
-                index: VarIndex::from_index(i, &array_shape),
+                index: VarIndex::from_index(i, outer_shape),
                 select: width_select.clone(),
                 comptime: comptime.clone(),
                 token,
