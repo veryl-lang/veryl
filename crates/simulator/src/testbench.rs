@@ -361,7 +361,19 @@ pub fn run_native_testbench(
     dump: Option<WaveDumper>,
     module_name: String,
 ) -> Result<TestResult, SimulatorError> {
+    run_native_testbench_capped(ir, dump, module_name, None)
+}
+
+/// Like [`run_native_testbench`], but stops after `max_cycles` clock cycles
+/// (`None` = run to completion). A capped run returns [`TestResult::Pass`].
+pub fn run_native_testbench_capped(
+    ir: Ir,
+    dump: Option<WaveDumper>,
+    module_name: String,
+    max_cycles: Option<u64>,
+) -> Result<TestResult, SimulatorError> {
     let mut sim = Simulator::new(ir, dump);
+    sim.cycle_limit = max_cycles;
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
@@ -482,6 +494,13 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                     sim.dump_variables();
                 }
                 sim.time += low_time;
+                // Stop once the optional clock-cycle cap is reached.
+                if let Some(limit) = sim.cycle_limit {
+                    sim.cycle_count += 1;
+                    if sim.cycle_count >= limit {
+                        return ExecResult::Finished;
+                    }
+                }
             }
             ExecResult::Continue
         }

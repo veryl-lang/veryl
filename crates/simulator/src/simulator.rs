@@ -56,6 +56,9 @@ pub struct Simulator {
     /// automatically when the cycle counter crosses a logarithmic
     /// checkpoint (doubling cadence, capped at 1 M cycles).
     pub write_log_diag: WriteLogDiag,
+    /// Stop the testbench after this many clock cycles; `None` runs to completion.
+    pub cycle_limit: Option<u64>,
+    pub cycle_count: u64,
 }
 
 #[derive(Default)]
@@ -116,6 +119,8 @@ impl Simulator {
                 next_print_cycle: 1_000_000,
                 ..Default::default()
             },
+            cycle_limit: None,
+            cycle_count: 0,
         };
 
         if let Some(dumper) = dump {
