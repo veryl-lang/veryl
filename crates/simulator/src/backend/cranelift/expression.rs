@@ -1421,25 +1421,11 @@ impl ProtoExpression {
                                 return Some((payload, Some(context.zero)));
                             }
                             (None, None) => {
-                                // 2-state mode: if y is a literal without X/Z,
-                                // wildcard comparison is equivalent to Eq/Ne
-                                let y_has_no_xz = match y.as_ref() {
-                                    ProtoExpression::Value {
-                                        value: Value::U64(v),
-                                        ..
-                                    } => v.mask_xz == 0,
-                                    _ => false,
-                                };
-                                if y_has_no_xz {
-                                    let cc = match op {
-                                        Op::EqWildcard => IntCC::Equal,
-                                        _ => IntCC::NotEqual,
-                                    };
-                                    let ret = builder.ins().icmp(cc, x_payload, y_payload);
-                                    let ret = builder.ins().uextend(I64, ret);
-                                    return Some((ret, None));
-                                }
-                                return None;
+                                // No x/z bits on either operand: the wildcard
+                                // don't-care set is empty, so `==?`/`!=?` reduce
+                                // to plain `==`/`!=` even for a non-literal RHS.
+                                // `payload` is the icmp result from the op match.
+                                return Some((payload, None));
                             }
                         };
 

@@ -655,7 +655,8 @@ impl Simulator {
 
         if aot_bytes != cr_bytes {
             eprintln!(
-                "[aot_event_validate] DIVERGENCE event={:?}: committed-FF bytes differ (aot {} bytes, cranelift {} bytes)",
+                "[aot_event_validate] DIVERGENCE module={} event={:?}: committed-FF bytes differ (aot {} bytes, cranelift {} bytes)",
+                self.ir.name,
                 self.last_event,
                 aot_bytes.len(),
                 cr_bytes.len(),

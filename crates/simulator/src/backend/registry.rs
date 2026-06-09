@@ -136,19 +136,86 @@ impl BackendRegistry {
         out: &mut Vec<ChunkOutput>,
     ) {
         if group.len() <= max_chunk_size {
-            match self.try_compile_chunk(ctx, &group) {
-                Some(artifact) => out.push(ChunkOutput::Compiled(artifact)),
-                None => out.push(ChunkOutput::Interpreted(group)),
-            }
+            self.compile_group_bisect(ctx, group, out);
         } else {
             for chunk in group.chunks(max_chunk_size) {
-                let chunk = chunk.to_vec();
-                match self.try_compile_chunk(ctx, &chunk) {
-                    Some(artifact) => out.push(ChunkOutput::Compiled(artifact)),
-                    None => out.push(ChunkOutput::Interpreted(chunk)),
-                }
+                self.compile_group_bisect(ctx, chunk.to_vec(), out);
             }
         }
+    }
+
+    /// Compile a jittable group; on a `compile_chunk` coverage bail (some
+    /// statement's emitter returned `None`), bisect and retry the halves rather
+    /// than dropping the WHOLE group to the interpreter — otherwise one stray
+    /// emitter gap turns a whole large comb interpreted. Each sub-chunk reloads
+    /// its inputs (per-chunk `load_cache`, no cross-group store elision), so the
+    /// split is value-preserving. Only fires on failure.
+    fn compile_group_bisect(
+        &mut self,
+        ctx: &CompileCtx,
+        group: Vec<ProtoStatement>,
+        out: &mut Vec<ChunkOutput>,
+    ) {
+        if group.is_empty() {
+            return;
+        }
+        if let Some(artifact) = self.try_compile_chunk(ctx, &group) {
+            out.push(ChunkOutput::Compiled(artifact));
+            return;
+        }
+        if group.len() == 1 {
+            // Genuinely un-buildable single statement: interpret just it.
+            if std::env::var("VERYL_CHUNK_BISECT_DIAG").as_deref() == Ok("1") {
+                eprintln!(
+                    "[chunk_bisect] isolated uncovered stmt: {}",
+                    classify_proto_stmt(&group[0])
+                );
+            }
+            out.push(ChunkOutput::Interpreted(group));
+            return;
+        }
+        let mut group = group;
+        let right = group.split_off(group.len() / 2);
+        self.compile_group_bisect(ctx, group, out);
+        self.compile_group_bisect(ctx, right, out);
+    }
+}
+
+/// One-line classification of a `ProtoStatement` for `VERYL_CHUNK_BISECT_DIAG`:
+/// names the construct (and width / dynamic-select dims) a chunk backend
+/// declined to emit, so emitter gaps can be prioritised by hotness.
+fn classify_proto_stmt(s: &ProtoStatement) -> String {
+    match s {
+        ProtoStatement::Assign(a) => {
+            let dynsel = a.dynamic_select.as_ref().map(|d| {
+                format!(
+                    " dynsel(elem={} n={} full={})",
+                    d.elem_width,
+                    d.num_elements,
+                    d.elem_width * d.num_elements
+                )
+            });
+            format!(
+                "Assign dst_width={}{}{}",
+                a.dst_width,
+                if a.select.is_some() { " select" } else { "" },
+                dynsel.unwrap_or_default(),
+            )
+        }
+        ProtoStatement::AssignDynamic(a) => {
+            let full = a.dst_width * a.dst_num_elements;
+            format!(
+                "AssignDynamic dst_width={} num_elems={} full={}",
+                a.dst_width, a.dst_num_elements, full
+            )
+        }
+        ProtoStatement::If(_) => "If".to_string(),
+        ProtoStatement::For(_) => "For".to_string(),
+        ProtoStatement::Break => "Break".to_string(),
+        ProtoStatement::SystemFunctionCall(_) => "SysFn".to_string(),
+        ProtoStatement::CompiledBlock(_) => "CompiledBlock".to_string(),
+        ProtoStatement::SequentialBlock(b) => format!("SequentialBlock(len={})", b.len()),
+        ProtoStatement::TbMethodCall { .. } => "TbMethodCall".to_string(),
     }
 }
 
