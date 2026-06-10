@@ -1548,6 +1548,23 @@ fn multiple_assignment() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        struct struct_a {
+            a: logic<2>,
+        }
+        var _a: struct_a<2, 2>;
+        for i in 0..2 :g {
+            always_comb {
+            _a[i] = '0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
