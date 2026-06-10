@@ -3915,6 +3915,36 @@ fn array_range_assign() {
 }
 
 #[test]
+fn array_range_assign_descending() {
+    // A descending `-:` slice reaching index 0 covers all four elements; the
+    // literal maps by ascending element index (matches Verilator). Regression
+    // guard for the `-:` low-bound off-by-one.
+    let code = r#"
+            module Top (
+                sel: input  logic<2>,
+                o  : output logic<8>,
+            ) {
+                var arr: logic<8> [4];
+                assign arr[3-:4] = '{8'd10, 8'd20, 8'd30, 8'd40};
+                assign o         = arr[sel];
+            }
+            "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (sel, expected) in [(0u64, 10u64), (1, 20), (2, 30), (3, 40)] {
+            sim.set("sel", Value::new(sel, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected, 8, false),
+                "sel={sel} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn assert_pass() {
     let code = r#"
     module Top (

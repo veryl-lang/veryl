@@ -258,6 +258,14 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         let dst: VarPathSelect = Conv::conv(context, expr)?;
                         let src: VarPathSelect = Conv::conv(context, expr)?;
 
+                        // An op-assign to an array range slice has no valid lowering and
+                        // emits illegal SystemVerilog; reject it, don't silently drop it.
+                        if dst.is_array_range(context) {
+                            let _ = eval_expr(context, None, &x.assignment.expression, false);
+                            context.insert_error(AnalyzerError::invalid_range_assign(&token));
+                            return Ok(ir::StatementBlock::default());
+                        }
+
                         if let Some(dst) = dst.to_assign_destination(context, false)
                             && let Some(src) = src.to_expression(context)
                         {

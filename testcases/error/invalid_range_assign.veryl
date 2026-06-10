@@ -1,0 +1,6 @@
+module invalid_range_assign (
+    i_n: input  logic<2>    ,
+    o  : output logic<8> [4],
+) {
+    assign o[i_n+:2] = '{8'd1, 8'd2};
+}

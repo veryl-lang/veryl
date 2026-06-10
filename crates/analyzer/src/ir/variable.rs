@@ -48,9 +48,8 @@ impl VarPathSelect {
 
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             if array_select.is_range() {
-                // Validate a range over the array dims (e.g. `o[2:0]`): a wrong-order
-                // (descending) slice can't lower to valid SystemVerilog on an
-                // ascending unpacked array, so reject it rather than silently drop it.
+                // Report a wrong-order / out-of-range slice (e.g. `o[2:0]`); it can't
+                // lower to valid SystemVerilog on an ascending unpacked array.
                 array_select.eval_comptime(context, &comptime.r#type, true);
             }
             comptime.r#type.array.drain(0..array_select.dimension());
@@ -137,6 +136,22 @@ impl VarPathSelect {
                 .collect();
         }
 
+        // The expansion needs fixed element indices, so the range must be constant
+        // (is_const_with_range) and in-range/ascending (eval_comptime catches the
+        // rest). Otherwise we'd fabricate/wrap indices and miscompile, so reject
+        // here — guarding every LHS path (assign, connect, instance).
+        let valid = array_select.is_const_with_range()
+            && (ignore_error
+                || array_select
+                    .eval_comptime(context, &base_comptime.r#type, true)
+                    .is_some());
+        if !valid {
+            if !ignore_error {
+                context.insert_error(AnalyzerError::invalid_range_assign(&token));
+            }
+            return vec![];
+        }
+
         let Some((beg, end)) = array_select.eval_value(context, &base_comptime.r#type, true) else {
             return vec![];
         };
@@ -157,11 +172,9 @@ impl VarPathSelect {
 
         let width_select = VarSelect::default();
 
-        // `beg..=end` are flat indices over the full element space. Collapse them
-        // to OUTER-element indices (divide out the un-selected inner array dims)
-        // and decode against the selected outer dims only, so each dst's index
-        // matches its inner-drained `comptime.r#type` — required for multi-dim
-        // arrays (a 1-D slice is unchanged: inner_total == 1).
+        // `beg..=end` are flat element indices; collapse to OUTER indices (divide out
+        // the un-selected inner dims) so each dst matches its inner-drained type
+        // (a 1-D slice is unchanged: inner_total == 1).
         let d = array_select.dimension();
         let full_shape = base_comptime.r#type.array.clone();
         let outer_dims: Vec<Option<usize>> = full_shape.iter().take(d).copied().collect();
@@ -182,6 +195,19 @@ impl VarPathSelect {
                 token,
             })
             .collect()
+    }
+
+    /// Whether this LHS is an array *range* select (e.g. `o[0+:2]`). Only a plain
+    /// `=` expands such a slice; other contexts (op-assign) must reject it.
+    pub fn is_array_range(&self, context: &Context) -> bool {
+        let (path, select, _) = self.clone().into();
+        let Some((_, mut comptime)) = context.find_path(&path) else {
+            return false;
+        };
+        if let Some(part_select) = &comptime.part_select {
+            comptime.r#type = part_select.base.clone();
+        }
+        select.split(comptime.r#type.array.dims()).0.is_range()
     }
 
     pub fn to_expression(self, context: &Context) -> Option<Expression> {
@@ -446,7 +472,9 @@ impl VarSelectOp {
         let (beg, end, swap) = match self {
             VarSelectOp::Colon => (beg, end, false),
             VarSelectOp::PlusColon => ((beg + end).saturating_sub(1), beg, is_array),
-            VarSelectOp::MinusColon => (beg, beg.saturating_sub(end) + 1, is_array),
+            // low = beg - width + 1; compute as (beg + 1) - width so a slice that
+            // reaches index 0 (beg + 1 == width) isn't clamped to 1 by the subtraction.
+            VarSelectOp::MinusColon => (beg, (beg + 1).saturating_sub(end), is_array),
             VarSelectOp::Step => ((beg * end + end).saturating_sub(1), beg * end, is_array),
         };
         if swap { (end, beg) } else { (beg, end) }
@@ -505,6 +533,12 @@ impl VarSelect {
         }
 
         ret
+    }
+
+    /// Like `is_const` but also requires the range bound (`+:`/`-:`/`:`/`step` end)
+    /// to be constant — a dynamic bound can't expand to fixed element indices.
+    pub fn is_const_with_range(&self) -> bool {
+        self.is_const() && self.1.as_ref().is_none_or(|(_, e)| e.comptime().is_const)
     }
 
     pub fn to_index(self) -> VarIndex {
@@ -573,6 +607,11 @@ impl VarSelect {
                 let (beg, end) = if let Some((op, x)) = &self.1 {
                     range.set_end(x.token_range());
                     let end = x.eval_value(context)?.to_usize().unwrap_or(0);
+                    // A `-:` width exceeding beg+1 underflows below index 0; `eval_value`
+                    // would saturate (hide) the low bound, so reject it as out-of-range.
+                    if matches!(op, VarSelectOp::MinusColon) && end > beg + 1 {
+                        return None;
+                    }
                     op.eval_value(beg, end, is_array)
                 } else {
                     (beg, beg)

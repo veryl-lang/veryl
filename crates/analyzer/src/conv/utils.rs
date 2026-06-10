@@ -568,10 +568,10 @@ pub fn eval_assign_statement(
     Ok(ret)
 }
 
-/// Expand an array-range assignment LHS (`o[0+:N] = '{...}`) over scalar elements
-/// into one assignment per covered element, like the connect path. Returns `None`
-/// when the LHS isn't such a range (caller uses the scalar path). Multi-dim /
-/// multi-element-width elements and non-literal RHS are declined.
+/// Expand an array-range assignment LHS (`o[0+:N] = '{...}`) into one assignment
+/// per covered element (recursing inner dims for multi-dim arrays). Returns `None`
+/// to defer to the scalar path when the LHS isn't a range or the RHS isn't an array
+/// literal; an invalid slice is rejected.
 pub fn eval_array_range_assign(
     context: &mut Context,
     lhs: &VarPathSelect,
@@ -590,17 +590,15 @@ pub fn eval_array_range_assign(
         return Ok(None);
     }
 
-    // Validate the range here (wrong-order / out-of-range slices are rejected).
-    array_select.eval_comptime(context, &comptime.r#type, true);
     let dsts = lhs.clone().to_assign_destinations(context, false);
     if dsts.is_empty() {
-        // Invalid range (already reported); still type-check the RHS.
-        let _ = eval_expr(context, None, rhs, false)?;
+        // Invalid range (to_assign_destinations validates and reports it). Type-check
+        // the RHS, but with no `?`: a propagated error would roll back that diagnostic.
+        let _ = eval_expr(context, None, rhs, false);
         return Ok(Some(vec![]));
     }
 
-    // Type-check the RHS against the full sliced type ([n] prepended to the
-    // element's own dims) so element widths / clock-domains are validated.
+    // Type-check the RHS against the slice type ([n] prepended to the element dims).
     let n = dsts.len();
     let elem_type = dsts[0].comptime.r#type.clone();
     let mut sub_type = elem_type.clone();
@@ -609,23 +607,28 @@ pub fn eval_array_range_assign(
     sub_type.array = Shape::new(dims);
     let (rhs_comptime, mut rhs_expr) = eval_expr(context, Some(sub_type), rhs, false)?;
 
-    // Split the RHS one dim deep and pair each outer item with one element dst;
-    // `eval_assign_statement` then recurses the element's inner dims. (A flat
-    // `eval_array_literal` would recurse past the outer dim and mis-decompose a
-    // sub-array/multi-dim element.) A non-literal RHS has no per-element item to
-    // pair, so defer to the scalar assign path.
+    // Pair each outer literal item with one element dst; `eval_assign_statement`
+    // recurses the element's inner dims. (A flat `eval_array_literal` would over-
+    // recurse and mis-decompose a multi-dim element.) Non-literal RHS: defer.
     let ir::Expression::ArrayLiteral(items, _) = &mut rhs_expr else {
         return Ok(None);
     };
     let mut outer: Vec<ir::Expression> = Vec::new();
     let mut default: Option<ir::Expression> = None;
+    let mut repeat_unresolved = false;
     for item in items.iter_mut() {
         match item {
             ir::ArrayLiteralItem::Value(expr, repeat) => {
                 let count = if let Some(repeat) = repeat {
-                    eval_repeat(context, repeat)
-                        .and_then(|v| v.to_usize())
-                        .unwrap_or(0)
+                    match eval_repeat(context, repeat).and_then(|v| v.to_usize()) {
+                        Some(count) => count,
+                        // Non-const repeat: already reported by eval_repeat. Skip the
+                        // count below so we don't pile on a spurious dimension error.
+                        None => {
+                            repeat_unresolved = true;
+                            0
+                        }
+                    }
                 } else {
                     1
                 };
@@ -651,8 +654,16 @@ pub fn eval_array_range_assign(
             outer.push(def.clone());
         }
     }
-    // Unexpected element count: let normal type checking report the mismatch.
-    if outer.len() != n {
+    // The one-level walk bypasses `eval_array_literal`'s count check, so verify the
+    // item count here (else a mismatch is silently dropped and emits illegal SV).
+    if outer.len() != n && !repeat_unresolved {
+        context.insert_error(AnalyzerError::mismatch_type(
+            MismatchTypeKind::ArrayDimension {
+                expected: n,
+                actual: outer.len(),
+            },
+            &token,
+        ));
         return Ok(Some(vec![]));
     }
 
