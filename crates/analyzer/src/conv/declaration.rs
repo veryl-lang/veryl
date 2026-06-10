@@ -1449,8 +1449,14 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                         let path = VarPath::new(name);
                         let token: TokenRange = port.identifier.as_ref().into();
                         if let Some((dst_type, clock_domain)) = component.port_types.get(&path) {
+                            context.in_inst_port = component
+                                .ports
+                                .get(&path)
+                                .and_then(|id| component.variables.get(id))
+                                .is_some_and(|v| v.kind == ir::VarKind::Input);
                             let connects =
                                 get_port_connects(context, component, port, &path, dst_type, token);
+                            context.in_inst_port = false;
                             let Ok(connects) = connects else {
                                 continue;
                             };

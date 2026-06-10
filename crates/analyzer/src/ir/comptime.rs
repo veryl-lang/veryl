@@ -529,6 +529,23 @@ impl Type {
         Some(self.kind.width()? * self.width.total()?)
     }
 
+    /// An unevaluated width (generics) counts as single-bit to avoid
+    /// false positives.
+    pub fn is_single_bit_plain(&self) -> bool {
+        matches!(self.kind, TypeKind::Logic | TypeKind::Bit)
+            && self.total_width().unwrap_or(1) == 1
+            && self.array.is_empty()
+    }
+
+    /// INVARIANT: operated values never carry clock/reset-ness — only a
+    /// direct reference or an `as` cast does.  Every operator result
+    /// type must pass through this helper.
+    pub fn strip_clock_reset(&mut self) {
+        if self.is_clock() || self.is_reset() {
+            self.kind = TypeKind::Logic;
+        }
+    }
+
     pub fn total_array(&self) -> Option<usize> {
         self.array.total()
     }
@@ -556,9 +573,12 @@ impl Type {
         } else if self.is_array() || src.r#type.is_array() {
             array_compatible(&self.array, &src.r#type.array)
         } else if self.is_clock() {
-            src.r#type.is_clock() || src.is_const
+            // Binding-point conversion: the declaration asserts
+            // clock-ness.  Input port connections are checked
+            // separately by `check_implicit_clock_conversion`.
+            src.r#type.is_clock() || src.is_const || src.r#type.is_single_bit_plain()
         } else if self.is_reset() {
-            !src.r#type.is_clock() || src.is_const
+            src.r#type.is_reset() || src.is_const || src.r#type.is_single_bit_plain()
         } else {
             // TODO width array check
             true
