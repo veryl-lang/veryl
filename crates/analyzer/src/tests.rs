@@ -569,7 +569,7 @@ fn clock_connection_check() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::ImplicitClockConversion { .. }
     ));
 
     let code = r#"
@@ -583,6 +583,292 @@ fn clock_connection_check() {
         clk: input clock,
         rst: input reset,
     ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn implicit_clock_conversion() {
+    // logic variable wired into a clock input port
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        var w_gclk: logic;
+        assign w_gclk = i_clk;
+        inst u: ModuleB ( clk: w_gclk, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // inline expression at a clock port (clock-ness does not propagate
+    // through operators)
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_en : input logic,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleB ( clk: i_clk & i_en, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // logic wired into a reset input port (reset is symmetric)
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_raw: input logic,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleB ( clk: i_clk, rst: i_raw, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // binding-point conversion: a clock-typed binding accepts a logic
+    // value, and the bound clock connects to a clock port cleanly
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_en : input logic,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        let w_gclk: '_ clock = i_clk & i_en;
+        inst u: ModuleB ( clk: w_gclk, rst: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        rst: input reset,
+        o_q: output logic,
+    ) {
+        always_ff (clk, rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn clock_binding_source_shape() {
+    // a multi-bit bus bound to a clock-typed binding keeps the
+    // mismatch warning (silent LSB truncation would hide a mistake)
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        i_bus: input logic<32>,
+        o_q  : output logic,
+    ) {
+        let w_clk: '_ clock = i_bus;
+        always_ff (w_clk, i_rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    // a struct value bound to a clock-typed binding keeps the warning
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        struct Pair {
+            a: logic,
+            b: logic,
+        }
+        var s: Pair;
+        assign s.a = 1'b0;
+        assign s.b = 1'b0;
+        let w_clk: '_ clock = s;
+        always_ff (w_clk, i_rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+}
+
+#[test]
+fn implicit_clock_conversion_function_arg() {
+    // a logic value passed to a clock-typed function argument is an
+    // implicit conversion, just like at a module input port
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_x  : input logic,
+        o_q  : output logic,
+    ) {
+        function pass (
+            c: input clock,
+        ) -> logic {
+            return 1'b0;
+        }
+        assign o_q = pass(i_x);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+
+    // passing an actual clock is clean
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        o_q  : output logic,
+    ) {
+        function pass (
+            c: input clock,
+        ) -> logic {
+            return 1'b0;
+        }
+        assign o_q = pass(i_clk);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn implicit_clock_conversion_single_diagnostic() {
+    // a cross-kind port connection (reset value into a clock port)
+    // reports exactly one diagnostic: the dedicated error, without the
+    // generic mismatch warning on the same connection
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        inst u: ModuleB ( clk: i_rst, o_q: o_q );
+    }
+    module ModuleB (
+        clk: input clock,
+        o_q: output logic,
+    ) {
+        var r_q: logic;
+        always_ff (clk) { r_q = ~r_q; }
+        assign o_q = r_q;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ImplicitClockConversion { .. }
+    ));
+}
+
+#[test]
+fn invalid_clock_assignment() {
+    // clock-typed variable assigned in always_ff (an FF divider must be
+    // written as a logic toggle + clock-typed binding instead)
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        var w_div: '_ clock;
+        always_ff (i_clk, i_rst) {
+            if_reset { w_div = 0; } else { w_div = ~w_div; }
+        }
+        always_ff (w_div, i_rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidClockAssignment { .. }
+    ));
+
+    // the B-form divider is clean: logic toggle FF + clock-typed binding
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_q  : output logic,
+    ) {
+        var r_tog: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset { r_tog = 0; } else { r_tog = ~r_tog; }
+        }
+        let w_div: '_ clock = r_tog;
+        always_ff (w_div, i_rst) {
+            if_reset { o_q = 0; } else { o_q = ~o_q; }
+        }
+    }
     "#;
 
     let errors = analyze(code);
@@ -608,7 +894,7 @@ fn reset_connection_check() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::ImplicitClockConversion { .. }
     ));
 }
 

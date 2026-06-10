@@ -844,6 +844,45 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(implicit_clock_conversion),
+        help(
+            "clock/reset-ness can be conferred only at a declaration: bind the value to a clock/reset-typed signal in the parent (e.g. `let g: '_ clock = expr;`) and connect that signal"
+        ),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("implicit conversion from \"{src}\" to \"{dst}\" is not allowed at a port connection")]
+    ImplicitClockConversion {
+        src: String,
+        dst: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label(collection, "instantiated at")]
+        inst_context: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(invalid_clock_assignment),
+        help(
+            "toggle a logic variable in always_ff and bind it to a clock/reset-typed signal instead (e.g. `var t: logic;` ... `let d: '_ clock = t;`)"
+        ),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{dst}\"-typed signal can't be assigned in always_ff")]
+    InvalidClockAssignment {
+        dst: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(non_positive_value),
         help("positive types (p8/p16/p32/p64) can only accept values > 0"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1790,6 +1829,8 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
             AnalyzerError::MemberAccessOnArray { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
+            AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
+            AnalyzerError::InvalidClockAssignment { token_source, .. } => *token_source,
             AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
             AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
@@ -2309,6 +2350,30 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+            token_source: token.source(),
+        }
+    }
+    pub fn implicit_clock_conversion(
+        src: &str,
+        dst: &str,
+        token: &TokenRange,
+        inst_context: &[TokenRange],
+    ) -> Self {
+        let (input, inst_context) = source_with_context(token, inst_context);
+        AnalyzerError::ImplicitClockConversion {
+            src: src.to_string(),
+            dst: dst.to_string(),
+            input,
+            error_location: token.into(),
+            inst_context,
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_clock_assignment(dst: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidClockAssignment {
+            dst: dst.to_string(),
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }

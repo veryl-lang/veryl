@@ -321,20 +321,16 @@ impl Op {
 
         match self {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
-                #[allow(clippy::if_same_then_else)]
                 if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                     dst.r#type.kind = y.r#type.kind.clone();
                 } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
                     dst.r#type.kind = x.r#type.kind.clone();
-                } else if x.r#type.is_clock() || x.r#type.is_reset() {
-                    dst.r#type.kind = x.r#type.kind.clone();
-                } else if y.r#type.is_clock() || y.r#type.is_reset() {
-                    dst.r#type.kind = y.r#type.kind.clone();
                 } else if x.r#type.is_2state() && y.r#type.is_2state() {
                     dst.r#type.kind = TypeKind::Bit;
                 } else {
                     dst.r#type.kind = TypeKind::Logic;
                 }
+                dst.r#type.strip_clock_reset();
             }
             Op::Pow | Op::Div | Op::Rem | Op::Mul | Op::Add | Op::Sub => {
                 if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
@@ -352,6 +348,7 @@ impl Op {
                 } else {
                     dst.r#type.kind = TypeKind::Logic;
                 }
+                dst.r#type.strip_clock_reset();
             }
             Op::LessEq
             | Op::GreaterEq
@@ -488,6 +485,7 @@ impl Op {
         } else {
             dst.r#type.kind = TypeKind::Logic;
         }
+        dst.r#type.strip_clock_reset();
     }
 
     pub fn eval_type_concatenation(

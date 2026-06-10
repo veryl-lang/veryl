@@ -1,5 +1,5 @@
 use crate::conv::Context;
-use crate::conv::utils::check_compatibility;
+use crate::conv::utils::{check_compatibility, check_implicit_clock_conversion};
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
@@ -474,6 +474,17 @@ impl Arguments {
                 let (path, _, direction) = &arg.members[0];
                 match direction {
                     Direction::Input => {
+                        let arg_type = &arg.comptime.r#type;
+                        if arg_type.is_clock() || arg_type.is_reset() {
+                            let expr_comptime = expr.eval_comptime(context, None);
+                            let expr_token = expr_comptime.token;
+                            check_implicit_clock_conversion(
+                                context,
+                                arg_type,
+                                expr_comptime,
+                                &expr_token,
+                            );
+                        }
                         inputs.insert(path.clone(), expr);
                     }
                     Direction::Output => {

@@ -498,6 +498,15 @@ pub fn eval_assign_statement(
 ) -> IrResult<Vec<ir::Statement>> {
     let (comptime, expr) = expr;
 
+    if (dst.comptime.r#type.is_clock() || dst.comptime.r#type.is_reset())
+        && context.is_affiliated(Affiliation::AlwaysFf)
+    {
+        context.insert_error(AnalyzerError::invalid_clock_assignment(
+            &dst.comptime.r#type.to_string(),
+            &token,
+        ));
+    }
+
     if dst.comptime.clock_domain == ClockDomain::Implicit {
         let inferred = if context.is_affiliated(Affiliation::AlwaysFf) {
             context
@@ -3045,12 +3054,53 @@ pub fn check_compatibility(
             token,
         ));
     }
+    // This branch is reached via `eval_expr` BEFORE its dst_type
+    // overwrite, so `src` is the connected value's own type; the later
+    // call on the same connection sees the overwritten (matching) type
+    // and stays silent.
+    if (dst.is_clock() || dst.is_reset()) && context.in_inst_port {
+        check_implicit_clock_conversion(context, dst, src, token);
+        return;
+    }
     if !dst.compatible(src) {
         let src_type = src.r#type.to_string();
         let dst_type = dst.to_string();
         context.insert_error(AnalyzerError::mismatch_assignment(
             &src_type,
             &dst_type,
+            token,
+            &[],
+        ));
+    }
+}
+
+/// Reject implicit conversion to a clock/reset-typed input port or
+/// function argument.  `$sv` ports are SystemVerilog-typed and never
+/// reach this check, which keeps the SystemVerilog boundary unchecked
+/// by design.
+pub fn check_implicit_clock_conversion(
+    context: &mut Context,
+    dst: &ir::Type,
+    src: &Comptime,
+    token: &TokenRange,
+) {
+    let dst_is_clock = dst.is_clock();
+    let dst_is_reset = dst.is_reset();
+    if !dst_is_clock && !dst_is_reset {
+        return;
+    }
+    if src.r#type.is_unknown() || src.r#type.is_systemverilog() || src.is_const {
+        return;
+    }
+    let ok = if dst_is_clock {
+        src.r#type.is_clock()
+    } else {
+        src.r#type.is_reset()
+    };
+    if !ok {
+        context.insert_error(AnalyzerError::implicit_clock_conversion(
+            &src.r#type.to_string(),
+            &dst.to_string(),
             token,
             &[],
         ));
