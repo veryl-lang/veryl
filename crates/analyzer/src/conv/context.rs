@@ -26,6 +26,7 @@ pub struct Config {
     pub instance_total_limit: usize,
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
+    pub expression_depth_limit: usize,
     pub defines: HashSet<StrId>,
 }
 
@@ -37,6 +38,9 @@ impl Default for Config {
             instance_total_limit: 1024 * 1024,
             evaluate_size_limit: 1024 * 1024,
             evaluate_array_limit: 128,
+            // A nesting level costs ~60KB of stack in debug conv recursion;
+            // 128 fits 16MB test stacks and far exceeds any real expression.
+            expression_depth_limit: 128,
             defines: HashSet::default(),
         }
     }
@@ -71,6 +75,7 @@ pub struct Context {
     /// Inside an inst input-port-connection conversion; consumed by
     /// `check_compatibility` to pick the clock/reset diagnostic.
     pub in_inst_port: bool,
+    pub expr_depth: usize,
     pub current_clock: Option<Comptime>,
     pub mask_cache: MaskCache,
     pub tb_reset_cycles: HashMap<StrId, Expression>,

@@ -12111,6 +12111,25 @@ fn exceed_limit() {
     let errors = analyze_with_ir(code);
     assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
 
+    // Deep expression nesting must error out instead of overflowing the stack.
+    let expr = format!("{}1{}", "(".repeat(300), ")".repeat(300));
+    let code = format!(
+        r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {{
+        assign o = {expr};
+    }}
+    "#
+    );
+
+    let errors = analyze_with_large_stack(&code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ExceedLimit { .. }))
+    );
+
     let code = r#"
     module ModuleA {
         var a: logic<10>;

@@ -27,27 +27,45 @@ fn is_if_expression(value: &Expression) -> bool {
 
 impl Conv<&IfExpression> for ir::Expression {
     fn conv(context: &mut Context, value: &IfExpression) -> IrResult<Self> {
-        let mut ret: ir::Expression = Conv::conv(context, value.expression01.as_ref())?;
-        for x in value.if_expression_list.iter().rev() {
-            let y: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-            let z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
-
-            if is_if_expression(&x.expression) {
-                let token: TokenRange = x.expression.as_ref().into();
-                context.insert_error(AnalyzerError::unenclosed_inner_if_expression(&token));
-            }
-            if is_if_expression(&x.expression0) {
-                let token: TokenRange = x.expression0.as_ref().into();
-                context.insert_error(AnalyzerError::unenclosed_inner_if_expression(&token));
-            }
-
-            let token = TokenRange::from_range(&y.token_range(), &ret.token_range());
-            let comptime = Box::new(Comptime::create_unknown(token));
-
-            ret = ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime);
+        // Every expression nesting level recurses through here; bound it so
+        // deep nesting reports an error instead of overflowing the stack.
+        if context.expr_depth >= context.config.expression_depth_limit {
+            let token: TokenRange = value.into();
+            context.insert_error(AnalyzerError::exceed_limit(
+                crate::analyzer_error::ExceedLimitKind::ExpressionDepth,
+                context.config.expression_depth_limit,
+                &token,
+            ));
+            return Err(ir_error!(token));
         }
-        Ok(ret)
+        context.expr_depth += 1;
+        let ret = conv_if_expression(context, value);
+        context.expr_depth -= 1;
+        ret
     }
+}
+
+fn conv_if_expression(context: &mut Context, value: &IfExpression) -> IrResult<ir::Expression> {
+    let mut ret: ir::Expression = Conv::conv(context, value.expression01.as_ref())?;
+    for x in value.if_expression_list.iter().rev() {
+        let y: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
+        let z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
+
+        if is_if_expression(&x.expression) {
+            let token: TokenRange = x.expression.as_ref().into();
+            context.insert_error(AnalyzerError::unenclosed_inner_if_expression(&token));
+        }
+        if is_if_expression(&x.expression0) {
+            let token: TokenRange = x.expression0.as_ref().into();
+            context.insert_error(AnalyzerError::unenclosed_inner_if_expression(&token));
+        }
+
+        let token = TokenRange::from_range(&y.token_range(), &ret.token_range());
+        let comptime = Box::new(Comptime::create_unknown(token));
+
+        ret = ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime);
+    }
+    Ok(ret)
 }
 
 fn resolve_op(op: &Expression01Op) -> (Op, u32) {
