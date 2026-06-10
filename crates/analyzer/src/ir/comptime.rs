@@ -75,13 +75,12 @@ impl PartSelectPath {
                 select = &select[select_dims..];
 
                 // If select dimension doesn't satisfy type dimension,
-                // additional select is necessary
+                // calculate index using only the selected (outer) dimensions
+                // so that `width * index` gives the correct bit position
                 if remaining_dims != 0 {
-                    let mut sel = sel.to_vec();
-                    for _ in 0..remaining_dims {
-                        sel.push(Expression::create_value(Value::new(0, 32, false), token));
-                    }
-                    x.r#type.width.calc_index_expr(&sel)?
+                    let outer_width = x.r#type.width.as_shape_ref();
+                    let outer_width = ShapeRef::new(&outer_width[0..select_dims]);
+                    outer_width.calc_index_expr(sel)?
                 } else {
                     x.r#type.width.calc_index_expr(sel)?
                 }
@@ -110,15 +109,11 @@ impl PartSelectPath {
             // pos += x.pos + width * index;
             let x_pos = Expression::create_value(Value::new(x.pos as u64, 32, false), token);
 
-            let expr = if remaining_dims != 0 {
-                // If remaining_dims exists, width is already considered by index
-                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(index), comptime.clone())
-            } else {
-                let expr = Expression::create_value(Value::new(width as u64, 32, false), token);
-                let expr =
-                    Expression::Binary(Box::new(expr), Op::Mul, Box::new(index), comptime.clone());
-                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(expr), comptime.clone())
-            };
+            let expr = Expression::create_value(Value::new(width as u64, 32, false), token);
+            let expr =
+                Expression::Binary(Box::new(expr), Op::Mul, Box::new(index), comptime.clone());
+            let expr =
+                Expression::Binary(Box::new(x_pos), Op::Add, Box::new(expr), comptime.clone());
 
             if let Some((pos, _, _)) = pos_width {
                 let expr =
