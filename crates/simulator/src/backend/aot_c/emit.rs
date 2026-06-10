@@ -1786,6 +1786,15 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     if let Ok(extra) = std::env::var("VERYL_AOT_CFLAGS") {
         flags.extend(extra.split_whitespace().map(str::to_string));
     }
+    // Event sources compile without SLP vectorization: on the single big
+    // event function SLP's dependence checking (alias stmt walking) blows
+    // up superlinearly, and its vectorized stores have not shown run-time
+    // wins on event .so.  The header comment is emitted by this file, so
+    // the match can't drift.  VERYL_AOT_C_EVENT_NOSLP=0 opts back in.
+    let event_noslp = std::env::var("VERYL_AOT_C_EVENT_NOSLP").map_or(true, |v| v != "0");
+    if event_noslp && src.starts_with("// AOT-C event") {
+        flags.push("-fno-tree-slp-vectorize".to_string());
+    }
 
     // Cache key = version + compiler + flags + target arch/OS + source.
     let flags_joined = flags.join(" ");
