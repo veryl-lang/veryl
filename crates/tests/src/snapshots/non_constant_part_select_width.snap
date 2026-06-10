@@ -2,9 +2,9 @@
 source: crates/tests/src/lib.rs
 expression: out
 ---
-invalid_select (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_select)
+non_constant_select_width (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#non_constant_select_width)
 
-  ⚠ invalid select caused by non-constant `+:`/`-:`/`step` part-select width
+  × `+:`/`-:`/`step` part-select width must be a constant
    ╭─[../../testcases/error/non_constant_part_select_width.veryl:6:23]
  5 │ ) {
  6 │     assign o = i_a[0+:i_n];
@@ -12,4 +12,4 @@ invalid_select (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.ht
    ·                        ╰── Error location
  7 │ }
    ╰────
-  help:
+  help: use a constant expression for the part-select width
