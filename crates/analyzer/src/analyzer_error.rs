@@ -677,6 +677,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(non_constant_select_width),
+        help("use a constant expression for the part-select width"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("`+:`/`-:`/`step` part-select width must be a constant")]
+    NonConstantSelectWidth {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_statement),
         help("remove {kind} statement"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1819,6 +1834,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidReset { token_source, .. } => *token_source,
             AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
+            AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
             AnalyzerError::MissingTbPort { token_source, .. } => *token_source,
@@ -2253,6 +2269,13 @@ impl AnalyzerError {
     }
     pub fn invalid_range_assign(token: &TokenRange) -> Self {
         AnalyzerError::InvalidRangeAssign {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn non_constant_select_width(token: &TokenRange) -> Self {
+        AnalyzerError::NonConstantSelectWidth {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3139,7 +3162,6 @@ pub enum InvalidSelectKind {
     OutOfRange { beg: usize, end: usize, size: usize },
     OutOfDimension { dim: usize, size: usize },
     SelectAfterRange,
-    NonConstantWidth,
 }
 
 impl fmt::Display for InvalidSelectKind {
@@ -3157,9 +3179,6 @@ impl fmt::Display for InvalidSelectKind {
             }
             InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
             InvalidSelectKind::SelectAfterRange => "select after range is not allowed".fmt(f),
-            InvalidSelectKind::NonConstantWidth => {
-                "non-constant `+:`/`-:`/`step` part-select width".fmt(f)
-            }
         }
     }
 }

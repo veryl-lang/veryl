@@ -73,11 +73,7 @@ fn check_part_select_width(
     ) && !expr.comptime().is_const
     {
         let token: TokenRange = value.into();
-        context.insert_error(AnalyzerError::invalid_select(
-            &InvalidSelectKind::NonConstantWidth,
-            &token,
-            &[],
-        ));
+        context.insert_error(AnalyzerError::non_constant_select_width(&token));
     }
 }
 

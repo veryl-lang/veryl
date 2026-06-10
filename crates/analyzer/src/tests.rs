@@ -1,4 +1,3 @@
-use crate::analyzer_error::InvalidSelectKind;
 use crate::conv::Context;
 use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
@@ -10968,13 +10967,11 @@ fn invalid_select() {
     }
     "#;
     let errors = analyze(code);
-    assert!(errors.iter().any(|e| matches!(
-        e,
-        AnalyzerError::InvalidSelect {
-            kind: InvalidSelectKind::NonConstantWidth,
-            ..
-        }
-    )));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. }))
+    );
 
     // A constant width (literal or parameter) is fine even with a runtime base.
     let code = r#"
@@ -10987,13 +10984,11 @@ fn invalid_select() {
     }
     "#;
     let errors = analyze(code);
-    assert!(!errors.iter().any(|e| matches!(
-        e,
-        AnalyzerError::InvalidSelect {
-            kind: InvalidSelectKind::NonConstantWidth,
-            ..
-        }
-    )));
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. }))
+    );
 }
 
 #[test]
