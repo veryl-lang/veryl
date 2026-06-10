@@ -568,6 +568,113 @@ pub fn eval_assign_statement(
     Ok(ret)
 }
 
+/// Expand an array-range assignment LHS (`o[0+:N] = '{...}`) into one assignment
+/// per covered element (recursing inner dims for multi-dim arrays). Returns `None`
+/// to defer to the scalar path when the LHS isn't a range or the RHS isn't an array
+/// literal; an invalid slice is rejected.
+pub fn eval_array_range_assign(
+    context: &mut Context,
+    lhs: &VarPathSelect,
+    rhs: &Expression,
+    token: TokenRange,
+) -> IrResult<Option<Vec<ir::Statement>>> {
+    let (_, select, _) = lhs.clone().into();
+    let Some((_, mut comptime)) = context.find_path(&lhs.0) else {
+        return Ok(None);
+    };
+    if let Some(part_select) = &comptime.part_select {
+        comptime.r#type = part_select.base.clone();
+    }
+    let (array_select, _) = select.split(comptime.r#type.array.dims());
+    if !array_select.is_range() {
+        return Ok(None);
+    }
+
+    let dsts = lhs.clone().to_assign_destinations(context, false);
+    if dsts.is_empty() {
+        // Invalid range (to_assign_destinations validates and reports it). Type-check
+        // the RHS, but with no `?`: a propagated error would roll back that diagnostic.
+        let _ = eval_expr(context, None, rhs, false);
+        return Ok(Some(vec![]));
+    }
+
+    // Type-check the RHS against the slice type ([n] prepended to the element dims).
+    let n = dsts.len();
+    let elem_type = dsts[0].comptime.r#type.clone();
+    let mut sub_type = elem_type.clone();
+    let mut dims = vec![Some(n)];
+    dims.extend(elem_type.array.iter().copied());
+    sub_type.array = Shape::new(dims);
+    let (rhs_comptime, mut rhs_expr) = eval_expr(context, Some(sub_type), rhs, false)?;
+
+    // Pair each outer literal item with one element dst; `eval_assign_statement`
+    // recurses the element's inner dims. (A flat `eval_array_literal` would over-
+    // recurse and mis-decompose a multi-dim element.) Non-literal RHS: defer.
+    let ir::Expression::ArrayLiteral(items, _) = &mut rhs_expr else {
+        return Ok(None);
+    };
+    let mut outer: Vec<ir::Expression> = Vec::new();
+    let mut default: Option<ir::Expression> = None;
+    let mut repeat_unresolved = false;
+    for item in items.iter_mut() {
+        match item {
+            ir::ArrayLiteralItem::Value(expr, repeat) => {
+                let count = if let Some(repeat) = repeat {
+                    match eval_repeat(context, repeat).and_then(|v| v.to_usize()) {
+                        Some(count) => count,
+                        // Non-const repeat: already reported by eval_repeat. Skip the
+                        // count below so we don't pile on a spurious dimension error.
+                        None => {
+                            repeat_unresolved = true;
+                            0
+                        }
+                    }
+                } else {
+                    1
+                };
+                for _ in 0..count {
+                    outer.push(expr.as_ref().clone());
+                }
+            }
+            ir::ArrayLiteralItem::Defaul(expr) => {
+                if default.is_some() {
+                    context.insert_error(AnalyzerError::multiple_default(
+                        MultipleDefaultKind::ArrayLiteral,
+                        "default",
+                        &token,
+                    ));
+                    return Ok(Some(vec![]));
+                }
+                default = Some(expr.as_ref().clone());
+            }
+        }
+    }
+    if let Some(def) = default {
+        while outer.len() < n {
+            outer.push(def.clone());
+        }
+    }
+    // The one-level walk bypasses `eval_array_literal`'s count check, so verify the
+    // item count here (else a mismatch is silently dropped and emits illegal SV).
+    if outer.len() != n && !repeat_unresolved {
+        context.insert_error(AnalyzerError::mismatch_type(
+            MismatchTypeKind::ArrayDimension {
+                expected: n,
+                actual: outer.len(),
+            },
+            &token,
+        ));
+        return Ok(Some(vec![]));
+    }
+
+    let mut statements = vec![];
+    for (mut dst, sub_expr) in dsts.into_iter().zip(outer) {
+        let mut expr = (rhs_comptime.clone(), sub_expr);
+        statements.extend(eval_assign_statement(context, &mut dst, &mut expr, token)?);
+    }
+    Ok(Some(statements))
+}
+
 fn eval_array_literal_expressions(
     context: &mut Context,
     r#type: &ir::Type,

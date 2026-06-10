@@ -660,6 +660,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_range_assign),
+        help("use a constant, in-range, ascending slice"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "array range select on an assignment left-hand side must be a constant, in-range, ascending slice"
+    )]
+    InvalidRangeAssign {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_statement),
         help("remove {kind} statement"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1762,6 +1779,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidReset { token_source, .. } => *token_source,
             AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
+            AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
             AnalyzerError::MissingTbPort { token_source, .. } => *token_source,
@@ -2189,6 +2207,13 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_range_assign(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidRangeAssign {
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }

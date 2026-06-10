@@ -3879,6 +3879,71 @@ fn array_dynamic_index_write_comb() {
     }
 }
 
+// Regression for #9: an array-range assignment LHS (`arr[0+:3] = '{...}` /
+// `arr[0:2] = '{...}`) must drive each covered element with the matching literal
+// item (first item -> lowest index), matching the emitted SystemVerilog.
+#[test]
+fn array_range_assign() {
+    for sel_form in ["arr[0+:3]", "arr[0:2]"] {
+        let code = format!(
+            r#"
+            module Top (
+                sel: input  logic<2>,
+                o  : output logic<8>,
+            ) {{
+                var arr: logic<8> [4];
+                assign {sel_form} = '{{8'd10, 8'd20, 8'd30}};
+                assign arr[3]   = 8'd40;
+                assign o        = arr[sel];
+            }}
+            "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            for (sel, expected) in [(0u64, 10u64), (1, 20), (2, 30), (3, 40)] {
+                sim.set("sel", Value::new(sel, 2, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("o").unwrap(),
+                    Value::new(expected, 8, false),
+                    "{sel_form} sel={sel} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn array_range_assign_descending() {
+    // A descending `-:` slice reaching index 0 covers all four elements; the
+    // literal maps by ascending element index (matches Verilator). Regression
+    // guard for the `-:` low-bound off-by-one.
+    let code = r#"
+            module Top (
+                sel: input  logic<2>,
+                o  : output logic<8>,
+            ) {
+                var arr: logic<8> [4];
+                assign arr[3-:4] = '{8'd10, 8'd20, 8'd30, 8'd40};
+                assign o         = arr[sel];
+            }
+            "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (sel, expected) in [(0u64, 10u64), (1, 20), (2, 30), (3, 40)] {
+            sim.set("sel", Value::new(sel, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected, 8, false),
+                "sel={sel} config={config:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn assert_pass() {
     let code = r#"
@@ -14336,5 +14401,98 @@ fn comb_block_cycle_war_preserves_blocking_order() {
             Value::new(51, 32, false),
             "o config={config:?}"
         );
+    }
+}
+
+#[test]
+fn array_range_assign_multidim_unpacked() {
+    // Range over the outer dim of a 2-D unpacked array, nested literal.
+    // o[0+:2] = '{'{1,2},'{3,4}} => arr[0][0]=1, arr[0][1]=2, arr[1][0]=3, arr[1][1]=4.
+    let code = r#"
+    module Top (
+        i: input  logic<1>,
+        j: input  logic<1>,
+        o: output logic<8>,
+    ) {
+        var arr: logic<8> [2, 2];
+        assign arr[0+:2] = '{'{8'd1, 8'd2}, '{8'd3, 8'd4}};
+        assign o = arr[i][j];
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i, j, exp) in [(0u64, 0u64, 1u64), (0, 1, 2), (1, 0, 3), (1, 1, 4)] {
+            sim.set("i", Value::new(i, 1, false));
+            sim.set("j", Value::new(j, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(exp, 8, false),
+                "arr[{i}][{j}] config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn array_range_assign_multidim_packed() {
+    // Range over a 1-D array of multi-dim-packed elements; scalar literals.
+    // o[0+:2] = '{100, 200} => arr[0]=100, arr[1]=200 (each logic<10,10>).
+    let code = r#"
+    module Top (
+        i: input  logic<1>,
+        o: output logic<10, 10>,
+    ) {
+        var arr: logic<10, 10> [2];
+        assign arr[0+:2] = '{100, 200};
+        assign o = arr[i];
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i, exp) in [(0u64, 100u128), (1, 200)] {
+            sim.set("i", Value::new(i, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap().payload_u128(),
+                exp,
+                "arr[{i}] config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn array_range_assign_prefix_then_range() {
+    // Fixed outer index then a range on the inner dim: arr[1][0+:2] = '{5,6}.
+    // Exercises the inner-dim collapse in to_assign_destinations.
+    let code = r#"
+    module Top (
+        i: input  logic<2>,
+        j: input  logic<1>,
+        o: output logic<8>,
+    ) {
+        var arr: logic<8> [3, 2];
+        assign arr[0]      = '{8'd9, 8'd9};
+        assign arr[1][0+:2] = '{8'd5, 8'd6};
+        assign arr[2]      = '{8'd9, 8'd9};
+        assign o = arr[i][j];
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i, j, exp) in [(1u64, 0u64, 5u64), (1, 1, 6), (0, 0, 9), (2, 1, 9)] {
+            sim.set("i", Value::new(i, 2, false));
+            sim.set("j", Value::new(j, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(exp, 8, false),
+                "arr[{i}][{j}] config={config:?}"
+            );
+        }
     }
 }

@@ -1,9 +1,9 @@
 use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::utils::{
     TypePosition, argument_list, build_for_range, build_for_statement, case_patterns,
-    eval_assign_statement, eval_expr, eval_variable, expand_connect, expand_connect_const,
-    function_call, get_return_str, switch_condition, tb_method_call, try_infer_decl_type,
-    try_infer_var_assign,
+    eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
+    expand_connect_const, function_call, get_return_str, switch_condition, tb_method_call,
+    try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -224,6 +224,12 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
 
                         let dst: VarPathSelect = Conv::conv(context, expr)?;
 
+                        if let Some(statements) =
+                            eval_array_range_assign(context, &dst, &x.assignment.expression, token)?
+                        {
+                            return Ok(ir::StatementBlock(statements));
+                        }
+
                         if let Some(mut dst) = dst.to_assign_destination(context, false) {
                             let mut expr = if let Some(inferred) = inferred {
                                 inferred
@@ -251,6 +257,14 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
 
                         let dst: VarPathSelect = Conv::conv(context, expr)?;
                         let src: VarPathSelect = Conv::conv(context, expr)?;
+
+                        // An op-assign to an array range slice has no valid lowering and
+                        // emits illegal SystemVerilog; reject it, don't silently drop it.
+                        if dst.is_array_range(context) {
+                            let _ = eval_expr(context, None, &x.assignment.expression, false);
+                            context.insert_error(AnalyzerError::invalid_range_assign(&token));
+                            return Ok(ir::StatementBlock::default());
+                        }
 
                         if let Some(dst) = dst.to_assign_destination(context, false)
                             && let Some(src) = src.to_expression(context)

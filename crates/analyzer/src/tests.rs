@@ -10444,6 +10444,144 @@ fn invalid_select() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // Assignment LHS with a wrong-order (descending) array range must be
+    // rejected, not silently dropped (#9).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {
+        assign o[2:0] = '{8'd0, 8'd0, 8'd0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+    );
+
+    // Valid array-range assignment LHS expands element-wise, so every covered
+    // element is driven (no false unassign) and overlaps are still caught (#9).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {
+        assign o[0+:2] = '{8'd0, 8'd0};
+        assign o[2+:2] = '{8'd1, 8'd1};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Multi-dim follow-up: an element with multi-dim-packed width is expanded
+    // element-wise too (each covered element gets its scalar literal).
+    let code = r#"
+    module ModuleA (
+        o: output logic<10, 10> [4],
+    ) {
+        assign o[0+:2] = '{100, 200};
+        assign o[2+:2] = '{300, 400};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Multi-dim follow-up: a range over the outer dim of a 2-D unpacked array
+    // expands the nested literal per outer element (no false unassign).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [2, 2],
+    ) {
+        assign o[0+:2] = '{'{8'd1, 8'd2}, '{8'd3, 8'd4}};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A range-LHS literal whose item count differs from the slice width must be
+    // reported (else it is silently dropped and illegal SystemVerilog is emitted).
+    for (lhs, rhs) in [
+        ("o[0+:2]", "'{8'd1, 8'd2, 8'd3}"),
+        ("o[0+:3]", "'{8'd1, 8'd2}"),
+    ] {
+        let code = format!(
+            r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {{
+        assign {lhs} = {rhs};
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::MismatchType { .. })),
+            "{lhs} = {rhs}"
+        );
+    }
+
+    // A range-LHS that can't lower to fixed element indices — dynamic base/bound,
+    // out-of-range, or reversed — must be rejected, not silently lowered (which
+    // miscompiles the simulator while the emitter keeps the original slice).
+    for lhs in [
+        "o[n+:2]", "o[0+:n]", "o[n:0]", "o[3+:2]", "o[1:0]", "o[1-:3]",
+    ] {
+        let code = format!(
+            r#"
+    module ModuleA (
+        n: input  logic<2>,
+        o: output logic<8> [4],
+    ) {{
+        assign {lhs} = '{{8'd1, 8'd2}};
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidRangeAssign { .. })),
+            "{lhs}"
+        );
+    }
+
+    // An op-assign (`+=` etc.) to an array range slice has no valid lowering and
+    // emits illegal SystemVerilog, so it must be rejected, not silently dropped.
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {
+        always_comb {
+            o = '{8'd1, 8'd2, 8'd3, 8'd4};
+            o[0+:2] += '{8'd10, 8'd20};
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidRangeAssign { .. }))
+    );
+
+    // A descending `-:` slice that reaches index 0 is a valid, count-matching
+    // constant range (regression guard for the `-:` low-bound off-by-one).
+    let code = r#"
+    module ModuleA (
+        o: output logic<8> [4],
+    ) {
+        assign o[3-:4] = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     let code = r#"
     module ModuleA {
         let _a: logic<2> = 1;
