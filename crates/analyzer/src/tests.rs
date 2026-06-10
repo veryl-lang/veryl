@@ -12703,6 +12703,74 @@ fn type_inference_not_supported() {
         errors[0],
         AnalyzerError::TypeInferenceNotSupported { .. }
     ));
+
+    // A struct/union/enum inference has no SV scalar type name, so the
+    // emitter would declare it as a 1-bit `logic`; it must be rejected.
+    let code = r#"
+    module ModuleA {
+        struct Pair {
+            a: logic<8>,
+            b: logic<8>,
+        }
+        var p: Pair;
+        var q;
+        always_comb {
+            p.a = 1;
+            p.b = 2;
+            q   = p;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TypeInferenceNotSupported { .. }))
+    );
+
+    let code = r#"
+    module ModuleA {
+        enum Mode {
+            A,
+            B,
+        }
+        var m: Mode;
+        var r;
+        always_comb {
+            m = Mode::A;
+            r = m;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TypeInferenceNotSupported { .. }))
+    );
+
+    let code = r#"
+    module ModuleA {
+        union U {
+            a: logic<8>,
+            b: logic<8>,
+        }
+        var u: U;
+        always_comb {
+            u.a = 1;
+        }
+        let _v = u;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TypeInferenceNotSupported { .. }))
+    );
 }
 
 #[test]

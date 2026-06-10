@@ -83,6 +83,7 @@ pub fn try_infer_var_assign(
     }
     let (comptime, ir_expr) = eval_expr(context, None, expr, false)?;
     let inferred = comptime.r#type.clone();
+    check_inferred_type_emittable(context, &inferred, expr, token)?;
 
     if let Some(existing) = crate::resolved_type_table::get(&dst_symbol.token.id) {
         if existing != inferred {
@@ -122,8 +123,28 @@ pub fn try_infer_decl_type(
         return Err(ir_error!(token));
     }
     let (comptime, ir_expr) = eval_expr(context, None, expr, false)?;
+    check_inferred_type_emittable(context, &comptime.r#type, expr, token)?;
     crate::resolved_type_table::insert(decl_token_id, comptime.r#type.clone());
     Ok(Some((comptime, ir_expr)))
+}
+
+/// The emitter declares an inferred variable by its SV scalar type name;
+/// a struct/union/enum has none and would silently emit a 1-bit `logic`,
+/// so reject the inference instead of miscompiling.
+fn check_inferred_type_emittable(
+    context: &mut Context,
+    r#type: &ir::Type,
+    expr: &Expression,
+    token: TokenRange,
+) -> IrResult<()> {
+    if matches!(
+        r#type.kind,
+        ir::TypeKind::Struct(_) | ir::TypeKind::Union(_) | ir::TypeKind::Enum(_)
+    ) {
+        context.insert_error(AnalyzerError::type_inference_not_supported(&expr.into()));
+        return Err(ir_error!(token));
+    }
+    Ok(())
 }
 
 fn format_positive_type_name(r#type: &ir::Type) -> Option<String> {
