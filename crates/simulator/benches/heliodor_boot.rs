@@ -10,15 +10,17 @@ use veryl_analyzer::{Analyzer, AnalyzerError, Context};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table;
-use veryl_simulator::ir::{Config, build_ir};
+use veryl_simulator::ir::{Config, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::testbench::{TestResult, run_native_testbench_capped};
 
 const TOP: &str = "test_soc_linux_boot";
 
-// Fixed clock-cycle slice, large enough that stepping (~0.97 us/cycle) dominates
-// the ~274 ms per-run fixed cost (Simulator::new + $readmemh + reset): ~78% at 1M.
+// Fixed clock-cycle slice, large enough that stepping (~2.7 us/cycle on x86,
+// ~28 us/cycle on the CodSpeed macro runner) dominates the ~270 ms per-run
+// fixed cost (Simulator::new + $readmemh + reset), small enough that 10
+// samples keep the CI job reasonable (~14 s per sample on the macro runner).
 // Override locally via VERYL_HELIODOR_BOOT_CYCLES.
-const BOOT_CYCLES: u64 = 1_000_000;
+const BOOT_CYCLES: u64 = 500_000;
 
 fn boot_cycles() -> u64 {
     std::env::var("VERYL_HELIODOR_BOOT_CYCLES")
@@ -98,14 +100,20 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let top = resource_table::get_str_id(TOP.to_string()).expect("top module not found");
 
+    // Cache the ProtoModule (incl. the aot_c compiled artifact) so the ~9s
+    // C-compile happens once, not per iteration; setup is then a cheap
+    // fresh-state instantiate, like `veryl test` running many tests.
+    let mut cache = ProtoModuleCache::default();
+
     let mut group = c.benchmark_group("heliodor");
-    // Only affect a local `cargo bench`; `cargo codspeed` ignores them.
+    // The CodSpeed walltime runner uses the criterion sampling pipeline, so these
+    // bound CI run time too: 10 samples x 1 iteration (~3 s each) ~= 30 s measured.
     group.sample_size(10);
     group.warm_up_time(Duration::from_secs(1));
-    group.measurement_time(Duration::from_secs(60));
+    group.measurement_time(Duration::from_secs(25));
     group.bench_function("linux_boot_1core", |b| {
         b.iter_batched(
-            || build_ir(&air_ir, top, &config).expect("build_ir failed"),
+            || build_ir_cached(&air_ir, top, &config, &mut cache).expect("build_ir failed"),
             |sim_ir| {
                 let result =
                     run_native_testbench_capped(sim_ir, None, TOP.to_string(), Some(boot_cycles()))
