@@ -77,6 +77,23 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
         }
     }
 
+    // WAR: a reader between two writes of a var must precede the later write, else
+    // the re-write clobbers the value it read — e.g. `o = a + ext` is otherwise
+    // dragged past a later `a = ...` by its forward read of `ext`. Only the
+    // prior-AND-next-writer case (single-writer cross-block reads stay RAW); the
+    // WAW loop below chains any further writers, so keep the two in sync.
+    for (reader_idx, ins) in stmt_inputs.iter().enumerate() {
+        for key in ins {
+            if let Some(writer_indices) = writers.get(key)
+                && writer_indices.iter().any(|&w| w < reader_idx)
+                && let Some(&next_writer) = writer_indices.iter().find(|&&w| w > reader_idx)
+                && adj[reader_idx].insert(next_writer)
+            {
+                in_degree[next_writer] += 1;
+            }
+        }
+    }
+
     // WAW ordering: chain consecutive writers of the same variable so that
     // bit-select assigns to a packed variable keep source order.
     // Skip when next already reaches prev (would create a cycle).
