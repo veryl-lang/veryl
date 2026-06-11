@@ -1536,6 +1536,34 @@ impl fmt::Binary for Value {
     }
 }
 
+/// Width of a width-less based literal as the emitter sizes it: a leading
+/// zero digit raises the width as if it were 1 (`'h0F` -> 5'h0F).  Shared
+/// with `crates/emitter` so the IR and emitted SV agree on concatenation
+/// widths.  `None` when the width is indeterminable (a bare decimal zero),
+/// which the emitter leaves unsized.
+pub fn calc_emitted_width(number: &str, base: u32) -> Option<usize> {
+    // strnum_bitwidth panics on a decimal zero written with underscores
+    // (e.g. `'d0_0`); treat it as unsized like a plain `'d0`.
+    if base == 10 && number.contains('_') && number.chars().all(|c| c == '0' || c == '_') {
+        return None;
+    }
+    let width = strnum_bitwidth::bitwidth(number, base)?;
+
+    let width_by_digits = if number.starts_with('0') {
+        let number: String = number
+            .chars()
+            .enumerate()
+            .map(|(i, s)| if i == 0 { '1' } else { s })
+            .collect();
+        strnum_bitwidth::bitwidth(&number, base)?
+    } else {
+        width
+    };
+
+    let width = width.max(width_by_digits);
+    if width >= 1 { Some(width) } else { Some(0) }
+}
+
 fn from_based_str(s: &str) -> Value {
     let x = s.replace('_', "");
 
@@ -1552,7 +1580,7 @@ fn from_based_str(s: &str) -> Value {
     };
     let lexical_width = value.len() * char_len;
 
-    let payload = value.replace(['x', 'X', 'z', 'Z'], "0");
+    let payload_str = value.replace(['x', 'X', 'z', 'Z'], "0");
     let mask_x: String = value
         .chars()
         .map(|x| if x == 'x' || x == 'X' { all1_char } else { '0' })
@@ -1562,7 +1590,7 @@ fn from_based_str(s: &str) -> Value {
         .map(|x| if x == 'z' || x == 'Z' { all1_char } else { '0' })
         .collect();
 
-    let payload = BigUint::from_str_radix(&payload, radix).unwrap_or(BigUint::from(0u32));
+    let payload = BigUint::from_str_radix(&payload_str, radix).unwrap_or(BigUint::from(0u32));
     let mut mask_x = BigUint::from_str_radix(&mask_x, radix).unwrap_or(BigUint::from(0u32));
     let mut mask_z = BigUint::from_str_radix(&mask_z, radix).unwrap_or(BigUint::from(0u32));
 
@@ -1588,7 +1616,9 @@ fn from_based_str(s: &str) -> Value {
         }
         x
     } else {
-        actual_width
+        calc_emitted_width(value, radix)
+            .map(|cw| cw.max(actual_width))
+            .unwrap_or(1)
     };
 
     let mask_xz = &mask_x | &mask_z;
@@ -5245,5 +5275,23 @@ mod tests {
                 .is_none()
         );
         assert!(Op::BitNot.eval_float_unary(&a, &TypeKind::F64).is_none());
+    }
+
+    #[test]
+    fn widthless_based_literal_width() {
+        // Width-less literals follow the emitter: a leading zero raises the
+        // width, a bare decimal zero is 1 bit.
+        for (s, expect) in [
+            ("'h0F", 5),
+            ("'hF0", 8),
+            ("'h00F", 9),
+            ("'b0010", 4),
+            ("'d09", 5),
+            ("'d0", 1),
+            ("'d00", 1),
+            ("'h0", 1),
+        ] {
+            assert_eq!(from_based_str(s).width(), expect, "{s}");
+        }
     }
 }

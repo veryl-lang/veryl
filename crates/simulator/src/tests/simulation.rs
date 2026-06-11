@@ -15843,3 +15843,29 @@ fn pow_negative_exponent_follows_lrm_table() {
         assert_eq!(sim.get("r").unwrap().payload_u128(), 27, "r3 {config:?}");
     }
 }
+
+#[test]
+fn widthless_literal_leading_zero_width_matches_emitter() {
+    // Regression: the analyzer sized a width-less literal by its value bits
+    // ('h0F -> 4) but the emitter counts a leading zero as 1 ('h0F -> 5'h0F),
+    // so concatenations diverged from the emitted SV.
+    let code = r#"
+    module Top (
+        o_b: output logic<9>,
+        o_c: output logic<9>,
+    ) {
+        assign o_b = {1'b1, 'h0F};
+        assign o_c = {2'b11, 'd09};
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // {1'b1, 5'h0F} = 6'b10_1111 = 47
+        assert_eq!(sim.get("o_b").unwrap().payload_u128(), 47, "{config:?}");
+        // {2'b11, 5'd09} = 7'b11_01001 = 105
+        assert_eq!(sim.get("o_c").unwrap().payload_u128(), 105, "{config:?}");
+    }
+}
