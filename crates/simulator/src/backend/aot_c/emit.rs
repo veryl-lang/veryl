@@ -868,6 +868,7 @@ fn emit_wide_select_read_at(base_ptr: &str, lo: usize, nbits: usize) -> String {
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
 /// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
 /// (a C expression).  Each entry holds ≤56 bytes; larger values chunk.
+/// Unchecked: the event prologue's bulk reserve guarantees room.
 /// Mirrors `event_write_log_push_wide` / `emit_wide_log_chunks`.
 fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
     use crate::ir::write_log::{
@@ -880,6 +881,7 @@ fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
     let mut written = 0usize;
     while written < nb {
         let chunk = (nb - written).min(cap);
+        EVENT_WIDE_PUSHES.with(|c| c.set(c.get() + 1));
         out.push_str(&format!(
             "{{ unsigned char* _lb = (unsigned char*)write_log; \
                 unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
@@ -915,6 +917,12 @@ pub type AotCell = Arc<OnceLock<EmittedModule>>;
 use std::cell::Cell;
 thread_local! {
     static EVENT_MODE: Cell<bool> = const { Cell::new(false) };
+    // Worst-case narrow/wide pushes per `veryl_aot_eval` invocation,
+    // accumulated during emission (const-loop bodies scaled by trip
+    // count).  The event prologue reserves this much up front, so the
+    // per-push code needs no capacity check.
+    static EVENT_NARROW_PUSHES: Cell<u64> = const { Cell::new(0) };
+    static EVENT_WIDE_PUSHES: Cell<u64> = const { Cell::new(0) };
 }
 fn event_mode() -> bool {
     EVENT_MODE.with(|c| c.get())
@@ -924,7 +932,8 @@ fn set_event_mode(on: bool) {
 }
 
 /// Inline narrow WriteLogEntry push.  `offset_expr` / `payload_expr`
-/// are C expressions; `wc` is native bytes ∈ {1,2,4,8}.
+/// are C expressions; `wc` is native bytes ∈ {1,2,4,8}.  Unchecked: the
+/// event prologue's bulk reserve guarantees room.
 fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
     // Offsets shared with the Cranelift push via write_log.rs consts,
     // so a layout change can't silently desync this emitted C.
@@ -933,6 +942,7 @@ fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
         WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
         WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
     };
+    EVENT_NARROW_PUSHES.with(|c| c.set(c.get() + 1));
     format!(
         "{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
@@ -1582,6 +1592,8 @@ pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCe
 /// the comb path).
 fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
+    EVENT_NARROW_PUSHES.with(|c| c.set(0));
+    EVENT_WIDE_PUSHES.with(|c| c.set(0));
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
     set_event_mode(true);
     let body_res = (|| {
@@ -1671,6 +1683,10 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     })();
     set_event_mode(false);
     let body = body_res?;
+    // > u32::MAX pushes per eval can't be reserved in one call; bail to
+    // Cranelift (which checks per push) rather than under-reserving.
+    let narrow_pushes = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
+    let wide_pushes = u32::try_from(EVENT_WIDE_PUSHES.with(|c| c.get())).ok()?;
     let mut src = String::from(
         "// AOT-C event; do not edit.\n\
          #include <stdint.h>\n\
@@ -1687,9 +1703,48 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
          __attribute__((visibility(\"default\")))\n\
          void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log) {\n",
     );
+    src.push_str(&emit_reserve_prologue(narrow_pushes, wide_pushes));
     src.push_str(&body);
     src.push_str("}\n");
     Some(src)
+}
+
+/// Prologue for `veryl_aot_eval`: one bulk reserve covering the body's
+/// worst-case push count, so every inline push below stays unchecked.
+/// Calls the `reserve` fn pointer stored in the buffer header (a baked
+/// symbol address would break the on-disk `.so` cache across ASLR).
+fn emit_reserve_prologue(narrow: u32, wide: u32) -> String {
+    use crate::ir::write_log::{
+        WRITE_LOG_NARROW_OFFSET_CAPACITY, WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_OFFSET_RESERVE,
+        WRITE_LOG_WIDE_OFFSET_CAPACITY, WRITE_LOG_WIDE_OFFSET_COUNT,
+    };
+    if narrow == 0 && wide == 0 {
+        return String::new();
+    }
+    // capacity - count is the free room; capacity >= count always holds.
+    let mut conds: Vec<String> = Vec::new();
+    if narrow > 0 {
+        conds.push(format!(
+            "*(unsigned int*)(_lb + {cap}) - *(unsigned int*)(_lb + {cnt}) < {narrow}u",
+            cap = WRITE_LOG_NARROW_OFFSET_CAPACITY,
+            cnt = WRITE_LOG_NARROW_OFFSET_COUNT,
+        ));
+    }
+    if wide > 0 {
+        conds.push(format!(
+            "*(unsigned int*)(_lb + {cap}) - *(unsigned int*)(_lb + {cnt}) < {wide}u",
+            cap = WRITE_LOG_WIDE_OFFSET_CAPACITY,
+            cnt = WRITE_LOG_WIDE_OFFSET_COUNT,
+        ));
+    }
+    format!(
+        "    {{ unsigned char* _lb = (unsigned char*)write_log; \
+            if (__builtin_expect({cond}, 0)) \
+                ((void(*)(void*, unsigned int, unsigned int))*(void**)(_lb + {res}))\
+                (_lb, {narrow}u, {wide}u); }}\n",
+        cond = conds.join(" || "),
+        res = WRITE_LOG_OFFSET_RESERVE,
+    )
 }
 
 /// Event-path `$display` / `$write` → a call into the Rust formatter
@@ -2431,11 +2486,22 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         VarOffset::Comb(o) => ("comb_values", o),
     };
     // Body: walk each ProtoStatement, fail fast on unsupported.
+    // Pushes inside the body execute once per iteration: scale their
+    // contribution to the reserve counters by the trip count.
+    let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());
+    let wide_before = EVENT_WIDE_PUSHES.with(|c| c.get());
     let mut body = String::new();
     for s in &for_stmt.body {
         body.push_str(&emit_stmt(s)?);
         body.push(' ');
     }
+    let trips = end_excl.saturating_sub(start).div_ceil(step);
+    EVENT_NARROW_PUSHES.with(|c| {
+        c.set(narrow_before + (c.get() - narrow_before).saturating_mul(trips));
+    });
+    EVENT_WIDE_PUSHES.with(|c| {
+        c.set(wide_before + (c.get() - wide_before).saturating_mul(trips));
+    });
     Some(format!(
         "for (uint64_t _it = {start}ULL; _it < {end}ULL; _it += {step}ULL) {{ \
             *(({ct}*)({b} + {off:#x})) = ({ct})_it; \

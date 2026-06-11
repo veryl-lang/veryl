@@ -28,6 +28,10 @@ pub enum HelperSig {
     Reduce,
     /// `(offset, payload, width_class) -> ()` — write-log push.
     WriteLogPushStatic,
+    /// `(buf, offset, payload, width_class) -> ()` — write-log grow+push (narrow).
+    WriteLogGrowPushNarrow,
+    /// `(buf, offset, src_ptr, nb) -> ()` — write-log grow+push (wide).
+    WriteLogGrowPushWide,
 }
 
 pub struct Context {
@@ -102,6 +106,18 @@ pub fn get_or_create_sig(
             sig.params.push(AbiParam::new(I64)); // payload
             sig.params.push(AbiParam::new(I32)); // width_class (caller-zext from u16)
         }
+        HelperSig::WriteLogGrowPushNarrow => {
+            sig.params.push(AbiParam::new(I64)); // buf
+            sig.params.push(AbiParam::new(I32)); // offset
+            sig.params.push(AbiParam::new(I64)); // payload
+            sig.params.push(AbiParam::new(I32)); // width_class
+        }
+        HelperSig::WriteLogGrowPushWide => {
+            sig.params.push(AbiParam::new(I64)); // buf
+            sig.params.push(AbiParam::new(I32)); // offset
+            sig.params.push(AbiParam::new(I64)); // src_ptr
+            sig.params.push(AbiParam::new(I32)); // nb
+        }
     }
 
     let sig_ref = builder.import_signature(sig);
@@ -136,9 +152,10 @@ pub fn call_helper_ret(
 
 /// Inline write-log push: direct loads/stores into the `WriteLogBuffer`
 /// at `context.log_buf` (mirrors `write_log::WriteLogBuffer` layout).
-/// ~8 instructions vs ~30+ via helper call.
+/// ~8 instructions vs ~30+ via helper call.  A full pool branches to the
+/// out-of-line grow+push helper (fn pointer in the buffer header).
 pub fn emit_inline_write_log_push(
-    context: &Context,
+    context: &mut Context,
     builder: &mut FunctionBuilder,
     offset: Value,
     payload: Value,
@@ -147,7 +164,8 @@ pub fn emit_inline_write_log_push(
     use crate::ir::write_log::{
         WRITE_LOG_ENTRY_OFFSET_MASK_XZ, WRITE_LOG_ENTRY_OFFSET_OFFSET,
         WRITE_LOG_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
-        WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
+        WRITE_LOG_NARROW_OFFSET_CAPACITY, WRITE_LOG_NARROW_OFFSET_COUNT,
+        WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR, WRITE_LOG_OFFSET_GROW_PUSH_NARROW,
     };
     let log_buf = context.log_buf;
     let flags = MemFlags::trusted();
@@ -155,6 +173,30 @@ pub fn emit_inline_write_log_push(
     let count = builder
         .ins()
         .load(I32, flags, log_buf, WRITE_LOG_NARROW_OFFSET_COUNT);
+    let capacity = builder
+        .ins()
+        .load(I32, flags, log_buf, WRITE_LOG_NARROW_OFFSET_CAPACITY);
+    let full = builder
+        .ins()
+        .icmp(IntCC::UnsignedGreaterThanOrEqual, count, capacity);
+
+    let slow_block = builder.create_block();
+    let fast_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.set_cold_block(slow_block);
+    builder.ins().brif(full, slow_block, &[], fast_block, &[]);
+
+    builder.switch_to_block(slow_block);
+    let grow_push = builder
+        .ins()
+        .load(I64, flags, log_buf, WRITE_LOG_OFFSET_GROW_PUSH_NARROW);
+    let sig_ref = get_or_create_sig(context, builder, HelperSig::WriteLogGrowPushNarrow);
+    builder
+        .ins()
+        .call_indirect(sig_ref, grow_push, &[log_buf, offset, payload, width_class]);
+    builder.ins().jump(merge_block, &[]);
+
+    builder.switch_to_block(fast_block);
     let one = builder.ins().iconst(I32, 1);
     let new_count = builder.ins().iadd(count, one);
     builder
@@ -188,22 +230,28 @@ pub fn emit_inline_write_log_push(
     builder
         .ins()
         .store(flags, payload, entry_slot, WRITE_LOG_ENTRY_OFFSET_PAYLOAD);
+    builder.ins().jump(merge_block, &[]);
+
+    builder.switch_to_block(merge_block);
 }
 
 /// Inline write-log push for a wide FF: writes a single `WriteLogWideEntry`
 /// with offset, byte count, and `nb` bytes copied from `payload_ptr`.
-/// Requires `nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES` (= 56).
+/// Requires `nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES` (= 56).  A full pool
+/// branches to the out-of-line grow+push helper, like the narrow push.
 pub fn emit_inline_write_log_push_wide(
-    context: &Context,
+    context: &mut Context,
     builder: &mut FunctionBuilder,
     offset: Value,
     payload_ptr: Value,
     nb: usize,
 ) {
     use crate::ir::write_log::{
-        WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
-        WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
-        WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+        WRITE_LOG_OFFSET_GROW_PUSH_WIDE, WRITE_LOG_WIDE_ENTRY_OFFSET_NB,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET, WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD,
+        WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, WRITE_LOG_WIDE_ENTRY_SIZE,
+        WRITE_LOG_WIDE_OFFSET_CAPACITY, WRITE_LOG_WIDE_OFFSET_COUNT,
+        WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
     };
     debug_assert!(nb > 0 && nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
     let log_buf = context.log_buf;
@@ -212,6 +260,31 @@ pub fn emit_inline_write_log_push_wide(
     let count = builder
         .ins()
         .load(I32, flags, log_buf, WRITE_LOG_WIDE_OFFSET_COUNT);
+    let capacity = builder
+        .ins()
+        .load(I32, flags, log_buf, WRITE_LOG_WIDE_OFFSET_CAPACITY);
+    let full = builder
+        .ins()
+        .icmp(IntCC::UnsignedGreaterThanOrEqual, count, capacity);
+
+    let slow_block = builder.create_block();
+    let fast_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.set_cold_block(slow_block);
+    builder.ins().brif(full, slow_block, &[], fast_block, &[]);
+
+    builder.switch_to_block(slow_block);
+    let grow_push = builder
+        .ins()
+        .load(I64, flags, log_buf, WRITE_LOG_OFFSET_GROW_PUSH_WIDE);
+    let nb_arg = builder.ins().iconst(I32, nb as i64);
+    let sig_ref = get_or_create_sig(context, builder, HelperSig::WriteLogGrowPushWide);
+    builder
+        .ins()
+        .call_indirect(sig_ref, grow_push, &[log_buf, offset, payload_ptr, nb_arg]);
+    builder.ins().jump(merge_block, &[]);
+
+    builder.switch_to_block(fast_block);
     let one = builder.ins().iconst(I32, 1);
     let new_count = builder.ins().iadd(count, one);
     builder
@@ -268,6 +341,9 @@ pub fn emit_inline_write_log_push_wide(
         };
         i += chunk;
     }
+    builder.ins().jump(merge_block, &[]);
+
+    builder.switch_to_block(merge_block);
 }
 
 /// Stack slot of `nb` bytes; returns its address as I64.

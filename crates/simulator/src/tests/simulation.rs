@@ -14908,3 +14908,165 @@ fn assign_concat_destructure_wide_rhs() {
         );
     }
 }
+
+#[test]
+fn write_log_grows_on_runtime_loop_narrow() {
+    // A runtime-bound loop pushes one write-log entry per iteration, far
+    // past the statically-sized pool; without growth this dropped entries
+    // (interpret) or stored past the allocation (JIT/AOT-C).
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_n  : input     logic<16>,
+        o_v  : output    logic<32>,
+    ) {
+        var mem: logic<32> [6000];
+        always_ff {
+            if_reset {
+            } else {
+                for i in 0..i_n {
+                    mem[i] = i + 1;
+                }
+            }
+        }
+        assign o_v = mem[5999];
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_n", Value::new(6000, 16, false));
+        sim.step(&rst);
+        sim.step(&clk);
+        // The last loop iteration's entry must survive the pool overflow.
+        assert_eq!(
+            sim.get("o_v").unwrap(),
+            Value::new(6000, 32, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn write_log_grows_on_runtime_loop_wide() {
+    // Same as the narrow case but with >8-byte elements so the wide entry
+    // pool (floor 64) overflows.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_n  : input     logic<8>,
+        o_v  : output    logic<128>,
+    ) {
+        var mem: logic<128> [200];
+        always_ff {
+            if_reset {
+            } else {
+                for i in 0..i_n {
+                    mem[i] = i + 1;
+                }
+            }
+        }
+        assign o_v = mem[199];
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_n", Value::new(200, 8, false));
+        sim.step(&rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_v").unwrap().payload_u128(),
+            200u128,
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn write_log_reserve_on_const_loop_narrow() {
+    // Const-bound loop: AOT-C emits the loop in C with a one-shot
+    // prologue reserve (6000 pushes from one site) instead of per-push
+    // capacity checks.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_v  : output    logic<32>,
+    ) {
+        var mem: logic<32> [6000];
+        always_ff {
+            if_reset {
+            } else {
+                for i in 0..6000 {
+                    mem[i] = i + 1;
+                }
+            }
+        }
+        assign o_v = mem[5999];
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step(&rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_v").unwrap(),
+            Value::new(6000, 32, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn write_log_reserve_on_const_loop_wide() {
+    // Same with >8-byte elements so the wide pool is reserved.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_v  : output    logic<128>,
+    ) {
+        var mem: logic<128> [200];
+        always_ff {
+            if_reset {
+            } else {
+                for i in 0..200 {
+                    mem[i] = i + 1;
+                }
+            }
+        }
+        assign o_v = mem[199];
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step(&rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_v").unwrap().payload_u128(),
+            200u128,
+            "config={config:?}"
+        );
+    }
+}
