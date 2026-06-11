@@ -2438,7 +2438,11 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
             return Ok(result);
         }
 
-        let expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+        let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+        // Expand an unsized fill literal (`{a, b} = '1`) to the concat
+        // width before the windows slice it; a width-0 sentinel sliced by
+        // a window reads as zero.
+        size_fill_literal_rhs(&mut expr, None, None, src.width.unwrap());
 
         let mut result = Vec::new();
         let mut remaining = src.width.unwrap();
@@ -2461,8 +2465,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 dst.comptime.r#type.total_width().unwrap()
             };
 
-            let rhs_select = Some((remaining - 1, remaining - dst_elem_width));
-            remaining -= dst_elem_width;
+            let rhs_select = Some(msb_first_window(&mut remaining, dst_elem_width));
 
             let const_index = if dst.index.is_const() {
                 dst.index.eval_value(&mut scope.analyzer_context)
@@ -2648,7 +2651,7 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
 /// materialize the value eagerly, so an unsized sentinel would be filled to
 /// width 0 — all zeros — silently dropping the value (e.g. `f.a = '1` reads
 /// back 0).  Expanding here keeps every backend consistent.
-fn size_fill_literal_rhs(
+pub(crate) fn size_fill_literal_rhs(
     expr: &mut ProtoExpression,
     select: Option<(usize, usize)>,
     dyn_window: Option<usize>,
@@ -2679,6 +2682,14 @@ fn size_fill_literal_rhs(
     *value = value.expand(target, false).into_owned();
     *width = target;
     expr_context.width = target;
+}
+
+/// MSB-first concat-destructure window: take `elem_width` bits off the
+/// top of the `remaining` unassigned RHS bits, as an inclusive (msb, lsb)
+/// rhs_select window.
+pub(crate) fn msb_first_window(remaining: &mut usize, elem_width: usize) -> (usize, usize) {
+    *remaining -= elem_width;
+    (*remaining + elem_width - 1, *remaining)
 }
 
 impl Conv<&air::AssignStatement> for ProtoStatement {
@@ -3046,10 +3057,13 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 }
             }
 
-            let proto_expr: ProtoExpression = Conv::conv(context, expr)?;
+            let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
             let scope = context.scope();
             let meta = scope.variable_meta.get(arg_var_id).unwrap();
             let element = &meta.elements[0];
+            // Size an unsized all-bit literal (`'1` etc.) to the parameter
+            // width — there is no assignment statement here to do it.
+            size_fill_literal_rhs(&mut proto_expr, None, None, meta.width);
             result.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
                 dst_width: meta.width,

@@ -10,6 +10,7 @@ use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression, ProtoForRange,
     ProtoForStatement, ProtoIfStatement, ProtoStatement,
 };
+use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::ir as air;
@@ -26,6 +27,11 @@ impl ProtoAssignDynamicStatement {
                 return false;
             }
             return full_width <= 64;
+        }
+        // build_binary's rhs_select slicing assumes a ≤64-bit scalar
+        // payload; wider sources stay on the interpreter (rare).
+        if self.rhs_select.is_some() && self.expr.width() > 64 {
+            return false;
         }
         // Wide (>128-bit) comb-base dynamic-indexed store: see
         // `build_binary_dynamic_wide`. FF-base / 65..=128 bail (AOT-C parity).
@@ -705,9 +711,88 @@ impl ProtoAssignStatement {
         let nb = calc_native_bytes(self.dst_width);
         let nb_i32 = nb as i32;
 
-        // Widen expression result to I128 for a 128-bit destination,
-        // skipping if already I128 (unsized all_bit literal).
-        if wide && self.expr.width() <= 64 && builder.func.dfg.value_type(payload) != I128 {
+        // Apply rhs_select before the dst-width coercion, at the source's
+        // natural representation: shifting after the I128→I64 truncation
+        // would lose windows above bit 63, and a >128-bit source is a
+        // pointer needing a word-window read.  A wide-pointer source with
+        // no rhs_select is the implicit truncation `narrow = wide`, read
+        // with window (dst_width-1, 0).
+        let rhs_window = self.rhs_select.or_else(|| {
+            if self.expr.builds_wide_pointer() {
+                Some((self.dst_width - 1, 0))
+            } else {
+                None
+            }
+        });
+        if let Some((beg, end)) = rhs_window {
+            let select_width = beg - end + 1;
+            if self.expr.builds_wide_pointer() {
+                // Producers clamp windows to the source width, so these
+                // reads stay inside its allocation.
+                let read = |builder: &mut FunctionBuilder, ptr| {
+                    if select_width <= 64 {
+                        emit_wide_bit_select_read_narrow(builder, ptr, beg, end, select_width)
+                    } else {
+                        // 65-128-bit window: combine two ≤64-bit reads.
+                        let lo = emit_wide_bit_select_read_narrow(builder, ptr, end + 63, end, 64);
+                        let hi = emit_wide_bit_select_read_narrow(
+                            builder,
+                            ptr,
+                            beg,
+                            end + 64,
+                            select_width - 64,
+                        );
+                        let lo = builder.ins().uextend(I128, lo);
+                        let hi = builder.ins().uextend(I128, hi);
+                        let hi = builder.ins().ishl_imm(hi, 64);
+                        builder.ins().bor(lo, hi)
+                    }
+                };
+                payload = read(builder, payload);
+                if let Some(mxz) = mask_xz {
+                    mask_xz = Some(read(builder, mxz));
+                }
+            } else {
+                let slice = |builder: &mut FunctionBuilder, v| {
+                    let bits = builder.func.dfg.value_type(v).bits() as usize;
+                    if end >= bits {
+                        // Window entirely above the source value: zero.
+                        if bits > 64 {
+                            iconst_128(builder, 0)
+                        } else {
+                            builder.ins().iconst(I64, 0)
+                        }
+                    } else {
+                        let shifted = if end > 0 {
+                            builder.ins().ushr_imm(v, end as i64)
+                        } else {
+                            v
+                        };
+                        band_const(
+                            builder,
+                            shifted,
+                            gen_mask_for_width(select_width),
+                            bits > 64,
+                        )
+                    }
+                };
+                payload = slice(builder, payload);
+                if let Some(mxz) = mask_xz {
+                    mask_xz = Some(slice(builder, mxz));
+                }
+            }
+        }
+
+        let known_bits = if let Some((beg, end)) = rhs_window {
+            beg - end + 1
+        } else {
+            known_bits
+        };
+
+        // Coerce the (now always scalar) value to the dst representation.
+        // Keyed on the value type, not expr.width(): a window read of a
+        // wide source yields I64/I128 regardless of the declared width.
+        if wide && builder.func.dfg.value_type(payload) != I128 {
             payload = builder.ins().uextend(I128, payload);
             if let Some(mxz) = mask_xz
                 && builder.func.dfg.value_type(mxz) != I128
@@ -721,27 +806,6 @@ impl ProtoAssignStatement {
                 && builder.func.dfg.value_type(mxz) == I128
             {
                 mask_xz = Some(builder.ins().ireduce(I64, mxz));
-            }
-        }
-
-        // Narrow known_bits if rhs_select is applied
-        let known_bits = if let Some((beg, end)) = self.rhs_select {
-            beg - end + 1
-        } else {
-            known_bits
-        };
-
-        if let Some((beg, end)) = self.rhs_select {
-            let select_width = beg - end + 1;
-            let mask = gen_mask_for_width(select_width);
-
-            payload = builder.ins().ushr_imm(payload, end as i64);
-            payload = band_const(builder, payload, mask, wide);
-
-            if let Some(mxz) = mask_xz {
-                let mxz = builder.ins().ushr_imm(mxz, end as i64);
-                let mxz = band_const(builder, mxz, mask, wide);
-                mask_xz = Some(mxz);
             }
         }
 
@@ -1314,11 +1378,38 @@ impl ProtoAssignStatement {
         };
         let _ = expr_width; // no longer gates representation (builds_wide_pointer does)
 
-        // rhs_select: `dst = src[beg:end]` — shift the source down by `end`
-        // and mask to the select width before storing the full wide dst.
-        let src_ptr = if let Some((beg, end)) = self.rhs_select {
+        // rhs_select: `dst = src[beg:end]`.  Size the shift to the SOURCE,
+        // whose bits above the dst's native size must survive the
+        // extraction; a narrower source is copied into a zeroed dst-sized
+        // slot first so the wide ops never read past its storage (and into
+        // its 4-state mask words).
+        let src_nb = if self.expr.builds_wide_pointer() {
+            calc_native_bytes(expr_width)
+        } else {
+            // Force-stored above into an nb-sized zeroed slot.
+            nb
+        };
+        let extract_window = |context: &mut CraneliftContext,
+                              builder: &mut FunctionBuilder,
+                              ptr: CraneliftValue,
+                              beg: usize,
+                              end: usize| {
             use super::helpers::emit_wide_shift_right_mask;
-            emit_wide_shift_right_mask(context, builder, src_ptr, end, beg - end + 1, nb)
+            let (src, op_nb) = if src_nb < nb {
+                let slot = alloc_wide_zero(builder, nb);
+                for i in 0..(src_nb / 8) {
+                    let off = (i * 8) as i32;
+                    let w = builder.ins().load(I64, MemFlags::trusted(), ptr, off);
+                    builder.ins().store(MemFlags::trusted(), w, slot, off);
+                }
+                (slot, nb)
+            } else {
+                (ptr, src_nb)
+            };
+            emit_wide_shift_right_mask(context, builder, src, end, beg - end + 1, op_nb)
+        };
+        let src_ptr = if let Some((beg, end)) = self.rhs_select {
+            extract_window(context, builder, src_ptr, beg, end)
         } else {
             src_ptr
         };
@@ -1374,8 +1465,7 @@ impl ProtoAssignStatement {
             // (4-state).  dst-select RMW only reaches here in 2-state, where
             // there is no mask half, so it never combines with this block.
             let mask_ptr = if let Some((beg, end)) = self.rhs_select {
-                use super::helpers::emit_wide_shift_right_mask;
-                emit_wide_shift_right_mask(context, builder, mask_ptr, end, beg - end + 1, nb)
+                extract_window(context, builder, mask_ptr, beg, end)
             } else {
                 mask_ptr
             };
