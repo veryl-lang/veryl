@@ -1085,7 +1085,9 @@ impl ProtoExpression {
                         // would wrongly return the operand unshifted instead of
                         // 0. Clamp: when count >= width, force 0.
                         let raw = builder.ins().ishl(x_payload, y_payload);
-                        if needs_wide && expr_context.width <= 128 {
+                        // Narrow shifts wrap the count mod 64 in native code,
+                        // so the clamp applies at every width.
+                        if expr_context.width >= 1 && expr_context.width <= 128 {
                             let oob = icmp_const(
                                 builder,
                                 IntCC::UnsignedGreaterThanOrEqual,
@@ -1101,7 +1103,7 @@ impl ProtoExpression {
                     }
                     Op::LogicShiftR => {
                         let raw = builder.ins().ushr(x_payload, y_payload);
-                        if needs_wide && expr_context.width <= 128 {
+                        if expr_context.width >= 1 && expr_context.width <= 128 {
                             let oob = icmp_const(
                                 builder,
                                 IntCC::UnsignedGreaterThanOrEqual,
@@ -1122,7 +1124,7 @@ impl ProtoExpression {
                             let shifted_up = builder.ins().ishl_imm(x_payload, shl_amount);
                             let sign_extended = builder.ins().sshr_imm(shifted_up, shl_amount);
                             let raw = builder.ins().sshr(sign_extended, y_payload);
-                            if needs_wide && x.width() <= 128 {
+                            if x.width() >= 1 && x.width() <= 128 {
                                 // count >= width: arithmetic right shift fills
                                 // with the sign bit. sshr by (width-1) yields
                                 // all-sign-bits; native mod-128 would instead
@@ -1143,7 +1145,7 @@ impl ProtoExpression {
                             }
                         } else {
                             let raw = builder.ins().ushr(x_payload, y_payload);
-                            if needs_wide && expr_context.width <= 128 {
+                            if expr_context.width >= 1 && expr_context.width <= 128 {
                                 let oob = icmp_const(
                                     builder,
                                     IntCC::UnsignedGreaterThanOrEqual,
