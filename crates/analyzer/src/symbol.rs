@@ -1604,8 +1604,17 @@ impl Type {
 
         let mut array = Shape::default();
 
+        let mut array_expr: Vec<ir::WidthExpr> = vec![];
+        let mut array_expr_valid = true;
         for w in &self.array {
             let (_, value) = eval_size(context, w, false)?;
+            if let Some(expr) = try_syntax_expr_to_param_width(w) {
+                array_expr.push(expr);
+            } else if let Some(n) = value {
+                array_expr.push(ir::WidthExpr::Concrete(n));
+            } else {
+                array_expr_valid = false;
+            }
             array.push(value);
         }
 
@@ -1673,6 +1682,19 @@ impl Type {
         let mut r#type = ir::Type::new(kind);
         r#type.signed = signed;
         r#type.is_positive = is_positive;
+        // Inner typedef/user-defined dims were appended after this type's
+        // own dims; extend the symbolic dims with their numeric values so
+        // the expr list still describes the whole shape.
+        for n in array.as_slice().iter().skip(array_expr.len()) {
+            if let Some(n) = n {
+                array_expr.push(ir::WidthExpr::Concrete(*n));
+            } else {
+                array_expr_valid = false;
+            }
+        }
+        if array_expr_valid && array_expr.len() == array.as_slice().len() {
+            r#type.set_array_expr(array_expr);
+        }
         r#type.array = array;
         if width_expr.len() == width.as_slice().len() {
             r#type.set_parametric_width(width, width_expr);

@@ -2535,7 +2535,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                             None
                         };
                         let period = if let Some(expr) = period {
-                            Some(Conv::conv(context, expr)?)
+                            Some(Conv::conv(context, expr.as_ref())?)
                         } else {
                             None
                         };
