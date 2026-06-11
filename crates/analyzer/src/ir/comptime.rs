@@ -1,3 +1,4 @@
+use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::utils::get_component;
 use crate::ir::{
@@ -74,6 +75,30 @@ impl PartSelectPath {
                 let sel = &select[0..select_dims];
                 select = &select[select_dims..];
 
+                // Bounds-check each coordinate against its dimension: an
+                // out-of-range member index would otherwise remap past the
+                // member into an adjacent field, emitting out-of-bounds SV.
+                for (k, coord) in sel.iter().enumerate() {
+                    if let Some(Some(size)) = x.r#type.width.get(k).copied()
+                        && let Some(value) = coord.eval_value(context)
+                        && !value.is_xz()
+                    {
+                        let idx = value.to_usize().unwrap_or(0);
+                        if idx >= size {
+                            context.insert_error(AnalyzerError::invalid_select(
+                                &InvalidSelectKind::OutOfRange {
+                                    beg: idx,
+                                    end: idx,
+                                    size,
+                                },
+                                &coord.token_range(),
+                                &[],
+                            ));
+                            return None;
+                        }
+                    }
+                }
+
                 // If select dimension doesn't satisfy type dimension,
                 // calculate index using only the selected (outer) dimensions
                 // so that `width * index` gives the correct bit position
@@ -90,6 +115,33 @@ impl PartSelectPath {
 
             let remaining_width = x.r#type.width.as_shape_ref();
             let remaining_width = ShapeRef::new(&remaining_width[select_dims..]);
+
+            // Bounds-check a bit-select range against the deepest member's
+            // innermost dimension, the same modulo-wrap hazard as an index.
+            if !has_sub_part
+                && let Some((range_beg, range_end)) = &range_select
+                && let Some(Some(size)) = remaining_width.first().copied()
+            {
+                for coord in [range_beg, range_end] {
+                    if let Some(value) = coord.eval_value(context)
+                        && !value.is_xz()
+                    {
+                        let idx = value.to_usize().unwrap_or(0);
+                        if idx >= size {
+                            context.insert_error(AnalyzerError::invalid_select(
+                                &InvalidSelectKind::OutOfRange {
+                                    beg: idx,
+                                    end: idx,
+                                    size,
+                                },
+                                &coord.token_range(),
+                                &[],
+                            ));
+                            return None;
+                        }
+                    }
+                }
+            }
 
             let width = if is_select {
                 let mut r#type = x.r#type.clone();
