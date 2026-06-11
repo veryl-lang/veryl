@@ -11102,6 +11102,47 @@ fn zero_width_literal_rejected() {
 }
 
 #[test]
+fn attribute_string_args_rejected() {
+    // Regression: align/fmt/expand silently skipped non-identifier (string)
+    // arguments, and a string top argument of #[test] silently selected the
+    // default top module.
+    for attr in ["#[align(number, \"junk\")]", "#[fmt(skip, \"junk\")]"] {
+        let code = format!(
+            r#"
+            module Top {{
+                {attr}
+                var a: logic;
+                assign a = 1;
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MismatchAttributeArgs { .. })),
+            "{attr}: {errors:?}"
+        );
+    }
+
+    // Valid identifier arguments stay accepted.
+    let code = r#"
+    module Top {
+        #[align(number)]
+        var a: logic;
+        assign a = 1;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchAttributeArgs { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn non_constant_select_width_on_struct_member() {
     // Regression: the member-access select loops skipped
     // check_part_select_width, so `p.data[0+:i_w]` with a runtime width

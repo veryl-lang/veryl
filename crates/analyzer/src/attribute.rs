@@ -166,6 +166,11 @@ fn arg_count(args: &Option<AttributeOpt>) -> usize {
     }
 }
 
+// get_args_ident drops non-identifier (string) args, so a count mismatch means one slipped in.
+fn has_non_ident_arg(idents: &[Token], opt: &Option<AttributeOpt>) -> bool {
+    idents.len() != arg_count(opt)
+}
+
 // Single-argument attributes read only position 0 (test also 1); reject extra args
 // so a typo'd `#[allow(unused_variable, garbage)]` is an error, not silently dropped.
 fn reject_extra_args(args: &Option<AttributeOpt>, max: usize) -> Result<(), AttributeError> {
@@ -355,6 +360,14 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                 let arg = get_arg_ident(&value.attribute_opt, 0);
                 let top = get_arg_ident(&value.attribute_opt, 1);
 
+                // A non-identifier top argument would silently select the
+                // DEFAULT top module instead.
+                if top.is_none() && arg_count(&value.attribute_opt) >= 2 {
+                    return Err(AttributeError::MismatchArgs(
+                        "test name with optional top module identifier".to_string(),
+                    ));
+                }
+
                 if let Some(arg) = arg {
                     Ok(Attribute::Test(arg, top.map(|x| x.text)))
                 } else {
@@ -386,6 +399,12 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             }
             x if x == pat.align => {
                 let args = get_args_ident(&value.attribute_opt);
+                if has_non_ident_arg(&args, &value.attribute_opt) {
+                    return Err(AttributeError::MismatchArgs(format!(
+                        "align type: ({})",
+                        AlignItem::available()
+                    )));
+                }
                 let mut items = Vec::new();
 
                 let err = AttributeError::MismatchArgs(format!(
@@ -409,6 +428,12 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             }
             x if x == pat.fmt => {
                 let args = get_args_ident(&value.attribute_opt);
+                if has_non_ident_arg(&args, &value.attribute_opt) {
+                    return Err(AttributeError::MismatchArgs(format!(
+                        "fmt type: ({})",
+                        FormatItem::available()
+                    )));
+                }
                 let mut items = Vec::new();
 
                 let err = AttributeError::MismatchArgs(format!(
@@ -432,6 +457,12 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
             }
             x if x == pat.expand => {
                 let args = get_args_ident(&value.attribute_opt);
+                if has_non_ident_arg(&args, &value.attribute_opt) {
+                    return Err(AttributeError::MismatchArgs(format!(
+                        "expand type: ({})",
+                        ExpandItem::available()
+                    )));
+                }
                 let mut items = Vec::new();
 
                 let err = AttributeError::MismatchArgs(format!(
