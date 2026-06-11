@@ -14482,6 +14482,49 @@ fn no_panic_on_oversized_based_literal() {
 }
 
 #[test]
+fn sized_xz_literal_narrower_than_digits_accepted() {
+    // Regression: 2'hx was rejected as too_large_number (the x digit's
+    // 4-bit mask exceeded the declared width) while the identical 2'bxx
+    // passed.  x/z fill digits truncate legally; only lost 1-bits count.
+    for lit in ["2'hx", "2'bxx", "2'hz", "2'h0x"] {
+        let code = format!(
+            r#"
+            module Top {{
+                var a: logic<2>;
+                assign a = {lit};
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+            "{lit}: {errors:?}"
+        );
+    }
+
+    // Lost 1-bits still error.
+    for lit in ["2'h7", "2'b1111111x"] {
+        let code = format!(
+            r#"
+            module Top {{
+                var a: logic<2>;
+                assign a = {lit};
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+            "{lit}: {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn no_panic_on_oversized_literal_in_expression() {
     // Regression: a based literal whose digits need >64 bits with a declared
     // width <=64 stayed a BigUint while its operand partner expanded to U64,
