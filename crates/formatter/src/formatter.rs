@@ -1580,6 +1580,9 @@ impl VerylWalker for Formatter {
         for (i, x) in arg.case_statement_list.iter().enumerate() {
             self.newline_list(i);
             self.case_item(&x.case_item);
+            // Like statement_block: a formatter-introduced wrap inside the
+            // arm must not be misread as an alignment-group split next run.
+            self.align_note_statement_end();
         }
         if self.mode == Mode::Align {
             self.aligner.enable_auto_finish_for(align_kind::EXPRESSION);
@@ -1642,6 +1645,8 @@ impl VerylWalker for Formatter {
         for (i, x) in arg.switch_statement_list.iter().enumerate() {
             self.newline_list(i);
             self.switch_item(&x.switch_item);
+            // See case_statement.
+            self.align_note_statement_end();
         }
         if self.mode == Mode::Align {
             self.aligner.enable_auto_finish_for(align_kind::EXPRESSION);
@@ -3307,16 +3312,14 @@ fn estimated_token_width(tokens: &[Token]) -> u32 {
     let mut total: u32 = tokens.iter().map(|t| t.length).sum();
     for pair in tokens.windows(2) {
         let (curr, next) = (&pair[0], &pair[1]);
-        let gap = if curr.line == next.line {
-            // Collapse source whitespace to one space (like the cross-line case
-            // below) so the estimate, and thus the arm-isolation decision, is
-            // layout-independent and identical across passes.
-            u32::from(next.column > curr.column + curr.length)
-        } else {
-            // Cross-line tokens collapse to a single space when joined.
-            1
-        };
-        total += gap;
+        // Approximate the formatter's own spacing rather than reading source columns:
+        // source layout (`a+b` vs `a + b`) shifts between passes and an estimate that
+        // follows it flips the arm-isolation decision near the threshold.
+        let curr_s = curr.to_string();
+        let next_s = next.to_string();
+        let no_space = matches!(next_s.as_str(), "," | ";" | ")" | "]" | ":" | "::" | ".")
+            || matches!(curr_s.as_str(), "(" | "[" | "::" | "." | "#" | "$");
+        total += u32::from(!no_space);
     }
     total
 }
