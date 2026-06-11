@@ -3124,10 +3124,26 @@ pub fn function_call(
 
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
-        let (inputs, outputs) = args.to_function_args(c, &func, token)?;
+        let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
 
         let mut comptime = func.r#type.clone();
         comptime.token = token;
+
+        // Merge the inputs' clock domains into the result and cross-check, so a
+        // call can't launder a domain crossing (mirrors Op::eval_type_binary);
+        // also check output-arg destinations against the merged domain.
+        for expr in inputs.values_mut() {
+            let x = expr.eval_comptime(c, None);
+            check_clock_domain(c, &comptime, x, &token.beg);
+            comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
+        }
+        for dsts in outputs.values() {
+            for dst in dsts {
+                let mut dst_comptime = dst.comptime.clone();
+                dst_comptime.token = dst.token;
+                check_clock_domain(c, &dst_comptime, &comptime, &token.beg);
+            }
+        }
 
         Ok(ir::FunctionCall {
             id: func.id,

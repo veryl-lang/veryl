@@ -11109,6 +11109,87 @@ fn out_of_range_lhs_select_rejected() {
 }
 
 #[test]
+fn clock_domain_function_call() {
+    // Regression: a function call's comptime was built from the return type
+    // alone (clock_domain None), so routing a signal through any function
+    // laundered the crossing — via the return value and via output args.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic,
+        o_b    : output 'b logic,
+    ) {
+        function FuncF (
+            x: input logic,
+        ) -> logic {
+            return x;
+        }
+        assign o_b = FuncF(i_a);
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Output-argument variant.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic,
+        o_b    : output 'b logic,
+    ) {
+        var t: 'b logic;
+        function FuncG (
+            x: input  logic,
+            y: output logic,
+        ) {
+            y = x;
+        }
+        always_comb {
+            FuncG(i_a, t);
+        }
+        assign o_b = t;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain calls stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_a    : input  'a logic,
+        o_a    : output 'a logic,
+    ) {
+        function FuncF (
+            x: input logic,
+        ) -> logic {
+            return x;
+        }
+        assign o_a = FuncF(i_a);
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (
