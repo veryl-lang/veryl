@@ -10992,6 +10992,52 @@ fn invalid_select() {
 }
 
 #[test]
+fn multiple_driver_detection_is_order_independent() {
+    // Regression: one dynamic-index assign made the accumulated entry's
+    // `maybe` sticky, suppressing later definite double-drive conflicts on
+    // the same variable when it appeared first.
+    for order in [
+        ["assign x[i] = 1;", "assign x[0] = 2;", "assign x[0] = 3;"],
+        ["assign x[0] = 2;", "assign x[0] = 3;", "assign x[i] = 1;"],
+        ["assign x[0] = 2;", "assign x[i] = 1;", "assign x[0] = 3;"],
+    ] {
+        let body = order.join("\n        ");
+        let code = format!(
+            r#"
+            module Top (i: input logic, o: output logic<8>) {{
+                var x: logic<8> [2];
+                {body}
+                assign o = x[0] + x[1];
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+            "{body}: {errors:?}"
+        );
+    }
+
+    // Dynamic + single definite per element stays accepted.
+    let code = r#"
+    module Top (i: input logic, o: output logic<8>) {
+        var x: logic<8> [2];
+        assign x[i] = 1;
+        assign o = x[0] + x[1];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn non_constant_select_width_on_struct_member() {
     // Regression: the member-access select loops skipped
     // check_part_select_width, so `p.data[0+:i_w]` with a runtime width
