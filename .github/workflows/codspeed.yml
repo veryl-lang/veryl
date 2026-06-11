@@ -9,6 +9,11 @@ on:
   # performance analysis in order to generate initial data.
   workflow_dispatch:
 
+# Avoid spurious curl HTTP/2 framing errors on crate download.
+env:
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: 10
+
 jobs:
   benchmarks:
     strategy:

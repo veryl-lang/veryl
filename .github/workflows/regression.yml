@@ -6,6 +6,11 @@ on:
       - master
   pull_request:
 
+# Avoid spurious curl HTTP/2 framing errors on crate download.
+env:
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: 10
+
 jobs:
   build:
     strategy:
@@ -218,6 +223,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: "${{ runner.os }}-wasm"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build for wasm
         run: cargo check --target wasm32-unknown-unknown -p veryl-emitter -p veryl-formatter -p veryl-simulator
 
@@ -228,5 +238,10 @@ jobs:
         with:
           submodules: 'true'
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: "${{ runner.os }}-highlightgen"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run highlightgen
         run: cargo run --bin highlightgen -- check
