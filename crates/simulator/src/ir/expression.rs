@@ -54,6 +54,11 @@ pub enum Expression {
         cond: Box<Expression>,
         true_expr: Box<Expression>,
         false_expr: Box<Expression>,
+        /// Result width; branch values evaluate at their own width and the
+        /// selected one extends to this.
+        width: usize,
+        /// True when both branches are signed (the extension sign-extends).
+        signed: bool,
     },
     DynamicVariable {
         base_ptr: *const u8,
@@ -146,16 +151,24 @@ impl Expression {
                 cond,
                 true_expr,
                 false_expr,
+                width,
+                signed,
             } => {
                 let cond_val = cond.eval(mask_cache);
                 let is_nonzero = match &cond_val {
                     Value::U64(x) => (x.payload & !x.mask_xz) != 0,
                     Value::BigUint(x) => *x.payload != (&*x.payload & &*x.mask_xz),
                 };
-                if is_nonzero {
+                let ret = if is_nonzero {
                     true_expr.eval(mask_cache)
                 } else {
                     false_expr.eval(mask_cache)
+                };
+                // Extend the selected branch to the result width (LRM 11.4.11).
+                if ret.width() < *width {
+                    ret.expand(*width, *signed).into_owned()
+                } else {
+                    ret
                 }
             }
             Expression::DynamicVariable {
@@ -250,6 +263,7 @@ impl Expression {
                 cond,
                 true_expr,
                 false_expr,
+                ..
             } => {
                 cond.gather_variable(inputs, outputs);
                 true_expr.gather_variable(inputs, outputs);
@@ -1051,8 +1065,11 @@ impl ProtoExpression {
                     cond,
                     true_expr,
                     false_expr,
+                    width,
                     ..
                 } => {
+                    let both_signed =
+                        true_expr.expr_context().signed && false_expr.expr_context().signed;
                     let cond = cond.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1078,6 +1095,8 @@ impl ProtoExpression {
                         cond: Box::new(cond),
                         true_expr: Box::new(true_expr),
                         false_expr: Box::new(false_expr),
+                        width: *width,
+                        signed: both_signed,
                     }
                 }
                 ProtoExpression::DynamicVariable {

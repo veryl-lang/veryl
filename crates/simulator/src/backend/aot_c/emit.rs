@@ -3040,12 +3040,44 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             cond,
             true_expr,
             false_expr,
+            width,
             ..
         } => {
             // The condition is a truthy test, so its high bits must be clean;
             // the selected branch becomes this result, so the branches inherit
             // `needs_clean`.
             let c = emit_expr(cond)?;
+            // Both-signed branches sign-extend to the result width
+            // (LRM 11.4.11); the plain C ternary would zero-extend the
+            // narrower one.  The sign-extension dirties the high bits, so
+            // re-mask the result to `width`.
+            let t_w = true_expr.width();
+            let f_w = false_expr.width();
+            let both_signed = true_expr.expr_context().signed
+                && false_expr.expr_context().signed
+                && t_w > 0
+                && f_w > 0;
+            if both_signed && (t_w < *width || f_w < *width) {
+                if *width == 0 || *width > 64 || t_w > 64 || f_w > 64 {
+                    return None;
+                }
+                let t = emit_expr_inner(true_expr, true)?;
+                let f = emit_expr_inner(false_expr, true)?;
+                let sext = |s: &str, w: usize| -> String {
+                    if w == 64 {
+                        format!("((int64_t)((uint64_t)({})))", s)
+                    } else {
+                        let shift = 64 - w;
+                        format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift)
+                    }
+                };
+                let inner = format!("(({}) ? ({}) : ({}))", c, sext(&t, t_w), sext(&f, f_w));
+                if *width < 64 {
+                    let mask = (1u64 << *width) - 1;
+                    return Some(format!("(((uint64_t)({inner})) & 0x{mask:x}ULL)"));
+                }
+                return Some(format!("((uint64_t)({inner}))"));
+            }
             let t = emit_expr_inner(true_expr, needs_clean)?;
             let f = emit_expr_inner(false_expr, needs_clean)?;
             Some(format!("(({}) ? ({}) : ({}))", c, t, f))

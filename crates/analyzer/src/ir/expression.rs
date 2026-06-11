@@ -453,10 +453,14 @@ impl Expression {
                 let y = y.eval_value(context)?;
                 let z = z.eval_value(context)?;
 
-                let width = y.width().max(z.width());
+                // The selected branch extends to the evaluation width by the
+                // result signedness: both-signed branches sign-extend
+                // (LRM 11.4.11), anything else zero-extends.
+                let signed = y.signed() && z.signed();
+                let width = y.width().max(z.width()).max(context_width);
 
                 let ret = if x.to_usize().unwrap_or(0) == 0 { z } else { y };
-                let ret = ret.expand(width, false).into_owned();
+                let ret = ret.expand(width, signed).into_owned();
                 Some(ret)
             }
             Expression::Concatenation(x, _) => {
