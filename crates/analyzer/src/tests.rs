@@ -14971,6 +14971,48 @@ fn for_zero_step_rejected() {
 }
 
 #[test]
+fn no_panic_on_inclusive_range_to_usize_max() {
+    // Regression: `for i in 0..=N` with N == usize::MAX computed `end + 1`,
+    // overflowing (panic in dev builds; in release the bound wrapped to 0 and
+    // the loop body was silently dropped from the IR while the emitted SV
+    // kept the full loop).  The unroller must decline instead.
+    for code in [
+        r#"
+        module Top (
+            o: output logic<32>,
+        ) {
+            const N: u64 = 64'hffff_ffff_ffff_ffff;
+            always_comb {
+                var acc: logic<32>;
+                acc = 0;
+                for i in 0..=N {
+                    acc += i as 32;
+                }
+                o = acc;
+            }
+        }
+        "#,
+        r#"
+        module Top (
+            o: output logic<32>,
+        ) {
+            const N: u64 = 64'hffff_ffff_ffff_ffff;
+            always_comb {
+                var acc: logic<32>;
+                acc = 0;
+                for i in 1..=N step *= 2 {
+                    acc += i as 32;
+                }
+                o = acc;
+            }
+        }
+        "#,
+    ] {
+        let _ = analyze(code);
+    }
+}
+
+#[test]
 fn for_degenerate_step_rejected() {
     // Regression: degenerate non-additive steps previously panicked the
     // compiler (`/= 0`, `%= 0` divide-by-zero; `-=` subtract overflow) or

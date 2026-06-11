@@ -577,7 +577,7 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 let start = r.start.eval(&mut sim.mask_cache);
                 let mut end = r.end.eval(&mut sim.mask_cache);
                 if r.inclusive {
-                    end += 1;
+                    end = end.saturating_add(1);
                 }
                 let step = r.step;
                 let op = r.op;
