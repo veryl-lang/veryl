@@ -16085,3 +16085,32 @@ fn concat_lhs_with_dynamic_bit_select() {
         assert_eq!(sim.get("b").unwrap().payload_u128(), 1, "{config:?}");
     }
 }
+
+#[test]
+fn enum_member_concat_width_not_squared() {
+    // Regression: an enum member factor kept its width both inside
+    // TypeKindEnum and in the outer shape, squaring total_width (12-bit
+    // member -> 144).  A concat of members then claimed >128 bits, sending
+    // the folded constant down the wide-pointer path where the JIT stored a
+    // raw stack ADDRESS into the destination.
+    let code = r#"
+    package Pkg {
+        enum Foo: logic<12> {
+            A = 12'h001,
+            B,
+        }
+    }
+    module Top (
+        y: output logic<24>,
+    ) {
+        assign y = {Pkg::Foo::B, Pkg::Foo::A};
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("y").unwrap().payload_u128(), 0x002001, "{config:?}");
+    }
+}

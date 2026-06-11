@@ -2123,6 +2123,9 @@ pub fn eval_factor_symbol(
 
                 let factor_comptime = factor.comptime_mut();
                 factor_comptime.r#type.kind = type_kind;
+                // The member width lives in TypeKindEnum, so the outer shape must
+                // be scalar (else total_width squares it), like to_ir_type's enums.
+                factor_comptime.r#type.set_concrete_width(Shape::default());
 
                 return Ok(factor);
             }
