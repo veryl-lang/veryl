@@ -1,0 +1,3 @@
+module zero_width_number {
+    const a: u32 = 0'd0;
+}

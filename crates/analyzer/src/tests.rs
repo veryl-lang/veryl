@@ -11063,6 +11063,45 @@ fn anonymous_identifier_in_type_position_rejected() {
 }
 
 #[test]
+fn zero_width_literal_rejected() {
+    // Regression: `0'1` emitted `0'b` (zero size, empty digits) and `0'h0`
+    // passed the too-large check (0 bits is not > width 0) — both illegal
+    // SystemVerilog emitted with no diagnostic.
+    for lit in ["0'1", "0'h0", "0'b0"] {
+        let code = format!(
+            r#"
+            module Top {{
+                var a: logic<8>;
+                assign a = {lit} as 8;
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::ZeroWidthNumber { .. })),
+            "{lit}: {errors:?}"
+        );
+    }
+
+    // Normal widths stay accepted.
+    let code = r#"
+    module Top {
+        var a: logic<8>;
+        assign a = 1'1 as 8;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ZeroWidthNumber { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn non_constant_select_width_on_struct_member() {
     // Regression: the member-access select loops skipped
     // check_part_select_width, so `p.data[0+:i_w]` with a runtime width
