@@ -2893,6 +2893,7 @@ impl AnalyzerError {
 pub enum ExceedLimitKind {
     EvaluateSize,
     ExpressionDepth,
+    StatementDepth,
     HierarchyDepth,
     TotalInstance,
 }
@@ -2902,6 +2903,7 @@ impl fmt::Display for ExceedLimitKind {
         match self {
             ExceedLimitKind::EvaluateSize => "evaluate size".fmt(f),
             ExceedLimitKind::ExpressionDepth => "expression depth".fmt(f),
+            ExceedLimitKind::StatementDepth => "statement depth".fmt(f),
             ExceedLimitKind::HierarchyDepth => "hierarchy depth".fmt(f),
             ExceedLimitKind::TotalInstance => "total instance".fmt(f),
         }
