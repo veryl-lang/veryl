@@ -187,7 +187,7 @@ impl TryFrom<&HierarchicalIdentifier> for ConnectOperand {
 
     fn try_from(arg: &HierarchicalIdentifier) -> Result<Self, Self::Error> {
         let full_path: Vec<_> = if let Ok(symbol) = symbol_table::resolve(arg) {
-            symbol.full_path.into_iter().collect()
+            symbol.full_path.clone().into_iter().collect()
         } else {
             return Err(None);
         };
@@ -272,7 +272,7 @@ impl TryFrom<&ExpressionIdentifier> for ConnectOperand {
 
     fn try_from(arg: &ExpressionIdentifier) -> Result<Self, Self::Error> {
         let full_path: Vec<_> = if let Ok(symbol) = symbol_table::resolve(arg) {
-            symbol.full_path.into_iter().collect()
+            symbol.full_path.clone().into_iter().collect()
         } else {
             return Err(None);
         };
@@ -366,7 +366,7 @@ impl TryFrom<&Expression> for ConnectOperand {
         };
 
         let full_path: Vec<_> = if let Ok(symbol) = symbol_table::resolve(exp) {
-            symbol.full_path.into_iter().collect()
+            symbol.full_path.clone().into_iter().collect()
         } else {
             return Err(None);
         };

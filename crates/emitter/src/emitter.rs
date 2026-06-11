@@ -1785,7 +1785,7 @@ impl Emitter {
     fn emit_port_identifier(&mut self, identifier: &Identifier) {
         let symbol = symbol_table::resolve((identifier, self.inst_module_namespace.as_ref()))
             .ok()
-            .map(|x| x.found);
+            .map(|x| Rc::clone(&x.found));
         self.emit_identifier(identifier, symbol.as_deref());
     }
 
@@ -2058,9 +2058,13 @@ impl Emitter {
             let user_defined = r#type.unwrap().get_user_defined()?;
             let (type_symbol, _) =
                 resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
-            type_symbol
-                .ok()
-                .map(|x| ((*x.found).clone(), x.full_path, x.generic_tables))
+            type_symbol.ok().map(|x| {
+                (
+                    (*x.found).clone(),
+                    x.full_path.clone(),
+                    x.generic_tables.clone(),
+                )
+            })
         }
 
         let Some((target_type, target_path, target_tables)) = get_type_symbol(target, target_map)
@@ -2189,13 +2193,13 @@ impl Emitter {
         let (defined_ports, generic_map, namespace) = {
             let symbol =
                 if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
-                    symbol.found
+                    Rc::clone(&symbol.found)
                 } else if let (Ok(symbol), _) =
                     self.resolve_scoped_idnetifier(&identifier.scoped_identifier)
                     && let SymbolKind::Port(port) = &symbol.found.kind
                     && port.direction == SymDirection::Interface
                 {
-                    symbol.found
+                    Rc::clone(&symbol.found)
                 } else {
                     unreachable!()
                 };
@@ -2400,7 +2404,7 @@ impl Emitter {
     fn resolve_scoped_idnetifier(
         &self,
         arg: &ScopedIdentifier,
-    ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+    ) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
         let path: GenericSymbolPath = arg.into();
 
         let (result, path) = self.resolve_generic_path(&path, None);
@@ -2422,7 +2426,7 @@ impl Emitter {
         &self,
         path: &GenericSymbolPath,
         namespace: Option<&Namespace>,
-    ) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+    ) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
         let generic_map = self.generic_map.last();
         if let Some(namespace) = namespace {
             resolve_generic_path(path, namespace, generic_map)
@@ -2843,7 +2847,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Identifier'
     fn identifier(&mut self, arg: &Identifier) {
-        let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+        let symbol = symbol_table::resolve(arg).ok().map(|x| Rc::clone(&x.found));
         self.emit_identifier(arg, symbol.as_deref());
     }
 
@@ -2874,7 +2878,7 @@ impl VerylWalker for Emitter {
         };
 
         if *list_len == 0 {
-            let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+            let symbol = symbol_table::resolve(arg).ok().map(|x| Rc::clone(&x.found));
             self.emit_identifier(&arg.identifier, symbol.as_deref());
         } else {
             self.identifier(&arg.identifier);
@@ -2896,7 +2900,7 @@ impl VerylWalker for Emitter {
         for (i, x) in arg.hierarchical_identifier_list0.iter().enumerate() {
             self.dot(&x.dot);
             if (i + 1) == *list_len {
-                let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+                let symbol = symbol_table::resolve(arg).ok().map(|x| Rc::clone(&x.found));
                 self.emit_identifier(&x.identifier, symbol.as_deref());
             } else {
                 self.identifier(&x.identifier);
@@ -3032,7 +3036,7 @@ impl VerylWalker for Emitter {
                 if (i + 1) < arg.expression_identifier_list0.len() {
                     self.emit_identifier(&x.identifier, None);
                 } else {
-                    let symbol = symbol_table::resolve(arg).ok().map(|x| x.found);
+                    let symbol = symbol_table::resolve(arg).ok().map(|x| Rc::clone(&x.found));
                     self.emit_identifier(&x.identifier, symbol.as_deref());
                 }
             }
@@ -6546,7 +6550,7 @@ pub fn resolve_generic_path(
     path: &GenericSymbolPath,
     namespace: &Namespace,
     generic_maps: Option<&Vec<GenericMap>>,
-) -> (Result<ResolveResult, ResolveError>, GenericSymbolPath) {
+) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
     let mut path = path.clone();
 
     path.resolve_imported(namespace, generic_maps);
@@ -6558,7 +6562,7 @@ pub fn resolve_generic_path(
     let path_symbols: Vec<_> = (0..path.len())
         .filter_map(|i| {
             symbol_table::resolve((&path.slice(i).generic_path(), namespace))
-                .map(|x| (i, x.found))
+                .map(|x| (i, Rc::clone(&x.found)))
                 .ok()
         })
         .collect();

@@ -7,6 +7,7 @@ use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPat
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use std::cell::RefCell;
+use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, GenericArgIdentifier, HierarchicalIdentifier, Identifier,
@@ -355,7 +356,7 @@ impl ReferenceTable {
                         continue;
                     }
 
-                    let target_symbol = symbol.found;
+                    let target_symbol = Rc::clone(&symbol.found);
 
                     let mut args: Vec<_> = path.paths[i].arguments.drain(0..).collect();
                     for param in params.iter().skip(n_args) {
@@ -619,7 +620,7 @@ impl ReferenceTable {
 
         match symbol_table::resolve(path) {
             Ok(symbol) => {
-                for id in symbol.full_path {
+                for id in symbol.full_path.iter().copied() {
                     symbol_table::add_reference(id, &token.beg);
                 }
             }
