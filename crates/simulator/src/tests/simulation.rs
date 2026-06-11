@@ -14496,3 +14496,415 @@ fn array_range_assign_prefix_then_range() {
         }
     }
 }
+
+#[test]
+fn inst_input_unsized_all_ones() {
+    let code = r#"
+    module Sub (
+        i_a   : input  logic<32>,
+        i_mask: input  logic<32>,
+        o     : output logic<32>,
+    ) {
+        assign o = i_a & i_mask;
+    }
+    module Top (
+        a: input  logic<32>,
+        c: output logic<32>,
+    ) {
+        inst u: Sub ( i_a: a, i_mask: '1, o: c );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(0x12345678, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("c").unwrap(), Value::new(0x12345678, 32, false));
+    }
+}
+
+#[test]
+fn inst_input_unsized_all_ones_wide() {
+    let code = r#"
+    module Sub (
+        i_a   : input  logic<66>,
+        i_mask: input  logic<66>,
+        o     : output logic<66>,
+    ) {
+        assign o = i_a & i_mask;
+    }
+    module Top (
+        a: input  logic<66>,
+        c: output logic<66>,
+    ) {
+        inst u: Sub ( i_a: a, i_mask: '1, o: c );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(0x123456789, 66, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("c").unwrap(), Value::new(0x123456789, 66, false));
+    }
+}
+
+#[test]
+fn inst_output_concat_destructure() {
+    let code = r#"
+    module Sub (
+        o: output logic<8>,
+    ) {
+        assign o = 8'b11100001;
+    }
+    module Top (
+        a: output logic<3>,
+        b: output logic<5>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // a takes the TOP 3 bits, b the LOW 5 bits
+        assert_eq!(sim.get("a").unwrap(), Value::new(0b111, 3, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0b00001, 5, false));
+    }
+}
+
+#[test]
+fn inst_output_concat_destructure_wide128() {
+    let code = r#"
+    module Sub (
+        o: output logic<128>,
+    ) {
+        assign o = {64'hDEADBEEF01234567, 64'h89ABCDEFFEDCBA98};
+    }
+    module Top (
+        a: output logic<64>,
+        b: output logic<64>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("a").unwrap(),
+            Value::from_str("64'hDEADBEEF_01234567").unwrap()
+        );
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::from_str("64'h89ABCDEF_FEDCBA98").unwrap()
+        );
+    }
+}
+
+#[test]
+fn inst_output_concat_destructure_wide66() {
+    let code = r#"
+    module Sub (
+        o: output logic<66>,
+    ) {
+        assign o = {2'b10, 64'h0123456789ABCDEF};
+    }
+    module Top (
+        a: output logic<2>,
+        b: output logic<64>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("a").unwrap(), Value::new(0b10, 2, false));
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::from_str("64'h01234567_89ABCDEF").unwrap()
+        );
+    }
+}
+
+#[test]
+fn inst_output_concat_destructure_wide160() {
+    let code = r#"
+    module Sub (
+        o: output logic<160>,
+    ) {
+        assign o = {32'hAAAA5555, 64'hDEADBEEF01234567, 64'h89ABCDEFFEDCBA98};
+    }
+    module Top (
+        a: output logic<32>,
+        b: output logic<128>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("a").unwrap(), Value::new(0xAAAA5555, 32, false));
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::from_str("128'hDEADBEEF_01234567_89ABCDEF_FEDCBA98").unwrap()
+        );
+    }
+}
+
+#[test]
+fn inst_output_concat_destructure_wide330() {
+    let code = r#"
+    module Sub (
+        o: output logic<330>,
+    ) {
+        assign o = {200'hF1E2D3C4B5A69788796A5B4C3D2E1F00DEADBEEF01234567CA, 130'h35A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A};
+    }
+    module Top (
+        a: output logic<200>,
+        b: output logic<130>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("a").unwrap(),
+            Value::from_str("200'hF1E2D3C4B5A69788796A5B4C3D2E1F00DEADBEEF01234567CA").unwrap()
+        );
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::from_str("130'h35A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A").unwrap()
+        );
+    }
+}
+
+#[test]
+fn inst_output_concat_narrower_than_port() {
+    // SV semantics: `{a, b} = o` truncates the RHS to the concat width,
+    // so the fields take o's LOW 6 bits, not its top bits.
+    let code = r#"
+    module Sub (
+        o: output logic<8>,
+    ) {
+        assign o = 8'b10110011;
+    }
+    module Top (
+        a: output logic<3>,
+        b: output logic<3>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // a = o[5:3], b = o[2:0]
+        assert_eq!(sim.get("a").unwrap(), Value::new(0b110, 3, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0b011, 3, false));
+    }
+}
+
+#[test]
+fn inst_output_concat_wider_than_port() {
+    // SV semantics: the RHS is zero-extended to the concat width, so the
+    // top field's high bits read zero.
+    let code = r#"
+    module Sub (
+        o: output logic<6>,
+    ) {
+        assign o = 6'b101100;
+    }
+    module Top (
+        a: output logic<4>,
+        b: output logic<4>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // a = {2'b00, o[5:4]}, b = o[3:0]
+        assert_eq!(sim.get("a").unwrap(), Value::new(0b0010, 4, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0b1100, 4, false));
+    }
+}
+
+#[test]
+fn inst_output_concat_entirely_above_port() {
+    // The top field lies entirely above the zero-extended port value and
+    // must be driven to zero (not left undriven).
+    let code = r#"
+    module Sub (
+        o: output logic<4>,
+    ) {
+        assign o = 4'b1011;
+    }
+    module Top (
+        a: output logic<4>,
+        b: output logic<8>,
+    ) {
+        inst u: Sub ( o: {a, b} );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("a").unwrap(), Value::new(0, 4, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0b00001011, 8, false));
+    }
+}
+
+#[test]
+fn function_arg_unsized_all_ones() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        c: output logic<32>,
+    ) {
+        function mask_and (
+            x: input logic<32>,
+            m: input logic<32>,
+        ) -> logic<32> {
+            return x & m;
+        }
+        always_comb {
+            c = mask_and(a, '1);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(0x12345678, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("c").unwrap(), Value::new(0x12345678, 32, false));
+    }
+}
+
+#[test]
+fn assign_concat_destructure_all_ones() {
+    let code = r#"
+    module Top (
+        a: output logic<3>,
+        b: output logic<5>,
+    ) {
+        assign {a, b} = '1;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("a").unwrap(), Value::new(0b111, 3, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0b11111, 5, false));
+    }
+}
+
+#[test]
+fn assign_concat_destructure_wide_rhs() {
+    let code = r#"
+    module Top (
+        i: input  logic<128>,
+        a: output logic<64>,
+        b: output logic<64>,
+    ) {
+        assign {a, b} = i;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set(
+            "i",
+            Value::from_str("128'hDEADBEEF_01234567_89ABCDEF_FEDCBA98").unwrap(),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("a").unwrap(),
+            Value::from_str("64'hDEADBEEF_01234567").unwrap()
+        );
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::from_str("64'h89ABCDEF_FEDCBA98").unwrap()
+        );
+    }
+}

@@ -3,11 +3,11 @@ use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::partial_index::partial_index_base;
-use crate::ir::statement::ProtoAssignStatement;
+use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
 };
-use crate::ir::{Event, ProtoExpression, ProtoStatement};
+use crate::ir::{Event, ProtoExpression, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
@@ -413,7 +413,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut already_aliased_parent_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for output in &src.outputs {
-                let Some(parent_dst) = output.dst.first() else {
+                // A concat destructure (multiple dsts) maps each parent var
+                // to a slice of the child port — no whole-var alias exists.
+                let [parent_dst] = output.dst.as_slice() else {
                     continue;
                 };
                 if !parent_dst.index.0.is_empty() || !parent_dst.select.is_empty() {
@@ -570,7 +572,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
             }
 
-            let proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
+            let mut proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
+            // Size an unsized all-bit literal (`'1` etc.) to the port
+            // width — there is no assignment statement here to do it.
+            size_fill_literal_rhs(&mut proto_expr, None, None, child_meta.width);
             let element = &child_meta.elements[0];
             all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
@@ -584,14 +589,58 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }));
         }
 
-        // Output ports: child port var → parent dst
+        // Output ports: child port var → parent dst.  A concat destructure
+        // (`o: {a, b}`) slices the port value MSB-first within the concat's
+        // TOTAL width — truncated / zero-extended like `assign {a, b} = o`.
         for output in &src.outputs {
             if aliased_output_ids.contains(&output.id) {
                 continue;
             }
-            if let Some(parent_dst) = output.dst.first() {
-                let child_meta = child_variable_meta.get(&output.id).unwrap();
+            let child_meta = child_variable_meta.get(&output.id).unwrap();
+            let multi_dst = output.dst.len() > 1;
 
+            // Field widths for the windows below, which slice a single
+            // packed child port value.
+            let mut dst_widths: Vec<usize> = Vec::with_capacity(output.dst.len());
+            if multi_dst {
+                if child_meta.elements.len() != 1 {
+                    return Err(SimulatorError::unsupported_description(
+                        &output.dst[0].token,
+                    ));
+                }
+                for parent_dst in &output.dst {
+                    // A dynamic bit-select field has no constant window.
+                    if !parent_dst.select.is_empty() && !parent_dst.select.is_const() {
+                        return Err(SimulatorError::unsupported_description(&parent_dst.token));
+                    }
+                    let parent_scope = context.scope();
+                    let width = if parent_dst.select.is_empty() {
+                        parent_scope
+                            .variable_meta
+                            .get(&parent_dst.id)
+                            .ok_or_else(|| {
+                                SimulatorError::unsupported_description(&parent_dst.token)
+                            })?
+                            .width
+                    } else {
+                        let (beg, end) = parent_dst
+                            .select
+                            .eval_value(
+                                &mut parent_scope.analyzer_context,
+                                &parent_dst.comptime.r#type,
+                                false,
+                            )
+                            .ok_or_else(|| {
+                                SimulatorError::unsupported_description(&parent_dst.token)
+                            })?;
+                        beg - end + 1
+                    };
+                    dst_widths.push(width);
+                }
+            }
+            let mut remaining: usize = dst_widths.iter().sum();
+
+            for (dst_idx, parent_dst) in output.dst.iter().enumerate() {
                 let (
                     parent_index,
                     parent_select,
@@ -643,6 +692,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     None
                 };
 
+                // MSB-first window, clamped to the port width: bits above
+                // it read zero (SV zero-extension of the RHS).
+                let (rhs_select, field_above_port) = if multi_dst {
+                    let (msb, lsb) = msb_first_window(&mut remaining, dst_widths[dst_idx]);
+                    if lsb >= child_meta.width {
+                        (None, true)
+                    } else {
+                        (Some((msb.min(child_meta.width - 1), lsb)), false)
+                    }
+                } else {
+                    (None, false)
+                };
+
                 let parent_scope = context.scope();
                 let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
 
@@ -664,20 +726,38 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         return Err(SimulatorError::unsupported_description(&parent_dst.token));
                     };
 
+                // A concat field spanning multiple parent array elements
+                // has no single rhs_select window.
+                if multi_dst && parent_element_indices.len() != 1 {
+                    return Err(SimulatorError::unsupported_description(&parent_dst.token));
+                }
+
                 for (elem_idx, &parent_elem_idx) in parent_element_indices.iter().enumerate() {
                     let child_element = &child_meta.elements[elem_idx];
                     let parent_element = &parent_meta.elements[parent_elem_idx];
 
-                    let child_expr = ProtoExpression::Variable {
-                        var_offset: child_element.current,
-                        select: None,
-                        dynamic_select: None,
-                        width: child_meta.width,
-                        var_full_width: child_meta.width,
-                        expr_context: ExpressionContext {
+                    let child_expr = if field_above_port {
+                        let width = dst_widths[dst_idx];
+                        ProtoExpression::Value {
+                            value: Value::new(0, width, false),
+                            width,
+                            expr_context: ExpressionContext {
+                                width,
+                                signed: false,
+                            },
+                        }
+                    } else {
+                        ProtoExpression::Variable {
+                            var_offset: child_element.current,
+                            select: None,
+                            dynamic_select: None,
                             width: child_meta.width,
-                            signed: false,
-                        },
+                            var_full_width: child_meta.width,
+                            expr_context: ExpressionContext {
+                                width: child_meta.width,
+                                signed: false,
+                            },
+                        }
                     };
 
                     let dst_var = if parent_element.is_ff() {
@@ -691,7 +771,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         dst_width: parent_width,
                         select: parent_select,
                         dynamic_select: parent_dynamic_select.clone(),
-                        rhs_select: None,
+                        rhs_select,
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset(),
                         token: TokenRange::default(),
