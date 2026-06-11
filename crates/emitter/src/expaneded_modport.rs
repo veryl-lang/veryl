@@ -538,7 +538,11 @@ fn resolve_interface(
     path.paths.pop(); // remove modport path
 
     let (result, _) = resolve_generic_path(&path, namespace, Some(&generic_map.to_vec()));
-    result
-        .ok()
-        .map(|x| ((*x.found).clone(), x.full_path, x.generic_tables))
+    result.ok().map(|x| {
+        (
+            (*x.found).clone(),
+            x.full_path.clone(),
+            x.generic_tables.clone(),
+        )
+    })
 }

@@ -20,6 +20,7 @@ use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
 use crate::{HashMap, HashSet, ir_error};
+use std::rc::Rc;
 use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -1854,7 +1855,13 @@ pub fn eval_factor_path(
             .map(|x| symbol.found.namespace.included(&x))
             .unwrap_or(false);
         if is_inernal {
-            eval_factor_symbol(context, generic_path, symbol, allow_unknown_value, token)
+            eval_factor_symbol(
+                context,
+                generic_path,
+                (*symbol).clone(),
+                allow_unknown_value,
+                token,
+            )
         } else {
             // To resolve external symbol reference,
             // use an independent context to avoid name conflict
@@ -1862,8 +1869,15 @@ pub fn eval_factor_path(
             external_context.inherit(context);
 
             external_context.push_generic_map(generic_path.to_generic_maps());
-            let ret = external_context
-                .block(|c| eval_factor_symbol(c, generic_path, symbol, allow_unknown_value, token));
+            let ret = external_context.block(|c| {
+                eval_factor_symbol(
+                    c,
+                    generic_path,
+                    (*symbol).clone(),
+                    allow_unknown_value,
+                    token,
+                )
+            });
 
             external_context.pop_generic_map();
             context.inherit(&mut external_context);
@@ -2566,7 +2580,7 @@ pub fn get_overridden_params(
         let name = param.identifier.text();
 
         let Ok(target) = symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
-            .map(|x| x.found)
+            .map(|x| Rc::clone(&x.found))
         else {
             continue;
         };

@@ -50,7 +50,7 @@ fn check_path(
 
 pub fn check_separator(context: &mut Context, value: &ExpressionIdentifier) {
     if let Ok(symbol) = symbol_table::resolve(value) {
-        let mut full_path: Vec<_> = symbol.full_path.into_iter().rev().collect();
+        let mut full_path: Vec<_> = symbol.full_path.clone().into_iter().rev().collect();
 
         for x in &value.scoped_identifier.scoped_identifier_list {
             check_path(

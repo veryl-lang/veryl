@@ -2,6 +2,7 @@ use crate::analyzer_error::MismatchTypeKind;
 use crate::conv::Context;
 use crate::conv::checker::generic::check_generic_refereence;
 use crate::{AnalyzerError, symbol_table};
+use std::rc::Rc;
 use veryl_parser::veryl_grammar_trait::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,7 +17,7 @@ pub enum AliasType {
 
 pub fn check_alias_target(context: &mut Context, value: &ScopedIdentifier, r#type: AliasType) {
     if let Ok(symbol) = symbol_table::resolve(value) {
-        let symbol = symbol.found;
+        let symbol = Rc::clone(&symbol.found);
 
         let expected = match r#type {
             AliasType::Module if !symbol.is_module(false) => Some("module"),

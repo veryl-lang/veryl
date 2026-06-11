@@ -11,6 +11,7 @@ use crate::symbol::{
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
+use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -638,12 +639,12 @@ fn check_members_compat(actual: &[SymbolId], proto: &[SymbolId]) -> Vec<Incompat
 
 pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIdentifier) {
     let actual_symbol = if let Ok(symbol) = symbol_table::resolve(actual) {
-        symbol.found
+        Rc::clone(&symbol.found)
     } else {
         return;
     };
     let proto_symbol = if let Ok(symbol) = symbol_table::resolve(proto) {
-        symbol.found
+        Rc::clone(&symbol.found)
     } else {
         return;
     };

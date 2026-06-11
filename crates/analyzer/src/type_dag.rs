@@ -9,6 +9,7 @@ use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
 use daggy::{Dag, NodeIndex, Walker, petgraph::algo};
 use std::cell::RefCell;
+use std::rc::Rc;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::Token;
 
@@ -49,7 +50,7 @@ pub struct TypeDag {
     nodes: BiMap<SymbolId, u32>,
     /// Map between NodeIdx and Symbol Resolve Information
     paths: HashMap<u32, TypeResolveInfo>,
-    symbols: HashMap<u32, Symbol>,
+    symbols: HashMap<u32, Rc<Symbol>>,
     source: u32,
     candidates: Vec<TypeDagCandidate>,
     errors: Vec<DagError>,
@@ -136,7 +137,7 @@ impl TypeDag {
                 parent,
                 import,
             } = cand
-                && let Some(symbol) = symbol_table::get(*id)
+                && let Some(symbol) = symbol_table::get_rc(*id)
                 && let Some(child) = self.insert_declaration_symbol(&symbol, parent)
             {
                 for x in import {
@@ -151,7 +152,7 @@ impl TypeDag {
                     for arg_path in map.map.values() {
                         // insert edge between given generic arg and base symbol
                         self.insert_path(
-                            arg_path,
+                            arg_path.clone(),
                             &symbol.namespace,
                             project_namespace,
                             &Some((*id, *context)),
@@ -162,7 +163,7 @@ impl TypeDag {
         }
 
         // Process symbol references using dag_owned
-        for cand in &candidates {
+        for cand in candidates {
             if let TypeDagCandidate::Path {
                 path,
                 namespace,
@@ -170,7 +171,7 @@ impl TypeDag {
                 parent,
             } = cand
             {
-                self.insert_path(path, namespace, project_namespace, parent);
+                self.insert_path(*path, &namespace, &project_namespace, &parent);
             }
         }
 
@@ -180,14 +181,13 @@ impl TypeDag {
 
     fn insert_path(
         &mut self,
-        path: &GenericSymbolPath,
+        mut path: GenericSymbolPath,
         namespace: &Namespace,
         project_namespace: &Namespace,
         parent: &Option<(SymbolId, Context)>,
     ) {
         namespace_table::set_default(&project_namespace.paths);
 
-        let mut path = path.clone();
         path.resolve_imported(namespace, None);
 
         for i in 0..path.len() {
@@ -198,7 +198,7 @@ impl TypeDag {
             };
 
             if let Some((parent_symbol, parent_context)) =
-                parent.map(|(id, context)| (symbol_table::get(id).unwrap(), context))
+                parent.map(|(id, context)| (symbol_table::get_rc(id).unwrap(), context))
             {
                 if !base_symbol.namespace.included(&parent_symbol.namespace) {
                     let (parent_symbol, parent_context) =
@@ -210,12 +210,12 @@ impl TypeDag {
                             } else {
                                 Context::Package
                             };
-                            (symbol, context)
+                            (Rc::new(symbol), context)
                         } else {
                             (parent_symbol, parent_context)
                         };
                     let base_symbol = if let Some(symbol) = base_symbol.get_parent_component() {
-                        symbol
+                        Rc::new(symbol)
                     } else {
                         base_symbol
                     };
@@ -241,7 +241,7 @@ impl TypeDag {
         }
     }
 
-    fn resolve_symbol_path(path: &SymbolPath, namespace: &Namespace) -> Option<Symbol> {
+    fn resolve_symbol_path(path: &SymbolPath, namespace: &Namespace) -> Option<Rc<Symbol>> {
         Self::resolve_symbol_path_inner(path, namespace, &mut Vec::new())
     }
 
@@ -249,7 +249,7 @@ impl TypeDag {
         path: &SymbolPath,
         namespace: &Namespace,
         visited: &mut Vec<SymbolId>,
-    ) -> Option<Symbol> {
+    ) -> Option<Rc<Symbol>> {
         let symbol = symbol_table::resolve((path, namespace)).ok()?;
         if let Some(alias_path) = symbol.found.alias_target(false) {
             // alias referenced as generic arg for generic instance put on the same namespace
@@ -267,7 +267,7 @@ impl TypeDag {
                 visited,
             )
         } else {
-            Some((*symbol.found).clone())
+            Some(Rc::clone(&symbol.found))
         }
     }
 
@@ -328,7 +328,7 @@ impl TypeDag {
     ) -> Option<u32> {
         if let Some(child) = self.insert_symbol(symbol) {
             if let Some(parent) = parent {
-                let parent_symbol = symbol_table::get(parent.0).unwrap();
+                let parent_symbol = symbol_table::get_rc(parent.0).unwrap();
                 let parent_context = parent.1;
                 if let Some(parent) = self.insert_symbol(&parent_symbol) {
                     self.insert_dag_owned(parent, child);
@@ -342,6 +342,11 @@ impl TypeDag {
     }
 
     fn insert_dag_edge(&mut self, parent: u32, child: u32, context: Context, recursive_ref: bool) {
+        // Skip existing edges: stored edge weights are never read back, and
+        // each daggy add_edge runs a costly cycle check.
+        if self.exist_edge(child, parent) {
+            return;
+        }
         // Reversing this order to make traversal work
         if let Err(x) = self.insert_edge(child, parent, context, recursive_ref) {
             self.errors.push(x);
@@ -366,7 +371,7 @@ impl TypeDag {
     }
 
     fn insert_node(&mut self, symbol_id: SymbolId, name: &str) -> Result<u32, DagError> {
-        let symbol = symbol_table::get(symbol_id).unwrap();
+        let symbol = symbol_table::get_rc(symbol_id).unwrap();
         let trinfo = TypeResolveInfo {
             symbol_id,
             name: name.into(),
@@ -391,7 +396,7 @@ impl TypeDag {
 
     fn get_symbol(&self, node: u32) -> Symbol {
         match self.symbols.get(&node) {
-            Some(x) => x.clone(),
+            Some(x) => (**x).clone(),
             None => {
                 panic!("Must insert node before accessing");
             }
@@ -435,11 +440,12 @@ impl TypeDag {
 
     fn insert_file_edge(&mut self, start: u32, end: u32) {
         if start != self.source {
-            let start = self.get_symbol(start);
-            let end = self.get_symbol(end);
-            if let (Some(start), Some(end)) =
-                (start.token.source.get_path(), end.token.source.get_path())
-            {
+            let start_path = self.paths.get(&start).map(|x| x.token);
+            let end_path = self.paths.get(&end).map(|x| x.token);
+            if let (Some(start), Some(end)) = (
+                start_path.and_then(|x| x.source.get_path()),
+                end_path.and_then(|x| x.source.get_path()),
+            ) {
                 let start = self.file_nodes.get_by_left(&start).unwrap();
                 let end = self.file_nodes.get_by_left(&end).unwrap();
                 let start: NodeIndex = (*start).into();

@@ -21,6 +21,7 @@ use log::trace;
 use msb::check_msb;
 use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_collector::TokenCollector;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
@@ -52,9 +53,9 @@ pub enum ResolveErrorCause {
 }
 
 impl ResolveError {
-    pub fn new(last_found: Option<&Symbol>, cause: ResolveErrorCause) -> Self {
+    pub fn new(last_found: Option<&Rc<Symbol>>, cause: ResolveErrorCause) -> Self {
         Self {
-            last_found: last_found.map(|x| Box::new(x.clone())),
+            last_found: last_found.map(|x| Box::new((**x).clone())),
             cause,
         }
     }
@@ -91,7 +92,7 @@ pub enum Connect {
 #[derive(Clone, Default, Debug)]
 pub struct SymbolTable {
     name_table: HashMap<StrId, Vec<SymbolId>>,
-    symbol_table: HashMap<SymbolId, Symbol>,
+    symbol_table: HashMap<SymbolId, Rc<Symbol>>,
     namespace_index: HashMap<SVec<StrId>, Vec<SymbolId>>,
     project_local_table: HashMap<StrId, HashMap<StrId, StrId>>,
     import_list: Vec<Import>,
@@ -150,18 +151,22 @@ impl SymbolTable {
         let id = symbol.id;
         let ns_paths = symbol.namespace.paths.clone();
         entry.push(id);
-        self.symbol_table.insert(id, symbol);
+        self.symbol_table.insert(id, Rc::new(symbol));
         self.namespace_index.entry(ns_paths).or_default().push(id);
         Some(id)
     }
 
     pub fn get(&self, id: SymbolId) -> Option<Symbol> {
+        self.symbol_table.get(&id).map(|x| (**x).clone())
+    }
+
+    pub fn get_rc(&self, id: SymbolId) -> Option<Rc<Symbol>> {
         self.symbol_table.get(&id).cloned()
     }
 
     pub fn update(&mut self, symbol: Symbol) {
         let id = symbol.id;
-        self.symbol_table.insert(id, symbol);
+        self.symbol_table.insert(id, Rc::new(symbol));
     }
 
     fn match_nested_generic_instance(&self, context: &ResolveContext, found: &Symbol) -> bool {
@@ -649,7 +654,7 @@ impl SymbolTable {
                     // with thier types.
                     // See: https://github.com/veryl-lang/veryl/issues/1714#issuecomment-2967149726
                     if let Some(map) = &namespace_generic_map {
-                        arg.apply_map(map);
+                        arg.apply_map(map.as_slice());
                     }
 
                     // Path to generic arg should have its project prefix to make it visiable from
@@ -928,11 +933,15 @@ impl SymbolTable {
             }
         }
         if let Some(found) = context.found {
-            let mut found = found.clone();
-
-            // replace namespace path to generic version
-            let generic_namespace = found.namespace.replace(&context.generic_namespace_map);
-            found.namespace = generic_namespace;
+            // Re-use the table-owned allocation when no generic namespace
+            // replacement is needed.
+            let found = if context.generic_namespace_map.is_empty() {
+                Rc::clone(found)
+            } else {
+                let mut found = (**found).clone();
+                found.namespace = found.namespace.replace(&context.generic_namespace_map);
+                Rc::new(found)
+            };
 
             trace!(
                 "symbol_table: {}found     '{}' : {}",
@@ -942,7 +951,7 @@ impl SymbolTable {
             );
 
             Ok(ResolveResult {
-                found: std::rc::Rc::new(found),
+                found,
                 full_path: context.full_path,
                 imported: context.imported,
                 generic_tables: context.generic_tables,
@@ -955,11 +964,19 @@ impl SymbolTable {
         }
     }
 
-    fn get_namespace_generic_map(&self, namespace: &Namespace) -> Option<Vec<GenericMap>> {
+    fn get_namespace_generic_map(&self, namespace: &Namespace) -> Option<Rc<Vec<GenericMap>>> {
         if namespace.depth() <= 1 {
             return None;
         }
+        if let Some(cached) = NS_GENERIC_MAP_CACHE.with(|f| f.borrow().get(namespace).cloned()) {
+            return cached;
+        }
+        let ret = self.get_namespace_generic_map_inner(namespace).map(Rc::new);
+        NS_GENERIC_MAP_CACHE.with(|f| f.borrow_mut().insert(namespace.clone(), ret.clone()));
+        ret
+    }
 
+    fn get_namespace_generic_map_inner(&self, namespace: &Namespace) -> Option<Vec<GenericMap>> {
         let mut namespace = namespace.clone();
         namespace.strip_anonymous_path();
 
@@ -1111,7 +1128,7 @@ impl SymbolTable {
     pub fn get_all(&self) -> Vec<Symbol> {
         let mut ret = Vec::new();
         for symbol in self.symbol_table.values() {
-            ret.push(symbol.clone());
+            ret.push((**symbol).clone());
         }
         ret
     }
@@ -1157,7 +1174,7 @@ impl SymbolTable {
     }
 
     pub fn add_generic_instance(&mut self, target: SymbolId, instance: SymbolId) {
-        if let Some(symbol) = self.symbol_table.get_mut(&target)
+        if let Some(symbol) = self.symbol_table.get_mut(&target).map(Rc::make_mut)
             && !symbol.generic_instances.contains(&instance)
         {
             symbol.generic_instances.push(instance);
@@ -1173,7 +1190,8 @@ impl SymbolTable {
             return;
         };
         for target_inst_id in &target_inst_ids {
-            if let Some(target_inst_symbol) = self.symbol_table.get_mut(target_inst_id)
+            if let Some(target_inst_symbol) =
+                self.symbol_table.get_mut(target_inst_id).map(Rc::make_mut)
                 && target_inst_symbol.token.text == instance.token.text
             {
                 let SymbolKind::GenericInstance(target_inst) = &mut target_inst_symbol.kind else {
@@ -1193,7 +1211,7 @@ impl SymbolTable {
     }
 
     fn add_imported_item(&mut self, target: SymbolId, import: &Import) {
-        if let Some(symbol) = self.symbol_table.get_mut(&target) {
+        if let Some(symbol) = self.symbol_table.get_mut(&target).map(Rc::make_mut) {
             symbol.imported.push(import.to_owned());
         }
     }
@@ -1228,7 +1246,8 @@ impl SymbolTable {
                     let target = target_symbol.inner_namespace();
                     if let Some(ids) = self.namespace_index.get(&target.paths) {
                         for id in ids {
-                            let Some(symbol) = self.symbol_table.get_mut(id) else {
+                            let Some(symbol) = self.symbol_table.get_mut(id).map(Rc::make_mut)
+                            else {
                                 continue;
                             };
                             if symbol.namespace.matched(&target) {
@@ -1410,7 +1429,7 @@ impl SymbolTable {
 
     pub fn set_user_defined(&mut self, resolved: Vec<(SymbolId, SymbolId)>) {
         for (id, type_id) in resolved {
-            let symbol = self.symbol_table.get_mut(&id).unwrap();
+            let symbol = Rc::make_mut(self.symbol_table.get_mut(&id).unwrap());
             if let Some(x) = symbol.kind.get_type_mut()
                 && let TypeKind::UserDefined(x) = &mut x.kind
             {
@@ -1427,7 +1446,7 @@ impl SymbolTable {
                     symbol.kind,
                     SymbolKind::Function(_) | SymbolKind::ProtoFunction(_)
                 ) {
-                    Some(symbol.clone())
+                    Some((**symbol).clone())
                 } else {
                     None
                 }
@@ -1440,7 +1459,7 @@ impl SymbolTable {
             .values()
             .filter_map(|symbol| {
                 if matches!(symbol.kind, SymbolKind::Enum(_)) {
-                    Some(symbol.clone())
+                    Some((**symbol).clone())
                 } else {
                     None
                 }
@@ -1451,7 +1470,7 @@ impl SymbolTable {
     pub fn find_project_symbol(&self, prj: StrId) -> Option<Symbol> {
         for symbol in self.symbol_table.values() {
             if matches!(symbol.kind, SymbolKind::Namespace) && symbol.token.text == prj {
-                return Some(symbol.clone());
+                return Some((**symbol).clone());
             }
         }
 
@@ -1628,8 +1647,8 @@ impl fmt::Display for SymbolTable {
 
 #[derive(Clone)]
 struct ResolveContext<'a> {
-    found: Option<&'a Symbol>,
-    last_found: Option<&'a Symbol>,
+    found: Option<&'a Rc<Symbol>>,
+    last_found: Option<&'a Rc<Symbol>>,
     last_found_type: Option<SymbolId>,
     full_path: Vec<SymbolId>,
     namespace: Namespace,
@@ -1934,18 +1953,31 @@ pub fn is_sv_keyword(s: &str) -> bool {
 }
 
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
-thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveResult>> = RefCell::new(HashMap::default()));
+thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, Rc<ResolveResult>>> = RefCell::new(HashMap::default()));
 
-/// Suppress SYMBOL_CACHE invalidation for `add_reference` and `add_generic_instance`.
-///
-/// Use this when performing bulk mutations that modify symbol metadata
-/// without affecting name resolution results. Must be paired with
-/// `resume_cache_clear`.
+// Cache for get_namespace_generic_map; its result only depends on the symbol
+// table state, so it is invalidated together with SYMBOL_CACHE.
+thread_local!(static NS_GENERIC_MAP_CACHE: RefCell<HashMap<Namespace, Option<Rc<Vec<GenericMap>>>>> = RefCell::new(HashMap::default()));
+
+// Cache for resolve failures. A new symbol can turn a cached NotFound into a
+// successful resolution, so `insert` invalidates this cache even while cache
+// clear is suppressed.
+thread_local!(static SYMBOL_ERR_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveError>> = RefCell::new(HashMap::default()));
+
+fn clear_resolve_caches() {
+    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    SYMBOL_ERR_CACHE.with(|f| f.borrow_mut().clear());
+    NS_GENERIC_MAP_CACHE.with(|f| f.borrow_mut().clear());
+}
+
+/// Suppress resolve-cache invalidation for bulk mutations that modify symbol
+/// metadata without affecting name resolution results. Must be paired with
+/// `resume_cache_clear`. `insert` still invalidates the caches.
 pub fn suppress_cache_clear() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().suppress_cache_clear = true);
 }
 
-/// Resume SYMBOL_CACHE invalidation after `suppress_cache_clear`.
+/// Resume resolve-cache invalidation after `suppress_cache_clear`.
 pub fn resume_cache_clear() {
     SYMBOL_TABLE.with(|f| f.borrow_mut().suppress_cache_clear = false);
 }
@@ -1953,14 +1985,14 @@ pub fn resume_cache_clear() {
 fn clear_cache() {
     let suppress = SYMBOL_TABLE.with(|f| f.borrow().suppress_cache_clear);
     if !suppress {
-        SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+        clear_resolve_caches();
     }
 }
 
 pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
     let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().insert(token, symbol));
     if ret.is_some() {
-        SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+        clear_resolve_caches();
     }
     ret
 }
@@ -1969,23 +2001,37 @@ pub fn get(id: SymbolId) -> Option<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get(id))
 }
 
+pub fn get_rc(id: SymbolId) -> Option<Rc<Symbol>> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_rc(id))
+}
+
 pub fn update(symbol: Symbol) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().update(symbol))
 }
 
-pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<ResolveResult, ResolveError> {
+pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<Rc<ResolveResult>, ResolveError> {
     let path: SymbolPathNamespace = path.into();
 
     if let Some(x) = SYMBOL_CACHE.with(|f| f.borrow().get(&path).cloned()) {
         Ok(x)
+    } else if let Some(e) = SYMBOL_ERR_CACHE.with(|f| f.borrow().get(&path).cloned()) {
+        Err(e)
     } else {
-        let context = ResolveContext::new(&path.1);
-        let ret = SYMBOL_TABLE.with(|f| f.borrow().resolve(&path.0, &[], context));
-        if let Ok(x) = &ret {
-            SYMBOL_CACHE.with(|f| f.borrow_mut().insert(path, x.clone()));
+        match SYMBOL_TABLE.with(|f| {
+            f.borrow()
+                .resolve(&path.0, &[], ResolveContext::new(&path.1))
+        }) {
+            Ok(x) => {
+                let x = Rc::new(x);
+                SYMBOL_CACHE.with(|f| f.borrow_mut().insert(path, Rc::clone(&x)));
+                Ok(x)
+            }
+            Err(e) => {
+                SYMBOL_ERR_CACHE.with(|f| f.borrow_mut().insert(path, e.clone()));
+                Err(e)
+            }
         }
-        ret
     }
 }
 
@@ -1998,7 +2044,7 @@ pub fn dump() -> String {
 }
 
 pub fn drop(file_path: PathId) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
 }
 
@@ -2020,22 +2066,22 @@ pub fn update_generic_instance_affiliation(target: SymbolId, instance: &Symbol) 
 }
 
 pub fn add_import(import: Import) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_import(import))
 }
 
 pub fn apply_import() {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import());
 }
 
 pub fn add_bind(bind: Bind) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_bind(bind))
 }
 
 pub fn apply_bind() -> Vec<AnalyzerError> {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_bind())
 }
 
@@ -2058,7 +2104,7 @@ pub fn apply_connect() -> Vec<AnalyzerError> {
 }
 
 pub fn resolve_user_defined() {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     let resolved = SYMBOL_TABLE.with(|f| f.borrow().resolve_user_defined());
     SYMBOL_TABLE.with(|f| f.borrow_mut().set_user_defined(resolved));
 }
@@ -2078,7 +2124,7 @@ pub fn find_project_symbol(prj: StrId) -> Option<Symbol> {
 }
 
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_project_local(prj, from, to))
 }
 
@@ -2087,7 +2133,7 @@ pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
 }
 
 pub fn add_reference_functions(id: SymbolId, functions: Vec<GenericSymbolPath>) {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_reference_functions(id, functions))
 }
 
@@ -2100,7 +2146,7 @@ pub fn get_references(id: SymbolId) -> Option<Vec<Token>> {
 }
 
 pub fn clear() {
-    SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
+    clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().clear())
 }
 
@@ -2201,12 +2247,12 @@ mod tests {
     }
 
     #[track_caller]
-    fn check_found(result: Result<ResolveResult, ResolveError>, expect: &str) {
+    fn check_found(result: Result<std::rc::Rc<ResolveResult>, ResolveError>, expect: &str) {
         assert_eq!(format!("{}", result.unwrap().found.namespace), expect);
     }
 
     #[track_caller]
-    fn check_not_found(result: Result<ResolveResult, ResolveError>) {
+    fn check_not_found(result: Result<std::rc::Rc<ResolveResult>, ResolveError>) {
         assert!(result.is_err());
     }
 
@@ -2230,7 +2276,10 @@ mod tests {
         ret
     }
 
-    fn resolve(paths: &[&str], namespace: &[&str]) -> Result<ResolveResult, ResolveError> {
+    fn resolve(
+        paths: &[&str],
+        namespace: &[&str],
+    ) -> Result<std::rc::Rc<ResolveResult>, ResolveError> {
         let path = create_path(paths);
         let namespace = create_namespace(namespace);
         symbol_table::resolve((&path, &namespace))
