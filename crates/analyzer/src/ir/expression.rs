@@ -734,7 +734,7 @@ impl Factor {
 
     pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
         match self {
-            Factor::Variable(_, _index, select, comptime) => {
+            Factor::Variable(_, index, select, comptime) => {
                 // Array dimensions are already drained at Factor construction time
                 // (in VarPathSelect::to_expression and eval_factor).
 
@@ -749,6 +749,19 @@ impl Factor {
                         && let Some(width) = select.eval_comptime(context, &comptime.r#type, false)
                     {
                         comptime.r#type.set_concrete_width(width);
+                    }
+
+                    // A select/index expression is a data-dependent read: an
+                    // 'a-domain index into 'b-domain data is a real CDC, so
+                    // check + merge each index/select domain into the factor.
+                    let select_exprs = select
+                        .0
+                        .iter_mut()
+                        .chain(select.1.as_mut().map(|(_, expr)| expr));
+                    for expr in index.0.iter_mut().chain(select_exprs) {
+                        let x = expr.eval_comptime(context, None);
+                        check_clock_domain(context, comptime, x, &comptime.token.beg);
+                        comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
                     }
                 }
 
