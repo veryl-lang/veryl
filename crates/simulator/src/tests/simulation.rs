@@ -15800,3 +15800,59 @@ fn widthless_literal_leading_zero_width_matches_emitter() {
         assert_eq!(sim.get("o_c").unwrap().payload_u128(), 105, "{config:?}");
     }
 }
+
+#[test]
+fn wide_signed_add_sign_extends_narrow_operand() {
+    // Regression: the >128-bit path zero-extended a narrow signed operand
+    // into its wide slot, so 192-bit `0 + (-1 as i8-ish)` gave 255 instead
+    // of -1 in the cranelift and cc backends.
+    let code = r#"
+    module Top (
+        a: input  signed logic<192>,
+        b: input  signed logic<8>,
+        c: output signed logic<192>,
+    ) {
+        assign c = a + b;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0, 192, true));
+        sim.set("b", Value::new(0xff, 8, true)); // -1
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let v = sim.get("c").unwrap();
+        let expect: Value = "192'hffffffffffffffffffffffffffffffffffffffffffffffff"
+            .parse()
+            .unwrap();
+        assert_eq!(v.payload(), expect.payload(), "{config:?}");
+    }
+}
+
+#[test]
+fn wide_compare_does_not_overread_narrower_operand() {
+    // Regression: comparing a 192-bit variable against a 256-bit one made
+    // the JIT read 32 bytes from the 24-byte allocation, picking up the
+    // adjacent variable's value as the missing words.
+    let code = r#"
+    module Top (
+        a: input  logic<192>,
+        d: input  logic<64>,
+        b: input  logic<256>,
+        c: output logic,
+    ) {
+        assign c = a == b;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(5, 192, false));
+        sim.set("d", Value::new(0xdead_beef_dead_beef, 64, false));
+        sim.set("b", Value::new(5, 256, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("c").unwrap(), Value::new(1, 1, false), "{config:?}");
+    }
+}

@@ -212,6 +212,9 @@ pub(crate) mod wide_fn_addrs {
     pub fn band() -> usize {
         fn_addr!(wide_ops::wide_band)
     }
+    pub fn resize() -> usize {
+        fn_addr!(wide_ops::wide_resize)
+    }
     pub fn bor() -> usize {
         fn_addr!(wide_ops::wide_bor)
     }
