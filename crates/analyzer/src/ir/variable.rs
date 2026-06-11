@@ -21,6 +21,13 @@ impl VarId {
     pub fn inc(&mut self) {
         self.0 += 1;
     }
+
+    /// Used by the simulator's `alloc_internal_event_id` to mint
+    /// globally-unique event ids; see its doc for why per-module-scope
+    /// ids are not enough there.
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
 }
 
 impl fmt::Display for VarId {

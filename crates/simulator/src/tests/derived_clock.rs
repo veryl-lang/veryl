@@ -497,3 +497,72 @@ fn gated_clock_via_submodule_output() {
         );
     }
 }
+
+/// Gated clock generated deep inside nested child instances (Top →
+/// Wrapper → Mem → GclkCell) must still fire its always_ff.
+/// Regression: the event key of a nested internal clock could
+/// numerically collide with an ancestor's input-port VarId and be
+/// hijacked by the inst-boundary event remap, orphaning the gated
+/// domain.
+#[test]
+fn nested_gated_clock_fires() {
+    let code = r#"
+    module GclkCell (
+        i_clk : input  logic,
+        i_en  : input  logic,
+        o_gclk: output logic,
+    ) {
+        assign o_gclk = i_clk & i_en;
+    }
+
+    module Mem (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        i_en : input  logic   ,
+        o_cnt: output logic<8>,
+    ) {
+        var w_gclk: '_ clock;
+        inst u_gclk: GclkCell ( i_clk, i_en, o_gclk: w_gclk );
+        var r_cnt: logic<8>;
+        always_ff (w_gclk, i_rst) {
+            if_reset { r_cnt = 0; } else { r_cnt += 1; }
+        }
+        assign o_cnt = r_cnt;
+    }
+
+    module Wrapper (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        i_en : input  logic   ,
+        o_cnt: output logic<8>,
+    ) {
+        inst u_mem: Mem ( i_clk, i_rst, i_en, o_cnt );
+    }
+
+    module Top (
+        i_clk: input  '_ clock   ,
+        i_rst: input  '_ reset   ,
+        i_en : input     logic   ,
+        o_cnt: output    logic<8>,
+    ) {
+        inst u_wrap: Wrapper ( i_clk, i_rst, i_en, o_cnt );
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.step(&rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_cnt").unwrap(),
+            Value::new(6, 8, false),
+            "nested gated clock must clock its FF every enabled cycle",
+        );
+    }
+}
