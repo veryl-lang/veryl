@@ -81,10 +81,11 @@ impl VerylGrammarTrait for CreateLiteralTable {
         if let HandlerPoint::Before = self.point {
             let token = &arg.based_token.token;
             let id = token.id;
-            let value: Value = arg.into();
+            // The value's payload is truncated to the declared width, so the
+            // digits' needed width comes from the parser, not the value.
+            let (value, needed_width) = crate::value::parse_based(&token.to_string());
 
-            let actual_width = value.payload().bits().max(value.mask_xz().bits()) as usize;
-            if actual_width > value.width() {
+            if needed_width > value.width() {
                 self.errors.push(AnalyzerError::too_large_number(
                     value.width(),
                     &token.into(),
