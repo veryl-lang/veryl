@@ -15281,3 +15281,70 @@ fn as_cast_wide_operand_to_narrow_context() {
         assert_eq!(sim.get("r").unwrap().payload_u128(), 0x43, "r {config:?}");
     }
 }
+
+#[test]
+fn compare_signedness_survives_outer_context() {
+    // A comparison under an unsigned sibling (`& 1'b1`, `+ 8'd0`) must
+    // stay signed: SV 11.4.4 decides signedness from the operands alone.
+    // Covers const-fold and the runtime backends.
+    let code = r#"
+    module Top (
+        sa : input  i8,
+        sb : input  i8,
+        sw : input  signed logic<96>,
+        sx : input  signed logic<96>,
+        tw : input  signed logic<192>,
+        tx : input  signed logic<192>,
+        o  : output logic,
+        oc : output logic,
+        ow : output logic,
+        ot : output logic,
+        p  : output logic<32>,
+    ) {
+        const A: i32 = -1;
+        const B: i32 = 1;
+        const C: u32 = ((A <: B) + 8'd0) as 32;
+        assign oc = (A <: B) & 1'b1;
+        assign p  = C;
+        assign o  = (sa <: sb) & 1'b1;
+        assign ow = (sw <: sx) & 1'b1;
+        assign ot = (tw <: tx) & 1'b1;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sa", Value::new(0xff, 8, true)); // -1
+        sim.set("sb", Value::new(0, 8, true));
+        // -2 <: 1 over the I128 (96-bit) and wide-ptr (192-bit) paths.
+        use num_bigint::BigUint;
+        let minus_two = |w: usize| (BigUint::from(1u32) << w) - BigUint::from(2u32);
+        sim.set("sw", Value::new_biguint(minus_two(96), 96, true));
+        sim.set("sx", Value::new_biguint(BigUint::from(1u32), 96, true));
+        sim.set("tw", Value::new_biguint(minus_two(192), 192, true));
+        sim.set("tx", Value::new_biguint(BigUint::from(1u32), 192, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("oc").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(1, 32, false),
+            "{config:?}"
+        );
+        assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
+        assert_eq!(
+            sim.get("ow").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("ot").unwrap(),
+            Value::new(1, 1, false),
+            "{config:?}"
+        );
+    }
+}
