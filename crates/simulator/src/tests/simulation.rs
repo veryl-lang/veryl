@@ -15070,3 +15070,32 @@ fn write_log_reserve_on_const_loop_wide() {
         );
     }
 }
+
+/// Reduction operand is self-determined (IEEE 1800 Table 11-23):
+/// `&(a | ~b)` with 4-bit operands reduces over exactly 4 bits.
+/// Regression: the outer expression context used to widen `~b`, making
+/// the reduction span bits the operand doesn't have.
+#[test]
+fn reduction_operand_self_determined() {
+    let code = r#"
+    module Top (
+        i_a: input  logic<4>,
+        i_b: input  logic<4>,
+        o_x: output logic   ,
+    ) {
+        assign o_x = &(i_a | ~i_b) && (i_b != 0);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_a", Value::new(0xf, 4, false));
+        sim.set("i_b", Value::new(0xf, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o_x").unwrap(),
+            Value::new(1, 1, false),
+            "&(f | ~f) over 4 bits must be 1, config={config:?}"
+        );
+    }
+}
