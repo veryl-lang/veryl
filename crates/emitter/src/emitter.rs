@@ -1304,35 +1304,74 @@ impl Emitter {
         }
 
         let mut n_newlines = 0;
-        for (i, x) in statement_block_list.iter().enumerate() {
-            for x in x {
-                let ifdef_attributes: Vec<_> = arg.statement_block_list[i]
-                    .statement_block_group
-                    .statement_block_group_list
-                    .iter()
-                    .filter(|x| is_conditional_attribute(&x.attribute))
-                    .collect();
+        let mut suppress_newline = false;
+        for x in &arg.statement_block_list {
+            self.emit_statement_block_group(
+                &x.statement_block_group,
+                base,
+                &mut n_newlines,
+                &mut suppress_newline,
+            );
+        }
+        self.newline_list_post(arg.statement_block_list.is_empty());
+        self.token(&arg.r_brace.r_brace_token.replace(end_kw));
+    }
 
-                for (j, x) in ifdef_attributes.iter().enumerate() {
-                    if i == 0 && j == 0 {
-                        self.newline_list(base + n_newlines);
-                        n_newlines += 1;
-                    }
-                    self.attribute(&x.attribute);
+    /// Emit one `StatementBlockGroup`, opening its conditional attributes once
+    /// around the whole group: a multi-statement `#[ifdef] block` gets a single
+    /// `ifdef/`endif pair, and nested groups keep their own guards. `suppress_newline`
+    /// is set after a conditional directive, whose trailing hardline starts the next line.
+    fn emit_statement_block_group(
+        &mut self,
+        group: &StatementBlockGroup,
+        base: usize,
+        n_newlines: &mut usize,
+        suppress_newline: &mut bool,
+    ) {
+        let ifdef_attributes: Vec<_> = group
+            .statement_block_group_list
+            .iter()
+            .filter(|x| is_conditional_attribute(&x.attribute))
+            .collect();
+
+        for (j, x) in ifdef_attributes.iter().enumerate() {
+            if j == 0 && !*suppress_newline {
+                self.newline_list(base + *n_newlines);
+                *n_newlines += 1;
+            }
+            self.attribute(&x.attribute);
+        }
+        if !ifdef_attributes.is_empty() {
+            *suppress_newline = true;
+        }
+
+        match &*group.statement_block_group_group {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                for x in &x.statement_block_group_group_list {
+                    self.emit_statement_block_group(
+                        &x.statement_block_group,
+                        base,
+                        n_newlines,
+                        suppress_newline,
+                    );
                 }
-
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                let item = x.statement_block_item.as_ref();
                 if matches!(
-                    x,
+                    item,
                     StatementBlockItem::LetStatement(_)
                         | StatementBlockItem::Statement(_)
                         | StatementBlockItem::ConcatenationAssignment(_)
                 ) {
-                    if i != 0 || ifdef_attributes.is_empty() {
-                        self.newline_list(base + n_newlines);
-                        n_newlines += 1;
+                    if *suppress_newline {
+                        *suppress_newline = false;
+                    } else {
+                        self.newline_list(base + *n_newlines);
+                        *n_newlines += 1;
                     }
 
-                    match &x {
+                    match item {
                         StatementBlockItem::LetStatement(x) => self.let_statement(&x.let_statement),
                         StatementBlockItem::Statement(x) => self.statement(&x.statement),
                         StatementBlockItem::ConcatenationAssignment(x) => {
@@ -1341,14 +1380,12 @@ impl Emitter {
                         _ => unreachable!(),
                     }
                 }
-
-                for _ in ifdef_attributes {
-                    self.attribute_end();
-                }
             }
         }
-        self.newline_list_post(arg.statement_block_list.is_empty());
-        self.token(&arg.r_brace.r_brace_token.replace(end_kw));
+
+        for _ in ifdef_attributes {
+            self.attribute_end();
+        }
     }
 
     fn emit_declaration_in_statement_block(
