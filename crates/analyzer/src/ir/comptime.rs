@@ -37,11 +37,20 @@ impl PartSelectPath {
     pub fn to_base_select(&self, context: &mut Context, select: &VarSelect) -> Option<VarSelect> {
         let mut pos_width: Option<(Expression, usize, Option<usize>)> = None;
 
-        let range_select = if let Some((op, end)) = &select.1 {
+        let (range_select, range_op_width) = if let Some((op, end)) = &select.1 {
+            // Keep `+:`/`-:` width so the rebased select stays `low +: w`.
+            let op_width = if matches!(op, VarSelectOp::Colon) {
+                None
+            } else {
+                end.clone()
+                    .eval_value(context)
+                    .and_then(|v| v.to_usize())
+                    .map(|w| w.max(1))
+            };
             let (beg, end) = op.eval_expr(select.0.last().unwrap(), end);
-            Some((beg, end))
+            (Some((beg, end)), op_width)
         } else {
-            None
+            (None, None)
         };
 
         let mut select = select.0.as_slice();
@@ -178,6 +187,9 @@ impl PartSelectPath {
 
         if let Some((pos, width, range_width)) = pos_width {
             let single = width == 1;
+            // `low +: select_width` keeps a dynamic base's width; `[beg:end]`
+            // loses it in the simulator's dynamic-select folding.
+            let mut select_width = Some(width);
             let width = Expression::create_value(Value::new(width as u64, 32, false), token);
 
             // beg = pos + width - 1
@@ -202,8 +214,8 @@ impl PartSelectPath {
             // beg = end + (range_beg + 1) * range_width - 1
             // end = end + range_end * range_width
             if let Some((range_beg, range_end)) = range_select {
-                let range_width =
-                    Expression::create_value(Value::new(range_width? as u64, 32, false), token);
+                let rw = range_width?;
+                let range_width = Expression::create_value(Value::new(rw as u64, 32, false), token);
 
                 let expr = Expression::Binary(
                     Box::new(range_beg),
@@ -237,6 +249,8 @@ impl PartSelectPath {
                     comptime.clone(),
                 );
                 end = Expression::Binary(Box::new(end), Op::Add, Box::new(expr), comptime);
+
+                select_width = range_op_width.map(|w| w * rw);
             }
 
             beg.eval_comptime(context, None);
@@ -244,7 +258,11 @@ impl PartSelectPath {
 
             if single {
                 Some(VarSelect(vec![beg], None))
+            } else if let Some(w) = select_width {
+                let w = Expression::create_value(Value::new(w as u64, 32, false), token);
+                Some(VarSelect(vec![end], Some((VarSelectOp::PlusColon, w))))
             } else {
+                // Colon fallback: width unavailable, so constant bounds only.
                 Some(VarSelect(vec![beg], Some((VarSelectOp::Colon, end))))
             }
         } else {
