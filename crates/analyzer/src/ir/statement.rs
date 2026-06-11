@@ -190,11 +190,14 @@ impl ForRange {
                         return None;
                     }
                     ret.push(i);
-                    let new_i = op.eval(i, *step);
-                    if new_i == i {
-                        break;
+                    // A stalled or faulting step can't be unrolled faithfully
+                    // (the emitted SV loop would be infinite); decline so the
+                    // loop stays a runtime statement.  build_for_range rejects
+                    // the const-evaluable cases with a diagnostic before this.
+                    match op.eval(i, *step) {
+                        Some(new_i) if new_i > i => i = new_i,
+                        _ => return None,
                     }
-                    i = new_i;
                 }
                 Some(ret)
             }

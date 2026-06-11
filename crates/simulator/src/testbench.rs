@@ -612,7 +612,13 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                             loop_result = result;
                             break;
                         }
-                        i = op.eval(i as usize, step as usize) as u64;
+                        // Progress guard: a stalled or faulting step would
+                        // spin forever (const-bound cases are rejected at
+                        // analysis; runtime bounds reach here).
+                        match op.eval(i as usize, step as usize) {
+                            Some(n) if n as u64 > i => i = n as u64,
+                            _ => break,
+                        }
                     }
                 } else {
                     let mut i = start;

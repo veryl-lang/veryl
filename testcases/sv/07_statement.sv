@@ -48,7 +48,7 @@ module veryl_testcase_Module07;
             a  = i;
             aa = i + 1;
         end
-        for (int i = 0; i < 10; i *= 2) begin
+        for (int i = 1; i < 10; i *= 2) begin
             a  = i;
             aa = i + 1;
         end

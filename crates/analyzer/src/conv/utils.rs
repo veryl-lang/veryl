@@ -1,5 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, ExceedLimitKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    AnalyzerError, ExceedLimitKind, InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind,
+    UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -1536,8 +1537,8 @@ fn build_for_range_inner(
             // build_for_statement and would emit an infinite `for (; ; i += 0)`.
             if step_val == 0 {
                 let token: TokenRange = expr.into();
-                context.insert_error(AnalyzerError::invalid_statement(
-                    "for-loop with a zero step never advances",
+                context.insert_error(AnalyzerError::invalid_for_step(
+                    InvalidForStepKind::ZeroStep,
                     &token,
                 ));
                 return Err(ir_error!(token));
@@ -1565,12 +1566,65 @@ fn build_for_range_inner(
             // toward the lower bound and would never terminate. Reject it rather
             // than emit a broken loop.
             let token: TokenRange = range.into();
-            context.insert_error(AnalyzerError::invalid_statement(
-                "reverse for-loop with a non-additive step",
+            context.insert_error(AnalyzerError::invalid_for_step(
+                InvalidForStepKind::NonAdditiveReverse,
                 &token,
             ));
             Err(ir_error!(token))
         } else {
+            // A forward stepped loop runs while `i < end`, so the step must
+            // strictly increase the induction variable. Ops that can only
+            // hold or decrease it (and identity step values) would emit an
+            // infinite SV loop while the unroller sees ≤1 iteration.
+            let never_advances = match op {
+                ir::Op::Sub
+                | ir::Op::Div
+                | ir::Op::Rem
+                | ir::Op::BitAnd
+                | ir::Op::ArithShiftR
+                | ir::Op::LogicShiftR => true,
+                ir::Op::Mul => step_val <= 1,
+                ir::Op::BitOr | ir::Op::BitXor | ir::Op::ArithShiftL | ir::Op::LogicShiftL => {
+                    step_val == 0
+                }
+                _ => false,
+            };
+            if never_advances {
+                let token: TokenRange = expr.into();
+                context.insert_error(AnalyzerError::invalid_for_step(
+                    InvalidForStepKind::NeverAdvances,
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
+            // With const bounds, also catch value-dependent stalls (e.g.
+            // `*= 2` starting at 0, or `|= k` once k's bits are set).
+            if let (Some(start_val), Some(end_val)) =
+                (beg.eval_value(context), end.eval_value(context))
+            {
+                let end_val = if inclusive {
+                    end_val.saturating_add(1)
+                } else {
+                    end_val
+                };
+                let limit = context.config.evaluate_size_limit;
+                let mut i = start_val;
+                let mut n = 0usize;
+                while i < end_val && n <= limit {
+                    match op.eval(i, step_val) {
+                        Some(next) if next > i => i = next,
+                        _ => {
+                            let token: TokenRange = expr.into();
+                            context.insert_error(AnalyzerError::invalid_for_step(
+                                InvalidForStepKind::StopsAdvancing,
+                                &token,
+                            ));
+                            return Err(ir_error!(token));
+                        }
+                    }
+                    n += 1;
+                }
+            }
             Ok(ir::ForRange::Stepped {
                 start: beg,
                 end,
