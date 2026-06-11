@@ -558,6 +558,21 @@ impl Op {
         matches!(self, Op::LogicAnd | Op::LogicOr)
     }
 
+    /// Unary operators whose operand is self-determined (IEEE 1800
+    /// Table 11-23): reductions and logical negation.
+    pub fn unary_x_self_determined(&self) -> bool {
+        matches!(
+            self,
+            Op::BitAnd
+                | Op::BitNand
+                | Op::BitOr
+                | Op::BitNor
+                | Op::BitXor
+                | Op::BitXnor
+                | Op::LogicNot
+        )
+    }
+
     pub fn binary_y_self_determined(&self) -> bool {
         matches!(
             self,

@@ -113,12 +113,21 @@ impl Expression {
         match self {
             Expression::Term(x) => x.gather_context(context),
             Expression::Unary(op, x, comptime) => {
-                let x = x.gather_context(context);
+                let xc = if op.unary_x_self_determined() {
+                    // Finalized with its own context here; `apply_context`
+                    // skips self-determined operands.
+                    x.check_self_determined_unsized(context);
+                    let expr_context = x.gather_context(context);
+                    x.apply_context(context, expr_context);
+                    x.comptime().expr_context
+                } else {
+                    x.gather_context(context)
+                };
 
-                comptime.is_const = x.is_const;
-                comptime.is_global = x.is_global;
+                comptime.is_const = xc.is_const;
+                comptime.is_global = xc.is_global;
 
-                op.eval_context_unary(x)
+                op.eval_context_unary(xc)
             }
             Expression::Binary(x, op, y, comptime) => {
                 let mut as_target_is_type = false;
@@ -277,7 +286,9 @@ impl Expression {
         match self {
             Expression::Term(x) => x.apply_context(expr_context),
             Expression::Unary(op, x, comptime) => {
-                x.apply_context(context, expr_context);
+                if !op.unary_x_self_determined() {
+                    x.apply_context(context, expr_context);
+                }
                 comptime.expr_context = expr_context;
                 op.eval_type_unary(context, x.comptime(), comptime);
                 comptime.evaluated = true;
@@ -1050,6 +1061,16 @@ mod tests {
             .get_value()
             .unwrap()
             .clone()
+    }
+
+    #[test]
+    fn reduction_operand_self_determined_repro() {
+        let x0 = calc_expression("&(4'hf | ~4'hf)", None);
+        let x1 = calc_expression("&(4'h0 | ~4'h0)", None);
+        let x2 = calc_expression("&(4'hf | ~4'hf)", Some(32));
+        assert_eq!(format!("{:x}", x0), "1'h1");
+        assert_eq!(format!("{:x}", x1), "1'h1");
+        assert_eq!(format!("{:x}", x2), "32'h00000001");
     }
 
     #[test]
