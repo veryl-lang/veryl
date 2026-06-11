@@ -15348,3 +15348,35 @@ fn compare_signedness_survives_outer_context() {
         );
     }
 }
+
+#[test]
+fn equality_sign_extends_mixed_width_signed_operands() {
+    // Regression: ==/!= (and ==?/!=?) zero-extended mixed-width operands
+    // unconditionally, so 8'shff == 16'shffff (both -1) compared 0x00FF vs
+    // 0xFFFF and yielded 0.  Per LRM 11.4.5 both-signed operands sign-extend
+    // to the comparison width.  Covers const-fold and the runtime backends.
+    let code = r#"
+    module Top (
+        sa: input  i8,
+        o : output logic,
+        n : output logic,
+        p : output logic,
+    ) {
+        const P: i8  = 0 - 1;
+        const Q: i16 = 0 - 1;
+        assign p = P == Q;
+        assign o = sa == Q;
+        assign n = sa != Q;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sa", Value::new(0xff, 8, true)); // -1
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("p").unwrap(), Value::new(1, 1, false), "{config:?}");
+        assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
+        assert_eq!(sim.get("n").unwrap(), Value::new(0, 1, false), "{config:?}");
+    }
+}

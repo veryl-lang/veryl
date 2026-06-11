@@ -709,10 +709,22 @@ impl ProtoExpression {
 
                 // Div/Rem and comparisons take signedness from their two
                 // operands alone; the outer expr_context may have dropped
-                // signed via merge() with an unsigned sibling.
+                // signed via merge() with an unsigned sibling.  Equality
+                // ops carry signed=false in their own context (1-bit
+                // result), but both-signed operands must sign-extend to
+                // the comparison width (LRM 11.4.5).
                 let signed = if matches!(
                     op,
-                    Op::Div | Op::Rem | Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq
+                    Op::Div
+                        | Op::Rem
+                        | Op::Greater
+                        | Op::GreaterEq
+                        | Op::Less
+                        | Op::LessEq
+                        | Op::Eq
+                        | Op::Ne
+                        | Op::EqWildcard
+                        | Op::NeWildcard
                 ) {
                     x.expr_context().signed & y.expr_context().signed
                 } else {
@@ -786,7 +798,16 @@ impl ProtoExpression {
                 if signed {
                     let width = if matches!(
                         op,
-                        Op::Div | Op::Rem | Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq
+                        Op::Div
+                            | Op::Rem
+                            | Op::Greater
+                            | Op::GreaterEq
+                            | Op::Less
+                            | Op::LessEq
+                            | Op::Eq
+                            | Op::Ne
+                            | Op::EqWildcard
+                            | Op::NeWildcard
                     ) {
                         if needs_wide { 128 } else { 64 }
                     } else {

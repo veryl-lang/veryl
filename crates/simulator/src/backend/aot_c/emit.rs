@@ -2741,7 +2741,17 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // value loaded as uint64_t compares (or divides) as
             // unsigned and negative numbers look like very-large positives.
             let is_signed_cmp = expr_context.signed
-                && matches!(op, Op::Less | Op::Greater | Op::LessEq | Op::GreaterEq);
+                && matches!(
+                    op,
+                    Op::Less
+                        | Op::Greater
+                        | Op::LessEq
+                        | Op::GreaterEq
+                        | Op::Eq
+                        | Op::Ne
+                        | Op::EqWildcard
+                        | Op::NeWildcard
+                );
             // Op::Div / Op::Rem use the AND of operand signedness, as the
             // Cranelift backend does.  expr_context.signed alone is not
             // sufficient because merge() with an unsigned sibling can
@@ -2783,6 +2793,8 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     Op::Greater => ">",
                     Op::LessEq => "<=",
                     Op::GreaterEq => ">=",
+                    Op::Eq | Op::EqWildcard => "==",
+                    Op::Ne | Op::NeWildcard => "!=",
                     Op::Div => "/",
                     Op::Rem => "%",
                     _ => unreachable!(),
