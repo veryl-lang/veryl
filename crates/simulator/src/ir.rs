@@ -477,7 +477,8 @@ unsafe impl Send for Ir {}
 /// at most 2 entries per cycle (payload + 4-state mask); wide FFs emit at
 /// most 2 wide entries per cycle (one per payload/mask).  Each contributes
 /// to its respective pool, with a ×2 over-provisioning headroom for
-/// initial dual-writes and multi-RMW chains.
+/// initial dual-writes and multi-RMW chains.  This is only a starting
+/// size: all push paths grow the pools on overflow.
 fn write_log_capacity(site_table: &site_table::SiteTable) -> (usize, usize) {
     let mut narrow: usize = 0;
     let mut wide: usize = 0;

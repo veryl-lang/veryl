@@ -1660,7 +1660,7 @@ fn emit_wide_narrow_field_store(
 /// (56) bytes; wider FFs are split into multiple entries at consecutive
 /// FF offsets.
 fn emit_wide_log_chunks(
-    context: &CraneliftContext,
+    context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     src_ptr: cranelift::prelude::Value,
     base_offset: i32,

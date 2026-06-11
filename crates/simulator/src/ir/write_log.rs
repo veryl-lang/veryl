@@ -64,14 +64,24 @@ pub struct WriteLogBuffer {
     pub narrow_entries_ptr: *mut WriteLogEntry,
     /// Live narrow-entry count for this cycle.
     pub narrow_count: u32,
-    /// Narrow capacity (constant after construction).
+    /// Narrow capacity (doubles on overflow via `grow_narrow`).
     pub narrow_capacity: u32,
     /// Wide path: pointer to the [`WriteLogWideEntry`] array (64 B per entry).
     pub wide_entries_ptr: *mut WriteLogWideEntry,
     /// Live wide-entry count for this cycle.
     pub wide_count: u32,
-    /// Wide capacity (constant after construction).
+    /// Wide capacity (doubles on overflow via `grow_wide`).
     pub wide_capacity: u32,
+    /// Grow-and-push slow path for a full narrow pool, reached as a
+    /// fn-pointer field (not a baked address) so disk-cached AOT-C objects
+    /// stay valid across processes/ASLR.
+    pub grow_push_narrow: unsafe extern "C" fn(*mut WriteLogBuffer, u32, u64, u32),
+    /// Grow-and-push slow path for a full wide pool.
+    pub grow_push_wide: unsafe extern "C" fn(*mut WriteLogBuffer, u32, *const u8, u32),
+    /// Bulk-reserve slow path: ensures room for the given numbers of
+    /// additional narrow/wide entries.  Called once from the AOT-C event
+    /// prologue so the per-push code stays unchecked.
+    pub reserve: unsafe extern "C" fn(*mut WriteLogBuffer, u32, u32),
     /// Owning storage — keeps `narrow_entries_ptr` valid.
     _narrow_owner: Box<[WriteLogEntry]>,
     /// Owning storage — keeps `wide_entries_ptr` valid.
@@ -96,11 +106,25 @@ pub const WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR: i32 =
 pub const WRITE_LOG_NARROW_OFFSET_COUNT: i32 =
     std::mem::offset_of!(WriteLogBuffer, narrow_count) as i32;
 #[allow(dead_code)]
+pub const WRITE_LOG_NARROW_OFFSET_CAPACITY: i32 =
+    std::mem::offset_of!(WriteLogBuffer, narrow_capacity) as i32;
+#[allow(dead_code)]
 pub const WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR: i32 =
     std::mem::offset_of!(WriteLogBuffer, wide_entries_ptr) as i32;
 #[allow(dead_code)]
 pub const WRITE_LOG_WIDE_OFFSET_COUNT: i32 =
     std::mem::offset_of!(WriteLogBuffer, wide_count) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_WIDE_OFFSET_CAPACITY: i32 =
+    std::mem::offset_of!(WriteLogBuffer, wide_capacity) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_OFFSET_GROW_PUSH_NARROW: i32 =
+    std::mem::offset_of!(WriteLogBuffer, grow_push_narrow) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_OFFSET_GROW_PUSH_WIDE: i32 =
+    std::mem::offset_of!(WriteLogBuffer, grow_push_wide) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_OFFSET_RESERVE: i32 = std::mem::offset_of!(WriteLogBuffer, reserve) as i32;
 
 #[allow(dead_code)]
 pub const WRITE_LOG_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogEntry>() as i32;
@@ -149,9 +173,101 @@ impl WriteLogBuffer {
             wide_entries_ptr,
             wide_count: 0,
             wide_capacity: wide_cap as u32,
+            grow_push_narrow: write_log_grow_push_narrow,
+            grow_push_wide: write_log_grow_push_wide,
+            reserve: write_log_reserve,
             _narrow_owner: narrow,
             _wide_owner: wide,
         }
+    }
+
+    /// Grow the narrow pool to at least `min_cap` (next power of two,
+    /// floor 4096), preserving live entries.  The buffer header address
+    /// stays stable (Ir owns the buffer in a Box), so JIT/AOT-C inline
+    /// pushes pick up the new pointer/capacity on their next load.
+    #[cold]
+    fn grow_narrow_to(&mut self, min_cap: usize) {
+        let new_cap = min_cap.next_power_of_two().max(4096);
+        let mut narrow = vec![WriteLogEntry::default(); new_cap].into_boxed_slice();
+        let live = self.narrow_count as usize;
+        narrow[..live].copy_from_slice(&self._narrow_owner[..live]);
+        self.narrow_entries_ptr = narrow.as_mut_ptr();
+        self.narrow_capacity = new_cap as u32;
+        self._narrow_owner = narrow;
+    }
+
+    /// Grow the wide pool to at least `min_cap` (next power of two,
+    /// floor 64), preserving live entries.
+    #[cold]
+    fn grow_wide_to(&mut self, min_cap: usize) {
+        let new_cap = min_cap.next_power_of_two().max(64);
+        let mut wide = vec![WriteLogWideEntry::default(); new_cap].into_boxed_slice();
+        let live = self.wide_count as usize;
+        wide[..live].copy_from_slice(&self._wide_owner[..live]);
+        self.wide_entries_ptr = wide.as_mut_ptr();
+        self.wide_capacity = new_cap as u32;
+        self._wide_owner = wide;
+    }
+
+    /// Ensure room for `extra` more narrow entries.
+    fn reserve_narrow(&mut self, extra: u32) {
+        let needed = self.narrow_count as u64 + extra as u64;
+        if needed > self.narrow_capacity as u64 {
+            self.grow_narrow_to(needed as usize);
+        }
+    }
+
+    /// Ensure room for `extra` more wide entries.
+    fn reserve_wide(&mut self, extra: u32) {
+        let needed = self.wide_count as u64 + extra as u64;
+        if needed > self.wide_capacity as u64 {
+            self.grow_wide_to(needed as usize);
+        }
+    }
+
+    /// Append a narrow entry, growing the pool when full.
+    fn push_narrow(&mut self, offset: u32, payload: u64, width_class: u16) {
+        if self.narrow_count >= self.narrow_capacity {
+            self.grow_narrow_to(self.narrow_capacity as usize + 1);
+        }
+        let idx = self.narrow_count as usize;
+        // SAFETY: idx < narrow_capacity after the grow check above.
+        unsafe {
+            *self.narrow_entries_ptr.add(idx) = WriteLogEntry {
+                offset,
+                mask_xz: 0,
+                width_class,
+                payload,
+            };
+        }
+        self.narrow_count += 1;
+    }
+
+    /// Append a wide entry, growing the pool when full.
+    ///
+    /// Safety: `payload` must be valid for reads of `native_bytes` (≤ 56) bytes.
+    unsafe fn push_wide(&mut self, offset: u32, payload: *const u8, native_bytes: usize) {
+        if self.wide_count >= self.wide_capacity {
+            self.grow_wide_to(self.wide_capacity as usize + 1);
+        }
+        let idx = self.wide_count as usize;
+        let entry = WriteLogWideEntry {
+            offset,
+            native_bytes: native_bytes as u8,
+            _pad: [0; 3],
+            payload: {
+                let mut p = [0u8; WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES];
+                unsafe {
+                    std::ptr::copy_nonoverlapping(payload, p.as_mut_ptr(), native_bytes);
+                }
+                p
+            },
+        };
+        // SAFETY: idx < wide_capacity after the grow check above.
+        unsafe {
+            *self.wide_entries_ptr.add(idx) = entry;
+        }
+        self.wide_count += 1;
     }
 
     pub fn narrow_capacity(&self) -> usize {
@@ -277,7 +393,9 @@ pub(crate) fn clear_event_write_log() {
 
 /// Push a narrow FF write entry into the active log buffer.  Called from
 /// JIT code (`extern "C"`) and from the interpret path.  Width class is
-/// one of 1/2/4/8 (== native bytes).
+/// one of 1/2/4/8 (== native bytes).  Grows the pool when full — a write
+/// site inside a runtime-bound loop can push any number of entries per
+/// cycle, so the statically-sized pool is only a starting capacity.
 ///
 /// Safety: caller is the JIT-emitted code which only invokes this while
 /// the TLS is installed by `set_event_write_log`.
@@ -296,32 +414,13 @@ pub(crate) unsafe extern "C" fn event_write_log_push_static(
             return;
         };
         let buf = unsafe { &mut *ptr.as_ptr() };
-        let idx = buf.narrow_count as usize;
-        let cap = buf.narrow_capacity as usize;
-        debug_assert!(
-            idx < cap,
-            "write_log narrow overflow: idx={} cap={}",
-            idx,
-            cap
-        );
-        if idx < cap {
-            // SAFETY: narrow_entries_ptr points to a capacity-sized allocation;
-            // idx < cap so the offset is in bounds.
-            unsafe {
-                *buf.narrow_entries_ptr.add(idx) = WriteLogEntry {
-                    offset,
-                    mask_xz: 0,
-                    width_class,
-                    payload,
-                };
-            }
-            buf.narrow_count = (idx as u32).saturating_add(1);
-        }
+        buf.push_narrow(offset, payload, width_class);
     });
 }
 
 /// Push a wide FF write entry (used by the interpret path).  `payload`
-/// must point to `native_bytes` (≤ 56) bytes of FF data.
+/// must point to `native_bytes` (≤ 56) bytes of FF data.  Grows the pool
+/// when full.
 ///
 /// Safety: caller must ensure `payload` is valid for reads of
 /// `native_bytes` bytes; the helper is only invoked while the TLS is
@@ -341,33 +440,58 @@ pub(crate) unsafe fn event_write_log_push_wide(
             return;
         };
         let buf = unsafe { &mut *ptr.as_ptr() };
-        let idx = buf.wide_count as usize;
-        let cap = buf.wide_capacity as usize;
-        debug_assert!(
-            idx < cap,
-            "write_log wide overflow: idx={} cap={}",
-            idx,
-            cap
-        );
-        if idx < cap {
-            let entry = WriteLogWideEntry {
-                offset,
-                native_bytes: native_bytes as u8,
-                _pad: [0; 3],
-                payload: {
-                    let mut p = [0u8; WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES];
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(payload, p.as_mut_ptr(), native_bytes);
-                    }
-                    p
-                },
-            };
-            unsafe {
-                *buf.wide_entries_ptr.add(idx) = entry;
-            }
-            buf.wide_count = (idx as u32).saturating_add(1);
+        unsafe {
+            buf.push_wide(offset, payload, native_bytes);
         }
     });
+}
+
+/// Slow path for the JIT/AOT-C inline narrow push: grow the pool and
+/// append.  Reached via the `grow_push_narrow` header field when the
+/// pool is full.
+///
+/// Safety: `buf` must point to the live `WriteLogBuffer` whose header was
+/// handed to the emitted code.
+pub(crate) unsafe extern "C" fn write_log_grow_push_narrow(
+    buf: *mut WriteLogBuffer,
+    offset: u32,
+    payload: u64,
+    width_class: u32,
+) {
+    let buf = unsafe { &mut *buf };
+    buf.push_narrow(offset, payload, width_class as u16);
+}
+
+/// Slow path for the JIT/AOT-C inline wide push: grow the pool and append.
+///
+/// Safety: `buf` must point to the live `WriteLogBuffer`; `payload` must be
+/// valid for reads of `native_bytes` (≤ 56) bytes.
+pub(crate) unsafe extern "C" fn write_log_grow_push_wide(
+    buf: *mut WriteLogBuffer,
+    offset: u32,
+    payload: *const u8,
+    native_bytes: u32,
+) {
+    let buf = unsafe { &mut *buf };
+    unsafe {
+        buf.push_wide(offset, payload, native_bytes as usize);
+    }
+}
+
+/// Bulk-reserve entry point, reached via the `reserve` header field from
+/// the AOT-C event prologue: one call per eval guarantees room for every
+/// (unchecked) inline push in the body.
+///
+/// Safety: `buf` must point to the live `WriteLogBuffer` whose header was
+/// handed to the emitted code.
+pub(crate) unsafe extern "C" fn write_log_reserve(
+    buf: *mut WriteLogBuffer,
+    narrow: u32,
+    wide: u32,
+) {
+    let buf = unsafe { &mut *buf };
+    buf.reserve_narrow(narrow);
+    buf.reserve_wide(wide);
 }
 
 #[cfg(test)]
@@ -444,6 +568,81 @@ mod tests {
         assert_eq!(entries[0].offset, 0x2000);
         assert_eq!(entries[0].native_bytes, 32);
         assert_eq!(&entries[0].payload[..32], &payload[..]);
+    }
+
+    #[test]
+    fn narrow_push_grows_past_capacity() {
+        let mut buf = WriteLogBuffer::with_capacity(4, 0);
+        unsafe {
+            set_event_write_log(&mut buf);
+            for i in 0..5000u32 {
+                event_write_log_push_static(i * 8, i as u64, 8);
+            }
+            clear_event_write_log();
+        }
+        assert_eq!(buf.narrow_count, 5000);
+        assert!(buf.narrow_capacity() >= 5000);
+        let entries = buf.narrow_entries_slice();
+        for i in 0..5000usize {
+            assert_eq!(entries[i].offset, i as u32 * 8);
+            assert_eq!(entries[i].payload, i as u64);
+        }
+    }
+
+    #[test]
+    fn wide_push_grows_past_capacity() {
+        let mut buf = WriteLogBuffer::with_capacity(0, 2);
+        unsafe {
+            set_event_write_log(&mut buf);
+            for i in 0..70u32 {
+                let payload = [i as u8; 16];
+                event_write_log_push_wide(i * 16, payload.as_ptr(), 16);
+            }
+            clear_event_write_log();
+        }
+        assert_eq!(buf.wide_count, 70);
+        assert!(buf.wide_capacity() >= 70);
+        let entries = buf.wide_entries_slice();
+        for i in 0..70usize {
+            assert_eq!(entries[i].offset, i as u32 * 16);
+            assert_eq!(entries[i].native_bytes, 16);
+            assert_eq!(&entries[i].payload[..16], &[i as u8; 16]);
+        }
+    }
+
+    #[test]
+    fn reserve_grows_both_pools_preserving_entries() {
+        let mut buf = WriteLogBuffer::with_capacity(4, 2);
+        unsafe {
+            write_log_grow_push_narrow(&mut buf, 0, 7, 8);
+            write_log_reserve(&mut buf, 5000, 70);
+        }
+        assert!(buf.narrow_capacity() >= 5001);
+        assert!(buf.wide_capacity() >= 70);
+        assert_eq!(buf.narrow_count, 1);
+        assert_eq!(buf.narrow_entries_slice()[0].payload, 7);
+        // Within capacity: a no-op.
+        let cap = buf.narrow_capacity();
+        unsafe {
+            write_log_reserve(&mut buf, 1, 1);
+        }
+        assert_eq!(buf.narrow_capacity(), cap);
+    }
+
+    #[test]
+    fn grow_push_entry_points_append_when_full() {
+        let mut buf = WriteLogBuffer::with_capacity(1, 1);
+        unsafe {
+            write_log_grow_push_narrow(&mut buf, 0, 1, 8);
+            write_log_grow_push_narrow(&mut buf, 8, 2, 8);
+            let payload = [0xa5u8; 16];
+            write_log_grow_push_wide(&mut buf, 0, payload.as_ptr(), 16);
+            write_log_grow_push_wide(&mut buf, 16, payload.as_ptr(), 16);
+        }
+        assert_eq!(buf.narrow_count, 2);
+        assert_eq!(buf.wide_count, 2);
+        assert_eq!(buf.narrow_entries_slice()[1].payload, 2);
+        assert_eq!(buf.wide_entries_slice()[1].offset, 16);
     }
 
     #[test]
