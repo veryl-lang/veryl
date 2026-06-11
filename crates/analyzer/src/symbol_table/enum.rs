@@ -30,6 +30,8 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
                 &symbol,
                 r#enum,
                 pre_value.as_ref(),
+                enum_width,
+                &mut member_width,
                 &mut errors,
             );
             if matches!(value, EnumMemberValue::UnevaluableValue) {
@@ -75,6 +77,8 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
         }
     }
 
+    errors.append(&mut context.drain_errors());
+
     errors
 }
 
@@ -111,6 +115,8 @@ fn eval_enum_member_value(
     symbol: &Symbol,
     r#enum: &EnumProperty,
     pre_value: Option<&EnumMemberValue>,
+    enum_width: usize,
+    member_width: &mut usize,
     errors: &mut Vec<AnalyzerError>,
 ) -> EnumMemberValue {
     let SymbolKind::EnumMember(enum_member) = &symbol.kind else {
@@ -146,6 +152,18 @@ fn eval_enum_member_value(
                         &[],
                     ));
                 }
+                // `value()` is None for x/z, bypassing the normal width checks,
+                // so validate the x/z literal's own width here instead.
+                let needed = value.payload().bits().max(value.mask_xz().bits()) as usize;
+                if enum_width > 0 && needed > enum_width {
+                    errors.push(AnalyzerError::too_large_enum_variant(
+                        &symbol.token.to_string(),
+                        value.payload().to_isize().unwrap_or(isize::MAX),
+                        enum_width,
+                        &symbol.token.into(),
+                    ));
+                }
+                *member_width = (*member_width).max(needed);
                 enum_member.value.clone()
             }
         } else {

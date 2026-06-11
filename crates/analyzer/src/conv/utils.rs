@@ -2102,6 +2102,13 @@ pub fn eval_factor_symbol(
             };
 
             let factor = match &x.value {
+                EnumMemberValue::Unresolved => {
+                    context.insert_error(AnalyzerError::referring_before_definition(
+                        &symbol.found.token.to_string(),
+                        &token,
+                    ));
+                    None
+                }
                 EnumMemberValue::ImplicitValue(x) => {
                     let value = Value::new_biguint(x.clone(), r#enum.width, false);
                     Some(ir::Factor::create_value(value, token))
