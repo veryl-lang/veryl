@@ -16049,3 +16049,39 @@ fn struct_member_dynamic_part_select() {
         );
     }
 }
+
+#[test]
+fn concat_lhs_with_dynamic_bit_select() {
+    // Regression: the multi-destination assign conv hardcoded
+    // dynamic_select: None, so `{a[i], b} = v` with a runtime i fell back
+    // to the full variable width — underflowing the RHS offset bookkeeping
+    // and overwriting the whole variable.
+    let code = r#"
+    module Top (
+        i: input  logic<2>,
+        v: input  logic<2>,
+        a: output logic<4>,
+        b: output logic,
+    ) {
+        assign {a[i], b} = v;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i", Value::new(2, 2, false));
+        sim.set("v", Value::new(0b10, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // a[2] = 1; the other bits stay 0/x (payload 0 either way).
+        assert_eq!(sim.get("a").unwrap().payload_u128(), 0b0100, "{config:?}");
+        assert_eq!(sim.get("b").unwrap().payload_u128(), 0, "{config:?}");
+
+        sim.set("i", Value::new(0, 2, false));
+        sim.set("v", Value::new(0b11, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // Bit 2 keeps its previous value (only a[i] is driven).
+        assert_eq!(sim.get("a").unwrap().payload_u128(), 0b0101, "{config:?}");
+        assert_eq!(sim.get("b").unwrap().payload_u128(), 1, "{config:?}");
+    }
+}
