@@ -3656,8 +3656,18 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Select'
     fn select(&mut self, arg: &Select) {
+        let step = arg
+            .select_opt
+            .as_ref()
+            .is_some_and(|x| matches!(&*x.select_operator, SelectOperator::Step(_)));
         self.l_bracket(&arg.l_bracket);
-        self.expression(&arg.expression);
+        if step && arg.expression.unwrap_factor().is_none() {
+            self.str("(");
+            self.expression(&arg.expression);
+            self.str(")");
+        } else {
+            self.expression(&arg.expression);
+        }
         if let Some(ref x) = arg.select_opt {
             match &*x.select_operator {
                 SelectOperator::Step(_) => {

@@ -3819,3 +3819,39 @@ package wild {
     assert!(ret.contains("import prj_abcd::*;"), "{ret}");
     assert!(!ret.contains("prj_abcd::abcd::*"), "{ret}");
 }
+
+#[test]
+fn step_select_parenthesizes_base_index() {
+    // Regression: `x[expr step w]` lowers to `x[expr*(w)+:(w)]`; a non-atomic
+    // base (`i + 1`) must be parenthesized or `*` rebinds it. A single factor
+    // needs no parentheses.
+    let code = r#"module ModuleA (
+    i: input  logic<2>,
+    a: input  logic<16>,
+    o: output logic<4>,
+) {
+    assign o = a[i + 1 step 4];
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("a[(i + 1)*(4)+:(4)]"),
+        "non-atomic base must be parenthesized: {ret}"
+    );
+
+    let code = r#"module ModuleB (
+    i: input  logic<2>,
+    a: input  logic<16>,
+    o: output logic<4>,
+) {
+    assign o = a[i step 4];
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("a[i*(4)+:(4)]"),
+        "single-factor base needs no parentheses: {ret}"
+    );
+}
