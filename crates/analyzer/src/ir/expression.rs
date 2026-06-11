@@ -278,8 +278,10 @@ impl Expression {
                             let x_context = x.gather_context(context);
                             is_const &= x_context.is_const;
                             is_global &= x_context.is_global;
-                            // check + accumulate each element's clock domain so a
-                            // cross-domain element is flagged, not laundered
+                            // Evaluate the element so a compound expression carries its
+                            // operands' clock domains (mirrors eval_type_concatenation);
+                            // else the check below launders a cross-domain element.
+                            x.apply_context(context, x_context);
                             let x = x.comptime();
                             check_clock_domain(context, comptime, x, &comptime.token.beg);
                             comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
@@ -293,6 +295,7 @@ impl Expression {
                             let x_context = x.gather_context(context);
                             is_const &= x_context.is_const;
                             is_global &= x_context.is_global;
+                            x.apply_context(context, x_context);
                             let x = x.comptime();
                             check_clock_domain(context, comptime, x, &comptime.token.beg);
                             comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
