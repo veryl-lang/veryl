@@ -2,6 +2,8 @@ use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes, read_native_value};
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
+use num_bigint::BigUint;
+use num_traits::One;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 
@@ -1621,7 +1623,61 @@ impl Conv<&air::Expression> for ProtoExpression {
                         return Ok(proto);
                     }
 
-                    return Conv::conv(context, x.as_ref());
+                    // Int->int casts are otherwise transparent (the operand
+                    // is already sized by the cast in gather_context), but a
+                    // NARROWING cast must still truncate the operand value:
+                    // mask to the cast width, and re-extend by the cast
+                    // signedness when the outer context is wider.
+                    let cast_width = comptime.r#type.total_width();
+                    let operand_width = x.comptime().expr_context.width;
+                    let proto = Conv::conv(context, x.as_ref())?;
+                    if let Some(cw) = cast_width
+                        && cw > 0
+                        && operand_width > cw
+                    {
+                        let outer: ExpressionContext = (&comptime.expr_context).into();
+                        let node_width = outer.width.max(cw);
+                        let value_node = |payload: BigUint| ProtoExpression::Value {
+                            value: Value::new_biguint(payload, node_width, false),
+                            width: node_width,
+                            expr_context: ExpressionContext {
+                                width: node_width,
+                                signed: false,
+                            },
+                        };
+                        let ctx = ExpressionContext {
+                            width: node_width,
+                            signed: false,
+                        };
+                        let mask = (BigUint::one() << cw) - BigUint::one();
+                        let mut ret = ProtoExpression::Binary {
+                            x: Box::new(proto),
+                            op: Op::BitAnd,
+                            y: Box::new(value_node(mask)),
+                            width: node_width,
+                            expr_context: ctx,
+                        };
+                        if comptime.r#type.signed && outer.width > cw {
+                            // Sign-extend the truncated value to the outer
+                            // width: ((v ^ s) - s) mod 2^node_width.
+                            let sign = BigUint::one() << (cw - 1);
+                            ret = ProtoExpression::Binary {
+                                x: Box::new(ProtoExpression::Binary {
+                                    x: Box::new(ret),
+                                    op: Op::BitXor,
+                                    y: Box::new(value_node(sign.clone())),
+                                    width: node_width,
+                                    expr_context: ctx,
+                                }),
+                                op: Op::Sub,
+                                y: Box::new(value_node(sign)),
+                                width: node_width,
+                                expr_context: ctx,
+                            };
+                        }
+                        return Ok(ret);
+                    }
+                    return Ok(proto);
                 }
 
                 let x_kind = x.comptime().r#type.kind.clone();

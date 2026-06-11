@@ -131,7 +131,40 @@ impl Expression {
             }
             Expression::Binary(x, op, y, comptime) => {
                 let mut as_target_is_type = false;
-                let (xc, yc) = if op.binary_op_self_determined() {
+                let (xc, yc) = if *op == Op::As {
+                    // `as` is a width-context boundary (LRM 6.24.1): the
+                    // operand is sized as if assigned to a cast-width
+                    // variable; the outer context never reaches inside.
+                    let xc = x.gather_context(context);
+                    let yc = y.gather_context(context);
+                    // The target is self-contained (a type or a width
+                    // literal): finalize it with its own context.
+                    y.apply_context(context, yc);
+                    as_target_is_type = matches!(y.comptime().value, ValueVariant::Type(_));
+                    // A numeric cast (`x as 16`) carries the width as the
+                    // literal's VALUE; a type cast carries it as the width.
+                    let cast_width = if as_target_is_type {
+                        yc.width
+                    } else {
+                        y.comptime()
+                            .get_value()
+                            .ok()
+                            .and_then(|v| v.to_usize())
+                            .unwrap_or(0)
+                    };
+                    let inner = ExpressionContext {
+                        width: xc.width.max(cast_width),
+                        ..xc
+                    };
+                    x.apply_context(context, inner);
+                    (
+                        x.comptime().expr_context,
+                        ExpressionContext {
+                            width: cast_width,
+                            ..yc
+                        },
+                    )
+                } else if op.binary_op_self_determined() {
                     let expr_context = x.gather_context(context).merge(y.gather_context(context));
                     x.apply_context(context, expr_context);
                     y.apply_context(context, expr_context);
@@ -294,7 +327,9 @@ impl Expression {
                 comptime.evaluated = true;
             }
             Expression::Binary(x, op, y, comptime) => {
-                if !op.binary_op_self_determined() {
+                // `as` operands were sized in gather_context; the outer
+                // context must not leak inside the cast.
+                if *op != Op::As && !op.binary_op_self_determined() {
                     if !op.binary_x_self_determined() {
                         x.apply_context(context, expr_context);
                     }
@@ -356,9 +391,12 @@ impl Expression {
                         val.trunc(cast_width);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else if val_width < cast_width {
-                        // SV's `N'(expr)` sign-extends a signed operand; widen by the
-                        // source signedness so comptime matches the emitted SV.
-                        let val = val.expand(cast_width, val.signed()).into_owned();
+                        // SV's `N'(expr)` sign-extends a signed operand; widen by
+                        // the source TYPE's signedness so comptime matches the
+                        // emitted SV (the value flag can carry the init
+                        // literal's signedness, e.g. `logic<8> = 200`).
+                        let src_signed = x.comptime().r#type.signed;
+                        let val = val.expand(cast_width, src_signed).into_owned();
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else {
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
