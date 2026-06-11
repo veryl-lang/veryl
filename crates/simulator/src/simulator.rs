@@ -352,6 +352,14 @@ impl Simulator {
     /// caller is responsible for `set_event_write_log`, `settle_comb`,
     /// and `dump_variables`.
     fn step_event_inner(&mut self, event: &Event) {
+        self.eval_event_stmts(event);
+        self.commit_event_log();
+    }
+
+    /// Evaluate `event_statements[event]` into the write log without
+    /// committing, so simultaneous events (master + gated clocks) share
+    /// one pre-commit state and one commit.
+    fn eval_event_stmts(&mut self, event: &Event) {
         #[cfg(feature = "profile")]
         let event_start = std::time::Instant::now();
 
@@ -426,7 +434,10 @@ impl Simulator {
         {
             self.profile.event_eval_ns += event_start.elapsed().as_nanos() as u64;
         }
+    }
 
+    /// Apply the accumulated write log to FF storage and reset the buffer.
+    fn commit_event_log(&mut self) {
         #[cfg(feature = "profile")]
         let ff_start = std::time::Instant::now();
 
@@ -492,24 +503,45 @@ impl Simulator {
             }
         }
 
-        self.step_event_inner(event);
-
-        // ff_commit may have advanced FF-driven derived clocks
-        // (`let div_copy = ff_div_clk;`); refresh before edge detect.
-        if has_eval_chunk {
-            self.ir.partial_settle(&mut self.mask_cache);
+        // Two-phase firing.  A master-gated clock's edge IS the master
+        // edge qualified by the pre-commit enable (ICG semantics), so
+        // those clocks fire here with the master event, sharing its
+        // pre-commit state and write-log commit; a same-cycle enable
+        // change waits for the next edge (the post-commit loop skips
+        // them).  FF-driven clocks fire post-commit instead, matching
+        // SV's NBA-driven edge propagation.
+        let n = self.ir.derived_clock_schedule.clocks.len();
+        let mut fired_mask: Vec<bool> = vec![false; n];
+        let mut pre_fire: SmallVec<[usize; 8]> = SmallVec::new();
+        if master_id_opt.is_some() {
+            for i in 0..n {
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                if clk.current_offset.is_ff() || !clk.master_gated {
+                    continue;
+                }
+                if self.prev_derived_clock_values[i] == 0 && self.read_derived_clock_bit(clk) == 1 {
+                    pre_fire.push(i);
+                }
+            }
         }
 
-        // Detect 0→1 edges and chain-fire one at a time, re-evaluating
-        // after each fire so NBA glitch suppression works (a transient
-        // edge cancelled by a same-cycle FF write must not trigger).
+        self.eval_event_stmts(event);
+        for &i in &pre_fire {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            self.eval_event_stmts(&Event::Clock(vid));
+            fired_mask[i] = true;
+        }
+        self.commit_event_log();
+
+        // Detect remaining 0→1 edges (caused by this step's FF commits)
+        // and chain-fire one at a time, re-evaluating after each fire so
+        // NBA glitch suppression works (a transient edge cancelled by a
+        // same-cycle FF write must not trigger).
         // Convergence: each clock fires at most once (`fired_mask`) and
         // `analyze_dependency` rejects comb cycles, so n+1 iterations
         // suffice; the debug_assert catches bookkeeping regressions.
-        let n = self.ir.derived_clock_schedule.clocks.len();
         let mut new_values: SmallVec<[u8; 8]> = SmallVec::new();
         new_values.resize(n, 0);
-        let mut fired_mask: Vec<bool> = vec![false; n];
         let max_iters = n + 1;
         let mut iters = 0;
         loop {
@@ -521,10 +553,16 @@ impl Simulator {
                 new_values[i] = self.read_derived_clock_bit(clk);
             }
 
-            // Earliest unfired clock with a real 0→1 edge.
+            // Earliest unfired clock with a real 0→1 edge.  An edge on a
+            // master-gated comb clock here is a committed enable change,
+            // which must not pulse (see the pre-commit phase above).
             let mut next_fire: Option<usize> = None;
             for i in 0..n {
                 if fired_mask[i] {
+                    continue;
+                }
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                if !clk.current_offset.is_ff() && clk.master_gated {
                     continue;
                 }
                 if self.prev_derived_clock_values[i] == 0 && new_values[i] == 1 {
@@ -535,6 +573,18 @@ impl Simulator {
 
             match next_fire {
                 Some(i) => {
+                    // The partial settle only refreshed the clock closure
+                    // and the fired domain reads arbitrary comb, so settle
+                    // fully before firing (paid only when an edge fires).
+                    self.do_settle_comb();
+                    // Re-verify on the fully settled state: the partial
+                    // closure can show a transient that full settling
+                    // cancels.  Not marked fired — the next iteration
+                    // re-reads a consistent 0, so the loop still ends.
+                    let clk = &self.ir.derived_clock_schedule.clocks[i];
+                    if self.read_derived_clock_bit(clk) != 1 {
+                        continue;
+                    }
                     iters += 1;
                     debug_assert!(
                         iters <= max_iters,
