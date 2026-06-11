@@ -2562,6 +2562,11 @@ impl VerylWalker for Emitter {
         let (width, tail) = text.split_once('\'').unwrap();
 
         if width.is_empty() {
+            // Skip the optional signed marker (`'sd3`); the lexer allows it
+            // together with an omitted width.
+            let signed = &tail[0..1] == "s";
+            let tail = if signed { &tail[1..] } else { tail };
+            let s = if signed { "s" } else { "" };
             let base = &tail[0..1];
             let base_num = match base {
                 "b" => 2,
@@ -2573,10 +2578,10 @@ impl VerylWalker for Emitter {
             let number = &tail[1..];
 
             let text = if let Some(actual_width) = calc_emitted_width(number, base_num) {
-                format!("{actual_width}'{base}{number}")
+                format!("{actual_width}'{s}{base}{number}")
             } else {
                 // If width can't be calculated, emit it as is (e.g. `'h0`)
-                format!("'{base}{number}")
+                format!("'{s}{base}{number}")
             };
             self.veryl_token(&arg.based_token.replace(&text));
         } else {
