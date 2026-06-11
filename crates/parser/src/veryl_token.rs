@@ -132,14 +132,16 @@ impl Token {
     }
 
     pub fn end_column(&self) -> u32 {
+        // Columns count CHARACTERS (parol), while `length` is the byte
+        // length — multi-byte UTF-8 text must not overshoot.
         let text = self.to_string();
         if text.matches('\n').count() > 0 {
             text.split('\n')
                 .next_back()
-                .map(|x| x.len() as u32)
+                .map(|x| x.chars().count() as u32)
                 .unwrap()
         } else {
-            self.column + self.length - 1
+            self.column + text.chars().count() as u32 - 1
         }
     }
 }
