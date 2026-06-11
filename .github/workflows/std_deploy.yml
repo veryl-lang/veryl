@@ -7,11 +7,6 @@ on:
     tags:
       - 'v*.*.*'
 
-# Avoid spurious curl HTTP/2 framing errors on crate download.
-env:
-  CARGO_HTTP_MULTIPLEXING: "false"
-  CARGO_NET_RETRY: 10
-
 jobs:
   std:
     runs-on: ubuntu-latest
