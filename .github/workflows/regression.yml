@@ -184,6 +184,11 @@ jobs:
       - name: Test
         run: ../../target/release-verylup/veryl test
         working-directory: testcases/heliodor
+      # The single-hart SoC Linux boot is #[ignore] (long); run it explicitly. It
+      # runs on the built-in cc-backend simulator (~30s, not verilator).
+      - name: Test Linux boot
+        run: ../../target/release-verylup/veryl test --ignored --test test_soc_linux_boot
+        working-directory: testcases/heliodor
 
   cocotb:
     needs: build-veryl

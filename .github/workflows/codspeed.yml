@@ -69,6 +69,19 @@ jobs:
           shared-key: "${{ runner.os }}-${{ runner.arch }}-codspeed-boot"
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
+      # The simulator stores compiled aot_c .so files content-addressed under
+      # ~/.cache/veryl/aot_c; without this cache every run pays the full gcc
+      # compile of the emitted C (~10 min on this runner). The lookup inside
+      # the dir is content-addressed, so the cache key only needs to pick the
+      # newest snapshot: restore by prefix, save under the unique commit sha.
+      - uses: actions/cache/restore@v4
+        id: aot-cache
+        continue-on-error: true
+        with:
+          path: ~/.cache/veryl/aot_c
+          key: ${{ runner.os }}-${{ runner.arch }}-aot-c-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-aot-c-
+
       # release-verylup (lto=false) avoids the slow fat-LTO link the default
       # `bench` profile forces; boot-only, so the `benchmarks` job keeps its baseline.
       - name: Build the benchmark target
@@ -80,3 +93,12 @@ jobs:
           run: cargo codspeed run -p veryl-simulator
           mode: "walltime"
           token: ${{ secrets.CODSPEED_TOKEN }}
+
+      # Save only on master (like rust-cache above): PR-scoped caches are
+      # invisible to other refs and just eat the 10GB quota.
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/master'
+        continue-on-error: true
+        with:
+          path: ~/.cache/veryl/aot_c
+          key: ${{ steps.aot-cache.outputs.cache-primary-key }}
