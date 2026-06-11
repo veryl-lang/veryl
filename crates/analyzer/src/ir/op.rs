@@ -1596,6 +1596,51 @@ impl Op {
             }
             Op::Pow => {
                 let x = x.expand(width, signed);
+
+                // IEEE 1800 11.4.3.1 (power operator rules): a negative exponent yields 0 / 1 / ±1 / x by
+                // the base value; `to_usize` would reinterpret it as a huge
+                // unsigned magnitude and compute modular-inverse garbage.
+                let y_negative = y.signed()
+                    && match y {
+                        Value::U64(v) => v.width > 0 && (v.payload >> (v.width - 1)) & 1 == 1,
+                        Value::BigUint(v) => v.width > 0 && v.payload.bit(v.width as u64 - 1),
+                    };
+                if y_negative {
+                    let exp_odd = match y {
+                        Value::U64(v) => v.payload & 1 == 1,
+                        Value::BigUint(v) => v.payload.bit(0),
+                    };
+                    return match x.as_ref() {
+                        Value::U64(v) => {
+                            let mask = ValueU64::gen_mask(width);
+                            if v.is_xz() || (v.payload & mask) == 0 {
+                                Value::U64(ValueU64::new_x(width, v.signed))
+                            } else if v.payload & mask == 1 {
+                                Value::U64(ValueU64::new(1, width, v.signed))
+                            } else if v.signed && (v.payload & mask) == mask {
+                                let p = if exp_odd { mask } else { 1 };
+                                Value::U64(ValueU64::new(p, width, true))
+                            } else {
+                                Value::U64(ValueU64::new(0, width, v.signed))
+                            }
+                        }
+                        Value::BigUint(v) => {
+                            let mask = mask_cache.get(width).clone();
+                            let p = v.payload.as_ref() & &mask;
+                            if v.is_xz() || p == b0() {
+                                Value::BigUint(ValueBigUint::new_x(width, v.signed))
+                            } else if p == b1() {
+                                Value::BigUint(ValueBigUint::new_biguint(b1(), width, v.signed))
+                            } else if v.signed && p == mask {
+                                let p = if exp_odd { mask } else { b1() };
+                                Value::BigUint(ValueBigUint::new_biguint(p, width, true))
+                            } else {
+                                Value::BigUint(ValueBigUint::new_biguint(b0(), width, v.signed))
+                            }
+                        }
+                    };
+                }
+
                 let y = y.to_usize();
 
                 match x.as_ref() {

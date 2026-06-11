@@ -1155,7 +1155,37 @@ impl ProtoExpression {
                         );
 
                         builder.switch_to_block(exit_block);
-                        builder.block_params(exit_block)[0]
+                        let pow_result = builder.block_params(exit_block)[0];
+
+                        // IEEE 1800 11.4.3.1 (power operator rules): a negative signed exponent yields
+                        // 0 / 1 / ±1 by the base value — the loop above would
+                        // treat it as a huge unsigned count and compute a
+                        // modular-inverse-like garbage value.
+                        let y_w = y.width();
+                        if y.expr_context().signed && y_w > 0 && y_w <= 64 {
+                            let mask = gen_mask_for_width(expr_context.width);
+                            let one = iconst_for_width(builder, 1, needs_wide);
+                            let zero = iconst_for_width(builder, 0, needs_wide);
+                            let mask_val = iconst_for_width(builder, mask, needs_wide);
+                            let y_sign = builder.ins().ushr_imm(y_payload, (y_w - 1) as i64);
+                            let y_neg = icmp_const(builder, IntCC::NotEqual, y_sign, 0, needs_wide);
+                            let base_masked = band_const(builder, x_payload, mask, needs_wide);
+                            let base_is_one =
+                                icmp_const(builder, IntCC::Equal, base_masked, 1, needs_wide);
+                            let base_is_m1 = if signed {
+                                icmp_const(builder, IntCC::Equal, base_masked, mask, needs_wide)
+                            } else {
+                                icmp_const(builder, IntCC::Equal, base_masked, 1, needs_wide)
+                            };
+                            let odd = band_const(builder, y_payload, 1, needs_wide);
+                            let is_odd = icmp_const(builder, IntCC::NotEqual, odd, 0, needs_wide);
+                            let m1_val = builder.ins().select(is_odd, mask_val, one);
+                            let table = builder.ins().select(base_is_m1, m1_val, zero);
+                            let table = builder.ins().select(base_is_one, one, table);
+                            builder.ins().select(y_neg, table, pow_result)
+                        } else {
+                            pow_result
+                        }
                     }
                     Op::LogicAnd | Op::LogicOr => {
                         // Fast path when both operands are already 0/1
