@@ -566,3 +566,75 @@ fn nested_gated_clock_fires() {
         );
     }
 }
+
+/// ICG semantics: a gated-clock FF and the comb logic it reads must see
+/// the SAME pre-commit cycle.  The producer FF (root clock) drives
+/// `pulse`; the gated FF reads `pulse` directly AND a comb function of
+/// it (`pulse && cnt == 0`).  Regression: the gated event used to fire
+/// after the master commit with only a partial comb resettle, so the
+/// direct read saw the new value while the comb still held the old one.
+#[test]
+fn gated_clock_pre_commit_consistency() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock   ,
+        i_rst  : input  '_ reset   ,
+        o_cnt  : output    logic<8>,
+        o_marks: output    logic<8>,
+    ) {
+        // Producer on the root clock: pulse goes high on cycles 2..5.
+        var r_tick: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { r_tick = 0; } else { r_tick += 1; }
+        }
+        let w_pulse: logic = (r_tick >= 2) && (r_tick <= 5);
+
+        let clk_g: '_ clock = i_clk & 1'b1;
+
+        var r_cnt  : logic<8>;
+        var r_marks: logic<8>;
+        let w_first: logic    = w_pulse && (r_cnt == 0);
+        always_ff (clk_g, i_rst) {
+            if_reset {
+                r_cnt   = 0;
+                r_marks = 0;
+            } else {
+                // Consistency: w_first (comb of w_pulse) must agree with
+                // a direct read of w_pulse in the same event.
+                if w_first && !w_pulse {
+                    r_marks = 8'hff; // inconsistent observation
+                }
+                if w_first && w_pulse && (r_marks != 8'hff) {
+                    r_marks += 1;
+                }
+                if w_pulse {
+                    r_cnt += 1;
+                }
+            }
+        }
+        assign o_cnt   = r_cnt;
+        assign o_marks = r_marks;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_cnt").unwrap(),
+            Value::new(4, 8, false),
+            "pulse spans 4 cycles",
+        );
+        assert_eq!(
+            sim.get("o_marks").unwrap(),
+            Value::new(1, 8, false),
+            "w_first must fire exactly once, in the same cycle the gated FF sees w_pulse rise",
+        );
+    }
+}

@@ -59,6 +59,16 @@ pub struct Simulator {
     /// Stop the testbench after this many clock cycles; `None` runs to completion.
     pub cycle_limit: Option<u64>,
     pub cycle_count: u64,
+    /// Env-gated `VERYL_STEP_WATCH=path1,path2` debug watch: resolved
+    /// variable pointers printed at each phase of `step_with_derived_clocks`.
+    watch_vars: Vec<WatchVar>,
+}
+
+struct WatchVar {
+    label: String,
+    ptr: *const u8,
+    native_bytes: usize,
+    width: u32,
 }
 
 #[derive(Default)]
@@ -121,7 +131,79 @@ impl Simulator {
             },
             cycle_limit: None,
             cycle_count: 0,
+            watch_vars: Vec::new(),
         };
+
+        if std::env::var("VERYL_DERIVED_CLOCK_DUMP").as_deref() == Ok("1") {
+            fn find_var_by_ptr(
+                module: &ModuleVariables,
+                ptr: *const u8,
+                prefix: &str,
+            ) -> Option<String> {
+                for v in module.variables.values() {
+                    if v.current_values.first().copied() == Some(ptr as *mut u8) {
+                        return Some(format!("{prefix}{}", v.path));
+                    }
+                }
+                for child in &module.children {
+                    if let Some(n) =
+                        find_var_by_ptr(child, ptr, &format!("{prefix}{}.", child.name))
+                    {
+                        return Some(n);
+                    }
+                }
+                None
+            }
+            for (i, clk) in ret.ir.derived_clock_schedule.clocks.iter().enumerate() {
+                let raw = clk.current_offset.raw();
+                let ptr = if raw >= 0 {
+                    if clk.current_offset.is_ff() {
+                        unsafe { ret.ir.ff_values.as_ptr().add(raw as usize) }
+                    } else {
+                        unsafe { ret.ir.comb_values.as_ptr().add(raw as usize) }
+                    }
+                } else {
+                    std::ptr::null()
+                };
+                let name = find_var_by_ptr(&ret.ir.module_variables, ptr, "")
+                    .unwrap_or_else(|| format!("{:?}@{raw}", clk.var_id));
+                eprintln!(
+                    "[derived_clock] [{i}] {name} is_ff={} has_events={}",
+                    clk.current_offset.is_ff(),
+                    ret.ir
+                        .event_statements
+                        .contains_key(&Event::Clock(clk.var_id)),
+                );
+            }
+        }
+
+        if std::env::var("VERYL_STEP_WATCH_LIST").as_deref() == Ok("1") {
+            fn dump_tree(module: &ModuleVariables, prefix: &str) {
+                for var in module.variables.values() {
+                    eprintln!("[step_watch_list] {prefix}{}", var.path);
+                }
+                for child in &module.children {
+                    dump_tree(child, &format!("{prefix}{}.", child.name));
+                }
+            }
+            dump_tree(&ret.ir.module_variables, "");
+        }
+
+        if let Ok(watch) = std::env::var("VERYL_STEP_WATCH") {
+            for path in watch.split(',').filter(|s| !s.is_empty()) {
+                match Self::find_var_meta_in_module(&ret.ir.module_variables, path) {
+                    Some((ptr, native_bytes, width)) => {
+                        ret.watch_vars.push(WatchVar {
+                            label: path.to_string(),
+                            ptr,
+                            native_bytes,
+                            width,
+                        });
+                    }
+                    None => eprintln!("[step_watch] UNRESOLVED: {path}"),
+                }
+            }
+        }
 
         if let Some(dumper) = dump {
             ret.setup_dump(dumper);
@@ -275,6 +357,41 @@ impl Simulator {
         None
     }
 
+    fn find_var_meta_in_module(
+        module: &ModuleVariables,
+        target: &str,
+    ) -> Option<(*const u8, usize, u32)> {
+        if let Some((head, rest)) = target.split_once('.') {
+            for child in &module.children {
+                if child.name.to_string() == head
+                    && let Some(v) = Self::find_var_meta_in_module(child, rest)
+                {
+                    return Some(v);
+                }
+            }
+        }
+        for var in module.variables.values() {
+            if var.path.to_string() == target {
+                return Some((var.current_values[0], var.native_bytes, var.width as u32));
+            }
+        }
+        None
+    }
+
+    fn dump_watch(&self, tag: &str) {
+        if self.watch_vars.is_empty() {
+            return;
+        }
+        let mut line = format!("[step_watch] t={} {tag}:", self.time);
+        for w in &self.watch_vars {
+            let value = unsafe {
+                read_native_value(w.ptr, w.native_bytes, self.ir.use_4state, w.width, false)
+            };
+            line.push_str(&format!(" {}={:x?}", w.label, value));
+        }
+        eprintln!("{line}");
+    }
+
     pub fn ensure_comb_updated(&mut self) {
         if self.comb_dirty {
             #[cfg(feature = "profile")]
@@ -352,6 +469,14 @@ impl Simulator {
     /// caller is responsible for `set_event_write_log`, `settle_comb`,
     /// and `dump_variables`.
     fn step_event_inner(&mut self, event: &Event) {
+        self.eval_event_stmts(event);
+        self.commit_event_log();
+    }
+
+    /// Evaluate `event_statements[event]` into the write log without
+    /// committing, so simultaneous events (master + gated clocks) share
+    /// one pre-commit state and one commit.
+    fn eval_event_stmts(&mut self, event: &Event) {
         #[cfg(feature = "profile")]
         let event_start = std::time::Instant::now();
 
@@ -426,7 +551,10 @@ impl Simulator {
         {
             self.profile.event_eval_ns += event_start.elapsed().as_nanos() as u64;
         }
+    }
 
+    /// Apply the accumulated write log to FF storage and reset the buffer.
+    fn commit_event_log(&mut self) {
         #[cfg(feature = "profile")]
         let ff_start = std::time::Instant::now();
 
@@ -462,11 +590,17 @@ impl Simulator {
             set_event_write_log(&mut self.ir.write_log_buffer);
         }
 
+        // Hoisted like `has_eval_chunk` so loops test a local bool.
+        let watch_enabled = !self.watch_vars.is_empty();
+
         // Subsequent partial_settle only refreshes the dep subset, so
         // the rest of the design must already be settled.
         if self.comb_dirty {
             self.do_settle_comb();
             self.comb_dirty = false;
+        }
+        if watch_enabled {
+            self.dump_watch("after_settle");
         }
 
         let master_id_opt = match event {
@@ -492,24 +626,51 @@ impl Simulator {
             }
         }
 
-        self.step_event_inner(event);
-
-        // ff_commit may have advanced FF-driven derived clocks
-        // (`let div_copy = ff_div_clk;`); refresh before edge detect.
-        if has_eval_chunk {
-            self.ir.partial_settle(&mut self.mask_cache);
+        // Two-phase firing.  A master-gated clock's edge IS the master
+        // edge qualified by the pre-commit enable (ICG semantics), so
+        // those clocks fire here with the master event, sharing its
+        // pre-commit state and write-log commit; a same-cycle enable
+        // change waits for the next edge (the post-commit loop skips
+        // them).  FF-driven clocks fire post-commit instead, matching
+        // SV's NBA-driven edge propagation.
+        let n = self.ir.derived_clock_schedule.clocks.len();
+        let mut fired_mask: Vec<bool> = vec![false; n];
+        let mut pre_fire: SmallVec<[usize; 8]> = SmallVec::new();
+        if master_id_opt.is_some() {
+            for i in 0..n {
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                if clk.current_offset.is_ff() || !clk.master_gated {
+                    continue;
+                }
+                if self.prev_derived_clock_values[i] == 0 && self.read_derived_clock_bit(clk) == 1 {
+                    pre_fire.push(i);
+                }
+            }
         }
 
-        // Detect 0→1 edges and chain-fire one at a time, re-evaluating
-        // after each fire so NBA glitch suppression works (a transient
-        // edge cancelled by a same-cycle FF write must not trigger).
+        self.eval_event_stmts(event);
+        for &i in &pre_fire {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            if watch_enabled {
+                self.dump_watch(&format!("pre_fire[{i}]"));
+            }
+            self.eval_event_stmts(&Event::Clock(vid));
+            fired_mask[i] = true;
+        }
+        self.commit_event_log();
+        if watch_enabled {
+            self.dump_watch("after_master_event");
+        }
+
+        // Detect remaining 0→1 edges (caused by this step's FF commits)
+        // and chain-fire one at a time, re-evaluating after each fire so
+        // NBA glitch suppression works (a transient edge cancelled by a
+        // same-cycle FF write must not trigger).
         // Convergence: each clock fires at most once (`fired_mask`) and
         // `analyze_dependency` rejects comb cycles, so n+1 iterations
         // suffice; the debug_assert catches bookkeeping regressions.
-        let n = self.ir.derived_clock_schedule.clocks.len();
         let mut new_values: SmallVec<[u8; 8]> = SmallVec::new();
         new_values.resize(n, 0);
-        let mut fired_mask: Vec<bool> = vec![false; n];
         let max_iters = n + 1;
         let mut iters = 0;
         loop {
@@ -521,10 +682,16 @@ impl Simulator {
                 new_values[i] = self.read_derived_clock_bit(clk);
             }
 
-            // Earliest unfired clock with a real 0→1 edge.
+            // Earliest unfired clock with a real 0→1 edge.  An edge on a
+            // master-gated comb clock here is a committed enable change,
+            // which must not pulse (see the pre-commit phase above).
             let mut next_fire: Option<usize> = None;
             for i in 0..n {
                 if fired_mask[i] {
+                    continue;
+                }
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                if !clk.current_offset.is_ff() && clk.master_gated {
                     continue;
                 }
                 if self.prev_derived_clock_values[i] == 0 && new_values[i] == 1 {
@@ -535,13 +702,31 @@ impl Simulator {
 
             match next_fire {
                 Some(i) => {
+                    // The partial settle only refreshed the clock closure
+                    // and the fired domain reads arbitrary comb, so settle
+                    // fully before firing (paid only when an edge fires).
+                    self.do_settle_comb();
+                    // Re-verify on the fully settled state: the partial
+                    // closure can show a transient that full settling
+                    // cancels.  Not marked fired — the next iteration
+                    // re-reads a consistent 0, so the loop still ends.
+                    let clk = &self.ir.derived_clock_schedule.clocks[i];
+                    if self.read_derived_clock_bit(clk) != 1 {
+                        continue;
+                    }
                     iters += 1;
                     debug_assert!(
                         iters <= max_iters,
                         "derived clock fixpoint exceeded n+1 iterations (n={n})",
                     );
                     let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                    if watch_enabled {
+                        self.dump_watch(&format!("before_derived[{i}]"));
+                    }
                     self.step_event_inner(&Event::Clock(vid));
+                    if watch_enabled {
+                        self.dump_watch(&format!("after_derived[{i}]"));
+                    }
                     fired_mask[i] = true;
                 }
                 None => break,

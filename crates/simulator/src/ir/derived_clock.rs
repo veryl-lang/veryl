@@ -24,6 +24,10 @@ pub struct DerivedClock {
     pub current_offset: VarOffset,
     /// Always 1 for a clock; carried for the `read_native_value` ABI.
     pub native_bytes: usize,
+    /// The comb closure reaches a master input clock (`gclk = clk & en`):
+    /// fires pre-commit with the master edge (ICG semantics) instead of
+    /// in the post-commit loop.  See `step_with_derived_clocks`.
+    pub master_gated: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -81,6 +85,7 @@ pub fn build_schedule(
             var_id: *var_id,
             current_offset: *off,
             native_bytes: *nb,
+            master_gated: false,
         })
         .collect();
 
@@ -100,18 +105,25 @@ pub fn build_schedule(
 
     let mut dep_set: HashSet<usize> = HashSet::default();
     let mut master_set: HashSet<VarId> = HashSet::default();
-    for clk in &clocks {
+    for clk in &mut clocks {
         if clk.current_offset.is_ff() {
             continue;
         }
+        // Per-clock closure walk so each clock learns whether ITS
+        // expression reaches a master input (→ ICG semantics).
+        let mut local_dep: HashSet<usize> = HashSet::default();
+        let mut local_master: HashSet<VarId> = HashSet::default();
         collect_comb_closure(
             clk.current_offset,
             pre_jit_stmts,
             &output_to_writer,
             input_clock_offsets,
-            &mut dep_set,
-            &mut master_set,
+            &mut local_dep,
+            &mut local_master,
         );
+        clk.master_gated = !local_master.is_empty();
+        dep_set.extend(local_dep);
+        master_set.extend(local_master);
     }
 
     // Sort by pre_jit_stmts index so partial_settle runs deps first.
