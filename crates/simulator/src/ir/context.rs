@@ -57,11 +57,30 @@ pub struct Context {
     pub in_initial: bool,
     /// Populated from `Config`.  Empty → interpreter-only.
     pub backends: BackendRegistry,
+    /// See `alloc_internal_event_id`.
+    pub internal_event_ids_allocated: u32,
 }
 
 impl Context {
     pub fn scope(&mut self) -> &mut ScopeContext {
         self.scope_contexts.last_mut().unwrap()
+    }
+
+    /// Mint a globally-unique VarId for an event declared inside a child
+    /// instance.  Ids come from the top of the u32 range (just below
+    /// `VarId::SYNTHETIC`), which real per-scope ids never reach, so the
+    /// inst-boundary event remap is a guaranteed no-op for them at every
+    /// ancestor level.  See the re-key in `InstDeclaration`'s `Conv` impl
+    /// (ir/declaration.rs) for the collision this prevents.
+    pub fn alloc_internal_event_id(&mut self) -> VarId {
+        self.internal_event_ids_allocated += 1;
+        // SYNTHETIC is u32::MAX; start below it.  Real ids count up from
+        // 0, so the ranges meet only after ~2^31 allocations.
+        debug_assert!(
+            self.internal_event_ids_allocated < u32::MAX / 2,
+            "internal event id allocator exhausted its half of the u32 range"
+        );
+        VarId::from_raw(u32::MAX - self.internal_event_ids_allocated)
     }
 }
 

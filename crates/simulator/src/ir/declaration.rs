@@ -817,25 +817,45 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 .or_insert(stmts);
         }
 
-        // Collect derived-clock candidates declared *inside* this child
-        // module: clock-typed non-port variables whose 0→1 transitions
-        // must be monitored by the top simulator.  Offsets in
-        // `child_variable_meta` are already absolute (parent-rebased) and
-        // account for port aliasing — since these are non-port vars, no
-        // alias rewriting applies.
+        // Derived-clock candidates: clock-typed non-port vars of this
+        // child, monitored for 0→1 edges by the top simulator.  Offsets
+        // in `child_variable_meta` are already absolute (parent-rebased);
+        // non-port vars need no alias rewriting.
+        //
+        // Candidate and event key are re-keyed to a globally-unique id
+        // here, where the owner scope closes: VarIds are per-module-scope,
+        // so a nested id can numerically equal an ancestor's input-port
+        // id, and the event remap at that boundary would hijack the key
+        // onto an unrelated clock.  Reset-typed internal vars get the
+        // same re-key for `Event::Reset`, but no schedule candidate —
+        // there is no derived-reset edge detection, so a re-keyed reset
+        // event simply never fires.
         let child_port_var_set: HashSet<air::VarId> =
             child_module.ports.values().copied().collect();
         for (vid, var) in &child_module.variables {
-            if !var.r#type.is_clock() {
+            let is_clock = var.r#type.is_clock();
+            let is_reset = var.r#type.is_reset();
+            if !is_clock && !is_reset {
                 continue;
             }
             if child_port_var_set.contains(vid) {
                 continue;
             }
+            if is_reset {
+                if let Some(stmts) = remapped_events.remove(&Event::Reset(*vid)) {
+                    let unique_id = context.alloc_internal_event_id();
+                    remapped_events.insert(Event::Reset(unique_id), stmts);
+                }
+                continue;
+            }
             if let Some(meta) = child_variable_meta.get(vid)
                 && let Some(elem) = meta.elements.first()
             {
-                all_derived_clock_candidates.push((*vid, elem.current, elem.native_bytes));
+                let unique_id = context.alloc_internal_event_id();
+                if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid)) {
+                    remapped_events.insert(Event::Clock(unique_id), stmts);
+                }
+                all_derived_clock_candidates.push((unique_id, elem.current, elem.native_bytes));
             }
         }
 
