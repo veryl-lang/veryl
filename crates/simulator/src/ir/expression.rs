@@ -1688,9 +1688,20 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
                 if matches!(
                     op,
-                    Op::Div | Op::Rem | Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq
+                    Op::Div
+                        | Op::Rem
+                        | Op::Greater
+                        | Op::GreaterEq
+                        | Op::Less
+                        | Op::LessEq
+                        | Op::Eq
+                        | Op::Ne
+                        | Op::EqWildcard
+                        | Op::NeWildcard
                 ) {
-                    // See build_binary for the merge() rationale.
+                    // See build_binary for the merge() rationale; equality ops
+                    // carry signed=false in their own context but both-signed
+                    // operands must sign-extend to the comparison width.
                     expr_context.signed = x.expr_context().signed & y.expr_context().signed;
                 }
 

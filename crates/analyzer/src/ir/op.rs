@@ -1104,8 +1104,11 @@ impl Op {
             }
             Op::Eq => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, false);
-                let y = y.expand(xy_width, false);
+                // Both-signed operands sign-extend to the comparison width
+                // (LRM 11.4.5); mixed/unsigned ones zero-extend.
+                let eq_signed = x.signed() && y.signed();
+                let x = x.expand(xy_width, eq_signed);
+                let y = y.expand(xy_width, eq_signed);
 
                 let (is_zero, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -1133,8 +1136,9 @@ impl Op {
             }
             Op::Ne => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, false);
-                let y = y.expand(xy_width, false);
+                let eq_signed = x.signed() && y.signed();
+                let x = x.expand(xy_width, eq_signed);
+                let y = y.expand(xy_width, eq_signed);
 
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -1162,8 +1166,9 @@ impl Op {
             }
             Op::EqWildcard => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, false);
-                let y = y.expand(xy_width, false);
+                let eq_signed = x.signed() && y.signed();
+                let x = x.expand(xy_width, eq_signed);
+                let y = y.expand(xy_width, eq_signed);
 
                 let (is_mismatch, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -1193,8 +1198,9 @@ impl Op {
             }
             Op::NeWildcard => {
                 let xy_width = x.width().max(y.width());
-                let x = x.expand(xy_width, false);
-                let y = y.expand(xy_width, false);
+                let eq_signed = x.signed() && y.signed();
+                let x = x.expand(xy_width, eq_signed);
+                let y = y.expand(xy_width, eq_signed);
 
                 let (is_mismatch, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
